@@ -118,6 +118,12 @@
   table.tt thead th{background:var(--surface-2); padding:10px 8px; font-size:12.5px; font-weight:600; color:var(--ink); position:sticky; top:0}
   table.tt .pcol{background:var(--surface-2); padding:10px; width:108px; text-align:left}
   table.tt .pcol .pl{font-weight:600; font-size:13px}
+  table.tt .tch-class{display:block; font-size:11.5px; color:var(--muted); font-weight:500; margin-top:2px}
+  table.tt .tch-sep{border:none; border-top:1px dashed var(--line); margin:6px 0}
+  .teacher-block{margin-bottom:28px}
+  .teacher-block .tb-head{display:flex; align-items:baseline; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:10px}
+  .teacher-block .tb-head h3{margin:0; font-family:"Fraunces",serif; font-size:20px; font-weight:600; color:var(--brand-navy)}
+  .teacher-block .tb-head .tiny{margin:0}
   table.tt .pcol .pt{font-size:11.5px; color:var(--muted); font-variant-numeric:tabular-nums}
   .cell{display:block; width:100%; min-height:62px; border:none; background:transparent; text-align:left; padding:9px 10px; cursor:grab; font-family:inherit; user-select:none; -webkit-user-drag:element}
   .cell.empty{cursor:pointer}
@@ -255,6 +261,8 @@
   .png-sheet .subj{font-weight:600; display:block; color:var(--brand-navy)}
   .png-sheet .slot-time{font-weight:600; display:block; color:#1F478F; font-size:12px; margin-top:2px}
   .png-sheet .tch{color:#444; font-size:12px; display:block; margin-top:3px}
+  .png-sheet .tch-class{display:block; font-size:12px; color:#5C6B86; font-weight:500; margin-top:2px}
+  .png-sheet .tch-sep{border:none; border-top:1px dashed #B9C4DA; margin:6px 0}
   .png-sheet .cellh{height:54px}
 
   /* dedicated print sheet (hidden on screen) */
@@ -278,6 +286,8 @@
     table.print-tt .subj{font-weight:600; display:block; color:#1F478F}
     table.print-tt .slot-time{font-weight:600; display:block; color:#1F478F; font-size:11px; margin-top:2px}
     table.print-tt .tch{color:#444; font-size:11px; display:block; margin-top:2px}
+    table.print-tt .tch-class{display:block; font-size:11px; color:#5C6B86; font-weight:500; margin-top:2px}
+    table.print-tt .tch-sep{border:none; border-top:1px dashed #B9C4DA; margin:5px 0}
     .print-page{page-break-after:always}
     .print-page:last-child{page-break-after:auto}
     @page{ size:A4 landscape; margin:14mm }
@@ -574,6 +584,7 @@ function migrateState(){
 migrateState();
 let tab='master';
 let activeGroupId=state.groups[0] ? state.groups[0].id : null;
+let activeTeacherName=null; /* display name, or '__all__' for tüm öğretmenler */
 let editingCell=null; // {groupId, key}
 let importTargetGroup=null;
 let showPeriods=false; // per-class period editor toggle
@@ -1684,6 +1695,98 @@ function teacherLoad(){
   state.groups.forEach(g=>Object.values(g.schedule).forEach(v=>{ if(v&&v.teacher){const t=v.teacher.trim(); if(t){const k=norm(t); load[k]=load[k]||{display:t,count:0}; load[k].count++;} }}));
   return Object.values(load).sort((a,b)=>b.count-a.count);
 }
+/** Öğretmenlerin programdaki dersleri (gün + saat + sınıf). */
+function teachersInSchedule(){
+  const map=new Map();
+  state.groups.forEach(g=>Object.values(g.schedule||{}).forEach(v=>{
+    if(!v||!v.teacher) return;
+    const t=v.teacher.trim(); if(!t) return;
+    const k=norm(t); if(!map.has(k)) map.set(k,t);
+  }));
+  return [...map.values()].sort((a,b)=>a.localeCompare(b,'tr'));
+}
+function collectTeacherLessons(teacherName){
+  const tn=norm(teacherName);
+  const items=[];
+  state.groups.forEach(g=>{
+    Object.entries(g.schedule||{}).forEach(([k,v])=>{
+      if(!v||!v.teacher||norm(v.teacher)!==tn) return;
+      const [di,pi]=k.split('_').map(Number);
+      const per=periodsForDay(g, di);
+      const p=per[pi]; if(!p) return;
+      const range=parseRange(p.time);
+      const startMin=range?range[0]:null;
+      const startLabel=formatPeriodTimeShort(p)||p.label||'—';
+      items.push({
+        di, pi, key:k, gid:g.id, gname:g.name, gcolor:g.color||'',
+        subject:String(v.subject||'').trim(),
+        teacher:v.teacher.trim(),
+        time:String(p.time||'').trim(),
+        label:String(p.label||'').trim(),
+        startMin, startLabel, range
+      });
+    });
+  });
+  return items;
+}
+function teacherTimetableRowMeta(items){
+  const keys=new Map();
+  items.forEach(it=>{
+    const sk=it.startMin!=null?('m'+it.startMin):('t'+norm(it.startLabel));
+    if(!keys.has(sk)) keys.set(sk,{sk, startMin:it.startMin, startLabel:it.startLabel, times:new Set()});
+    if(it.time) keys.get(sk).times.add(it.time);
+  });
+  return [...keys.values()].sort((a,b)=>{
+    if(a.startMin!=null&&b.startMin!=null) return a.startMin-b.startMin;
+    if(a.startMin!=null) return -1;
+    if(b.startMin!=null) return 1;
+    return String(a.startLabel).localeCompare(String(b.startLabel),'tr');
+  });
+}
+function matchesTeacherRow(it, row){
+  if(it.startMin!=null&&row.startMin!=null) return it.startMin===row.startMin;
+  return norm(it.startLabel)===norm(row.startLabel);
+}
+function teacherCellInnerHTML(cellItems){
+  return cellItems.map(it=>`
+    <span class="subj">${esc(it.subject||'—')}</span>
+    <span class="tch-class">${esc(it.gname)}</span>
+    ${it.time?`<span class="slot-time">${esc(it.time)}</span>`:''}
+  `).join('<hr class="tch-sep">');
+}
+function teacherTimetableHTML(teacherName, opts={}){
+  const print=!!opts.print;
+  const items=collectTeacherLessons(teacherName);
+  const rows=teacherTimetableRowMeta(items);
+  if(!rows.length){
+    return print
+      ? `<p style="color:#697086;font-style:italic">Bu öğretmenin programda atanmış dersi yok.</p>`
+      : `<div class="empty">Bu öğretmenin programda atanmış dersi yok.</div>`;
+  }
+  const {conflictCells}=conflictData();
+  const body=rows.map(row=>{
+    const cells=state.days.map((d,di)=>{
+      const cellItems=items.filter(it=>it.di===di&&matchesTeacherRow(it,row));
+      if(!cellItems.length) return print?`<td class="pcell"></td>`:`<td></td>`;
+      const conf=cellItems.some(it=>conflictCells.has(it.gid+'|'+it.key));
+      const inner=teacherCellInnerHTML(cellItems);
+      if(print) return `<td class="pcell">${inner}</td>`;
+      return `<td><div class="cell has-lesson readonly-slot ${conf?'conflict':''}">${conf?'<span class="tch">⚠ Çakışma</span>':''}${inner}</div></td>`;
+    }).join('');
+    const sub=row.times.size===1?[...row.times][0]:'';
+    return `<tr>
+      <td class="pcol"><div class="pl">${esc(row.startLabel)}</div>${sub&&sub!==row.startLabel?`<div class="pt tiny">${esc(sub)}</div>`:''}</td>
+      ${cells}
+    </tr>`;
+  }).join('');
+  const tableClass=print?'print-tt':'tt';
+  const wrapOpen=print?'':`<div class="tt-wrap">`;
+  const wrapClose=print?'':'</div>';
+  return `${wrapOpen}<table class="${tableClass}">
+    <thead><tr><th class="pcol">Saat</th>${state.days.map(d=>`<th>${esc(d)}</th>`).join('')}</tr></thead>
+    <tbody>${body}</tbody>
+  </table>${wrapClose}`;
+}
 function fmtDate(iso){
   if(!iso) return '—';
   const d=new Date(iso+'T00:00:00'); if(isNaN(d)) return iso;
@@ -1717,6 +1820,7 @@ function renderTabs(){
     ['master','Tüm Sınıflar'],
     ['gruplar','Gruplar & Öğrenciler'],
     ['program','Ders Programı (tek sınıf)'],
+    ['ogretmen','Öğretmen Programı'],
     ['cakisma','Çakışmalar'+(conflicts.length?' ('+conflicts.length+')':'')],
     ['ayarlar','Ayarlar'],
   ];
@@ -1972,6 +2076,60 @@ function renderProgram(){
   updateUndoBtn();
 }
 
+/* ---------------- render: teacher timetable ---------------- */
+function ensureActiveTeacher(){
+  const list=teachersInSchedule();
+  if(activeTeacherName==='__all__') return;
+  if(activeTeacherName && list.some(t=>norm(t)===norm(activeTeacherName))){
+    const hit=list.find(t=>norm(t)===norm(activeTeacherName));
+    if(hit) activeTeacherName=hit;
+    return;
+  }
+  activeTeacherName=list[0]||null;
+}
+function renderOgretmen(){
+  ensureActiveTeacher();
+  const list=teachersInSchedule();
+  if(!list.length){
+    $('#view').innerHTML=`<div class="empty" style="padding:24px;text-align:center">
+      <p style="margin-bottom:8px">Henüz öğretmen atanmış ders yok.</p>
+      <p class="tiny" style="margin:0">Ders Programı sekmesinde hücrelere öğretmen yazıldığında burada haftalık tabloları görünür.</p>
+    </div>`;
+    return;
+  }
+  const pills=[
+    `<button class="gpill ${activeTeacherName==='__all__'?'active':''}" data-act="pick-teacher" data-tname="__all__">Tümü</button>`,
+    ...list.map(t=>{
+      const n=collectTeacherLessons(t).length;
+      return `<button class="gpill ${activeTeacherName!=='__all__'&&norm(activeTeacherName)===norm(t)?'active':''}" data-act="pick-teacher" data-tname="${esc(t)}">${esc(t)} <span class="tiny" style="opacity:.75">(${n})</span></button>`;
+    })
+  ].join('');
+  const showAll=activeTeacherName==='__all__';
+  const targets=showAll?list:[activeTeacherName].filter(Boolean);
+  const blocks=targets.map(t=>{
+    const n=collectTeacherLessons(t).length;
+    return `<div class="teacher-block" data-teacher="${esc(t)}">
+      <div class="tb-head">
+        <h3>${esc(t)}</h3>
+        <div class="tiny">${n} ders · ${state.days.length} gün</div>
+      </div>
+      ${teacherTimetableHTML(t)}
+    </div>`;
+  }).join('');
+  $('#view').innerHTML=`
+    <div class="prog-head">
+      <div class="gpills">${pills}</div>
+    </div>
+    <div class="prog-tools" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px">
+      <div class="tiny">Her satır bir başlangıç saati; hücrede sınıf adı ve ders görünür. Üstteki <b>Yazdır / PDF</b> veya PNG ile çıktı alın.</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn sm" data-act="export-png">PNG indir${showAll?' (tümü)':''}</button>
+        <button class="btn sm primary" data-act="print">Yazdır / PDF${showAll?' (tümü)':''}</button>
+      </div>
+    </div>
+    ${blocks}`;
+}
+
 /* ---------------- render: conflicts ---------------- */
 function renderCakisma(){
   const {conflicts, sharedLessons}=conflictData();
@@ -2108,6 +2266,7 @@ function render(){
   if(tab==='master') renderMaster();
   else if(tab==='gruplar') renderGruplar();
   else if(tab==='program') renderProgram();
+  else if(tab==='ogretmen') renderOgretmen();
   else if(tab==='cakisma') renderCakisma();
   else if(tab==='ayarlar') renderAyarlar();
 }
@@ -2374,6 +2533,7 @@ document.addEventListener('click',e=>{
       const g=group(gid); g.students=g.students.filter(s=>s.id!==a.dataset.sid); saveState(); render();
       break;}
     case 'pick-group':{ activeGroupId=a.dataset.gid; render(); break; }
+    case 'pick-teacher':{ activeTeacherName=a.dataset.tname||null; render(); break; }
     case 'edit-name':{ const inp=card.querySelector('.gname'); if(inp){ inp.focus(); inp.select(); } break; }
     case 'import-students':{ importTargetGroup=gid; $('#studentImportFile').click(); break; }
     case 'pick-system-students': openStudentPicker(gid); break;
@@ -2763,12 +2923,84 @@ function pageForGroup(g){
     ${timetableForPrint(g)}
   </div>`;
 }
+function pageForTeacher(teacherName){
+  const logo=document.querySelector('.logo');
+  const logoSrc=logo?logo.getAttribute('src'):'';
+  return `<div class="print-page">
+    <div class="print-head">
+      ${logoSrc?`<img class="print-logo" src="${logoSrc}" alt="">`:''}
+      <div class="print-title">${esc(teacherName)}</div>
+      <div class="print-sub">Öğretmen Haftalık Programı</div>
+    </div>
+    ${teacherTimetableHTML(teacherName,{print:true})}
+  </div>`;
+}
+function teachersForExport(){
+  ensureActiveTeacher();
+  if(activeTeacherName==='__all__') return teachersInSchedule();
+  if(activeTeacherName) return [activeTeacherName];
+  return teachersInSchedule();
+}
 function buildPrintSheet(){
+  if(tab==='ogretmen'){
+    const teachers=teachersForExport();
+    $('#printSheet').innerHTML=teachers.map(pageForTeacher).join('');
+    return;
+  }
   const g=group(activeGroupId);
   $('#printSheet').innerHTML = g ? pageForGroup(g) : '';
 }
 /* ---------------- PNG export ---------------- */
+async function exportTeacherPNG(teacherName){
+  if(!window.html2canvas){ alert('PNG aracı yüklenemedi (internet bağlantısı gerekiyor).'); return; }
+  const logo=document.querySelector('.logo'); const logoSrc=logo?logo.getAttribute('src'):'';
+  const items=collectTeacherLessons(teacherName);
+  const rowsMeta=teacherTimetableRowMeta(items);
+  let tableBody='';
+  if(!rowsMeta.length){
+    tableBody=`<tr><td colspan="${1+state.days.length}" style="padding:16px;color:#697086;font-style:italic">Bu öğretmenin programda atanmış dersi yok.</td></tr>`;
+  } else {
+    tableBody=rowsMeta.map(row=>{
+      const cells=state.days.map((d,di)=>{
+        const cellItems=items.filter(it=>it.di===di&&matchesTeacherRow(it,row));
+        if(!cellItems.length) return `<td class="cellh"></td>`;
+        return `<td class="cellh">${teacherCellInnerHTML(cellItems)}</td>`;
+      }).join('');
+      const sub=row.times.size===1?[...row.times][0]:'';
+      return `<tr>
+        <td class="pcol"><div class="pl">${esc(row.startLabel)}</div>${sub&&sub!==row.startLabel?`<div class="pt tiny">${esc(sub)}</div>`:''}</td>
+        ${cells}
+      </tr>`;
+    }).join('');
+  }
+  const stage=document.createElement('div'); stage.className='png-stage';
+  stage.innerHTML=`<div class="png-sheet">
+    <div class="ph">${logoSrc?`<img src="${logoSrc}" alt="">`:''}<div class="tt">${esc(teacherName)}</div><div class="sb">Öğretmen Haftalık Programı</div></div>
+    <table><thead><tr><th class="pcol">Saat</th>${state.days.map(d=>`<th>${esc(d)}</th>`).join('')}</tr></thead><tbody>${tableBody}</tbody></table>
+  </div>`;
+  document.body.appendChild(stage);
+  try{
+    const img=stage.querySelector('img');
+    if(img && !img.complete) await new Promise(r=>{img.onload=r; img.onerror=r;});
+    const canvas=await html2canvas(stage.querySelector('.png-sheet'),{scale:2, backgroundColor:'#ffffff', useCORS:true, logging:false});
+    const url=canvas.toDataURL('image/png');
+    const a=document.createElement('a');
+    a.href=url;
+    a.download=((teacherName||'ogretmen').replace(/[\\/:*?"<>|]+/g,' ').trim())+' - ogretmen programi.png';
+    a.click();
+  }catch(e){ alert('PNG oluşturulamadı: '+(e.message||e)); }
+  finally{ stage.remove(); }
+}
 async function exportPNG(){
+  if(tab==='ogretmen'){
+    const teachers=teachersForExport();
+    if(!teachers.length){ alert('İndirilecek öğretmen programı yok.'); return; }
+    for(const t of teachers){
+      await exportTeacherPNG(t);
+      if(teachers.length>1) await new Promise(r=>setTimeout(r,350));
+    }
+    return;
+  }
   const g=group(activeGroupId); if(!g) return;
   if(!window.html2canvas){ alert('PNG aracı yüklenemedi (internet bağlantısı gerekiyor).'); return; }
   const logo=document.querySelector('.logo'); const logoSrc=logo?logo.getAttribute('src'):'';
