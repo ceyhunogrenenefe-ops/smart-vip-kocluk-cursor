@@ -7,6 +7,7 @@ import { detectPlatform } from '../lib/detectMeetingPlatform';
 import type { TeacherLesson, TeacherStudentLessonSummaryRow, UserRole } from '../types';
 import BbbAutoLinkFieldHint from '../components/liveLessons/BbbAutoLinkFieldHint';
 import LiveLessonCard from '../components/liveLessons/LiveLessonCard';
+import StudentLiveLessonsPanel from '../components/liveLessons/StudentLiveLessonsPanel';
 import { ClassLiveStudentMobileCalendar } from '../components/liveLessons/ClassLiveStudentMobileCalendar';
 import { WeeklyLiveGridShell } from '../components/liveLessons/WeeklyLiveGridShell';
 import { useMobileAppShell } from '../hooks/useMobileAppShell';
@@ -805,6 +806,19 @@ export default function LiveLessons({ hideCalendar = false }: { hideCalendar?: b
   };
 
   if (!canManage) {
+    const isStudent =
+      roleTags.includes('student') ||
+      role === 'student';
+    if (isStudent) {
+      return (
+        <div className="space-y-3 p-2 md:p-0">
+          <div className="rounded-xl border border-sky-100 bg-sky-50/90 px-4 py-3 text-sm text-sky-950">
+            Canlı özel dersleriniz — <strong>Derse Katıl</strong> saatinden 2 saat önce açılır.
+          </div>
+          <StudentLiveLessonsPanel />
+        </div>
+      );
+    }
     return (
       <div className="p-6 text-center text-slate-600">
         Bu sayfaya erişim yetkiniz yok.
@@ -1414,7 +1428,11 @@ export default function LiveLessons({ hideCalendar = false }: { hideCalendar?: b
                           <div className="flex flex-col gap-1.5">
                             {hourItems.map((lesson) => {
                               const accent = liveSubjectAccent(lesson.title);
-                              const canJoin = lesson.status === 'scheduled' && Boolean(lessonJoinUrl(lesson));
+                              const canJoin =
+                                lesson.status === 'scheduled' &&
+                                (Boolean(lessonJoinUrl(lesson)) ||
+                                  shouldUsePanelBbbJoin(lesson) ||
+                                  lesson.platform === 'bbb');
                               return (
                                 <div
                                   key={lesson.id}

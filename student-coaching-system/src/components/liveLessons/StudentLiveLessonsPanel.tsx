@@ -9,7 +9,10 @@ import { Loader2, Radio, AlertTriangle, CalendarRange } from 'lucide-react';
 import { useRecordingUnavailableAlert, recordingUnavailableText } from '../../hooks/useRecordingUnavailableAlert';
 
 function isoDate(d: Date): string {
-  return d.toISOString().slice(0, 10);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
 }
 
 function defaultRangeFrom(): string {
@@ -306,17 +309,24 @@ export default function StudentLiveLessonsPanel() {
               onJoin={() => {
                 void (async () => {
                   const url = lessonJoinUrl(lesson);
-                  if (!url) return;
                   try {
-                    if (shouldUsePanelBbbJoin(lesson, url)) {
+                    if (
+                      shouldUsePanelBbbJoin(lesson, url) ||
+                      lesson.platform === 'bbb' ||
+                      needsBbbJoinFlow(url)
+                    ) {
                       await openBbbJoin('teacher-lessons', lesson.id);
-                    } else if (url && isExternalMeetingPlatform(url)) {
-                      window.open(url, '_blank', 'noopener,noreferrer');
-                    } else if (needsBbbJoinFlow(url)) {
-                      await openBbbJoin('teacher-lessons', lesson.id);
-                    } else if (url) {
-                      window.open(url, '_blank', 'noopener,noreferrer');
+                      return;
                     }
+                    if (!url) {
+                      setError('Toplantı bağlantısı henüz eklenmemiş. Öğretmeniniz veya koçunuzla iletişime geçin.');
+                      return;
+                    }
+                    if (isExternalMeetingPlatform(url)) {
+                      window.open(url, '_blank', 'noopener,noreferrer');
+                      return;
+                    }
+                    window.open(url, '_blank', 'noopener,noreferrer');
                   } catch (e) {
                     setError(e instanceof Error ? e.message : String(e));
                   }

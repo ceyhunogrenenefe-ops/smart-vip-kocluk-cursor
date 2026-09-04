@@ -961,7 +961,7 @@ function Siparislerim({ onPendingChange }: { onPendingChange?: (n: number) => vo
   const [filterStatus, setFilterStatus] = useState('');
   const [sinifFilter, setSinifFilter] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
-  const [nameSort, setNameSort] = useState<'asc' | 'desc'>('asc');
+  const [nameSort, setNameSort] = useState<'newest' | 'asc' | 'desc'>('newest');
   const [shipModal, setShipModal] = useState<string | null>(null);
   const [editing, setEditing] = useState<VendorOrderRow | null>(null);
   const seenPendingRef = useRef<Set<string>>(new Set());
@@ -1038,11 +1038,24 @@ function Siparislerim({ onPendingChange }: { onPendingChange?: (n: number) => vo
     }
 
     return [...list].sort((a, b) => {
+      if (nameSort === 'newest') {
+        const pa = a.status === 'pending' ? 0 : 1;
+        const pb = b.status === 'pending' ? 0 : 1;
+        if (pa !== pb) return pa - pb;
+        const ta = new Date(
+          String(a.commerce_orders?.created_at || (a as { created_at?: string }).created_at || 0)
+        ).getTime();
+        const tb = new Date(
+          String(b.commerce_orders?.created_at || (b as { created_at?: string }).created_at || 0)
+        ).getTime();
+        if (tb !== ta) return tb - ta;
+      }
       const cmp = vendorOrderDisplayName(a).localeCompare(
         vendorOrderDisplayName(b),
         'tr',
         { sensitivity: 'base' }
       );
+      if (nameSort === 'newest') return cmp;
       return nameSort === 'asc' ? cmp : -cmp;
     });
   }, [orders, sinifFilter, searchQuery, nameSort]);
@@ -1142,14 +1155,23 @@ function Siparislerim({ onPendingChange }: { onPendingChange?: (n: number) => vo
               </select>
             </label>
             <div className="flex flex-col justify-end">
-              <span className="text-xs font-medium text-slate-600">Öğrenci adına göre sırala</span>
+              <span className="text-xs font-medium text-slate-600">Sıralama</span>
               <button
                 type="button"
-                onClick={() => setNameSort((prev) => (prev === 'asc' ? 'desc' : 'asc'))}
+                onClick={() =>
+                  setNameSort((prev) =>
+                    prev === 'newest' ? 'asc' : prev === 'asc' ? 'desc' : 'newest'
+                  )
+                }
                 className="mt-1 inline-flex items-center justify-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-semibold text-indigo-900 hover:bg-indigo-100"
               >
-                {nameSort === 'asc' ? <ArrowDownAZ className="h-4 w-4" /> : <ArrowUpAZ className="h-4 w-4" />}
-                {nameSort === 'asc' ? 'A → Z' : 'Z → A'}
+                {nameSort === 'newest' ? (
+                  <>Yeni sipariş önce</>
+                ) : nameSort === 'asc' ? (
+                  <><ArrowDownAZ className="h-4 w-4" /> A → Z</>
+                ) : (
+                  <><ArrowUpAZ className="h-4 w-4" /> Z → A</>
+                )}
               </button>
             </div>
             <label className="block text-xs font-medium text-slate-600 sm:col-span-2">
