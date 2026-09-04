@@ -209,7 +209,7 @@ export function paymentStatusClass(s?: string | null): string {
   }
 }
 
-/** Ders başlamadan 15 dk önce / bitişten 30 dk sonra katılım penceresi */
+/** Ders başlamadan 2 saat önce / bitişten 30 dk sonra katılım penceresi */
 export function isPrivateLessonJoinWindowOpen(opts: {
   date: string;
   start_time: string;
@@ -217,7 +217,7 @@ export function isPrivateLessonJoinWindowOpen(opts: {
   openMinutesBefore?: number;
   closeMinutesAfter?: number;
 }): boolean {
-  const openBefore = opts.openMinutesBefore ?? 15;
+  const openBefore = opts.openMinutesBefore ?? 120;
   const closeAfter = opts.closeMinutesAfter ?? 30;
   const startRaw = String(opts.start_time || '00:00').slice(0, 5);
   const endRaw = String(opts.end_time || opts.start_time || '00:00').slice(0, 5);
