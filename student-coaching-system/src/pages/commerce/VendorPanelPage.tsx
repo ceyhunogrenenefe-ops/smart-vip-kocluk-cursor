@@ -12,6 +12,7 @@ import {
   Camera,
   CheckCircle2,
   ChevronRight,
+  Download,
   Image,
   Loader2,
   MapPin,
@@ -53,6 +54,7 @@ import { apiFetch } from '../../lib/session';
 import { compressCoverImage, formatBytes } from '../../lib/commerce/compressCoverImage';
 import { clearActingVendor, getActingVendor, setActingVendor, type ActingVendor } from '../../lib/commerceActingVendor';
 import { caListVendors } from '../../lib/commerceAdminApi';
+import { exportVendorOrdersToExcel } from '../../lib/vendorOrdersExport';
 import type {
   CommerceBook,
   CommerceVendorOffer,
@@ -969,7 +971,7 @@ function vendorOrderSearchHaystack(vo: VendorOrderRow) {
     .toLocaleLowerCase('tr-TR');
 }
 
-function Siparislerim() {
+function Siparislerim({ onPendingChange }: { onPendingChange?: (n: number) => void }) {
   const [orders, setOrders] = useState<VendorOrderRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [filterStatus, setFilterStatus] = useState('');
@@ -978,16 +980,55 @@ function Siparislerim() {
   const [nameSort, setNameSort] = useState<'asc' | 'desc'>('asc');
   const [shipModal, setShipModal] = useState<string | null>(null);
   const [editing, setEditing] = useState<VendorOrderRow | null>(null);
+  const seenPendingRef = useRef<Set<string>>(new Set());
+  const bootstrappedRef = useRef(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const r = await cvListOrders({ status: filterStatus || undefined, limit: 200 });
-      setOrders((r.vendor_orders || []) as VendorOrderRow[]);
+      const list = (r.vendor_orders || []) as VendorOrderRow[];
+      setOrders(list);
+      const pendingIds = list.filter((o) => o.status === 'pending').map((o) => o.id);
+      onPendingChange?.(pendingIds.length);
+
+      if (!bootstrappedRef.current) {
+        seenPendingRef.current = new Set(pendingIds);
+        bootstrappedRef.current = true;
+      } else {
+        const fresh = pendingIds.filter((id) => !seenPendingRef.current.has(id));
+        if (fresh.length) {
+          toast.message(`${fresh.length} yeni sipariş paneline düştü`, {
+            description: 'Siparişlerim listesini kontrol edin.',
+          });
+          try {
+            if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+              new Notification('Yeni kitap siparişi', {
+                body: `${fresh.length} yeni sipariş satıcı panelinde.`,
+              });
+            }
+          } catch {
+            /* ignore */
+          }
+          fresh.forEach((id) => seenPendingRef.current.add(id));
+        }
+      }
     } catch (e: unknown) { toast.error((e as Error).message); }
     finally { setLoading(false); }
-  }, [filterStatus]);
+  }, [filterStatus, onPendingChange]);
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    const t = window.setInterval(() => { void load(); }, 45000);
+    return () => window.clearInterval(t);
+  }, [load]);
+
+  useEffect(() => {
+    if (typeof Notification === 'undefined') return;
+    if (Notification.permission === 'default') {
+      void Notification.requestPermission().catch(() => undefined);
+    }
+  }, []);
 
   const sinifOptions = useMemo(() => {
     const set = new Set<string>();
@@ -1024,6 +1065,16 @@ function Siparislerim() {
 
   const filtersActive = Boolean(sinifFilter || searchQuery.trim());
 
+  const handleExportExcel = () => {
+    try {
+      const acting = getActingVendor();
+      exportVendorOrdersToExcel(filteredOrders, acting?.name || 'satici');
+      toast.success('Excel indirildi');
+    } catch (e: unknown) {
+      toast.error((e as Error).message || 'Excel oluşturulamadı');
+    }
+  };
+
   const handleAccept = async (id: string) => {
     try {
       await cvAcceptOrder(id);
@@ -1055,9 +1106,28 @@ function Siparislerim() {
 
   return (
     <div>
-      <div className="mb-4">
-        <h2 className="text-lg font-semibold">Siparişlerim</h2>
-        <p className="text-xs text-gray-500 mt-0.5">Yalnızca kart veya IBAN ile ödemesi alınan siparişler listelenir.</p>
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-semibold">Siparişlerim</h2>
+          <p className="text-xs text-gray-500 mt-0.5">Yalnızca kart veya IBAN ile ödemesi alınan siparişler listelenir. Yeni siparişte panel ve WhatsApp bildirimi gelir.</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => void load()}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          >
+            <RefreshCw className="h-4 w-4" /> Yenile
+          </button>
+          <button
+            type="button"
+            onClick={handleExportExcel}
+            disabled={!filteredOrders.length}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-semibold text-indigo-900 hover:bg-indigo-100 disabled:opacity-50"
+          >
+            <Download className="h-4 w-4" /> Excel indir
+          </button>
+        </div>
       </div>
 
       <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm mb-4">
@@ -1557,6 +1627,7 @@ export default function VendorPanelPage() {
   const [acting, setActing] = useState<ActingVendor | null>(() => getActingVendor());
   const [vendorChoices, setVendorChoices] = useState<{ id: string; name: string }[]>([]);
   const [vendorPick, setVendorPick] = useState('');
+  const [pendingCount, setPendingCount] = useState(0);
 
   useEffect(() => {
     const hash = window.location.hash.replace('#', '') as Tab;
@@ -1572,6 +1643,24 @@ export default function VendorPanelPage() {
       window.removeEventListener('storage', sync);
     };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const r = await cvGetStats();
+        if (!cancelled) setPendingCount(r.stats?.pending_orders || 0);
+      } catch {
+        /* ignore */
+      }
+    };
+    void poll();
+    const t = window.setInterval(poll, 45000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(t);
+    };
+  }, [acting?.id]);
 
   const roles = [(effectiveUser?.role ?? ''), ...((effectiveUser as { roles?: string[] })?.roles ?? [])];
   const isSuperAdmin = roles.includes('super_admin');
@@ -1626,7 +1715,7 @@ export default function VendorPanelPage() {
       case 'genel': return <GenelBakis />;
       case 'kitaplarim': return <Kitaplarim />;
       case 'tekliflerim': return <Tekliflerim />;
-      case 'siparislerim': return <Siparislerim />;
+      case 'siparislerim': return <Siparislerim onPendingChange={setPendingCount} />;
       case 'hakedislerim': return <Hakedislerim />;
       default: return null;
     }
@@ -1657,6 +1746,19 @@ export default function VendorPanelPage() {
           <p className="text-sm text-gray-500">Kitaplar · Teklifler · Siparişler · Hakedişler</p>
         </div>
       </div>
+      {pendingCount > 0 && tab !== 'siparislerim' ? (
+        <button
+          type="button"
+          onClick={() => { setTab('siparislerim'); window.history.replaceState(null, '', '#siparislerim'); }}
+          className="mb-4 flex w-full items-start gap-3 rounded-xl border border-yellow-200 bg-yellow-50 p-4 text-left hover:bg-yellow-100/80"
+        >
+          <AlertCircle className="w-5 h-5 text-yellow-600 flex-shrink-0 mt-0.5" />
+          <div>
+            <div className="font-semibold text-yellow-800 text-sm">{pendingCount} yeni sipariş onayınızı bekliyor</div>
+            <div className="text-xs text-yellow-600 mt-0.5">Siparişlerim sekmesine gitmek için tıklayın.</div>
+          </div>
+        </button>
+      ) : null}
       <div className="flex gap-1 overflow-x-auto pb-1 mb-6 border-b border-gray-200">
         {TABS.map((t) => (
           <button
@@ -1670,6 +1772,11 @@ export default function VendorPanelPage() {
           >
             {t.icon}
             {t.label}
+            {t.key === 'siparislerim' && pendingCount > 0 ? (
+              <span className="ml-1 inline-flex min-w-[1.25rem] items-center justify-center rounded-full bg-amber-500 px-1.5 text-[10px] font-bold text-white">
+                {pendingCount}
+              </span>
+            ) : null}
           </button>
         ))}
       </div>
