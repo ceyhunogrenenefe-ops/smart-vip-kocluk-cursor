@@ -31,7 +31,6 @@ export default function PrivateLiveLayout() {
     if (isStudent) {
       return [
         { to: '/canli-ozel-ders', label: 'Özet', icon: LayoutDashboard, end: true },
-        { to: '/canli-ozel-ders/takvim', label: 'Takvim', icon: Calendar },
         { to: '/canli-ozel-ders/gecmis', label: 'Geçmiş', icon: History }
       ];
     }
@@ -57,7 +56,7 @@ export default function PrivateLiveLayout() {
         <h1 className="mt-1 text-xl font-bold tracking-tight sm:text-2xl">Canlı Özel Ders</h1>
         <p className="mt-1 max-w-2xl text-sm text-slate-300">
           {isStudent
-            ? 'Yaklaşan dersleriniz, kalan hakkınız ve kayıtlarınız.'
+            ? 'Yaklaşan dersleriniz, Derse Katıl ve kayıtlarınız — Özet sayfasında.'
             : 'Takvim, paket, yoklama ve ders süreci — tek panelden yönetim.'}
         </p>
       </div>
