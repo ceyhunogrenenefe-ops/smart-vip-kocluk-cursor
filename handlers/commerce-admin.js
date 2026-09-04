@@ -771,6 +771,20 @@ async function handleOrders(op, body, actor) {
     return out;
   }
 
+  if (op === 'orders.assign_vendor') {
+    const { assignOrderToVendor } = await import('../api/_lib/commerce-assign-vendor.js');
+    const out = await assignOrderToVendor({
+      orderId: sanitizeText(body.order_id) || sanitizeText(body.orderId) || null,
+      formOrderId: sanitizeText(body.form_order_id) || sanitizeText(body.form_id) || null,
+      vendorId: sanitizeText(body.vendor_id) || sanitizeText(body.vendorId) || null,
+      kitapciId: sanitizeText(body.kitapci_id) || sanitizeText(body.bookseller_id) || null,
+      notifyWa: body.notify_wa !== false && body.notifyWa !== false,
+      forcePending: body.force_pending !== false,
+      actorSub: actor?.sub || null,
+    });
+    return out;
+  }
+
   if (op === 'orders.sync_whatsapp_template') {
     const activated = await activateBookOrderMetaTemplate();
     return {
@@ -792,7 +806,7 @@ async function handleOrders(op, body, actor) {
   if (op === 'orders.list') {
     let q = supabaseAdmin
       .from('commerce_orders')
-      .select('*, commerce_order_items(id, title_snapshot, quantity, unit_price_kurus, vendor_id), commerce_payments(id, provider, status, raw_response, paid_at)')
+      .select('*, commerce_order_items(id, title_snapshot, quantity, unit_price_kurus, vendor_id), commerce_payments(id, provider, status, raw_response, paid_at), commerce_vendor_orders(id, vendor_id, status, commerce_vendors(id, name))')
       .order('created_at', { ascending: false });
     if (body.status) q = q.eq('status', body.status);
     if (body.student_id) q = q.eq('student_id', body.student_id);
