@@ -219,29 +219,25 @@ export default function LiveLessons({ hideCalendar = false }: { hideCalendar?: b
   const joinLiveLesson = useCallback(
     async (lesson: TeacherLesson) => {
       const url = lessonJoinUrl(lesson);
-      if (!url && !lesson.id) {
-        setError('Toplantı bağlantısı yok.');
-        return;
-      }
       try {
-        if (shouldUsePanelBbbJoin(lesson, url) || needsBbbJoinFlow(url)) {
+        if (
+          shouldUsePanelBbbJoin(lesson, url) ||
+          lesson.platform === 'bbb' ||
+          needsBbbJoinFlow(url)
+        ) {
           markPostLessonHomeworkPrompt();
-        }
-        if (shouldUsePanelBbbJoin(lesson, url)) {
           await openBbbJoin('teacher-lessons', lesson.id);
+          return;
+        }
+        if (!url) {
+          setError('Toplantı bağlantısı yok.');
           return;
         }
         if (url && isExternalMeetingPlatform(url)) {
           window.open(url, '_blank', 'noopener,noreferrer');
           return;
         }
-        if (needsBbbJoinFlow(url)) {
-          await openBbbJoin('teacher-lessons', lesson.id);
-        } else if (url) {
-          window.open(url, '_blank', 'noopener,noreferrer');
-        } else {
-          setError('Toplantı bağlantısı yok.');
-        }
+        window.open(url, '_blank', 'noopener,noreferrer');
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
       }
