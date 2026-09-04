@@ -10,6 +10,7 @@ import {
   privateLiveApi,
   type PrivateLiveDashboard
 } from '../../lib/privateLiveApi';
+import StudentLiveLessonsPanel from '../../components/liveLessons/StudentLiveLessonsPanel';
 
 function StatCard({
   label,
@@ -134,9 +135,15 @@ export default function PrivateLiveDashboardPage() {
         <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-sm font-semibold text-slate-900">Bugünkü dersler</h2>
-            <Link to="/canli-ozel-ders/takvim" className="text-xs font-semibold text-indigo-600">
-              Takvime git
-            </Link>
+            {isStudent ? (
+              <a href="#ozel-ders-takvim" className="text-xs font-semibold text-indigo-600">
+                Aşağıdaki takvime in
+              </a>
+            ) : (
+              <Link to="/canli-ozel-ders/takvim" className="text-xs font-semibold text-indigo-600">
+                Takvime git
+              </Link>
+            )}
           </div>
           {data.today.length === 0 ? (
             <p className="text-sm text-slate-500">Bugün planlı özel ders yok.</p>
@@ -218,6 +225,16 @@ export default function PrivateLiveDashboardPage() {
               );
             })}
           </ul>
+        </section>
+      ) : null}
+
+      {isStudent ? (
+        <section id="ozel-ders-takvim" className="scroll-mt-4 space-y-3">
+          <div className="rounded-xl border border-sky-100 bg-sky-50/90 px-4 py-3 text-sm text-sky-950">
+            Planlı özel dersleriniz ve <strong>Derse Katıl</strong> burada. Ayrı bir Takvim sekmesine
+            girmenize gerek yok.
+          </div>
+          <StudentLiveLessonsPanel />
         </section>
       ) : null}
     </div>
