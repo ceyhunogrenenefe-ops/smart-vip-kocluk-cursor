@@ -9,6 +9,7 @@
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { errorMessage } from '../api/_lib/error-msg.js';
 import { publicCardFromSnapshot, publicDetailFromSnapshot } from '../api/_lib/teacher-profile.js';
+import { listPublicTeacherReviews } from '../api/_lib/teacher-reviews.js';
 import { computePublicSlots, loadAvailabilityBundle } from '../api/_lib/teacher-availability.js';
 
 function applyCors(req, res) {
@@ -73,6 +74,13 @@ export default async function handler(req, res) {
         }
       }
 
+      let reviews = [];
+      try {
+        reviews = await listPublicTeacherReviews(data.user_id, { limit: 40 });
+      } catch (revErr) {
+        console.warn('[public-teachers] reviews', errorMessage(revErr));
+      }
+
       return res.status(200).json({
         teacher: {
           ...publicDetailFromSnapshot(data),
@@ -83,7 +91,10 @@ export default async function handler(req, res) {
             description: d.description,
             mime_type: d.mime_type
           })),
-          availability_slots
+          availability_slots,
+          reviews,
+          average_rating: data.average_rating != null ? Number(data.average_rating) : null,
+          total_reviews: data.total_reviews != null ? Number(data.total_reviews) : 0
         }
       });
     }
