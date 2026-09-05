@@ -7,6 +7,8 @@ export function isGuestPublicPath(pathname?: string): boolean {
     (typeof window !== 'undefined' && window.location?.pathname ? window.location.pathname : '');
   if (!path) return false;
   return (
+    path.startsWith('/review/public') ||
+    path === '/review/public' ||
     path.startsWith('/veli-imza/') ||
     path.startsWith('/sign-contract/') ||
     path.startsWith('/kitapci/') ||

@@ -173,6 +173,14 @@
       "destination": "/api/deep-api?path=question-help/webhook"
     },
     {
+      "source": "/api/reviews/(.*)",
+      "destination": "/api/deep-api?path=reviews/$1"
+    },
+    {
+      "source": "/api/teachers/(.*)",
+      "destination": "/api/deep-api?path=teachers/$1"
+    },
+    {
       "source": "/veli-imza/:token",
       "has": [
         {
