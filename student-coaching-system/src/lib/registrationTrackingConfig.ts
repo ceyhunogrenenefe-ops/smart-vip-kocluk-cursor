@@ -69,6 +69,91 @@ export const KANBAN_STAGES = [
   'postponed'
 ] as const;
 
+/** Deneme dersi aşamaları (üst filtre + CRM sütunu) */
+export const TRIAL_STAGES = ['trial_lesson_scheduled', 'trial_lesson_completed'] as const;
+
+/** Gelen lead / ilk temas aşamaları */
+export const INCOMING_STAGES = ['new_lead', 'first_contact_pending'] as const;
+
+/**
+ * Bitrix tarzı sade CRM pipeline (Kanban).
+ * Her sütun bir veya birden fazla stage’i toplar.
+ */
+export const CRM_PIPELINE_COLUMNS: {
+  id: string;
+  label: string;
+  stages: readonly string[];
+}[] = [
+  { id: 'incoming', label: 'Gelen leadler', stages: INCOMING_STAGES },
+  {
+    id: 'contact',
+    label: 'Görüşülüyor',
+    stages: ['first_contact_completed', 'presentation_scheduled', 'offer_sent']
+  },
+  { id: 'trial', label: 'Deneme dersi', stages: TRIAL_STAGES },
+  { id: 'thinking', label: 'Düşünüyor / takip', stages: ['considering', 'follow_up', 'postponed'] },
+  { id: 'payment', label: 'Ödeme bekleniyor', stages: ['payment_pending'] }
+];
+
+/**
+ * Üst hızlı filtreler — kullanıcı localStorage ile sırayı/görünürlüğü düzenleyebilir.
+ * key: API’ye giden rt_quick değeri
+ */
+export const CRM_QUICK_FILTERS: {
+  key: string;
+  label: string;
+  defaultVisible: boolean;
+}[] = [
+  { key: '', label: 'Aktif takip', defaultVisible: true },
+  { key: 'incoming', label: 'Gelen leadler', defaultVisible: true },
+  { key: 'trial', label: 'Deneme dersi', defaultVisible: true },
+  { key: 'payment', label: 'Ödeme bekleyen', defaultVisible: true },
+  { key: 'confirmed', label: 'Kesin kayıt', defaultVisible: true },
+  { key: 'lost', label: 'Kayıt sildirdi', defaultVisible: true },
+  { key: 'today', label: 'Bugün aranacak', defaultVisible: true },
+  { key: 'overdue', label: 'Gecikmiş', defaultVisible: true },
+  { key: 'all', label: 'Tümü', defaultVisible: false }
+];
+
+export const CRM_FILTER_STORAGE_KEY = 'ovip.registrationCrmQuickFilters.v1';
+
+export type CrmFilterPrefs = { order: string[]; hidden: string[] };
+
+export function loadCrmFilterPrefs(): CrmFilterPrefs {
+  try {
+    const raw = localStorage.getItem(CRM_FILTER_STORAGE_KEY);
+    if (!raw) return defaultCrmFilterPrefs();
+    const parsed = JSON.parse(raw) as CrmFilterPrefs;
+    const known = new Set(CRM_QUICK_FILTERS.map((f) => f.key));
+    const order = (parsed.order || []).filter((k) => known.has(k));
+    for (const f of CRM_QUICK_FILTERS) {
+      if (!order.includes(f.key)) order.push(f.key);
+    }
+    const hidden = (parsed.hidden || []).filter((k) => known.has(k));
+    return { order, hidden };
+  } catch {
+    return defaultCrmFilterPrefs();
+  }
+}
+
+export function saveCrmFilterPrefs(prefs: CrmFilterPrefs) {
+  localStorage.setItem(CRM_FILTER_STORAGE_KEY, JSON.stringify(prefs));
+}
+
+export function defaultCrmFilterPrefs(): CrmFilterPrefs {
+  return {
+    order: CRM_QUICK_FILTERS.map((f) => f.key),
+    hidden: CRM_QUICK_FILTERS.filter((f) => !f.defaultVisible).map((f) => f.key)
+  };
+}
+
+export function visibleCrmQuickFilters(prefs: CrmFilterPrefs) {
+  return prefs.order
+    .map((key) => CRM_QUICK_FILTERS.find((f) => f.key === key))
+    .filter((f): f is (typeof CRM_QUICK_FILTERS)[number] => Boolean(f))
+    .filter((f) => !prefs.hidden.includes(f.key));
+}
+
 export function leadCardTone(lead: {
   temperature?: string;
   stage?: string;
