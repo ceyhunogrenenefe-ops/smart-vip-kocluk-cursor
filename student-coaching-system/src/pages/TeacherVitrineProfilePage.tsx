@@ -772,6 +772,8 @@ export default function TeacherVitrineProfilePage() {
             </button>
           </div>
         </div>
+      ) : null}
+
       {(teacherUserId || teacherSlug) ? (
         <TeacherReviews
           teacherId={teacherUserId || undefined}
