@@ -61,7 +61,7 @@ export default function TeacherReviewModal({
         }
         throw new Error(j.hint || j.message || j.error || `HTTP ${res.status}`);
       }
-      toast.success('Değerlendirmeniz kaydedildi');
+      toast.success('Değerlendirmeniz alındı. Admin onayından sonra sitede yayınlanır.');
       onSubmitted?.();
       onClose();
     } catch (e) {

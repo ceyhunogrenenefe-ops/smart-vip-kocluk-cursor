@@ -37,7 +37,6 @@ export default async function handler(req, res) {
   const lessonId = String(body.lesson_id || body.lessonId || '').trim();
   const rating = clampRating(body.rating);
   const comment = snippetComment(body.comment ?? body.review);
-  const isPublic = body.is_public === false || body.isPublic === false ? false : true;
 
   if (!lessonId) return res.status(400).json({ error: 'lesson_id_required' });
   if (!rating) {
@@ -95,16 +94,17 @@ export default async function handler(req, res) {
         'Öğrenci';
     }
 
-    const insertRow = {
-      teacher_id: String(lesson.teacher_id),
-      student_id: studentId,
-      lesson_id: lessonId,
-      reviewer_type: 'STUDENT',
-      reviewer_name: reviewerName.slice(0, 120),
-      rating,
-      comment,
-      is_public: isPublic
-    };
+  const insertRow = {
+    teacher_id: String(lesson.teacher_id),
+    student_id: studentId,
+    lesson_id: lessonId,
+    reviewer_type: 'STUDENT',
+    reviewer_name: reviewerName.slice(0, 120),
+    rating,
+    comment,
+    is_public: false,
+    moderation_status: 'pending'
+  };
 
     const { data: saved, error: insErr } = await supabaseAdmin
       .from('teacher_reviews')
@@ -121,8 +121,13 @@ export default async function handler(req, res) {
       throw insErr;
     }
 
-    const stats = await refreshTeacherReviewStats(lesson.teacher_id);
-    return res.status(201).json({ data: mapReviewToApi(saved), stats });
+  const stats = await refreshTeacherReviewStats(lesson.teacher_id);
+  return res.status(201).json({
+    data: mapReviewToApi(saved),
+    stats,
+    moderation: 'pending',
+    hint: 'Yorumunuz admin onayından sonra sitede yayınlanır.'
+  });
   } catch (e) {
     console.error('[reviews/student]', errorMessage(e));
     return res.status(500).json({ error: 'server_error', message: errorMessage(e) });
