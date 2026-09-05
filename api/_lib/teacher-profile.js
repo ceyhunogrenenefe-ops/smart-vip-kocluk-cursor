@@ -328,6 +328,9 @@ export function publicCardFromSnapshot(row) {
     private_lesson_enabled: row.private_lesson_enabled !== false,
     average_rating: row.average_rating != null ? Number(row.average_rating) : null,
     total_reviews: row.total_reviews != null ? Number(row.total_reviews) : 0,
+    completed_lessons_count:
+      row.completed_lessons_count != null ? Number(row.completed_lessons_count) : 0,
+    lessons: row.completed_lessons_count != null ? Number(row.completed_lessons_count) : 0,
     // Liste (hover tanıtım) için zorunlu — detayda vardı, kartta yoktu
     video_url: videos[0]?.url || snap.video_url || null,
     videos

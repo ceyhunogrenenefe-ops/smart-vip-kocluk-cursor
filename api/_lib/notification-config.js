@@ -51,6 +51,17 @@ export const NOTIFICATION_DEFINITIONS = [
     allowMetaFallback: false
   },
   {
+    id: 'teacher_review_invite',
+    templateType: 'teacher_review_invite',
+    nameTr: 'Öğretmen yorum daveti (veli)',
+    descriptionTr: 'Özel ders bitince ~10 dk içinde veliye Meta WhatsApp şablonu.',
+    sendChannel: SEND_CHANNELS.META_API,
+    mode: 'automatic',
+    cronJobKey: 'teacher_review_invites',
+    coachScoped: false,
+    allowMetaFallback: false
+  },
+  {
     id: 'report_reminder',
     templateType: 'report_reminder',
     nameTr: 'Günlük rapor hatırlatma',

@@ -19,6 +19,7 @@ import { toast } from 'sonner';
 import { apiFetch } from '../lib/session';
 import { Link } from 'react-router-dom';
 import { listInstitutionsForPicker, type InstitutionPickRow } from '../lib/parentSignApi';
+import AdminTeacherReviewsPanel from '../components/teacher/AdminTeacherReviewsPanel';
 
 type Row = {
   id: string;
@@ -622,6 +623,8 @@ export default function TeacherProfileApprovalsPage() {
           <RefreshCw className="h-4 w-4" /> Yenile
         </button>
       </div>
+
+      <AdminTeacherReviewsPanel />
 
       <div className="flex flex-wrap gap-2">
         {FILTERS.map((f) => (

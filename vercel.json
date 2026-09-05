@@ -131,6 +131,10 @@
     {
       "path": "/api/cron/solution-appointment-reminders",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/teacher-review-invites",
+      "schedule": "*/5 * * * *"
     }
   ],
   "redirects": [

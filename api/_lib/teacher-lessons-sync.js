@@ -1,5 +1,6 @@
 import { supabaseAdmin } from './supabase-admin.js';
 import { errorMessage } from './error-msg.js';
+import { refreshTeacherCompletedLessonCount } from './teacher-reviews.js';
 
 /** İstanbul duvar saati + sabit +03:00 */
 function wallTimeToUtcMs(lessonDate, timeStr) {
@@ -27,20 +28,29 @@ export async function syncTeacherLessonsScheduledToCompleted() {
     horizon.setDate(horizon.getDate() + 1);
     const horizonStr = horizon.toISOString().slice(0, 10);
 
-    const { data: rows, error } = await supabaseAdmin
-      .from('teacher_lessons')
-      .select('id, lesson_date, end_time, status')
-      .eq('status', 'scheduled')
-      .lte('lesson_date', horizonStr)
-      .limit(800);
+  const { data: rows, error } = await supabaseAdmin
+    .from('teacher_lessons')
+    .select('id, teacher_id, lesson_date, end_time, status')
+    .eq('status', 'scheduled')
+    .lte('lesson_date', horizonStr)
+    .limit(800);
     if (error) throw error;
 
-    for (const r of rows || []) {
-      const endMs = wallTimeToUtcMs(r.lesson_date, r.end_time);
-      if (endMs != null && endMs <= now) {
-        await supabaseAdmin.from('teacher_lessons').update({ status: 'completed' }).eq('id', r.id);
-      }
+  const completedTeacherIds = new Set();
+  for (const r of rows || []) {
+    const endMs = wallTimeToUtcMs(r.lesson_date, r.end_time);
+    if (endMs != null && endMs <= now) {
+      await supabaseAdmin.from('teacher_lessons').update({ status: 'completed' }).eq('id', r.id);
+      if (r.teacher_id) completedTeacherIds.add(String(r.teacher_id));
     }
+  }
+  for (const tid of completedTeacherIds) {
+    try {
+      await refreshTeacherCompletedLessonCount(tid);
+    } catch (e) {
+      console.warn('[teacher-lessons sync] lesson count', errorMessage(e));
+    }
+  }
   } catch (e) {
     console.warn('[teacher-lessons sync]', errorMessage(e));
   }

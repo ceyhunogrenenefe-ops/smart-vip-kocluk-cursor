@@ -171,7 +171,6 @@ export default async function handler(req, res) {
   const token = String(body.token || req.query?.token || '').trim();
   const rating = clampRating(body.rating);
   const comment = snippetComment(body.comment ?? body.review);
-  const isPublic = body.is_public === false || body.isPublic === false ? false : true;
 
   if (!token) return res.status(400).json({ error: 'token_required' });
   if (!rating) {
@@ -191,16 +190,17 @@ export default async function handler(req, res) {
         .trim()
         .slice(0, 120) || 'Veli';
 
-    const insertRow = {
-      teacher_id: invite.teacher_id,
-      student_id: invite.student_id || null,
-      lesson_id: invite.lesson_id || null,
-      reviewer_type: 'PARENT',
-      reviewer_name: reviewerName,
-      rating,
-      comment,
-      is_public: isPublic
-    };
+  const insertRow = {
+    teacher_id: invite.teacher_id,
+    student_id: invite.student_id || null,
+    lesson_id: invite.lesson_id || null,
+    reviewer_type: 'PARENT',
+    reviewer_name: reviewerName,
+    rating,
+    comment,
+    is_public: false,
+    moderation_status: 'pending'
+  };
 
     const { data: saved, error: insErr } = await supabaseAdmin
       .from('teacher_reviews')
@@ -222,8 +222,13 @@ export default async function handler(req, res) {
       .update({ used_at: new Date().toISOString() })
       .eq('id', invite.id);
 
-    const stats = await refreshTeacherReviewStats(invite.teacher_id);
-    return res.status(201).json({ data: mapReviewToApi(saved), stats });
+  const stats = await refreshTeacherReviewStats(invite.teacher_id);
+  return res.status(201).json({
+    data: mapReviewToApi(saved),
+    stats,
+    moderation: 'pending',
+    hint: 'Yorumunuz admin onayından sonra sitede yayınlanır.'
+  });
   } catch (e) {
     console.error('[reviews/parent POST]', errorMessage(e));
     return res.status(500).json({ error: 'server_error', message: errorMessage(e) });
