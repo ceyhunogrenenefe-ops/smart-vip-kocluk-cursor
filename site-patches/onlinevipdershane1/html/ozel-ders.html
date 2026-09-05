@@ -1,0 +1,636 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Premium Online Özel Ders — Online VIP Dershane</title>
+<meta name="description" content="Türkiye'nin premium online özel ders platformu. Canlı birebir ders, ders kayıtları, AI destekli koçluk, 1 milyon soru, haftalık takip ve veli raporu. Ücretsiz tanışma dersi alın.">
+<link rel="canonical" href="https://onlinevipdershane.com/ozel-ders">
+<meta property="og:title" content="Premium Online Özel Ders — Online VIP Dershane">
+<meta property="og:description" content="Canlı birebir ders, AI koçluk, ders kayıtları ve haftalık veli takibi. Premium online özel ders deneyimi.">
+<meta property="og:url" content="https://onlinevipdershane.com/ozel-ders">
+<meta property="og:type" content="website">
+<meta property="og:image" content="https://onlinevipdershane.com/assets/img/hero/slide-vip-start.jpg">
+<meta name="robots" content="index,follow">
+<meta name="theme-color" content="#0d1f5c">
+<meta name="google-site-verification" content="3zMZ-JrvFsPWEUs_bzeFJOH-kmWIVfx9A-Ibq21w-Rs">
+<link rel="icon" type="image/png" href="assets/img/ovd-logo.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preload" as="image" href="assets/img/hero/slide-vip-start.jpg" fetchpriority="high">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;700;800&family=Nunito:wght@400;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config={
+  theme:{
+    extend:{
+      colors:{
+        navy:{DEFAULT:'#1a3fad',2:'#0f2a7a',3:'#0d1f5c',4:'#071236'},
+        accent:{DEFAULT:'#e8232a',2:'#c8191f'},
+        ink:'#1a1f36',
+        mute:'#64748b',
+        soft:'#f4f7ff'
+      },
+      fontFamily:{
+        display:['Bricolage Grotesque','system-ui','sans-serif'],
+        sans:['Nunito','system-ui','sans-serif']
+      },
+      boxShadow:{
+        soft:'0 12px 40px rgba(26,63,173,.12)',
+        lift:'0 20px 50px rgba(13,31,92,.18)'
+      },
+      keyframes:{
+        fadeUp:{'0%':{opacity:'0',transform:'translateY(22px)'},'100%':{opacity:'1',transform:'translateY(0)'}},
+        float:{'0%,100%':{transform:'translateY(0)'},'50%':{transform:'translateY(-8px)'}},
+        pulseSoft:{'0%,100%':{opacity:'.55'},'50%':{opacity:'1'}}
+      },
+      animation:{
+        fadeUp:'fadeUp .7s ease forwards',
+        float:'float 5s ease-in-out infinite',
+        pulseSoft:'pulseSoft 2.4s ease-in-out infinite'
+      }
+    }
+  }
+}
+</script>
+<style>
+  html{scroll-behavior:smooth}
+  .reveal{opacity:0;transform:translateY(24px);transition:opacity .7s ease,transform .7s ease}
+  .reveal.in{opacity:1;transform:none}
+  .faq-a{display:grid;grid-template-rows:0fr;transition:grid-template-rows .35s ease}
+  .faq-a.open{grid-template-rows:1fr}
+  .faq-a>div{overflow:hidden}
+  details summary::-webkit-details-marker{display:none}
+  .teacher-photo-box{aspect-ratio:4/5;overflow:hidden;background:#eef2fb;position:relative}
+  .teacher-photo{width:100%;height:100%;object-fit:cover;object-position:center 20%;display:block;transition:transform .5s ease,opacity .35s ease}
+  .group:hover .teacher-photo{transform:scale(1.03)}
+  .teacher-photo-box.has-video{cursor:pointer}
+  .teacher-photo-box.has-video .teacher-photo{
+    position:absolute;inset:0;width:100%;height:100%;
+    transform:scale(1) rotate(0deg);
+    transform-origin:center center;
+    transition:transform .55s cubic-bezier(.15,.9,.25,1),opacity .4s ease,filter .55s ease;
+    z-index:1;
+  }
+  .teacher-photo-box.has-video.is-playing .teacher-photo{
+    transform:scale(2.15) rotate(4deg);
+    opacity:0;
+    filter:brightness(1.85) contrast(1.1) blur(12px);
+    pointer-events:none;
+  }
+  .teacher-photo-box.has-video::before,
+  .teacher-photo-box.has-video::after{
+    content:"";position:absolute;inset:0;z-index:4;pointer-events:none;opacity:0;
+    border-radius:inherit;
+  }
+  .teacher-photo-box.has-video::before{
+    background:
+      radial-gradient(circle at center,rgba(255,255,255,.95) 0%,rgba(255,220,180,.55) 18%,rgba(232,35,42,.35) 42%,transparent 68%);
+    transform:scale(.2);
+  }
+  .teacher-photo-box.has-video.is-playing::before{
+    animation:teacher-burst-core .7s cubic-bezier(.12,.85,.25,1) forwards;
+  }
+  .teacher-photo-box.has-video::after{
+    box-shadow:
+      0 0 0 0 rgba(255,255,255,.55),
+      0 0 0 0 rgba(232,35,42,.35),
+      inset 0 0 0 0 rgba(255,255,255,.4);
+  }
+  .teacher-photo-box.has-video.is-playing::after{
+    animation:teacher-burst-ring .75s cubic-bezier(.12,.85,.25,1) forwards;
+  }
+  @keyframes teacher-burst-core{
+    0%{opacity:0;transform:scale(.15)}
+    22%{opacity:1;transform:scale(1.05)}
+    100%{opacity:0;transform:scale(2.6)}
+  }
+  @keyframes teacher-burst-ring{
+    0%{opacity:.9;box-shadow:0 0 0 0 rgba(255,255,255,.7),0 0 0 0 rgba(232,35,42,.45),inset 0 0 40px rgba(255,255,255,.35)}
+    100%{opacity:0;box-shadow:0 0 0 90px rgba(255,255,255,0),0 0 0 140px rgba(232,35,42,0),inset 0 0 0 rgba(255,255,255,0)}
+  }
+  .teacher-video-layer{
+    position:absolute;inset:0;opacity:0;pointer-events:none;background:#0b1224;
+    transform:scale(.18);
+    transform-origin:center center;
+    filter:blur(10px) brightness(1.4);
+    transition:transform .65s cubic-bezier(.12,.9,.2,1) .1s,opacity .45s ease .12s,filter .55s ease .1s;
+    z-index:2;
+  }
+  .teacher-photo-box.is-playing .teacher-video-layer{
+    transform:scale(1);
+    opacity:1;
+    filter:blur(0) brightness(1);
+    /* iframe mouseleave tetiklemesin — hover foto kutusunda kalsın */
+    pointer-events:none;
+  }
+  .teacher-photo-box.is-playing.is-touch-playing .teacher-video-layer{
+    pointer-events:auto;
+  }
+  .teacher-video-layer iframe,
+  .teacher-video-layer video{width:100%;height:100%;border:0;object-fit:cover;display:block}
+  .teacher-video-badge{
+    position:absolute;right:12px;bottom:12px;z-index:5;display:inline-flex;align-items:center;gap:6px;
+    border-radius:999px;background:rgba(13,31,92,.88);color:#fff;font-size:11px;font-weight:800;
+    padding:6px 10px;box-shadow:0 8px 20px rgba(13,31,92,.25);pointer-events:none;
+    transition:opacity .3s ease,transform .35s cubic-bezier(.2,.9,.3,1);
+  }
+  .teacher-photo-box.is-playing .teacher-video-badge{opacity:0;transform:scale(1.6);filter:blur(4px);pointer-events:none}
+  .teacher-video-badge svg{width:12px;height:12px;fill:currentColor}
+  .teacher-unmute-btn{
+    display:none;position:absolute;left:50%;bottom:18px;transform:translateX(-50%);
+    z-index:12;align-items:center;justify-content:center;gap:6px;
+    border:0;border-radius:999px;padding:10px 16px;cursor:pointer;
+    background:#e8232a;color:#fff;font-size:13px;font-weight:800;
+    box-shadow:0 10px 28px rgba(232,35,42,.4);pointer-events:auto;
+    animation:teacher-unmute-pulse 1.4s ease-in-out infinite;
+  }
+  .teacher-photo-box.is-playing.is-muted .teacher-unmute-btn{display:inline-flex}
+  .teacher-photo-box.has-sound .teacher-unmute-btn{display:none!important}
+  @keyframes teacher-unmute-pulse{
+    0%,100%{transform:translateX(-50%) scale(1)}
+    50%{transform:translateX(-50%) scale(1.06)}
+  }
+  @media (prefers-reduced-motion:reduce){
+    .teacher-photo-box.has-video .teacher-photo,
+    .teacher-video-layer{transition:opacity .2s ease!important;transform:none!important;filter:none!important}
+    .teacher-photo-box.has-video.is-playing .teacher-photo{opacity:0}
+    .teacher-photo-box.is-playing .teacher-video-layer{opacity:1}
+    .teacher-photo-box.has-video.is-playing::before,
+    .teacher-photo-box.has-video.is-playing::after{animation:none!important;opacity:0!important}
+  }
+  #premiumPackageGrid,#teacherGrid{overflow:visible}
+  /* Hero öğretmen şeridi */
+  .hero-teachers{position:relative;isolation:isolate;min-height:88vh;background:#0d1f5c;color:#fff;overflow:hidden}
+  .hero-teachers-bg{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:62% 40%;opacity:.28;pointer-events:none}
+  .hero-teachers-veil{position:absolute;inset:0;background:linear-gradient(180deg,rgba(13,31,92,.72) 0%,rgba(13,31,92,.35) 40%,rgba(13,31,92,.82) 100%);pointer-events:none}
+  .hero-teachers-inner{position:relative;z-index:1;display:flex;flex-direction:column;min-height:88vh;max-width:1200px;margin:0 auto;padding:1.5rem 1.25rem 2rem}
+  .hero-teachers-head{text-align:center;padding:0.5rem 0 1rem}
+  .hero-teachers-head .eyebrow{font-size:.75rem;font-weight:800;letter-spacing:.18em;text-transform:uppercase;color:rgba(254,202,202,.9)}
+  .hero-teachers-head h1{margin:.35rem auto 0;max-width:18ch;font-size:clamp(1.45rem,3.4vw,2.35rem);line-height:1.15;font-weight:800;letter-spacing:-.02em}
+  .hero-teachers-head p{margin:.55rem auto 0;max-width:36rem;font-size:.95rem;line-height:1.55;color:rgba(226,232,240,.88)}
+  .hero-teacher-grid{display:grid;gap:14px;flex:1;align-content:center;min-height:0}
+  .hero-teacher-grid[data-cols="1"]{grid-template-columns:minmax(0,420px);justify-content:center}
+  .hero-teacher-grid[data-cols="2"]{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .hero-teacher-grid[data-cols="3"]{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .hero-teacher-grid[data-cols="4"]{grid-template-columns:repeat(4,minmax(0,1fr))}
+  .hero-teacher-card{min-width:0}
+  .hero-teacher-link{display:block;height:100%;border-radius:18px;overflow:hidden;outline:none}
+  .hero-teacher-photo{aspect-ratio:3/4;border-radius:18px;box-shadow:0 18px 50px rgba(0,0,0,.35);transition:transform .45s cubic-bezier(.2,.9,.3,1),box-shadow .45s ease}
+  .hero-teacher-card:hover .hero-teacher-photo,
+  .hero-teacher-photo.is-playing{transform:scale(1.045);box-shadow:0 28px 64px rgba(0,0,0,.45);z-index:2}
+  .hero-teacher-meta{position:absolute;left:0;right:0;bottom:0;z-index:3;padding:3.2rem 1rem 1rem;background:linear-gradient(transparent,rgba(8,16,48,.92));pointer-events:none;transition:opacity .35s ease}
+  .hero-teacher-photo.is-playing .hero-teacher-meta{opacity:.35}
+  .hero-teacher-name{font-size:1.05rem;font-weight:800;letter-spacing:-.01em}
+  .hero-teacher-role{margin-top:2px;font-size:.8rem;font-weight:700;color:rgba(226,232,240,.85)}
+  .hero-teachers-cta{display:flex;flex-wrap:wrap;justify-content:center;gap:10px;padding-top:1.15rem}
+  .hero-teacher-fallback{text-align:center;padding:3rem 1rem;color:rgba(255,255,255,.85)}
+  .hero-teacher-fallback a{color:#fff;font-weight:800}
+  @media(max-width:900px){
+    .hero-teacher-grid[data-cols="3"],
+    .hero-teacher-grid[data-cols="4"]{grid-template-columns:repeat(2,minmax(0,1fr))}
+  }
+  @media(max-width:560px){
+    .hero-teachers-inner{min-height:auto;padding-top:1.25rem}
+    .hero-teacher-grid[data-cols="2"],
+    .hero-teacher-grid[data-cols="3"],
+    .hero-teacher-grid[data-cols="4"]{grid-template-columns:1fr;max-width:360px;margin:0 auto;width:100%}
+    .hero-teacher-photo{aspect-ratio:4/5}
+  }
+  #premiumPackageGrid,#teacherGrid{overflow:visible}
+  /* Yatay öğretmen avatar şeridi (başlık ↔ filtreler) */
+  .teacher-avatar-rail{margin-left:-0.25rem;margin-right:-0.25rem}
+  .teacher-avatar-strip{
+    display:flex;gap:18px;overflow-x:auto;overflow-y:visible;
+    padding:10px 8px 18px;scroll-snap-type:x proximity;-webkit-overflow-scrolling:touch;
+    scrollbar-width:thin;scrollbar-color:#c5c9d6 transparent;
+  }
+  .teacher-avatar-strip::-webkit-scrollbar{height:6px}
+  .teacher-avatar-strip::-webkit-scrollbar-thumb{background:#c5c9d6;border-radius:99px}
+  .teacher-avatar-item{
+    flex:0 0 auto;width:92px;text-align:center;text-decoration:none;color:inherit;
+    scroll-snap-align:start;outline:none;
+  }
+  .teacher-avatar-ring{
+    width:76px;height:76px;margin:0 auto;border-radius:999px;padding:3px;
+    background:linear-gradient(145deg,var(--avatar-a,#1a3fad),var(--avatar-b,#e8232a));
+    box-shadow:0 8px 18px rgba(26,63,173,.14);
+    transition:transform .28s cubic-bezier(.2,.9,.3,1),box-shadow .28s ease;
+  }
+  .teacher-avatar-item:hover .teacher-avatar-ring,
+  .teacher-avatar-item:focus-visible .teacher-avatar-ring{
+    transform:scale(1.12);box-shadow:0 14px 28px rgba(26,63,173,.22);
+  }
+  .teacher-avatar-img{
+    width:100%;height:100%;border-radius:999px;object-fit:cover;object-position:center 20%;
+    display:block;background:#eef2fb;border:2px solid #fff;
+  }
+  .teacher-avatar-name{
+    margin-top:8px;font-size:12px;font-weight:800;line-height:1.25;color:#1a1f36;
+    display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
+  }
+  .teacher-avatar-branch{
+    margin-top:2px;font-size:11px;font-weight:600;color:#6e6e73;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  }
+  .card-enter{opacity:0;transform:translateY(14px);transition:opacity .45s ease,transform .45s ease}
+  .card-enter.in{opacity:1;transform:none}
+</style>
+<script type="application/ld+json">
+{
+  "@context":"https://schema.org",
+  "@type":"Service",
+  "name":"Premium Online Özel Ders",
+  "provider":{
+    "@type":"EducationalOrganization",
+    "name":"Online VIP Dershane",
+    "url":"https://onlinevipdershane.com",
+    "telephone":"+908503034014"
+  },
+  "areaServed":"TR",
+  "description":"Canlı birebir online özel ders, AI destekli koçluk, ders kayıtları, haftalık takip ve veli raporu.",
+  "url":"https://onlinevipdershane.com/ozel-ders"
+}
+</script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=AW-17235832134"></script>
+<script src="assets/analytics-config.js"></script>
+<script src="assets/gtag-init.js"></script>
+</head>
+<body class="font-sans text-ink bg-white antialiased">
+<!-- Google Tag Manager (noscript) -->
+<noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-NZR5ZLZQ" height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
+
+<!-- NAV -->
+<header class="sticky top-0 z-50 border-b border-slate-200/80 bg-white/95 backdrop-blur-md">
+  <div class="mx-auto flex h-16 max-w-6xl items-center justify-between gap-4 px-5 lg:px-6">
+    <a href="/" class="flex shrink-0 items-center" aria-label="Online VIP Dershane Ana Sayfa">
+      <img src="assets/img/ovd-logo.png" alt="Online VIP Dershane" width="148" height="40" class="h-9 w-auto" decoding="async">
+    </a>
+    <nav class="hidden items-center gap-1 md:flex" aria-label="Sayfa menüsü">
+      <a href="#avantajlar" class="rounded-lg px-3 py-2 text-sm font-semibold text-mute hover:bg-soft hover:text-navy">Avantajlar</a>
+      <a href="#ogretmenler" class="rounded-lg px-3 py-2 text-sm font-semibold text-mute hover:bg-soft hover:text-navy">Öğretmenler</a>
+      <a href="#paketler" class="rounded-lg px-3 py-2 text-sm font-semibold text-mute hover:bg-soft hover:text-navy">Paketler</a>
+      <a href="#sss" class="rounded-lg px-3 py-2 text-sm font-semibold text-mute hover:bg-soft hover:text-navy">SSS</a>
+    </nav>
+    <div class="flex items-center gap-2">
+      <a href="tel:08503034014" class="hidden rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-ink hover:border-navy hover:text-navy sm:inline-flex">0850 303 40 14</a>
+      <a href="kayit.html?program=premium-ozel-ders" class="inline-flex rounded-xl bg-accent px-4 py-2.5 text-sm font-bold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-accent-2">Kayıt Ol</a>
+    </div>
+  </div>
+</header>
+
+<!-- HERO — tanıtım videolu öğretmenler -->
+<section class="hero-teachers" aria-label="Öğretmen tanıtımları">
+  <img
+    class="hero-teachers-bg"
+    src="assets/img/hero/slide-vip-start.jpg"
+    alt=""
+    width="1600"
+    height="1067"
+    fetchpriority="high"
+    decoding="async"
+    aria-hidden="true">
+  <div class="hero-teachers-veil" aria-hidden="true"></div>
+  <div class="hero-teachers-inner">
+    <div class="hero-teachers-head">
+      <p class="eyebrow">Online VIP Dershane</p>
+      <h1>Türkiye'nin Premium Online Özel Ders Platformu</h1>
+      <p>Hocalarımızın üzerine gelin — kendilerini anlatsınlar. Seçin, özel derse başlayın.</p>
+    </div>
+    <div id="heroTeacherGrid" class="hero-teacher-grid" data-cols="3" aria-live="polite"></div>
+    <div class="hero-teachers-cta">
+      <a href="#ogretmenler" class="inline-flex items-center justify-center rounded-xl bg-accent px-6 py-3.5 text-[15px] font-bold text-white shadow-lift transition hover:-translate-y-0.5 hover:bg-accent-2">Tüm Öğretmenler</a>
+      <a href="iletisim.html" class="inline-flex items-center justify-center rounded-xl border-2 border-white/35 bg-white/5 px-6 py-3.5 text-[15px] font-bold text-white backdrop-blur-sm transition hover:border-white hover:bg-white/10">Ücretsiz Tanışma</a>
+      <a href="#paketler" class="inline-flex items-center justify-center rounded-xl border-2 border-white/20 px-6 py-3.5 text-[15px] font-bold text-white/90 transition hover:border-white/40 hover:bg-white/5">Paketler</a>
+    </div>
+  </div>
+</section>
+
+<!-- ÖĞRETMEN SEÇ -->
+<section id="ogretmenler" class="border-b border-slate-200 bg-soft py-16 lg:py-20">
+  <div class="mx-auto max-w-6xl px-5 lg:px-6">
+    <div class="reveal mx-auto max-w-2xl text-center">
+      <p class="mb-3 text-sm font-bold uppercase tracking-wider text-accent">Premium Kadro</p>
+      <h2 class="font-display text-3xl font-extrabold tracking-tight text-ink sm:text-4xl">Öğretmen seç, özel derse başla</h2>
+      <p class="mt-4 text-mute">Branş, sınıf ve müsaitliğe göre filtreleyin. Seçtiğiniz öğretmenle hemen eğitime başlayın.</p>
+    </div>
+
+    <div class="teacher-avatar-rail reveal mt-8" aria-label="Hızlı öğretmen seçimi">
+      <div id="teacherAvatarStrip" class="teacher-avatar-strip"></div>
+    </div>
+
+    <div class="reveal mt-8 rounded-2xl border border-slate-200 bg-white p-4 shadow-soft sm:p-5" aria-label="Öğretmen filtreleri">
+      <div class="mb-4">
+        <label for="q" class="sr-only">Öğretmen ara</label>
+        <div class="relative">
+          <span class="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-mute" aria-hidden="true">⌕</span>
+          <input id="q" type="search" placeholder="Ad, branş veya üniversite ara…" autocomplete="off"
+            class="w-full rounded-xl border border-slate-200 bg-soft py-3 pl-10 pr-4 text-sm font-semibold text-ink outline-none placeholder:font-medium placeholder:text-mute focus:border-navy focus:bg-white focus:ring-2 focus:ring-navy/20">
+        </div>
+      </div>
+      <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+        <div>
+          <label for="f-branch" class="mb-1.5 block text-xs font-bold uppercase tracking-wide text-mute">Branş</label>
+          <select id="f-branch" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold outline-none focus:border-navy focus:ring-2 focus:ring-navy/20"></select>
+        </div>
+        <div>
+          <label for="f-grade" class="mb-1.5 block text-xs font-bold uppercase tracking-wide text-mute">Sınıf</label>
+          <select id="f-grade" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold outline-none focus:border-navy focus:ring-2 focus:ring-navy/20">
+            <option value="">Tümü</option>
+            <option value="ilkokul">İlkokul</option>
+            <option value="ortaokul">Ortaokul</option>
+            <option value="lise">Lise</option>
+            <option value="lgs">LGS</option>
+            <option value="yks">YKS</option>
+          </select>
+        </div>
+        <div>
+          <label for="f-price" class="mb-1.5 block text-xs font-bold uppercase tracking-wide text-mute">Fiyat</label>
+          <select id="f-price" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold outline-none focus:border-navy focus:ring-2 focus:ring-navy/20">
+            <option value="">Tümü</option>
+            <option value="0-650">0 – 650 ₺</option>
+            <option value="651-800">651 – 800 ₺</option>
+            <option value="801+">801 ₺+</option>
+          </select>
+        </div>
+        <div>
+          <label for="f-avail" class="mb-1.5 block text-xs font-bold uppercase tracking-wide text-mute">Müsait</label>
+          <select id="f-avail" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold outline-none focus:border-navy focus:ring-2 focus:ring-navy/20">
+            <option value="">Tümü</option>
+            <option value="1">Müsait</option>
+            <option value="0">Dolu</option>
+            <option value="live">Şu an canlı</option>
+          </select>
+        </div>
+        <div>
+          <label for="f-exp" class="mb-1.5 block text-xs font-bold uppercase tracking-wide text-mute">Deneyim</label>
+          <select id="f-exp" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold outline-none focus:border-navy focus:ring-2 focus:ring-navy/20">
+            <option value="">Tümü</option>
+            <option value="0-9">0–9 yıl</option>
+            <option value="10-15">10–15 yıl</option>
+            <option value="16+">16+ yıl</option>
+          </select>
+        </div>
+      </div>
+      <div class="mt-4 flex flex-wrap items-center justify-between gap-3">
+        <p id="resultMeta" class="text-sm font-semibold text-mute">—</p>
+        <button type="button" id="btnReset" class="rounded-xl border border-slate-200 px-4 py-2 text-sm font-bold text-navy hover:bg-soft">Filtreleri Temizle</button>
+      </div>
+    </div>
+
+    <div class="reveal mt-6" aria-live="polite">
+      <div id="teacherGrid" class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3"></div>
+      <div id="emptyState" class="hidden rounded-2xl border border-dashed border-slate-300 bg-white px-6 py-16 text-center">
+        <p class="font-display text-xl font-bold text-ink">Sonuç bulunamadı</p>
+        <p class="mt-2 text-sm text-mute">Filtreleri gevşetin veya arama metnini değiştirin.</p>
+      </div>
+    </div>
+    <nav id="pagination" class="reveal mt-8 flex flex-wrap items-center justify-center gap-2" aria-label="Sayfalama"></nav>
+  </div>
+</section>
+
+<!-- AVANTAJLAR -->
+<section id="avantajlar" class="bg-soft py-20 lg:py-24">
+  <div class="mx-auto max-w-6xl px-5 lg:px-6">
+    <div class="reveal mx-auto max-w-2xl text-center">
+      <p class="mb-3 text-sm font-bold uppercase tracking-wider text-accent">Neden Premium?</p>
+      <h2 class="font-display text-3xl font-extrabold tracking-tight text-ink sm:text-4xl">Sadece ders değil; ölçülebilir takip</h2>
+      <p class="mt-4 text-mute">Her oturum kayıt altında, her hafta planlı, her ay veliyle şeffaf.</p>
+    </div>
+    <div class="mt-12 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+      <article class="reveal rounded-2xl border border-slate-200/80 bg-white p-6 shadow-soft transition hover:-translate-y-1 hover:shadow-lift">
+        <div class="mb-4 flex h-11 w-11 items-center justify-center rounded-xl bg-navy text-lg text-white" aria-hidden="true">1:1</div>
+        <h3 class="font-display text-lg font-bold text-ink">Canlı birebir ders</h3>
+        <p class="mt-2 text-sm leading-relaxed text-mute">Öğrenciye özel tempo. Eksik konu netleşir, soru çözümü derinleşir.</p>
+      </article>
+      <article class="reveal rounded-2xl border border-slate-200/80 bg-white p-6 shadow-soft transition hover:-translate-y-1 hover:shadow-lift">
+        <div class="mb-4 flex h-11 w-11 items-center justify-center rounded-xl bg-accent text-lg text-white" aria-hidden="true">▶</div>
+        <h3 class="font-display text-lg font-bold text-ink">Ders kayıtları</h3>
+        <p class="mt-2 text-sm leading-relaxed text-mute">Kaçırılan veya tekrar edilmesi gereken dersler istediğiniz zaman izlenir.</p>
+      </article>
+      <article class="reveal rounded-2xl border border-slate-200/80 bg-white p-6 shadow-soft transition hover:-translate-y-1 hover:shadow-lift">
+        <div class="mb-4 flex h-11 w-11 items-center justify-center rounded-xl bg-navy-2 text-lg text-white" aria-hidden="true">AI</div>
+        <h3 class="font-display text-lg font-bold text-ink">AI destekli koçluk</h3>
+        <p class="mt-2 text-sm leading-relaxed text-mute">Zayıf konular ve çalışma temposu veriye göre kişiselleştirilir.</p>
+      </article>
+      <article class="reveal rounded-2xl border border-slate-200/80 bg-white p-6 shadow-soft transition hover:-translate-y-1 hover:shadow-lift">
+        <div class="mb-4 flex h-11 w-11 items-center justify-center rounded-xl bg-emerald-500 text-sm font-bold text-white" aria-hidden="true">1M+</div>
+        <h3 class="font-display text-lg font-bold text-ink">1 Milyon soru</h3>
+        <p class="mt-2 text-sm leading-relaxed text-mute">Branş ve seviyeye göre zengin soru havuzuyla pekiştirme.</p>
+      </article>
+      <article class="reveal rounded-2xl border border-slate-200/80 bg-white p-6 shadow-soft transition hover:-translate-y-1 hover:shadow-lift">
+        <div class="mb-4 flex h-11 w-11 items-center justify-center rounded-xl bg-navy text-lg text-white" aria-hidden="true">📅</div>
+        <h3 class="font-display text-lg font-bold text-ink">Haftalık takip</h3>
+        <p class="mt-2 text-sm leading-relaxed text-mute">Hedef, ödev ve deneme planı her hafta güncellenir.</p>
+      </article>
+      <article class="reveal rounded-2xl border border-slate-200/80 bg-white p-6 shadow-soft transition hover:-translate-y-1 hover:shadow-lift">
+        <div class="mb-4 flex h-11 w-11 items-center justify-center rounded-xl bg-accent text-lg text-white" aria-hidden="true">✉</div>
+        <h3 class="font-display text-lg font-bold text-ink">Veli raporu</h3>
+        <p class="mt-2 text-sm leading-relaxed text-mute">Devam, performans ve öneriler velilerle düzenli paylaşılır.</p>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- PAKETLER -->
+<section id="paketler" class="bg-navy-3 py-20 text-white lg:py-24">
+  <div class="mx-auto max-w-6xl px-5 lg:px-6">
+    <div class="reveal mx-auto max-w-2xl text-center">
+      <p class="mb-3 text-sm font-bold uppercase tracking-wider text-red-300">Paketler</p>
+      <h2 class="font-display text-3xl font-extrabold tracking-tight sm:text-4xl">Premium özel ders paketleri</h2>
+      <p class="mt-4 text-slate-300">Size uygun paketi seçin, güvenli ödemeyle hemen başlayın.</p>
+    </div>
+    <div id="premiumPackageGrid" class="mt-14 grid gap-5 sm:grid-cols-2 lg:grid-cols-4 lg:items-stretch lg:gap-5"></div>
+    <p class="reveal mt-8 text-center">
+      <a href="premium-paketler.html" class="text-sm font-bold text-red-200 hover:text-white">Tüm paket detayları →</a>
+    </p>
+  </div>
+</section>
+
+<!-- NASIL ÇALIŞIR -->
+<section id="nasil" class="bg-white py-20 lg:py-24">
+  <div class="mx-auto max-w-6xl px-5 lg:px-6">
+    <div class="reveal mx-auto max-w-2xl text-center">
+      <p class="mb-3 text-sm font-bold uppercase tracking-wider text-accent">Süreç</p>
+      <h2 class="font-display text-3xl font-extrabold tracking-tight text-ink sm:text-4xl">Nasıl çalışır?</h2>
+      <p class="mt-4 text-mute">4 net adımda premium özel derse başlayın.</p>
+    </div>
+    <ol class="mt-12 grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+      <li class="reveal relative rounded-2xl border border-slate-200 bg-soft p-6">
+        <span class="font-display text-4xl font-extrabold text-navy/20">01</span>
+        <h3 class="mt-3 font-display text-lg font-bold text-ink">Başvuru</h3>
+        <p class="mt-2 text-sm text-mute">Form veya WhatsApp ile hedef sınıf ve dersi paylaşın.</p>
+      </li>
+      <li class="reveal relative rounded-2xl border border-slate-200 bg-soft p-6">
+        <span class="font-display text-4xl font-extrabold text-navy/20">02</span>
+        <h3 class="mt-3 font-display text-lg font-bold text-ink">Tanışma dersi</h3>
+        <p class="mt-2 text-sm text-mute">Ücretsiz canlı tanışma ile seviye ve uyum ölçülür.</p>
+      </li>
+      <li class="reveal relative rounded-2xl border border-slate-200 bg-soft p-6">
+        <span class="font-display text-4xl font-extrabold text-navy/20">03</span>
+        <h3 class="mt-3 font-display text-lg font-bold text-ink">Plan & paket</h3>
+        <p class="mt-2 text-sm text-mute">Öğretmen eşleşmesi, ders saati ve paket netleşir.</p>
+      </li>
+      <li class="reveal relative rounded-2xl border border-slate-200 bg-soft p-6">
+        <span class="font-display text-4xl font-extrabold text-navy/20">04</span>
+        <h3 class="mt-3 font-display text-lg font-bold text-ink">Takip başlar</h3>
+        <p class="mt-2 text-sm text-mute">Kayıtlar, ödev, AI koçluk ve veli raporları devreye girer.</p>
+      </li>
+    </ol>
+  </div>
+</section>
+
+<!-- SSS -->
+<section id="sss" class="bg-soft py-20 lg:py-24">
+  <div class="mx-auto max-w-3xl px-5 lg:px-6">
+    <div class="reveal text-center">
+      <p class="mb-3 text-sm font-bold uppercase tracking-wider text-accent">SSS</p>
+      <h2 class="font-display text-3xl font-extrabold tracking-tight text-ink sm:text-4xl">Sık sorulan sorular</h2>
+    </div>
+    <div class="mt-10 space-y-3">
+      <details class="reveal group rounded-2xl border border-slate-200 bg-white open:shadow-soft" open>
+        <summary class="flex cursor-pointer list-none items-center justify-between gap-4 px-5 py-4 font-display text-base font-bold text-ink">
+          Özel dersler gerçekten birebir mi?
+          <span class="text-navy transition group-open:rotate-45">+</span>
+        </summary>
+        <div class="px-5 pb-5 text-sm leading-relaxed text-mute">Evet. Premium özel dersler canlı ve birebirdir. Grup dersleri ayrı VIP programlarımızda sunulur.</div>
+      </details>
+      <details class="reveal group rounded-2xl border border-slate-200 bg-white">
+        <summary class="flex cursor-pointer list-none items-center justify-between gap-4 px-5 py-4 font-display text-base font-bold text-ink">
+          Ders kayıtlarına ne kadar süre erişirim?
+          <span class="text-navy transition group-open:rotate-45">+</span>
+        </summary>
+        <div class="px-5 pb-5 text-sm leading-relaxed text-mute">Paket süreniz boyunca kaçırdığınız veya tekrar etmek istediğiniz dersleri izleyebilirsiniz.</div>
+      </details>
+      <details class="reveal group rounded-2xl border border-slate-200 bg-white">
+        <summary class="flex cursor-pointer list-none items-center justify-between gap-4 px-5 py-4 font-display text-base font-bold text-ink">
+          Hangi sınıflar için uygun?
+          <span class="text-navy transition group-open:rotate-45">+</span>
+        </summary>
+        <div class="px-5 pb-5 text-sm leading-relaxed text-mute">İlkokuldan LGS ve YKS’ye kadar branş ihtiyacına göre öğretmen eşleştirmesi yapılır.</div>
+      </details>
+      <details class="reveal group rounded-2xl border border-slate-200 bg-white">
+        <summary class="flex cursor-pointer list-none items-center justify-between gap-4 px-5 py-4 font-display text-base font-bold text-ink">
+          Veli raporları ne sıklıkla gelir?
+          <span class="text-navy transition group-open:rotate-45">+</span>
+        </summary>
+        <div class="px-5 pb-5 text-sm leading-relaxed text-mute">Premium ve Elite paketlerde haftalık takip özeti; Elite’de ayrıca aylık kapsamlı değerlendirme sunulur.</div>
+      </details>
+      <details class="reveal group rounded-2xl border border-slate-200 bg-white">
+        <summary class="flex cursor-pointer list-none items-center justify-between gap-4 px-5 py-4 font-display text-base font-bold text-ink">
+          Ücretsiz tanışma dersi zorunlu mu?
+          <span class="text-navy transition group-open:rotate-45">+</span>
+        </summary>
+        <div class="px-5 pb-5 text-sm leading-relaxed text-mute">Zorunlu değildir ama doğru öğretmen–öğrenci eşleşmesi için şiddetle önerilir.</div>
+      </details>
+    </div>
+  </div>
+</section>
+
+<!-- YORUMLAR -->
+<section id="yorumlar" class="bg-white py-20 lg:py-24">
+  <div class="mx-auto max-w-6xl px-5 lg:px-6">
+    <div class="reveal mx-auto max-w-2xl text-center">
+      <p class="mb-3 text-sm font-bold uppercase tracking-wider text-accent">Geri bildirim</p>
+      <h2 class="font-display text-3xl font-extrabold tracking-tight text-ink sm:text-4xl">Öğrenci ve veli yorumları</h2>
+    </div>
+    <div class="mt-12 grid gap-6 md:grid-cols-3">
+      <blockquote class="reveal rounded-2xl border border-slate-200 bg-soft p-6">
+        <p class="text-sm leading-relaxed text-ink/90">“Matematikte panik yapıyordum. Birebir ders + kayıtlar sayesinde konuları evde tekrar edebildim. Netlerim 2 ayda toparlandı.”</p>
+        <footer class="mt-5 text-sm font-bold text-navy">Elif · 11. Sınıf</footer>
+      </blockquote>
+      <blockquote class="reveal rounded-2xl border border-slate-200 bg-soft p-6">
+        <p class="text-sm leading-relaxed text-ink/90">“Veli olarak her hafta ne çalışıldığını görmek çok rahatlatıcı. Öğretmen iletişimi net, takip gerçekten var.”</p>
+        <footer class="mt-5 text-sm font-bold text-navy">Ayşe Hanım · Veli</footer>
+      </blockquote>
+      <blockquote class="reveal rounded-2xl border border-slate-200 bg-soft p-6">
+        <p class="text-sm leading-relaxed text-ink/90">“Fizik korkum azalmıştı bile. Ali Hocanın anlatımı ve haftalık planla AYT’ye daha güvenli giriyorum.”</p>
+        <footer class="mt-5 text-sm font-bold text-navy">Can · 12. Sınıf</footer>
+      </blockquote>
+    </div>
+  </div>
+</section>
+
+<!-- CTA -->
+<section class="relative overflow-hidden bg-gradient-to-br from-navy-3 via-navy-2 to-navy py-20 text-white">
+  <div class="absolute right-0 top-0 h-64 w-64 rounded-full bg-accent/25 blur-3xl animate-float" aria-hidden="true"></div>
+  <div class="reveal relative mx-auto max-w-4xl px-5 text-center lg:px-6">
+    <h2 class="font-display text-3xl font-extrabold tracking-tight sm:text-4xl">Sorularınız mı var?</h2>
+    <p class="mx-auto mt-4 max-w-xl text-slate-200">Ücretsiz tanışma dersi veya WhatsApp ile ekibimize ulaşın.</p>
+    <div class="mt-8 flex flex-wrap items-center justify-center gap-3">
+      <a href="iletisim.html" class="inline-flex rounded-xl bg-accent px-7 py-3.5 text-[15px] font-bold text-white transition hover:-translate-y-0.5 hover:bg-accent-2">Ücretsiz Tanışma</a>
+      <a href="https://wa.me/908503034014" target="_blank" rel="noopener" class="inline-flex rounded-xl border-2 border-white/40 px-7 py-3.5 text-[15px] font-bold text-white transition hover:bg-white hover:text-navy-3">WhatsApp</a>
+      <a href="tel:08503034014" class="inline-flex rounded-xl bg-white/10 px-7 py-3.5 text-[15px] font-bold text-white transition hover:bg-white/20">0850 303 40 14</a>
+    </div>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer class="border-t-4 border-accent bg-navy-3 text-slate-300">
+  <div class="mx-auto grid max-w-6xl gap-10 px-5 py-14 sm:grid-cols-2 lg:grid-cols-4 lg:px-6">
+    <div>
+      <img src="assets/img/ovd-logo.png" alt="Online VIP Dershane" width="140" height="38" class="h-9 w-auto brightness-0 invert" loading="lazy" decoding="async">
+      <p class="mt-4 max-w-xs text-sm leading-relaxed text-slate-400">Türkiye’nin yeni nesil online dershanesi. Premium özel ders, VIP gruplar ve sistemli koçluk.</p>
+    </div>
+    <div>
+      <h3 class="mb-4 font-display text-xs font-bold uppercase tracking-widest text-white">Keşfet</h3>
+      <ul class="space-y-2 text-sm">
+        <li><a href="/" class="hover:text-white">Ana Sayfa</a></li>
+        <li><a href="programlar/" class="hover:text-white">Programlar</a></li>
+        <li><a href="kadromuz.html" class="hover:text-white">Kadromuz</a></li>
+        <li><a href="blog.html" class="hover:text-white">Blog</a></li>
+      </ul>
+    </div>
+    <div>
+      <h3 class="mb-4 font-display text-xs font-bold uppercase tracking-widest text-white">Özel Ders</h3>
+      <ul class="space-y-2 text-sm">
+        <li><a href="#ogretmenler" class="hover:text-white">Öğretmenler</a></li>
+        <li><a href="#paketler" class="hover:text-white">Paketler</a></li>
+        <li><a href="#sss" class="hover:text-white">SSS</a></li>
+        <li><a href="kayit.html?program=premium-ozel-ders" class="hover:text-white">Kayıt</a></li>
+      </ul>
+    </div>
+    <div>
+      <h3 class="mb-4 font-display text-xs font-bold uppercase tracking-widest text-white">İletişim</h3>
+      <ul class="space-y-2 text-sm">
+        <li><a href="tel:08503034014" class="hover:text-white">0850 303 40 14</a></li>
+        <li><a href="mailto:info@onlinevipdershane.com" class="hover:text-white">info@onlinevipdershane.com</a></li>
+        <li><a href="https://wa.me/908503034014" target="_blank" rel="noopener" class="hover:text-white">WhatsApp Destek</a></li>
+      </ul>
+    </div>
+  </div>
+  <div class="border-t border-white/10 px-5 py-5 text-center text-xs text-slate-500 lg:px-6">
+    © <span id="y"></span> Online VIP Dershane. Tüm hakları saklıdır.
+    · <a href="gizlilik.html" class="hover:text-white">Gizlilik</a>
+    · <a href="satis.html" class="hover:text-white">Satış</a>
+  </div>
+</footer>
+
+<script>
+document.getElementById('y').textContent=new Date().getFullYear();
+(function(){
+  var nodes=document.querySelectorAll('.reveal');
+  if(!('IntersectionObserver' in window)){nodes.forEach(function(n){n.classList.add('in');});return;}
+  var io=new IntersectionObserver(function(entries){
+    entries.forEach(function(e){
+      if(e.isIntersecting){e.target.classList.add('in');io.unobserve(e.target);}
+    });
+  },{threshold:0.12,rootMargin:'0px 0px -40px 0px'});
+  nodes.forEach(function(n){io.observe(n);});
+})();
+</script>
+<script src="assets/products.js?v=20260717a"></script>
+<script src="assets/cart.js?v=20260717a"></script>
+<script src="assets/premium-packages-ui.js?v=20260717a"></script>
+<script>OVD_PREMIUM_PACKAGES.init({ source:'ozel-ders' });</script>
+<script src="assets/premium-teachers.js?v=20260729a"></script>
+<script src="assets/premium-teachers-ui.js?v=20260905r"></script>
+<script src="assets/ozel-ders-hero-teachers.js?v=20260803b"></script>
+<script>
+  window.OVD_OZEL_HERO_SLUGS = ['elif-denk', 'ali-aktas', 'merve-matematik'];
+  OVD_OZEL_HERO_TEACHERS.init();
+  OVD_PREMIUM_TEACHERS_UI.init();
+</script>
+<script src="assets/perf-analytics.js" defer></script>
+</body>
+</html>
