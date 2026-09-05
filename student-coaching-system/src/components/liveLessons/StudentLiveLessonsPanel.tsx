@@ -295,22 +295,12 @@ export default function StudentLiveLessonsPanel() {
             <LiveLessonCard
               lesson={lesson}
               lockCompletedLink
-              extraActions={
-                lesson.status === 'completed' && !reviewedLessonIds.has(lesson.id) ? (
-                  <button
-                    type="button"
-                    onClick={() => setReviewLesson(lesson)}
-                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-amber-500 text-white text-sm font-medium hover:bg-amber-600"
-                  >
-                    <Star className="w-4 h-4" />
-                    Öğretmeni Değerlendir
-                  </button>
-                ) : lesson.status === 'completed' && reviewedLessonIds.has(lesson.id) ? (
-                  <span className="text-[11px] text-emerald-700 font-medium px-2 py-1 rounded-lg bg-emerald-50">
-                    Değerlendirildi
-                  </span>
-                ) : null
+              onReviewTeacher={
+                lesson.status === 'completed' && !reviewedLessonIds.has(lesson.id)
+                  ? () => setReviewLesson(lesson)
+                  : undefined
               }
+              reviewSubmitted={Boolean(lesson.status === 'completed' && reviewedLessonIds.has(lesson.id))}
               onCopy={() =>
                 void navigator.clipboard.writeText(copyLessonAccessMessage(lesson, window.location.origin))
               }
