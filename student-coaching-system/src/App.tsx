@@ -75,6 +75,7 @@ import AcademicCenterBbbJoinPage from './pages/AcademicCenterBbbJoinPage';
 import ParentSignFlowPage from './pages/ParentSignFlowPage';
 import TahsilatMuhasebePage from './pages/TahsilatMuhasebePage';
 import VeliImzaPage from './pages/VeliImzaPage';
+import PublicTeacherReviewPage from './pages/PublicTeacherReviewPage';
 import VeliKayitLegalDocPage from './pages/VeliKayitLegalDocPage';
 import PlayStoreLegalPage from './pages/PlayStoreLegalPage';
 import VerifyDocumentPage from './pages/VerifyDocumentPage';
@@ -701,6 +702,7 @@ function App() {
             <Route path="/kitapci/:token" element={<KitapciPortalPage />} />
             <Route path="/odeme/sonuc" element={<GarantiOdemeSonucPage />} />
             <Route path="/odeme/:token" element={<GarantiOdemePage />} />
+            <Route path="/review/public" element={<PublicTeacherReviewPage />} />
             <Route path="/veli-imza/:token" element={<VeliImzaPage />} />
             <Route path="/sign-contract/:token" element={<VeliImzaPage />} />
             <Route path="/veli-kayit-metin/:slug" element={<VeliKayitLegalDocPage />} />
