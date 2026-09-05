@@ -53,6 +53,13 @@ export function studentRowToStudent(s: ApiStudentRow): Student {
     whatsappAutomationEnabled: s.whatsapp_automation_enabled !== false,
     programId: s.program_id || undefined,
     programName: inferProgramName(classLevel),
+    enrollmentStatus:
+      s.enrollment_status === 'trial' || s.enrollment_status === 'withdrawn' || s.enrollment_status === 'confirmed'
+        ? s.enrollment_status
+        : s.deleted_at
+          ? 'withdrawn'
+          : 'confirmed',
+    deletedAt: s.deleted_at ?? null,
     createdAt: s.created_at
   };
 }

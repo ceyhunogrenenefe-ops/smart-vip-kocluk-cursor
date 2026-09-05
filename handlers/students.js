@@ -7,9 +7,57 @@ import { enforceStudentInsertQuotas, enforceCoachStudentQuota, QuotaError } from
 import { enforceCoachLicenseForStudentInsert, LicenseError } from '../api/_lib/coach-license.js';
 import { getTeacherPanelStudentScope } from '../api/_lib/teacher-class-scope.js';
 import { normalizedUserRolesFromDb } from '../api/_lib/user-roles-fetch.js';
-import { STUDENT_LIST_COLUMNS } from '../api/_lib/list-query-columns.js';
+import { STUDENT_LIST_COLUMNS, STUDENT_LIST_OPTIONAL_COLUMNS } from '../api/_lib/list-query-columns.js';
+import { selectWithOptionalColumns, updateOneOptionalModerator } from '../api/_lib/supabase-optional-moderator.js';
 import { resolveViewAsActorIfAllowed } from '../api/_lib/view-as-actor.js';
 import { autoEnrollStudentRow } from '../api/_lib/edesis-auto-enroll.js';
+
+const ENROLLMENT_STATUSES = new Set(['confirmed', 'trial', 'withdrawn']);
+
+function normalizeEnrollmentStatus(raw, fallback = 'confirmed') {
+  const v = String(raw || '')
+    .trim()
+    .toLowerCase();
+  if (ENROLLMENT_STATUSES.has(v)) return v;
+  return fallback;
+}
+
+function parseEnrollmentListOpts(req) {
+  const includeDeleted =
+    String(req.query?.include_deleted || '') === '1' ||
+    String(req.query?.include_deleted || '').toLowerCase() === 'true';
+  const enrollmentRaw = String(req.query?.enrollment_status || '')
+    .trim()
+    .toLowerCase();
+  const enrollmentStatus =
+    enrollmentRaw && enrollmentRaw !== 'all' && ENROLLMENT_STATUSES.has(enrollmentRaw)
+      ? enrollmentRaw
+      : null;
+  return { includeDeleted, enrollmentStatus };
+}
+
+/** Soft-delete / kayıt durumu süzgeci (kolon yoksa satırlar olduğu gibi kalır). */
+function filterEnrollmentRows(rows, opts = {}) {
+  const includeDeleted = Boolean(opts.includeDeleted);
+  const enrollmentStatus = opts.enrollmentStatus || null;
+  let out = Array.isArray(rows) ? rows : [];
+  if (!includeDeleted) {
+    out = out.filter((r) => !r?.deleted_at);
+  }
+  if (enrollmentStatus) {
+    out = out.filter((r) => normalizeEnrollmentStatus(r?.enrollment_status) === enrollmentStatus);
+  }
+  return out;
+}
+
+async function queryStudentsList(applyQuery) {
+  return selectWithOptionalColumns(
+    'students',
+    STUDENT_LIST_COLUMNS,
+    STUDENT_LIST_OPTIONAL_COLUMNS,
+    applyQuery
+  );
+}
 
 const normActorRole = (r) => String(r || '').trim().toLowerCase();
 
@@ -183,11 +231,9 @@ async function assertStudentVisibilityResolved(actor, student) {
 async function listStudentsByIds(ids) {
   const unique = [...new Set((ids || []).map((id) => String(id || '').trim()).filter(Boolean))];
   if (!unique.length) return [];
-  const { data, error } = await supabaseAdmin
-    .from('students')
-    .select(STUDENT_LIST_COLUMNS)
-    .in('id', unique)
-    .order('created_at', { ascending: false });
+  const { data, error } = await queryStudentsList((q) =>
+    q.in('id', unique).order('created_at', { ascending: false })
+  );
   if (error) throw error;
   return data || [];
 }
@@ -200,11 +246,9 @@ async function listStudentsByTeacherScope(actor) {
 
 async function listStudentsByCoachId(coachId) {
   if (!coachId) return [];
-  const { data, error } = await supabaseAdmin
-    .from('students')
-    .select(STUDENT_LIST_COLUMNS)
-    .eq('coach_id', coachId)
-    .order('created_at', { ascending: false });
+  const { data, error } = await queryStudentsList((q) =>
+    q.eq('coach_id', coachId).order('created_at', { ascending: false })
+  );
   if (error) throw error;
   return data || [];
 }
@@ -247,6 +291,7 @@ export default async function handler(req, res) {
 
     if (req.method === 'GET') {
       const rs = await actorRoleSet(actor);
+      const enrollmentOpts = parseEnrollmentListOpts(req);
       const platformUserId = req.query.platform_user_id
         ? String(req.query.platform_user_id).trim()
         : null;
@@ -295,7 +340,10 @@ export default async function handler(req, res) {
 
         if (viewRs.has('teacher') || viewRs.has('coach')) {
           const merged = await listStudentsMergedCoachTeacher(viewActor, viewRs);
-          return res.status(200).json({ data: merged, view_as_user_id: viewAsUserId });
+          return res.status(200).json({
+            data: filterEnrollmentRows(merged, enrollmentOpts),
+            view_as_user_id: viewAsUserId
+          });
         }
 
         if (viewRs.has('student')) {
@@ -311,25 +359,25 @@ export default async function handler(req, res) {
         }
 
         if (viewRs.has('admin') && viewActor.institution_id) {
-          const { data, error } = await supabaseAdmin
-            .from('students')
-            .select(STUDENT_LIST_COLUMNS)
-            .eq('institution_id', viewActor.institution_id)
-            .order('created_at', { ascending: false });
+          const { data, error } = await queryStudentsList((q) =>
+            q.eq('institution_id', viewActor.institution_id).order('created_at', { ascending: false })
+          );
           if (error) throw error;
-          return res.status(200).json({ data: data || [], view_as_user_id: viewAsUserId });
+          return res.status(200).json({
+            data: filterEnrollmentRows(data || [], enrollmentOpts),
+            view_as_user_id: viewAsUserId
+          });
         }
 
         return res.status(200).json({ data: [], view_as_user_id: viewAsUserId });
       }
 
       if (rs.has('super_admin')) {
-        const { data, error } = await supabaseAdmin
-          .from('students')
-          .select(STUDENT_LIST_COLUMNS)
-          .order('created_at', { ascending: false });
+        const { data, error } = await queryStudentsList((q) =>
+          q.order('created_at', { ascending: false })
+        );
         if (error) throw error;
-        return res.status(200).json({ data: data || [] });
+        return res.status(200).json({ data: filterEnrollmentRows(data || [], enrollmentOpts) });
       }
 
       if (rs.has('student')) {
@@ -349,19 +397,17 @@ export default async function handler(req, res) {
 
       if (rs.has('admin')) {
         if (!actor.institution_id) return res.status(403).json({ error: 'institution_missing' });
-        const { data, error } = await supabaseAdmin
-          .from('students')
-          .select(STUDENT_LIST_COLUMNS)
-          .eq('institution_id', actor.institution_id)
-          .order('created_at', { ascending: false });
+        const { data, error } = await queryStudentsList((q) =>
+          q.eq('institution_id', actor.institution_id).order('created_at', { ascending: false })
+        );
         if (error) throw error;
-        return res.status(200).json({ data: data || [] });
+        return res.status(200).json({ data: filterEnrollmentRows(data || [], enrollmentOpts) });
       }
 
       /** Öğretmen/koç: kurumdaki tüm liste değil — sınıf veya koç ataması */
       if (rs.has('teacher') || rs.has('coach')) {
         const merged = await listStudentsMergedCoachTeacher(actor, rs);
-        return res.status(200).json({ data: merged });
+        return res.status(200).json({ data: filterEnrollmentRows(merged, enrollmentOpts) });
       }
 
       return res.status(200).json({ data: [] });
@@ -603,6 +649,8 @@ export default async function handler(req, res) {
         coach_id: resolvedCoachId,
         program_id: body.program_id ?? null,
         institution_id: institutionId,
+        enrollment_status: normalizeEnrollmentStatus(body.enrollment_status, 'confirmed'),
+        deleted_at: null,
         created_at: body.created_at || new Date().toISOString(),
         updated_at: new Date().toISOString()
       };
@@ -638,10 +686,22 @@ export default async function handler(req, res) {
         'program_id',
         'whatsapp_automation_enabled',
         'institution_id',
+        'enrollment_status',
+        'deleted_at',
       ]);
       const patchBody = {};
       for (const [key, value] of Object.entries(body)) {
         if (allowedKeys.has(key)) patchBody[key] = value;
+      }
+      if (patchBody.enrollment_status !== undefined) {
+        patchBody.enrollment_status = normalizeEnrollmentStatus(patchBody.enrollment_status);
+        // Kesin kayıt / deneme dersine geri alınırsa soft-delete temizlenir
+        if (patchBody.enrollment_status === 'confirmed' || patchBody.enrollment_status === 'trial') {
+          if (patchBody.deleted_at === undefined) patchBody.deleted_at = null;
+        }
+        if (patchBody.enrollment_status === 'withdrawn' && patchBody.deleted_at === undefined) {
+          patchBody.deleted_at = new Date().toISOString();
+        }
       }
       if (actor.role === 'coach') {
         delete patchBody.coach_id;
@@ -692,6 +752,30 @@ export default async function handler(req, res) {
         await rebuildCoachStudentIdsFromFk(prevCoachId);
         await rebuildCoachStudentIdsFromFk(data?.coach_id ?? null);
       }
+
+      // Kayıt durumu değişince bağlı kullanıcıyı aktif/pasif tut
+      if (patchBody.enrollment_status !== undefined) {
+        const nowIso = new Date().toISOString();
+        const restore =
+          patchBody.enrollment_status === 'confirmed' || patchBody.enrollment_status === 'trial';
+        const linkedIds = [existing.user_id, existing.platform_user_id, data?.user_id, data?.platform_user_id]
+          .filter(Boolean)
+          .map(String);
+        for (const uid of [...new Set(linkedIds)]) {
+          try {
+            await supabaseAdmin
+              .from('users')
+              .update({ is_active: restore, updated_at: nowIso })
+              .eq('id', uid);
+          } catch (e) {
+            console.warn(
+              '[students enrollment] user active sync:',
+              e instanceof Error ? e.message : e
+            );
+          }
+        }
+      }
+
       return res.status(200).json({ data });
     }
 
@@ -699,15 +783,51 @@ export default async function handler(req, res) {
       if (actor.role === 'teacher') return res.status(403).json({ error: 'forbidden' });
 
       const id = String(req.query.id || '');
+      const hard =
+        String(req.query.hard || '') === '1' || String(req.query.hard || '').toLowerCase() === 'true';
       const { data: existing } = await supabaseAdmin.from('students').select('*').eq('id', id).single();
       if (!existing || !(await assertStudentVisibilityResolved(actor, existing)))
         return res.status(403).json({ error: 'forbidden' });
       const prevCoachDel = existing.coach_id || null;
+
+      // Soft-delete (varsayılan): kayıt sildirdi — veri saklanır
+      if (!hard) {
+        const now = new Date().toISOString();
+        const softPatch = {
+          enrollment_status: 'withdrawn',
+          deleted_at: now,
+          updated_at: now
+        };
+        const softResult = await updateOneOptionalModerator('students', softPatch, 'id', id);
+        if (softResult.error) throw softResult.error;
+
+        // Bağlı giriş hesabını pasife çek (hesabı silme)
+        const linkedIds = [existing.user_id, existing.platform_user_id].filter(Boolean).map(String);
+        for (const uid of [...new Set(linkedIds)]) {
+          try {
+            await supabaseAdmin
+              .from('users')
+              .update({ is_active: false, updated_at: now })
+              .eq('id', uid);
+          } catch (e) {
+            console.warn('[students soft-delete] user deactivate:', e instanceof Error ? e.message : e);
+          }
+        }
+
+        const { data: refreshed } = await supabaseAdmin.from('students').select('*').eq('id', id).maybeSingle();
+        return res.status(200).json({
+          ok: true,
+          soft_deleted: true,
+          data: refreshed || { ...existing, ...softPatch }
+        });
+      }
+
+      // hard=1: kalıcı silme (eski davranış)
       await deleteStudentDependentRows(id);
       const { error } = await supabaseAdmin.from('students').delete().eq('id', id);
       if (error) throw error;
       if (prevCoachDel) await rebuildCoachStudentIdsFromFk(prevCoachDel);
-      return res.status(200).json({ ok: true });
+      return res.status(200).json({ ok: true, hard_deleted: true });
     }
 
     return res.status(405).json({ error: 'method_not_allowed' });
