@@ -3,6 +3,7 @@
 export type QuestionGradeGroup = 'ilkokul' | 'ortaokul' | 'lise' | 'lgs' | 'tyt' | 'ayt';
 
 export const QUESTION_GRADE_OPTIONS: { value: string; label: string; group: QuestionGradeGroup }[] = [
+  { value: '2', label: '2. Sınıf', group: 'ilkokul' },
   { value: '3', label: '3. Sınıf', group: 'ilkokul' },
   { value: '4', label: '4. Sınıf', group: 'ilkokul' },
   { value: '5', label: '5. Sınıf', group: 'ortaokul' },

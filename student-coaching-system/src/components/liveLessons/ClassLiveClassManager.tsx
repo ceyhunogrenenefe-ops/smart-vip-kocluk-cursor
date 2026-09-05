@@ -61,6 +61,7 @@ export type ClassLiveClassRow = {
 type TeacherOption = { id: string; name: string };
 
 const CLASS_LEVEL_OPTIONS: { value: string; label: string }[] = [
+  { value: '2', label: '2' },
   { value: '3', label: '3' },
   { value: '4', label: '4' },
   { value: '5', label: '5' },

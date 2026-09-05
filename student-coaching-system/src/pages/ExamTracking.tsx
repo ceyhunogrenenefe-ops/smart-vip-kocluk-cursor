@@ -73,7 +73,7 @@ const loadPdfJs = async () => {
 interface ExamResult {
   id: string;
   studentId: string;
-  examType: '3' | '4' | '5' | '6' | '7' | 'LGS' | 'YOS' | 'TYT' | 'YKS-EA' | 'YKS-SAY' | 'AYT';
+  examType: '2' | '3' | '4' | '5' | '6' | '7' | 'LGS' | 'YOS' | 'TYT' | 'YKS-EA' | 'YKS-SAY' | 'AYT';
   examDate: string;
   source: 'webhook' | 'manual' | 'edesis' | 'pdf';
   totalNet: number;
@@ -100,9 +100,10 @@ interface ExamResult {
 
 type ExamType = ExamResult['examType'];
 
-const EXAM_TYPE_OPTIONS: ExamType[] = ['3', '4', '5', '6', '7', 'LGS', 'YOS', 'TYT', 'YKS-EA', 'YKS-SAY', 'AYT'];
+const EXAM_TYPE_OPTIONS: ExamType[] = ['2', '3', '4', '5', '6', '7', 'LGS', 'YOS', 'TYT', 'YKS-EA', 'YKS-SAY', 'AYT'];
 
 const SUBJECT_TEMPLATES: Record<ExamType, string[]> = {
+  '2': ['Türkçe', 'Matematik', 'Hayat Bilgisi', 'İngilizce'],
   '3': ['Türkçe', 'Matematik', 'Hayat Bilgisi', 'İngilizce', 'Fen Bilimleri'],
   '4': ['Türkçe', 'Matematik', 'Sosyal Bilgiler', 'İngilizce', 'Fen Bilimleri'],
   '5': ['LGS-Türkçe', 'LGS-Sosyal Bilimler', 'LGS-Din Kültürü', 'LGS-İngilizce', 'LGS-Matematik', 'LGS-Fen Bilimleri'],
@@ -144,7 +145,7 @@ const normalizeText = (v: string) =>
     .replace(/ç/g, 'c');
 
 const getWrongPenalty = (examType?: ExamType) =>
-  examType === '3' || examType === '4' || examType === '5' || examType === '6' || examType === '7' || examType === 'LGS'
+  examType === '2' || examType === '3' || examType === '4' || examType === '5' || examType === '6' || examType === '7' || examType === 'LGS'
     ? 1 / 3
     : 1 / 4;
 
@@ -224,7 +225,7 @@ export default function ExamTracking() {
     const st = students.find((s) => s.id === studentId);
     if (!st) return false;
     const lvl = st.classLevel;
-    if (examType === '3' || examType === '4' || examType === '5' || examType === '6' || examType === '7') {
+    if (examType === '2' || examType === '3' || examType === '4' || examType === '5' || examType === '6' || examType === '7') {
       return String(lvl) === examType;
     }
     if (examType === 'LGS') return String(lvl) === 'LGS' || String(lvl) === '8';
@@ -279,7 +280,7 @@ export default function ExamTracking() {
     if (/LGS|LGS-/i.test(normalized)) {
       const classMatch = normalized.match(/SINIF[^\d]*(\d+)/i);
       const cls = classMatch?.[1];
-      if (cls === '3' || cls === '4' || cls === '5' || cls === '6' || cls === '7') {
+      if (cls === '2' || cls === '3' || cls === '4' || cls === '5' || cls === '6' || cls === '7') {
         examType = cls;
       } else {
         examType = 'LGS';
