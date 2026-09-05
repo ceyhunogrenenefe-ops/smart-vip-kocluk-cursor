@@ -209,6 +209,8 @@ export interface Database {
           auth_user_id?: string | null;
           program_id?: string | null;
           whatsapp_automation_enabled?: boolean | null;
+          enrollment_status?: 'confirmed' | 'trial' | 'withdrawn' | null;
+          deleted_at?: string | null;
           created_at: string;
           updated_at: string;
         };

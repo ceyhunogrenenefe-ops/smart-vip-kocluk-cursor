@@ -288,6 +288,10 @@ export default function UserManagement() {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterRole, setFilterRole] = useState<UserRole | 'all'>('all');
   const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'expired' | 'inactive'>('all');
+  /** Öğrenci kayıt durumu: açık kayıtlar | kesin | deneme | kayıt sildirdi */
+  const [filterEnrollment, setFilterEnrollment] = useState<
+    'open' | 'confirmed' | 'trial' | 'withdrawn' | 'all'
+  >('open');
   const [filterInstitutionId, setFilterInstitutionId] = useState<string>('all');
   const [filterClassLevel, setFilterClassLevel] = useState<string>('all');
   const [filterBranch, setFilterBranch] = useState<string>('all');
@@ -517,7 +521,7 @@ export default function UserManagement() {
         setListLoading(false);
 
         const [stRows, coRows, pendingRows] = await Promise.all([
-          db.getStudents(scope),
+          db.getStudents(scope, { includeDeleted: true }),
           db.getCoaches(scope),
           isAdminish
             ? db.getPendingRegistrations().catch(() => [] as PendingRegistrationRow[])
@@ -806,6 +810,7 @@ export default function UserManagement() {
     endDate: '',
     isActive: true,
     whatsappAutomationEnabled: true,
+    enrollmentStatus: 'confirmed' as 'confirmed' | 'trial' | 'withdrawn',
     questionBranches: [] as string[],
     questionGrades: [] as string[]
   });
@@ -888,6 +893,24 @@ export default function UserManagement() {
         if (filterStatus === 'inactive' && user.isActive !== false) return false;
       }
 
+      if (tags.includes('student')) {
+        const stStatus =
+          (studentMatchForFilter?.enrollmentStatus as
+            | 'confirmed'
+            | 'trial'
+            | 'withdrawn'
+            | undefined) ||
+          (studentMatchForFilter?.deletedAt ? 'withdrawn' : 'confirmed');
+        if (filterEnrollment === 'open') {
+          if (stStatus === 'withdrawn') return false;
+        } else if (filterEnrollment !== 'all') {
+          if (stStatus !== filterEnrollment) return false;
+        }
+      } else if (filterEnrollment === 'confirmed' || filterEnrollment === 'trial' || filterEnrollment === 'withdrawn') {
+        // Kayıt durumu filtresi seçiliyken yalnızca öğrencileri göster
+        return false;
+      }
+
       if (filterClassLevel !== 'all') {
         if (!tags.includes('student')) return false;
         if (!classLevelsMatch(studentMatchForFilter?.classLevel, filterClassLevel)) return false;
@@ -935,6 +958,7 @@ export default function UserManagement() {
     currentUser?.role,
     filterRole,
     filterStatus,
+    filterEnrollment,
     filterClassLevel,
     filterBranch,
     filterAcademicYear,
@@ -950,6 +974,7 @@ export default function UserManagement() {
     searchTerm,
     filterRole,
     filterStatus,
+    filterEnrollment,
     filterInstitutionId,
     filterClassLevel,
     filterBranch,
@@ -1433,6 +1458,14 @@ export default function UserManagement() {
         endDate: user.endDate?.split('T')[0] || '',
         isActive: user.isActive !== false,
         whatsappAutomationEnabled: studentMatch?.whatsappAutomationEnabled !== false,
+        enrollmentStatus:
+          studentMatch?.enrollmentStatus === 'trial' ||
+          studentMatch?.enrollmentStatus === 'withdrawn' ||
+          studentMatch?.enrollmentStatus === 'confirmed'
+            ? studentMatch.enrollmentStatus
+            : studentMatch?.deletedAt
+              ? 'withdrawn'
+              : 'confirmed',
         questionBranches: [],
         questionGrades: []
       });
@@ -1468,7 +1501,15 @@ export default function UserManagement() {
                 studentInstitutionId: profile.institutionId
                   ? String(profile.institutionId)
                   : prev.studentInstitutionId,
-                whatsappAutomationEnabled: profile.whatsappAutomationEnabled !== false
+                whatsappAutomationEnabled: profile.whatsappAutomationEnabled !== false,
+                enrollmentStatus:
+                  profile.enrollmentStatus === 'trial' ||
+                  profile.enrollmentStatus === 'withdrawn' ||
+                  profile.enrollmentStatus === 'confirmed'
+                    ? profile.enrollmentStatus
+                    : profile.deletedAt
+                      ? 'withdrawn'
+                      : prev.enrollmentStatus
               }));
             })
             .catch(() => {});
@@ -1509,6 +1550,7 @@ export default function UserManagement() {
         endDate: endDate.toISOString().split('T')[0],
         isActive: true,
         whatsappAutomationEnabled: true,
+        enrollmentStatus: 'confirmed',
         questionBranches: [],
         questionGrades: []
       });
@@ -1581,6 +1623,8 @@ export default function UserManagement() {
       startDate: new Date().toISOString().split('T')[0],
       endDate: endDate.toISOString().split('T')[0],
       isActive: true,
+      whatsappAutomationEnabled: true,
+      enrollmentStatus: 'confirmed',
       questionBranches: [],
       questionGrades: []
     });
@@ -1650,6 +1694,7 @@ export default function UserManagement() {
       endDate: endDate.toISOString().split('T')[0],
       isActive: true,
       whatsappAutomationEnabled: true,
+      enrollmentStatus: 'confirmed',
       questionBranches: [],
       questionGrades: []
     });
@@ -1893,6 +1938,7 @@ export default function UserManagement() {
                 selectedUser.institutionId ||
                 undefined,
               whatsappAutomationEnabled: formData.whatsappAutomationEnabled,
+              enrollmentStatus: formData.enrollmentStatus,
               createdAt: new Date().toISOString()
             };
             let st =
@@ -2156,6 +2202,7 @@ export default function UserManagement() {
                   coachId: formData.assignCoachId || undefined,
                   institutionId: institutionForStudentProfile || undefined,
                   whatsappAutomationEnabled: formData.whatsappAutomationEnabled,
+                  enrollmentStatus: formData.enrollmentStatus,
                   createdAt: new Date().toISOString()
                 };
                 const existingSt = findStudentForPlatformUser(
@@ -2244,7 +2291,7 @@ export default function UserManagement() {
     setLoading(false);
   };
 
-  // Kullanıcı sil
+  // Kullanıcı sil (öğrenci: soft-delete → kayıt sildirdi)
   const handleDelete = async (userId: string) => {
     if (userId.startsWith(COACH_PROFILE_ONLY_PREFIX)) {
       if (!confirm('Bu kayıt yalnızca koç profili (giriş hesabı yok). Koçu silmek istiyor musunuz?')) return;
@@ -2262,24 +2309,41 @@ export default function UserManagement() {
       return;
     }
 
-    if (!confirm('Bu kullanıcıyı silmek istediğinizden emin misiniz?')) return;
-
     const target = users.find((u) => u.id === userId) || getUserById(userId);
+    const tags = target ? userRoleTags(target as SystemUser) : [];
+    const isStudent = tags.includes('student');
+
+    if (isStudent) {
+      if (
+        !confirm(
+          'Öğrenci «kayıt sildirdi» olarak işaretlenecek; veriler silinmez. Daha sonra filtre ile bulabilirsiniz. Devam?'
+        )
+      ) {
+        return;
+      }
+    } else if (!confirm('Bu kullanıcıyı silmek istediğinizden emin misiniz?')) {
+      return;
+    }
 
     if (getAuthToken()) {
       const em = (target?.email || '').toLowerCase().trim();
-      const tags = target ? userRoleTags(target as SystemUser) : [];
       try {
-        if (tags.includes('student') && target) {
+        if (isStudent && target) {
           const st = await resolveStudentLinkForUser(target);
           if (st?.id) await deleteStudent(st.id);
+          // Öğrenci soft-delete: kullanıcı hesabını hard silme — pasife çekilir (API)
+          setMessage({
+            type: 'success',
+            text: 'Öğrenci «kayıt sildirdi» olarak işaretlendi. Filtreden görüntüleyebilirsiniz.'
+          });
+        } else {
+          if (tags.includes('coach')) {
+            const cid = target?.coachId || coaches.find((c) => c.email.toLowerCase().trim() === em)?.id;
+            if (cid) await deleteCoach(cid);
+          }
+          await db.deleteUser(userId);
+          setMessage({ type: 'success', text: 'Kullanıcı silindi.' });
         }
-        if (tags.includes('coach')) {
-          const cid = target.coachId || coaches.find((c) => c.email.toLowerCase().trim() === em)?.id;
-          if (cid) await deleteCoach(cid);
-        }
-        await db.deleteUser(userId);
-        setMessage({ type: 'success', text: 'Kullanıcı silindi.' });
       } catch (e) {
         setMessage({
           type: 'error',
@@ -3036,7 +3100,7 @@ export default function UserManagement() {
 
       {/* Filters */}
       <div className="bg-white rounded-xl p-4 border border-gray-100">
-        <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-stretch">
           <div className="flex-1 relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
             <input
@@ -3047,6 +3111,21 @@ export default function UserManagement() {
               className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
             />
           </div>
+
+          <select
+            value={filterEnrollment}
+            onChange={(e) => setFilterEnrollment(e.target.value as typeof filterEnrollment)}
+            className="w-full sm:w-auto px-4 py-2.5 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 min-h-[44px] sm:min-w-[14rem]"
+            aria-label="Kayıt durumu filtresi"
+            title="Öğrenci kayıt durumu"
+          >
+            <option value="open">Açık kayıtlar</option>
+            <option value="confirmed">Kesin kayıt</option>
+            <option value="withdrawn">Kayıt sildirdi</option>
+            <option value="trial">Deneme dersi</option>
+            <option value="all">Tümü (arşiv dahil)</option>
+          </select>
+        </div>
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:flex xl:flex-row xl:flex-wrap">
             <select
@@ -3278,7 +3357,26 @@ export default function UserManagement() {
                         />
                       ) : null}
                       <div className="min-w-0 flex-1">
-                      <p className="text-base font-semibold text-slate-900 break-words">{user.name}</p>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="text-base font-semibold text-slate-900 break-words">{user.name}</p>
+                        {tags.includes('student') ? (
+                          <span
+                            className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                              studentMatch?.enrollmentStatus === 'withdrawn' || studentMatch?.deletedAt
+                                ? 'bg-rose-50 text-rose-700 ring-1 ring-rose-200'
+                                : studentMatch?.enrollmentStatus === 'trial'
+                                  ? 'bg-amber-50 text-amber-800 ring-1 ring-amber-200'
+                                  : 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200'
+                            }`}
+                          >
+                            {studentMatch?.enrollmentStatus === 'withdrawn' || studentMatch?.deletedAt
+                              ? 'Kayıt sildirdi'
+                              : studentMatch?.enrollmentStatus === 'trial'
+                                ? 'Deneme dersi'
+                                : 'Kesin kayıt'}
+                          </span>
+                        ) : null}
+                      </div>
                       <p className="mt-0.5 text-sm text-gray-600 break-all">{user.email}</p>
                       {user.phone ? (
                         <p className="mt-0.5 text-sm text-gray-500">{user.phone}</p>
@@ -3314,7 +3412,7 @@ export default function UserManagement() {
                           type="button"
                           onClick={() => void handleDelete(user.id)}
                           className="rounded-lg p-2 text-red-600 hover:bg-red-50"
-                          title="Sil"
+                          title={tags.includes('student') ? 'Kayıt sildirdi' : 'Sil'}
                         >
                           <Trash2 className="h-4 w-4" />
                         </button>
@@ -3526,8 +3624,27 @@ export default function UserManagement() {
                         />
                       ) : null}
                     </td>
-                    <td className="px-3 py-3 text-sm font-semibold text-slate-900 uppercase tracking-tight truncate" title={firstName}>
-                      {firstName}
+                    <td className="px-3 py-3 text-sm font-semibold text-slate-900 uppercase tracking-tight" title={firstName}>
+                      <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                        <span className="truncate">{firstName}</span>
+                        {tags.includes('student') ? (
+                          <span
+                            className={`inline-flex shrink-0 items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium normal-case tracking-normal ${
+                              studentMatch?.enrollmentStatus === 'withdrawn' || studentMatch?.deletedAt
+                                ? 'bg-rose-50 text-rose-700 ring-1 ring-rose-200'
+                                : studentMatch?.enrollmentStatus === 'trial'
+                                  ? 'bg-amber-50 text-amber-800 ring-1 ring-amber-200'
+                                  : 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200'
+                            }`}
+                          >
+                            {studentMatch?.enrollmentStatus === 'withdrawn' || studentMatch?.deletedAt
+                              ? 'Kayıt sildirdi'
+                              : studentMatch?.enrollmentStatus === 'trial'
+                                ? 'Deneme'
+                                : 'Kesin'}
+                          </span>
+                        ) : null}
+                      </div>
                     </td>
                     <td className="px-3 py-3 text-sm text-slate-800 uppercase truncate" title={lastName}>
                       {lastName}
@@ -3682,8 +3799,8 @@ export default function UserManagement() {
                           <button
                             type="button"
                             onClick={() => void handleDelete(user.id)}
-                            className="rounded-lg p-2 text-blue-600 transition-colors hover:bg-blue-50"
-                            title="Sil"
+                            className="rounded-lg p-2 text-red-600 transition-colors hover:bg-red-50"
+                            title={tags.includes('student') ? 'Kayıt sildirdi' : 'Sil'}
                           >
                             <Trash2 className="h-4 w-4" />
                           </button>
@@ -3831,6 +3948,23 @@ export default function UserManagement() {
                             {level.label}
                           </option>
                         ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Kayıt durumu</label>
+                      <select
+                        value={formData.enrollmentStatus}
+                        onChange={(e) =>
+                          setFormData({
+                            ...formData,
+                            enrollmentStatus: e.target.value as typeof formData.enrollmentStatus
+                          })
+                        }
+                        className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 bg-white"
+                      >
+                        <option value="confirmed">Kesin kayıt</option>
+                        <option value="trial">Deneme dersi</option>
+                        <option value="withdrawn">Kayıt sildirdi</option>
                       </select>
                     </div>
                     <div>

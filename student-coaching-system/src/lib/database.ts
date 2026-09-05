@@ -418,15 +418,19 @@ class DatabaseService {
   // Tüm öğrencileri getir
   async getStudents(
     institutionId?: string,
-    opts?: { viewAsUserId?: string }
+    opts?: { viewAsUserId?: string; includeDeleted?: boolean; enrollmentStatus?: string }
   ): Promise<StudentRow[]> {
     const authSub = peekJwtClaims(getAuthToken())?.sub || 'anon';
     const viewAs = opts?.viewAsUserId ? String(opts.viewAsUserId).trim() : '';
-    const key = `students:${authSub}:${institutionId || '*'}:va:${viewAs || '-'}`;
+    const includeDeleted = opts?.includeDeleted === true;
+    const enrollmentStatus = opts?.enrollmentStatus ? String(opts.enrollmentStatus).trim() : '';
+    const key = `students:${authSub}:${institutionId || '*'}:va:${viewAs || '-'}:del:${includeDeleted ? 1 : 0}:enr:${enrollmentStatus || '-'}`;
     return this.cachedGet(key, 12_000, async () => {
-      const path = viewAs
-        ? `/api/students?view_as_user_id=${encodeURIComponent(viewAs)}`
-        : '/api/students';
+      const q = new URLSearchParams();
+      if (viewAs) q.set('view_as_user_id', viewAs);
+      if (includeDeleted) q.set('include_deleted', '1');
+      if (enrollmentStatus) q.set('enrollment_status', enrollmentStatus);
+      const path = q.toString() ? `/api/students?${q.toString()}` : '/api/students';
       let rows: StudentRow[];
       try {
         rows = await this.apiListJson<StudentRow>(path, path);
@@ -434,7 +438,11 @@ class DatabaseService {
         const msg = e instanceof Error ? e.message : String(e);
         // Koç taklidinde eski istemci view_as gönderirse — normal listeye düş
         if (viewAs && (msg.includes('view_as_forbidden') || msg.includes('view_as_'))) {
-          rows = await this.apiListJson<StudentRow>('/api/students', '/api/students');
+          const fallback = new URLSearchParams();
+          if (includeDeleted) fallback.set('include_deleted', '1');
+          if (enrollmentStatus) fallback.set('enrollment_status', enrollmentStatus);
+          const fbPath = fallback.toString() ? `/api/students?${fallback}` : '/api/students';
+          rows = await this.apiListJson<StudentRow>(fbPath, fbPath);
         } else {
           throw e;
         }

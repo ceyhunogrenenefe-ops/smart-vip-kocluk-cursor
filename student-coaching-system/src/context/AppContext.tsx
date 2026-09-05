@@ -1044,7 +1044,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
           coach_id: student.coachId || null,
           institution_id: resolvedInstitutionId,
           program_id: student.programId || inferProgramName(student.classLevel),
-          whatsapp_automation_enabled: student.whatsappAutomationEnabled !== false
+          whatsapp_automation_enabled: student.whatsappAutomationEnabled !== false,
+          enrollment_status: student.enrollmentStatus || 'confirmed',
+          deleted_at: student.deletedAt ?? null
         },
         preferredRowId,
         {
@@ -1087,6 +1089,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (updatedStudent.whatsappAutomationEnabled !== undefined)
       patch.whatsapp_automation_enabled = Boolean(updatedStudent.whatsappAutomationEnabled);
     if (updatedStudent.programId !== undefined) patch.program_id = updatedStudent.programId;
+    if (updatedStudent.enrollmentStatus !== undefined)
+      patch.enrollment_status = updatedStudent.enrollmentStatus;
+    if (updatedStudent.deletedAt !== undefined) patch.deleted_at = updatedStudent.deletedAt;
 
     let saved: ApiStudentRow;
     try {
