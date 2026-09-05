@@ -3277,7 +3277,6 @@ export default function UserManagement() {
               PDF
             </button>
           </div>
-        </div>
       </div>
 
       {currentUser?.role === 'super_admin' && (
