@@ -158,6 +158,14 @@ function applyLeadFilters(q, filters, institutionId) {
   }
 
   if (filters.stage) query = query.eq('stage', filters.stage);
+  if (filters.stage_in) {
+    const stages = String(filters.stage_in)
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (stages.length === 1) query = query.eq('stage', stages[0]);
+    else if (stages.length > 1) query = query.in('stage', stages);
+  }
   if (filters.grade_program) query = query.eq('grade_program', filters.grade_program);
   if (filters.temperature) query = query.eq('temperature', filters.temperature);
   if (filters.assigned_user_id) query = query.eq('assigned_user_id', filters.assigned_user_id);
