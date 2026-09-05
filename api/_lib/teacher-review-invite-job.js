@@ -9,7 +9,7 @@ import { getIstanbulDateString } from './istanbul-time.js';
 import { recordCronRun } from './cron-run-log.js';
 import { renderMessageTemplate } from './template-engine.js';
 import { normalizePhoneToE164 } from './phone-whatsapp.js';
-import { sendNotification } from './message-service.js';
+import { sendAutomatedWhatsApp } from './whatsapp-outbound.js';
 import { metaWhatsAppConfigured, loadMetaWhatsAppSecretsFromDb } from './meta-whatsapp.js';
 import { insertWhatsAppAutomationLog } from './message-log.js';
 
@@ -217,10 +217,9 @@ export async function runTeacherReviewInviteJob(opts = {}) {
       };
       const text = renderMessageTemplate(templateContent, vars).trim();
 
-      const sent = await sendNotification({
-        notificationType: TEACHER_REVIEW_INVITE_KIND,
+      const sent = await sendAutomatedWhatsApp({
         phone,
-        plainText: text,
+        templateType: TEACHER_REVIEW_INVITE_KIND,
         vars
       });
 
