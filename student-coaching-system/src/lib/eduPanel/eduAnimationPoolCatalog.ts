@@ -18,6 +18,7 @@ export type AnimationPoolTargetGroup = {
 
 /** Temel sınıf kartları */
 export const ANIMATION_POOL_CLASS_CARDS: AnimationPoolClassCard[] = [
+  { classLevel: '2', label: '2. Sınıf', program: 'lgs', topicPoolClassKey: 2 },
   { classLevel: '3', label: '3. Sınıf', program: 'lgs', topicPoolClassKey: 3 },
   { classLevel: '4', label: '4. Sınıf', program: 'lgs', topicPoolClassKey: 4 },
   { classLevel: '5', label: '5. Sınıf', program: 'lgs', topicPoolClassKey: 5 },

@@ -5,6 +5,7 @@ export type UserRole = 'super_admin' | 'admin' | 'coach' | 'teacher' | 'student'
 
 // Sınıf seviyeleri: ilkokul, ortaokul, lise ve YKS puan türleri
 export type ClassLevel =
+  | 2
   | 3
   | 4
   | 5
@@ -224,7 +225,7 @@ export interface ExamSubjectResult {
 export interface ExamResult {
   id: string;
   studentId: string;
-  examType: '3' | '4' | '5' | '6' | '7' | 'LGS' | 'YOS' | 'TYT' | 'YKS-EA' | 'YKS-SAY' | 'AYT';
+  examType: '2' | '3' | '4' | '5' | '6' | '7' | 'LGS' | 'YOS' | 'TYT' | 'YKS-EA' | 'YKS-SAY' | 'AYT';
   examDate: string;
   source: 'webhook' | 'manual' | 'pdf' | 'edesis';
   totalNet: number;
@@ -302,6 +303,7 @@ export interface ChartData {
 
 // Yardımcı: öğrenci formları ve filtreler
 export const CLASS_LEVELS: { value: ClassLevel; label: string }[] = [
+  { value: 2, label: '2. Sınıf' },
   { value: 3, label: '3. Sınıf' },
   { value: 4, label: '4. Sınıf' },
   { value: 5, label: '5. Sınıf' },
@@ -337,7 +339,7 @@ export function formatClassLevelLabel(level: ClassLevel | string | number | unde
 
 /** Konu Havuzu sayfası: tüm sınıf / YKS seçenekleri (sıralı) */
 export const TOPIC_CLASS_OPTIONS: { value: string; label: string }[] = [
-  ...([3, 4, 5, 6, 7] as const).map(n => ({ value: String(n), label: `${n}. Sınıf` })),
+  ...([2, 3, 4, 5, 6, 7] as const).map(n => ({ value: String(n), label: `${n}. Sınıf` })),
   { value: 'LGS', label: 'LGS (8. Sınıf)' },
   { value: 'YOS', label: 'YÖS' },
   { value: 'TYT-Maarif', label: 'TYT Maarif Model' },

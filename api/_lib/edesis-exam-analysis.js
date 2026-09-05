@@ -84,7 +84,7 @@ export function inferExamFamilyFromClassLevel(classLevel) {
   if (/tyt/.test(s)) return 'tyt';
   const n = Number(raw);
   if (n === 8) return 'lgs';
-  if (n >= 3 && n <= 7) return 'okul';
+  if (n >= 2 && n <= 7) return 'okul';
   return 'tyt';
 }
 

@@ -114,10 +114,10 @@ function poolTargetFromClassLevel(rawLevel, className = '') {
   const level = String(rawLevel || '').trim();
   const name = String(className || '').trim();
   const hay = `${level} ${name}`.toLocaleUpperCase('tr-TR');
-  const digit = (hay.match(/(?:^|[^\d])(1[0-2]|[3-9])(?:[^\d]|$)/) || [])[1];
+  const digit = (hay.match(/(?:^|[^\d])(1[0-2]|[2-9])(?:[^\d]|$)/) || [])[1];
   if (digit) {
     const n = Number(digit);
-    if (n >= 3 && n <= 8) return { program: 'lgs', class_level: String(n) };
+    if (n >= 2 && n <= 8) return { program: 'lgs', class_level: String(n) };
     if (n >= 9 && n <= 11) return { program: 'tyt', class_level: String(n) };
     if (n === 12) return { program: 'ayt', class_level: '12' };
   }
