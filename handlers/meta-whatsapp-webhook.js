@@ -1,12 +1,19 @@
 /**
- * Meta WhatsApp Cloud API webhook — mesaj teslimat durumu (delivered / failed).
- * Meta BM → WhatsApp → Configuration → Webhook URL:
+ * Meta WhatsApp / Instagram webhook
+ * - WhatsApp: teslimat statuses + gelen mesajlar → Kayıt Takibi lead kartı
+ * - Instagram Messaging: gelen DM → lead kartı
+ *
+ * Meta BM → Webhook URL:
  *   https://www.dersonlinevipkocluk.com/api/meta/webhook
- * Vercel env: META_WEBHOOK_VERIFY_TOKEN (Meta BM'deki Verify Token ile aynı)
- * Abonelik: messages (statuses)
+ * Vercel env: META_WEBHOOK_VERIFY_TOKEN
+ * Abonelik: messages (WhatsApp); Instagram messaging (DM)
  */
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { getIstanbulDateString } from '../api/_lib/istanbul-time.js';
+import {
+  ingestWhatsAppCloudMessages,
+  ingestInstagramMessagingEvents
+} from '../api/_lib/registration-channel-ingest.js';
 
 function verifyToken() {
   return String(process.env.META_WEBHOOK_VERIFY_TOKEN || process.env.META_VERIFY_TOKEN || '').trim();
@@ -127,18 +134,66 @@ export default async function handler(req, res) {
   }
 
   const body = req.body && typeof req.body === 'object' ? req.body : {};
+  const objectType = String(body.object || '').toLowerCase();
   const entries = Array.isArray(body.entry) ? body.entry : [];
 
-  for (const entry of entries) {
-    const changes = Array.isArray(entry?.changes) ? entry.changes : [];
-    for (const change of changes) {
-      if (String(change?.field || '') !== 'messages') continue;
-      const value = change?.value && typeof change.value === 'object' ? change.value : {};
-      const statuses = Array.isArray(value.statuses) ? value.statuses : [];
-      for (const row of statuses) {
-        await applyDeliveryStatus(row.id, row.status, row.errors);
+  try {
+    // Instagram Messaging (object: instagram)
+    if (objectType === 'instagram') {
+      for (const entry of entries) {
+        const messaging = Array.isArray(entry?.messaging) ? entry.messaging : [];
+        if (messaging.length) {
+          await ingestInstagramMessagingEvents(messaging);
+        }
+        // bazı IG abonelikleri changes[] ile gelir
+        const changes = Array.isArray(entry?.changes) ? entry.changes : [];
+        for (const change of changes) {
+          const value = change?.value && typeof change.value === 'object' ? change.value : {};
+          if (Array.isArray(value.messages)) {
+            // nadir: WA benzeri IG payload — telefon yok, contact id kullan
+            for (const m of value.messages) {
+              const from = String(m?.from || m?.sender?.id || '').trim();
+              if (!from) continue;
+              const text = m?.text?.body != null ? String(m.text.body) : m?.message?.text != null ? String(m.message.text) : null;
+              await ingestInstagramMessagingEvents([
+                {
+                  sender: { id: from },
+                  timestamp: m?.timestamp,
+                  message: { mid: m?.id || m?.mid, text }
+                }
+              ]);
+            }
+          }
+        }
+      }
+      return res.status(200).json({ ok: true, channel: 'instagram', received: getIstanbulDateString() });
+    }
+
+    // WhatsApp Cloud API (+ page messaging fallback)
+    for (const entry of entries) {
+      const messaging = Array.isArray(entry?.messaging) ? entry.messaging : [];
+      if (messaging.length && (objectType === 'page' || objectType === 'instagram')) {
+        await ingestInstagramMessagingEvents(messaging);
+      }
+
+      const changes = Array.isArray(entry?.changes) ? entry.changes : [];
+      for (const change of changes) {
+        if (String(change?.field || '') !== 'messages') continue;
+        const value = change?.value && typeof change.value === 'object' ? change.value : {};
+
+        const statuses = Array.isArray(value.statuses) ? value.statuses : [];
+        for (const row of statuses) {
+          await applyDeliveryStatus(row.id, row.status, row.errors);
+        }
+
+        if (Array.isArray(value.messages) && value.messages.length) {
+          await ingestWhatsAppCloudMessages(value);
+        }
       }
     }
+  } catch (e) {
+    console.error('[meta-webhook] ingest error:', e instanceof Error ? e.message : e);
+    // Meta'ya her zaman 200 dön — aksi halde retry storm
   }
 
   return res.status(200).json({ ok: true, received: getIstanbulDateString() });
