@@ -1,5 +1,5 @@
 import React from 'react';
-import { Video, Link2, Copy, ExternalLink, Presentation, PlayCircle } from 'lucide-react';
+import { Video, Link2, Copy, ExternalLink, Presentation, PlayCircle, Star } from 'lucide-react';
 import type { TeacherLesson, TeacherLessonPlatform } from '../../types';
 import { isApproaching, isOngoing, PLATFORM_LABEL, hasBbbRecordingAccess, needsBbbJoinFlow, isPrivateLessonJoinWindowOpen } from '../../lib/liveLessonUtils';
 
@@ -14,6 +14,9 @@ type Props = {
   /** Planlı dersi tamamlandı işaretle (öğretmen/koç) */
   onMarkComplete?: () => void;
   extraActions?: React.ReactNode;
+  /** Tamamlanan özel ders — öğretmen değerlendirme (öğrenci) */
+  onReviewTeacher?: () => void;
+  reviewSubmitted?: boolean;
   /**
    * Öğrenci paneli: tamamlanan derslerde toplantı linki tekrar kullanılmasın (yeni ders yeni link).
    */
@@ -45,6 +48,8 @@ export default function LiveLessonCard({
   onWatchRecording,
   onMarkComplete,
   extraActions,
+  onReviewTeacher,
+  reviewSubmitted = false,
   lockCompletedLink = false,
   joinAsModerator = false
 }: Props) {
@@ -162,6 +167,20 @@ export default function LiveLessonCard({
                 <PlayCircle className="w-4 h-4" />
                 Ders kaydını izle
               </button>
+            ) : null}
+            {lesson.status === 'completed' && onReviewTeacher && !reviewSubmitted ? (
+              <button
+                type="button"
+                onClick={onReviewTeacher}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-amber-500 text-white text-sm font-semibold hover:bg-amber-600 touch-manipulation min-h-[44px]"
+              >
+                <Star className="w-4 h-4" />
+                Öğretmeni Değerlendir
+              </button>
+            ) : lesson.status === 'completed' && onReviewTeacher && reviewSubmitted ? (
+              <span className="inline-flex items-center px-3 py-2 rounded-lg bg-emerald-50 text-emerald-700 text-sm font-medium">
+                Değerlendirildi
+              </span>
             ) : null}
             <button
               type="button"
