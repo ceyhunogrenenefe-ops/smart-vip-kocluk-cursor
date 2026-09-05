@@ -3,9 +3,10 @@ import { useAuth } from '../../context/AuthContext';
 import { apiFetch } from '../../lib/session';
 import type { StudentTeacherLessonQuota, TeacherLesson } from '../../types';
 import LiveLessonCard from './LiveLessonCard';
+import TeacherReviewModal from '../teacher/TeacherReviewModal';
 import { copyLessonAccessMessage, lessonJoinUrl, needsBbbJoinFlow, shouldUsePanelBbbJoin, isExternalMeetingPlatform } from '../../lib/liveLessonUtils';
 import { openBbbJoin, openBbbRecording } from '../../lib/bbbJoin';
-import { Loader2, Radio, AlertTriangle, CalendarRange } from 'lucide-react';
+import { Loader2, Radio, AlertTriangle, CalendarRange, Star } from 'lucide-react';
 import { useRecordingUnavailableAlert, recordingUnavailableText } from '../../hooks/useRecordingUnavailableAlert';
 
 function isoDate(d: Date): string {
@@ -41,6 +42,8 @@ export default function StudentLiveLessonsPanel() {
   const [error, setError] = useState<string | null>(null);
   const { showRecordingUnavailable, recordingAlertModal } = useRecordingUnavailableAlert();
   const [uiTick, setUiTick] = useState(0);
+  const [reviewLesson, setReviewLesson] = useState<TeacherLesson | null>(null);
+  const [reviewedLessonIds, setReviewedLessonIds] = useState<Set<string>>(() => new Set());
 
   useEffect(() => {
     const id = window.setInterval(() => setUiTick((x) => x + 1), 30_000);
@@ -292,6 +295,12 @@ export default function StudentLiveLessonsPanel() {
             <LiveLessonCard
               lesson={lesson}
               lockCompletedLink
+              onReviewTeacher={
+                lesson.status === 'completed' && !reviewedLessonIds.has(lesson.id)
+                  ? () => setReviewLesson(lesson)
+                  : undefined
+              }
+              reviewSubmitted={Boolean(lesson.status === 'completed' && reviewedLessonIds.has(lesson.id))}
               onCopy={() =>
                 void navigator.clipboard.writeText(copyLessonAccessMessage(lesson, window.location.origin))
               }
@@ -337,6 +346,18 @@ export default function StudentLiveLessonsPanel() {
         ))}
       </div>
       {recordingAlertModal}
+      <TeacherReviewModal
+        open={Boolean(reviewLesson)}
+        lessonId={reviewLesson?.id || ''}
+        teacherName={reviewLesson?.teacher_name || undefined}
+        lessonTitle={reviewLesson?.title}
+        onClose={() => setReviewLesson(null)}
+        onSubmitted={() => {
+          if (reviewLesson?.id) {
+            setReviewedLessonIds((prev) => new Set(prev).add(reviewLesson.id));
+          }
+        }}
+      />
     </div>
   );
 }

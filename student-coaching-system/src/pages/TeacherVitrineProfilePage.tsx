@@ -3,6 +3,7 @@ import { Loader2, Save, Send, AlertCircle, Lock, Upload, ImagePlus, Plus, Trash2
 import { toast } from 'sonner';
 import { apiFetch } from '../lib/session';
 import TeacherAvailabilityPanel from '../components/teacher/TeacherAvailabilityPanel';
+import TeacherReviews from '../components/teacher/TeacherReviews';
 
 type TeacherVideo = { id: string; url: string; title?: string };
 
@@ -332,6 +333,8 @@ export default function TeacherVitrineProfilePage() {
   };
 
   const status = String((data?.profile as { status?: string })?.status || '');
+  const teacherUserId = String((data?.profile as { user_id?: string })?.user_id || '').trim();
+  const teacherSlug = String((data?.profile as { slug?: string })?.slug || '').trim();
   const statusKey = status === 'changes_pending' ? 'changes_pending' : status;
   const pct = data?.completion_pct ?? 0;
   const missing = data?.missing_required || [];
@@ -769,6 +772,14 @@ export default function TeacherVitrineProfilePage() {
             </button>
           </div>
         </div>
+      ) : null}
+
+      {(teacherUserId || teacherSlug) ? (
+        <TeacherReviews
+          teacherId={teacherUserId || undefined}
+          slug={teacherSlug || undefined}
+          title="Aldığınız Değerlendirmeler"
+        />
       ) : null}
     </div>
   );
