@@ -9,5 +9,8 @@ export const USER_LIST_OPTIONAL_COLUMNS = ['academic_year_label'];
 export const STUDENT_LIST_COLUMNS =
   'id,name,email,phone,class_level,school,parent_name,parent_phone,coach_id,institution_id,platform_user_id,user_id,birth_date,whatsapp_automation_enabled,program_id,created_at,updated_at';
 
+/** Eski prod şemasında eksik olabilir — select kademeli düşürülür. */
+export const STUDENT_LIST_OPTIONAL_COLUMNS = ['enrollment_status', 'deleted_at'];
+
 export const COACH_LIST_COLUMNS =
   'id,name,email,phone,institution_id,specialties,lessons_meetings_locked,created_at,updated_at';

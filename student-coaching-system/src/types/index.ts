@@ -118,6 +118,10 @@ export interface Student {
   authUserId?: string;
   /** Platform kullanıcısı (public.users.id) — özel JWT oturumu */
   platformUserId?: string;
+  /** kesin kayıt | deneme dersi | kayıt sildirdi */
+  enrollmentStatus?: 'confirmed' | 'trial' | 'withdrawn';
+  /** Soft-delete zamanı (kayıt sildirdi) */
+  deletedAt?: string | null;
   createdAt: string;
 }
 
