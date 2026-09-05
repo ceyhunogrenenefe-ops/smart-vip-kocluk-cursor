@@ -10,7 +10,9 @@ import {
   Search,
   Upload,
   Download,
-  Filter
+  Filter,
+  Settings2,
+  GripVertical
 } from 'lucide-react';
 import { toast } from 'sonner';
 import * as XLSX from 'xlsx';
@@ -33,7 +35,16 @@ import {
   GRADE_PROGRAMS,
   GRADE_LABEL,
   STAGE_LABELS,
-  KANBAN_STAGES
+  KANBAN_STAGES,
+  CRM_PIPELINE_COLUMNS,
+  CRM_QUICK_FILTERS,
+  INCOMING_STAGES,
+  TRIAL_STAGES,
+  loadCrmFilterPrefs,
+  saveCrmFilterPrefs,
+  defaultCrmFilterPrefs,
+  visibleCrmQuickFilters,
+  type CrmFilterPrefs
 } from '../../lib/registrationTrackingConfig';
 import RegLeadCard from './registrationTracking/RegLeadCard';
 import RegLeadDrawer from './registrationTracking/RegLeadDrawer';
@@ -73,6 +84,12 @@ export default function RegistrationTrackingPanel({ isManager, institutionId }: 
   const dateFrom = params.get('rt_from') || '';
   const dateTo = params.get('rt_to') || '';
   const [coaches, setCoaches] = useState<RegCoach[]>([]);
+  const [filterPrefs, setFilterPrefs] = useState<CrmFilterPrefs>(() =>
+    typeof window !== 'undefined' ? loadCrmFilterPrefs() : defaultCrmFilterPrefs()
+  );
+  const [showFilterEditor, setShowFilterEditor] = useState(false);
+  const visibleFilters = useMemo(() => visibleCrmQuickFilters(filterPrefs), [filterPrefs]);
+
 
   const setViewMode = (v: ViewMode) => {
     setParams((p) => {
@@ -93,10 +110,11 @@ export default function RegistrationTrackingPanel({ isManager, institutionId }: 
   };
 
   const buildQuery = useCallback(() => {
+    const wantLost = quickFilter === 'lost' || quickFilter === 'all' || includeLost;
     const q: Record<string, string> = {
       page: '1',
       page_size: '500',
-      include_lost: includeLost ? '1' : '0'
+      include_lost: wantLost ? '1' : '0'
     };
     if (debouncedSearch) q.search = debouncedSearch;
     if (quickFilter === 'overdue') q.overdue = '1';
@@ -108,7 +126,10 @@ export default function RegistrationTrackingPanel({ isManager, institutionId }: 
     }
     if (quickFilter === 'payment') q.payment_pending = '1';
     if (quickFilter === 'confirmed') q.primary_status = 'confirmed';
-    if (quickFilter === 'tracking') q.primary_status = 'tracking';
+    if (quickFilter === 'lost') q.primary_status = 'lost';
+    if (quickFilter === 'incoming') q.stage_in = INCOMING_STAGES.join(',');
+    if (quickFilter === 'trial') q.stage_in = TRIAL_STAGES.join(',');
+    if (quickFilter === '' || quickFilter === 'tracking') q.primary_status = 'tracking';
     if (coachId) q.coach_id = coachId;
     if (dateFrom) q.date_from = dateFrom;
     if (dateTo) q.date_to = dateTo;
@@ -293,38 +314,28 @@ export default function RegistrationTrackingPanel({ isManager, institutionId }: 
           ))}
         </div>
 
-        <div className="flex flex-wrap gap-1">
-          {[
-            ['', 'Tümü'],
-            ['today', 'Bugün'],
-            ['overdue', 'Gecikmiş'],
-            ['payment', 'Ödeme bekleyen'],
-            ['confirmed', 'Kesin kayıt']
-          ].map(([k, label]) => (
+        <div className="flex flex-wrap items-center gap-1">
+          {visibleFilters.map((f) => (
             <button
-              key={k || 'all'}
+              key={f.key || 'tracking'}
               type="button"
-              onClick={() => setQuickFilter(k)}
-              className={`rounded-full px-2.5 py-1 text-xs ${
-                quickFilter === k ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-200'
+              onClick={() => setQuickFilter(f.key)}
+              className={`rounded-full px-2.5 py-1 text-xs font-medium ${
+                quickFilter === f.key
+                  ? 'bg-indigo-600 text-white'
+                  : 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-200'
               }`}
             >
-              {label}
+              {f.label}
             </button>
           ))}
           <button
             type="button"
-            onClick={() =>
-              setParams((p) => {
-                const n = new URLSearchParams(p);
-                if (includeLost) n.delete('rt_lost');
-                else n.set('rt_lost', '1');
-                return n;
-              })
-            }
-            className={`rounded-full px-2.5 py-1 text-xs ${includeLost ? 'bg-slate-700 text-white' : 'bg-slate-100'}`}
+            onClick={() => setShowFilterEditor(true)}
+            className="inline-flex items-center gap-1 rounded-full border border-dashed border-slate-300 px-2.5 py-1 text-xs text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-300"
+            title="Üst filtreleri kendine göre düzenle"
           >
-            Arşiv/Olumsuz
+            <Settings2 className="h-3.5 w-3.5" /> Filtreleri düzenle
           </button>
         </div>
 
@@ -452,6 +463,14 @@ export default function RegistrationTrackingPanel({ isManager, institutionId }: 
           isManager={isManager}
           onClose={closeDrawer}
           onUpdated={reload}
+        />
+      )}
+
+      {showFilterEditor && (
+        <CrmFilterEditorModal
+          prefs={filterPrefs}
+          onClose={() => setShowFilterEditor(false)}
+          onSave={(next) => setFilterPrefs(next)}
         />
       )}
 
@@ -603,15 +622,24 @@ function GradeColumns({
 function KanbanView({ leads, onOpen }: { leads: RegLead[]; onOpen: (id: string) => void }) {
   return (
     <div className="flex gap-3 overflow-x-auto pb-4">
-      {KANBAN_STAGES.map((stage) => {
-        const col = leads.filter((l) => l.stage === stage);
+      {CRM_PIPELINE_COLUMNS.map((column) => {
+        const stageSet = new Set(column.stages);
+        const col = leads.filter((l) => stageSet.has(l.stage));
         return (
-          <div key={stage} className="w-64 shrink-0 rounded-xl border border-slate-200 bg-slate-50/50 p-2 dark:border-slate-700 dark:bg-slate-800/50">
-            <div className="mb-2 text-xs font-semibold text-slate-700 dark:text-slate-200">
-              {STAGE_LABELS[stage]}
-              <span className="ml-1 text-slate-400">({col.length})</span>
+          <div
+            key={column.id}
+            className="w-72 shrink-0 rounded-xl border border-slate-200 bg-slate-50/50 p-2 dark:border-slate-700 dark:bg-slate-800/50"
+          >
+            <div className="mb-2 flex items-baseline justify-between gap-2">
+              <span className="text-xs font-semibold uppercase tracking-wide text-slate-700 dark:text-slate-200">
+                {column.label}
+              </span>
+              <span className="text-[10px] text-slate-400">{col.length}</span>
             </div>
-            <div className="space-y-2 max-h-[70vh] overflow-y-auto">
+            <div className="max-h-[70vh] space-y-2 overflow-y-auto">
+              {col.length === 0 && (
+                <p className="py-6 text-center text-[10px] text-slate-400">Lead yok</p>
+              )}
               {col.map((l) => (
                 <RegLeadCard key={l.id} lead={l} onClick={() => onOpen(l.id)} />
               ))}
@@ -1003,6 +1031,105 @@ function ImportWizard({ onClose, onDone }: { onClose: () => void; onDone: () => 
         <button type="button" onClick={onClose} className="mt-4 text-sm text-slate-500 hover:underline">
           Kapat
         </button>
+      </div>
+    </div>
+  );
+}
+
+function CrmFilterEditorModal({
+  prefs,
+  onClose,
+  onSave
+}: {
+  prefs: CrmFilterPrefs;
+  onClose: () => void;
+  onSave: (next: CrmFilterPrefs) => void;
+}) {
+  const [draft, setDraft] = useState<CrmFilterPrefs>(prefs);
+
+  const move = (key: string, dir: -1 | 1) => {
+    setDraft((prev) => {
+      const order = [...prev.order];
+      const i = order.indexOf(key);
+      const j = i + dir;
+      if (i < 0 || j < 0 || j >= order.length) return prev;
+      [order[i], order[j]] = [order[j], order[i]];
+      return { ...prev, order };
+    });
+  };
+
+  const toggleHidden = (key: string) => {
+    setDraft((prev) => {
+      const hidden = prev.hidden.includes(key)
+        ? prev.hidden.filter((k) => k !== key)
+        : [...prev.hidden, key];
+      return { ...prev, hidden };
+    });
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-4 shadow-xl dark:border-slate-700 dark:bg-slate-900">
+        <h3 className="text-base font-semibold text-slate-900 dark:text-white">CRM üst filtreleri</h3>
+        <p className="mt-1 text-xs text-slate-500">
+          Sırayı değiştirin, istemediğiniz filtreleri gizleyin. Ayarlar bu tarayıcıda saklanır.
+        </p>
+        <ul className="mt-3 max-h-80 space-y-1 overflow-y-auto">
+          {draft.order.map((key) => {
+            const f = CRM_QUICK_FILTERS.find((x) => x.key === key);
+            if (!f) return null;
+            const hidden = draft.hidden.includes(key);
+            return (
+              <li
+                key={key || 'tracking'}
+                className={`flex items-center gap-2 rounded-lg border px-2 py-1.5 text-sm ${
+                  hidden
+                    ? 'border-slate-100 bg-slate-50 opacity-60 dark:border-slate-800 dark:bg-slate-800/40'
+                    : 'border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800'
+                }`}
+              >
+                <GripVertical className="h-4 w-4 shrink-0 text-slate-400" />
+                <span className="min-w-0 flex-1 truncate font-medium">{f.label}</span>
+                <button type="button" className="text-xs text-slate-500 hover:text-slate-800" onClick={() => move(key, -1)}>
+                  ↑
+                </button>
+                <button type="button" className="text-xs text-slate-500 hover:text-slate-800" onClick={() => move(key, 1)}>
+                  ↓
+                </button>
+                <button
+                  type="button"
+                  className="rounded-full px-2 py-0.5 text-[11px] font-medium text-indigo-700 hover:bg-indigo-50"
+                  onClick={() => toggleHidden(key)}
+                >
+                  {hidden ? 'Göster' : 'Gizle'}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+        <div className="mt-4 flex justify-end gap-2">
+          <button type="button" className="rounded-lg px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100" onClick={onClose}>
+            Vazgeç
+          </button>
+          <button
+            type="button"
+            className="rounded-lg px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100"
+            onClick={() => setDraft(defaultCrmFilterPrefs())}
+          >
+            Sıfırla
+          </button>
+          <button
+            type="button"
+            className="rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700"
+            onClick={() => {
+              saveCrmFilterPrefs(draft);
+              onSave(draft);
+              onClose();
+            }}
+          >
+            Kaydet
+          </button>
+        </div>
       </div>
     </div>
   );
