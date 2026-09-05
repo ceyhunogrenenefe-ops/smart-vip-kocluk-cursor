@@ -868,7 +868,7 @@ const BOOK_SUBJECTS = [
   'Matematik', 'Türkçe', 'Fen Bilimleri', 'Sosyal Bilgiler', 'İngilizce',
   'Fizik', 'Kimya', 'Biyoloji', 'Tarih', 'Coğrafya', 'Din Kültürü', 'İnkılap Tarihi', 'Diğer',
 ];
-const BOOK_CLASS_LEVELS = ['5', '6', '7', 'LGS', '9', '10', '11', '12', 'YKS', 'TYT', 'AYT'];
+const BOOK_CLASS_LEVELS = ['2', '3', '4', '5', '6', '7', 'LGS', '9', '10', '11', '12', 'YKS', 'TYT', 'AYT'];
 const BOOK_SERIES = [
   { value: '', label: 'Kategori seçin' },
   { value: 'egitim-setleri', label: 'Eğitim Setleri' },

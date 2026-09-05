@@ -7,7 +7,7 @@ export function suggestHoursAndFeeFromSinif(sinifRaw) {
     .toLowerCase();
   const num = t.match(/(\d{1,2})/);
   const n = num ? parseInt(num[1], 10) : null;
-  if (n != null && n >= 3 && n <= 5) return { hours: 4, fee: 18000 };
+  if (n != null && n >= 2 && n <= 5) return { hours: 4, fee: 18000 };
   if (n != null && n >= 6 && n <= 8) return { hours: 6, fee: 28000 };
   if (n === 9 || t.includes('9.')) return { hours: 8, fee: 42000 };
   if (n === 10) return { hours: 10, fee: 48000 };

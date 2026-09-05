@@ -197,7 +197,7 @@ type BookMode = 'search' | 'new';
 
 const SUBJECTS = ['Matematik', 'Türkçe', 'Fen Bilimleri', 'Sosyal Bilgiler', 'İngilizce',
   'Fizik', 'Kimya', 'Biyoloji', 'Tarih', 'Coğrafya', 'Din Kültürü', 'Diğer'];
-const CLASS_LEVELS = ['3', '4', '5', '6', '7', '8', '9', '10', '11', '12', 'LGS', 'TYT', 'AYT', 'YOS'];
+const CLASS_LEVELS = ['2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', 'LGS', 'TYT', 'AYT', 'YOS'];
 
 function OfferModal({ offer, onClose, onSave }: OfferModalProps) {
   const isEdit = Boolean(offer);

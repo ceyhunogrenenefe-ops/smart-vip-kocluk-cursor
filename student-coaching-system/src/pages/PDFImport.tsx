@@ -66,7 +66,7 @@ interface ParsedExamResult {
   examDate: string;
   booklet: string;
   className: string;
-  examType: '3' | '4' | '5' | '6' | '7' | 'LGS' | 'YOS' | 'TYT' | 'YKS-EA' | 'YKS-SAY' | 'AYT';
+  examType: '2' | '3' | '4' | '5' | '6' | '7' | 'LGS' | 'YOS' | 'TYT' | 'YKS-EA' | 'YKS-SAY' | 'AYT';
   subjects: {
     name: string;
     questions: number;
@@ -204,9 +204,9 @@ export default function PDFImport() {
     const classMatch = normalizedText.match(/(?:S[iı]n[iı]f|Sinif|Class)[^\d]*(\d+)/i);
 
     // Sınav tipini belirle
-    const examType: '3' | '4' | '5' | '6' | '7' | 'LGS' | 'YOS' | 'TYT' | 'YKS-EA' | 'YKS-SAY' | 'AYT' =
+    const examType: '2' | '3' | '4' | '5' | '6' | '7' | 'LGS' | 'YOS' | 'TYT' | 'YKS-EA' | 'YKS-SAY' | 'AYT' =
       normalizedText.includes('LGS')
-        ? (normalizedText.match(/Sinif[^\d]*(3|4|5|6|7)/i)?.[1] as '3' | '4' | '5' | '6' | '7') || 'LGS'
+        ? (normalizedText.match(/Sinif[^\d]*(2|3|4|5|6|7)/i)?.[1] as '2' | '3' | '4' | '5' | '6' | '7') || 'LGS'
         : normalizedText.includes('YOS') || normalizedText.includes('YÖS')
           ? 'YOS'
         : normalizedText.includes('TYT')
@@ -331,7 +331,7 @@ export default function PDFImport() {
 
     const yosNetFromCounts = (c: number, w: number) => {
       const pen =
-        examType === '3' || examType === '4' || examType === '5' || examType === '6' || examType === '7' || examType === 'LGS'
+        examType === '2' || examType === '3' || examType === '4' || examType === '5' || examType === '6' || examType === '7' || examType === 'LGS'
           ? 1 / 3
           : 1 / 4;
       return Math.round((c - w * pen) * 100) / 100;

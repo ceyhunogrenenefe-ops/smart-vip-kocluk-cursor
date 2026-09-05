@@ -4,7 +4,7 @@ export function normClassLevel(v) {
   if (v == null || v === '') return '';
   if (typeof v === 'number' && Number.isFinite(v)) {
     const n = Math.trunc(v);
-    if (n >= 3 && n <= 12) return String(n);
+    if (n >= 2 && n <= 12) return String(n);
     return '';
   }
   const s = String(v).trim();
@@ -15,7 +15,7 @@ export function normClassLevel(v) {
   if (s === 'TYT-Maarif') return 'TYT-Maarif';
   if (s.startsWith('YKS-')) return s;
   const n = parseInt(s, 10);
-  if (!Number.isNaN(n) && n >= 3 && n <= 12) return String(n);
+  if (!Number.isNaN(n) && n >= 2 && n <= 12) return String(n);
   return s;
 }
 

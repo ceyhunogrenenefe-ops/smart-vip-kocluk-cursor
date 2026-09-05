@@ -14,7 +14,7 @@ export function normalizeClassLevel(raw: unknown): ClassLevel | undefined {
   if (typeof raw === 'number') {
     if (!Number.isFinite(raw)) return undefined;
     const n = Math.trunc(raw);
-    if (n >= 3 && n <= 12) return n as ClassLevel;
+    if (n >= 2 && n <= 12) return n as ClassLevel;
     return undefined;
   }
   if (typeof raw === 'string') {
@@ -29,7 +29,7 @@ export function normalizeClassLevel(raw: unknown): ClassLevel | undefined {
       return trimmed as ClassLevel;
     }
     const parsed = parseInt(trimmed, 10);
-    if (!Number.isNaN(parsed) && parsed >= 3 && parsed <= 12) return parsed as ClassLevel;
+    if (!Number.isNaN(parsed) && parsed >= 2 && parsed <= 12) return parsed as ClassLevel;
   }
   return undefined;
 }
