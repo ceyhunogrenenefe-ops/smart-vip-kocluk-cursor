@@ -1,4 +1,4 @@
-import { AlertTriangle, Clock, Flame, Snowflake, Sun, CheckCircle2, CreditCard } from 'lucide-react';
+import { AlertTriangle, Clock, Flame, Snowflake, Sun, CheckCircle2, CreditCard, MessageCircle, Instagram } from 'lucide-react';
 import type { RegLead } from '../../../lib/registrationTrackingApi';
 import {
   CARD_TONE_CLASS,
@@ -26,6 +26,24 @@ function TempIcon({ temperature }: { temperature?: string }) {
   return <Sun className="h-3.5 w-3.5 text-amber-600" aria-hidden />;
 }
 
+function ChannelBadge({ channel }: { channel?: string | null }) {
+  if (channel === 'instagram') {
+    return (
+      <span className="inline-flex items-center gap-0.5 rounded bg-pink-100 px-1.5 py-0.5 font-medium text-pink-800 dark:bg-pink-900/40 dark:text-pink-200">
+        <Instagram className="h-3 w-3" /> IG
+      </span>
+    );
+  }
+  if (channel === 'whatsapp') {
+    return (
+      <span className="inline-flex items-center gap-0.5 rounded bg-emerald-100 px-1.5 py-0.5 font-medium text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200">
+        <MessageCircle className="h-3 w-3" /> WA
+      </span>
+    );
+  }
+  return null;
+}
+
 export default function RegLeadCard({
   lead,
   assigneeName,
@@ -37,6 +55,7 @@ export default function RegLeadCard({
 }: Props) {
   const tone = leadCardTone(lead);
   const overdue = isOverdue(lead.next_action_at) && lead.primary_status === 'tracking';
+  const inboundSnippet = String(lead.last_inbound_snippet || '').trim();
 
   return (
     <div
@@ -68,6 +87,7 @@ export default function RegLeadCard({
           <span className="rounded bg-white/70 px-1.5 py-0.5 dark:bg-slate-900/60">
             {TEMPERATURE_LABELS[lead.temperature]}
           </span>
+          <ChannelBadge channel={lead.last_inbound_channel} />
           {lead.stage === 'payment_pending' && (
             <span className="inline-flex items-center gap-0.5 rounded bg-violet-100 px-1.5 py-0.5 text-violet-800">
               <CreditCard className="h-3 w-3" /> Ödeme
@@ -84,6 +104,18 @@ export default function RegLeadCard({
             </span>
           )}
         </div>
+        {inboundSnippet && (
+          <div className="mt-1.5 rounded border border-emerald-200/70 bg-white/80 px-2 py-1.5 dark:border-emerald-800/50 dark:bg-slate-900/50">
+            <div className="flex items-center gap-1 text-[10px] font-medium text-emerald-700 dark:text-emerald-300">
+              <MessageCircle className="h-3 w-3 shrink-0" />
+              Son mesaj
+              {lead.last_inbound_at && (
+                <span className="ml-auto font-normal text-slate-400">{formatIstanbul(lead.last_inbound_at)}</span>
+              )}
+            </div>
+            <p className="mt-0.5 line-clamp-2 text-[11px] leading-snug text-slate-700 dark:text-slate-200">{inboundSnippet}</p>
+          </div>
+        )}
         {assigneeName && (
           <div className="mt-1 text-[10px] text-slate-600 dark:text-slate-400">Sorumlu: {assigneeName}</div>
         )}
@@ -91,7 +123,7 @@ export default function RegLeadCard({
           <Clock className="h-3 w-3" />
           {formatIstanbul(lead.next_action_at)}
         </div>
-        {lead.notes && (
+        {!inboundSnippet && lead.notes && (
           <p className="mt-1 line-clamp-2 text-[10px] text-slate-600 dark:text-slate-400">{lead.notes}</p>
         )}
       </button>

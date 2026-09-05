@@ -343,7 +343,7 @@ async function handleGetLead(leadId, institutionId, tags) {
   if (error) throw error;
   if (!lead) return null;
 
-  const [interactions, tasks, meetingLinks, audit, tagRows] = await Promise.all([
+  const [interactions, tasks, meetingLinks, audit, tagRows, channelMsgs] = await Promise.all([
     supabaseAdmin
       .from('registration_interactions')
       .select('*')
@@ -361,8 +361,25 @@ async function handleGetLead(leadId, institutionId, tags) {
       .eq('lead_id', leadId)
       .order('created_at', { ascending: false })
       .limit(100),
-    supabaseAdmin.from('registration_lead_tags').select('tag_id, registration_tags(id, name, color)').eq('lead_id', leadId)
+    supabaseAdmin.from('registration_lead_tags').select('tag_id, registration_tags(id, name, color)').eq('lead_id', leadId),
+    supabaseAdmin
+      .from('registration_channel_messages')
+      .select(
+        'id, channel, direction, body, message_type, contact_name, phone, occurred_at, external_message_id, created_at'
+      )
+      .eq('lead_id', leadId)
+      .order('occurred_at', { ascending: true })
+      .limit(200)
   ]);
+
+  let channelMessages = [];
+  if (channelMsgs.error) {
+    if (!/registration_channel_messages|does not exist|schema cache/i.test(channelMsgs.error.message || '')) {
+      throw channelMsgs.error;
+    }
+  } else {
+    channelMessages = channelMsgs.data || [];
+  }
 
   return {
     lead: sanitizeLeadForActor(lead, tags),
@@ -370,7 +387,8 @@ async function handleGetLead(leadId, institutionId, tags) {
     tasks: tasks.data || [],
     meeting_links: meetingLinks.data || [],
     audit_logs: audit.data || [],
-    tags: (tagRows.data || []).map((r) => r.registration_tags).filter(Boolean)
+    tags: (tagRows.data || []).map((r) => r.registration_tags).filter(Boolean),
+    channel_messages: channelMessages
   };
 }
 

@@ -28,7 +28,7 @@ type Props = {
   onUpdated: () => void;
 };
 
-type Tab = 'general' | 'interactions' | 'tasks' | 'meetings' | 'pricing' | 'audit';
+type Tab = 'general' | 'messages' | 'interactions' | 'tasks' | 'meetings' | 'pricing' | 'audit';
 
 export default function RegLeadDrawer({ leadId, isManager, onClose, onUpdated }: Props) {
   const [tab, setTab] = useState<Tab>('general');
@@ -76,6 +76,7 @@ export default function RegLeadDrawer({ leadId, isManager, onClose, onUpdated }:
 
   const tabs: { id: Tab; label: string }[] = [
     { id: 'general', label: 'Genel Bilgiler' },
+    { id: 'messages', label: 'Mesajlar' },
     { id: 'interactions', label: 'Görüşme Geçmişi' },
     { id: 'tasks', label: 'Görevler' },
     { id: 'meetings', label: 'Toplantılar' },
@@ -127,6 +128,10 @@ export default function RegLeadDrawer({ leadId, isManager, onClose, onUpdated }:
 
         {!loading && lead && tab === 'general' && (
           <GeneralForm lead={lead} saving={saving} onSave={saveGeneral} isManager={isManager} />
+        )}
+
+        {!loading && tab === 'messages' && (
+          <MessagesTab items={detail?.channel_messages || []} />
         )}
 
         {!loading && tab === 'interactions' && (
@@ -412,6 +417,44 @@ function PricingForm({
         Kaydet
       </button>
     </form>
+  );
+}
+
+function MessagesTab({ items }: { items: Array<Record<string, unknown>> }) {
+  if (!items.length) {
+    return (
+      <p className="text-sm text-slate-500">
+        Henüz WhatsApp / Instagram mesajı yok. Meta webhook gelen mesajları buraya düşürür.
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      {items.map((m) => {
+        const inbound = String(m.direction || '') === 'inbound';
+        const channel = String(m.channel || '');
+        const channelLabel = channel === 'instagram' ? 'Instagram' : channel === 'whatsapp' ? 'WhatsApp' : channel;
+        return (
+          <div
+            key={String(m.id)}
+            className={`max-w-[90%] rounded-2xl px-3 py-2 text-sm ${
+              inbound
+                ? 'mr-auto rounded-bl-md bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-100'
+                : 'ml-auto rounded-br-md bg-emerald-600 text-white'
+            }`}
+          >
+            <div className={`mb-0.5 flex items-center gap-1 text-[10px] ${inbound ? 'text-slate-500' : 'text-emerald-100'}`}>
+              <span className="font-medium">{channelLabel}</span>
+              <span>·</span>
+              <span>{inbound ? 'Gelen' : 'Giden'}</span>
+              <span className="ml-auto">{formatIstanbul(String(m.occurred_at || m.created_at || ''))}</span>
+            </div>
+            <p className="whitespace-pre-wrap leading-snug">{String(m.body || `[${m.message_type || 'mesaj'}]`)}</p>
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
