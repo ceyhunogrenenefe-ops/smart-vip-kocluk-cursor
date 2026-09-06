@@ -22,6 +22,7 @@ import { apiFetch } from '../lib/session';
 import { resolveInstitutionIdForActor } from '../lib/activeInstitutionScope';
 import { mergeClassSlotsIntoPlanner, type PlannerState as FullPlannerState } from '../lib/classSlotsToPlanner';
 import { PLANNER_CURRICULUM_PRESETS, PLANNER_POOL_SUBJECTS } from '../lib/plannerTopicPool';
+import { pickClassForPlannerGroup } from '../lib/plannerClassMatch';
 import {
   NEW_TERM_END,
   NEW_TERM_KEY,
@@ -136,16 +137,7 @@ function lastSharedPlanStorageKey(institutionId: string): string {
 }
 
 function pickClassForGroup(groupName: string, rows: ClassRow[]): ClassRow | null {
-  const gn = normMatchLabel(groupName);
-  if (!gn) return null;
-  const exact = rows.find((c) => normMatchLabel(c.name) === gn);
-  if (exact) return exact;
-  return (
-    rows.find((c) => {
-      const cn = normMatchLabel(c.name);
-      return cn.includes(gn) || gn.includes(cn);
-    }) || null
-  );
+  return pickClassForPlannerGroup(groupName, rows);
 }
 
 function termDatesFromPlanner(state: PlannerState): { from: string; to: string } | null {
@@ -869,6 +861,173 @@ export default function SchedulePlannerPage({ mode = 'default' }: { mode?: 'defa
     await previewTeachers(exportGroupId || plannerGroups[0]?.id || '');
   };
 
+  /** Excel’deki bir 8. sınıf grubunu (örn. 8F) eşleşen canlı sınıfa aktarır. */
+  const handleExportLgs8GroupToClass = async (groupName: string) => {
+    if (!iframeReady || !institutionId) {
+      toast.error('Kurum veya planlayıcı hazır değil.');
+      return;
+    }
+    setBusy('export');
+    setExportResult(null);
+    setTeacherMap({});
+    try {
+      let state = await getPlannerState();
+      let groups = Array.isArray(state.groups) ? state.groups : [];
+      let group = groups.find(
+        (g) => normMatchLabel(String(g.name || '')) === normMatchLabel(groupName)
+      ) as (PlannerGroup & { schedule?: Record<string, unknown> }) | undefined;
+      const groupLessonCount = group?.schedule ? Object.keys(group.schedule).length : 0;
+
+      // Grup yoksa veya ders hücresi boşsa Excel seed’i bas
+      if (!group?.id || groupLessonCount === 0) {
+        const seeded = buildLgs8ExcelNewTermPlannerState();
+        await pushPlannerContext({
+          serverPlanActive: true,
+          autoSyncClasses: false,
+          nameOverride: NEW_TERM_PLAN_NAME
+        });
+        await postPlannerMessage(iframeRef.current, 'SET_STATE', seeded);
+        planBootstrappedRef.current = true;
+        await refreshPlannerGroups();
+        state = seeded as unknown as PlannerState;
+        groups = seeded.groups;
+        group = groups.find(
+          (g) => normMatchLabel(String(g.name || '')) === normMatchLabel(groupName)
+        ) as (PlannerGroup & { schedule?: Record<string, unknown> }) | undefined;
+
+        if (selectedPlanId) {
+          await apiFetch('/api/class-schedule-plans', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              id: selectedPlanId,
+              name: NEW_TERM_PLAN_NAME,
+              planner_json: seeded,
+              institution_id: institutionId
+            })
+          });
+        } else {
+          const res = await apiFetch('/api/class-schedule-plans', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              name: NEW_TERM_PLAN_NAME,
+              planner_json: seeded,
+              institution_id: institutionId
+            })
+          });
+          const j = await res.json().catch(() => ({}));
+          if (res.ok && j?.data?.id) {
+            const id = String(j.data.id);
+            setSelectedPlanId(id);
+            setPlanName(NEW_TERM_PLAN_NAME);
+            rememberSharedPlan(id);
+            await loadPlans();
+          }
+        }
+      }
+      if (!group?.id) {
+        throw new Error(`Planlayıcıda «${groupName}» grubu yok.`);
+      }
+
+      const classRow = pickClassForGroup(groupName, classes);
+      if (!classRow) {
+        throw new Error(
+          `«${groupName}» için canlı sınıf bulunamadı. Sınıf adı 8F / 8-F / 8 F olmalı.`
+        );
+      }
+
+      const termRange = termDatesFromPlanner(state) || defaultDateRange(true);
+      setExportGroupId(group.id);
+      setExportClassId(classRow.id);
+      setExportDateFrom(termRange.from);
+      setExportDateTo(termRange.to);
+      setReplaceExisting(true);
+      setReplaceSessionsInRange(true);
+
+      const planner_json = await getPlannerState();
+      const prevRes = await apiFetch('/api/class-schedule-plans?op=preview-teachers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          group_id: group.id,
+          planner_json,
+          institution_id: institutionId
+        })
+      });
+      const prevJ = await prevRes.json().catch(() => ({}));
+      if (!prevRes.ok) throw new Error(prevJ.error || 'preview_failed');
+      const options: TeacherOption[] = Array.isArray(prevJ.teachers) ? prevJ.teachers : [];
+      const unmatched: string[] = (prevJ.unmatched || []).map((x: { name: string }) => x.name);
+      setTeacherOptions(options);
+      setUnmatchedTeachers(unmatched);
+
+      if (unmatched.length) {
+        setExportOpen(true);
+        toast.message(
+          `«${groupName}» → «${classRow.name}» için öğretmen eşleştirmesi gerekli: ${unmatched.join(', ')}`
+        );
+        return;
+      }
+
+      const res = await apiFetch('/api/class-schedule-plans?op=export-direct', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          group_id: group.id,
+          class_id: classRow.id,
+          planner_json,
+          institution_id: institutionId,
+          replace_existing: true,
+          clear_cross_class_conflicts: false,
+          replace_sessions_in_range: true,
+          clip_sessions_to_range: true,
+          teacher_map: {},
+          date_from: termRange.from,
+          date_to: termRange.to
+        })
+      });
+      const j = (await res.json().catch(() => ({}))) as ExportResult & {
+        error?: string;
+        message?: string;
+        partial?: boolean;
+      };
+      if (!res.ok && !j.message && !j.error) throw new Error('export_failed');
+      const result: ExportResult = {
+        ok: Boolean(j.ok),
+        partial: Boolean(j.partial),
+        message: String(
+          j.message ||
+            j.error ||
+            (j.ok
+              ? `«${groupName}» → «${classRow.name}» aktarıldı.`
+              : 'Aktarım başarısız.')
+        ),
+        slots_created: Number(j.slots_created ?? j.created ?? 0),
+        sessions_created: Number(j.sessions_created ?? 0),
+        date_from: j.date_from || termRange.from,
+        date_to: j.date_to || termRange.to,
+        class_id: classRow.id,
+        class_name: classRow.name
+      };
+      setExportResult(result);
+      if (result.ok) {
+        toast.success(
+          `«${groupName}» → «${classRow.name}»: ${result.slots_created || 0} şablon, ${result.sessions_created || 0} oturum.`
+        );
+      } else {
+        toast.error(result.message);
+        setExportOpen(true);
+      }
+    } catch (e) {
+      const msg = String((e as Error).message || e);
+      setExportResult({ ok: false, message: msg });
+      toast.error(msg);
+    } finally {
+      setBusy('');
+    }
+  };
+
   const previewTeachers = async (groupId: string) => {
     if (!groupId || !institutionId) return;
     try {
@@ -1178,6 +1337,16 @@ export default function SchedulePlannerPage({ mode = 'default' }: { mode?: 'defa
               >
                 {busy === 'excel' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
                 Excel 8. sınıf programı
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleExportLgs8GroupToClass('8F')}
+                disabled={!!busy || !iframeReady || !institutionId}
+                className="inline-flex items-center gap-1 rounded-lg border border-sky-300 bg-sky-50 px-3 py-1.5 text-sm text-sky-950 hover:bg-sky-100 disabled:opacity-50"
+                title="Excel 8F programını eşleşen canlı 8F / 8-F sınıfına aktar"
+              >
+                {busy === 'export' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                8F’ye aktar
               </button>
               <button
                 type="button"
