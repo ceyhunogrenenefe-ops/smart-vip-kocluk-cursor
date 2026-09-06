@@ -18,6 +18,31 @@ export function clampRating(raw) {
   return r;
 }
 
+
+/**
+ * Sitede görünen isim: "Ad Soyad" → "Ad S."
+ * Tek kelimeyse olduğu gibi bırakır.
+ */
+export function formatPublicReviewerName(parts = {}, fallback = 'Öğrenci') {
+  const first = String(parts.first_name || parts.firstName || '').trim();
+  const last = String(parts.last_name || parts.lastName || '').trim();
+  if (first && last) {
+    const initial = last.charAt(0).toLocaleUpperCase('tr-TR');
+    return `${first} ${initial}.`.slice(0, 120);
+  }
+
+  const raw = String(parts.full_name || parts.fullName || parts.name || '').trim();
+  if (!raw) return fallback;
+  const tokens = raw.split(/\s+/).filter(Boolean);
+  if (tokens.length === 1) return tokens[0].slice(0, 120);
+  const lastTok = tokens[tokens.length - 1];
+  const firstToks = tokens.slice(0, -1).join(' ');
+  const initial = lastTok.charAt(0).toLocaleUpperCase('tr-TR');
+  if (!initial) return firstToks.slice(0, 120);
+  return `${firstToks} ${initial}.`.slice(0, 120);
+}
+
+
 function isApprovedPublicFilter() {
   // PostgREST: is_public + (approved OR legacy null status)
   return {
@@ -180,20 +205,26 @@ export async function listPendingTeacherReviews({ limit = 100 } = {}) {
   const { data, error } = await supabaseAdmin
     .from('teacher_reviews')
     .select(
-      'id, teacher_id, student_id, lesson_id, reviewer_type, reviewer_name, rating, comment, is_public, moderation_status, created_at'
+      'id, teacher_id, student_id, lesson_id, class_session_id, reviewer_type, reviewer_name, rating, comment, is_public, moderation_status, created_at'
     )
     .eq('moderation_status', 'pending')
     .order('created_at', { ascending: false })
     .limit(lim);
   if (error) throw error;
-  return (data || []).map(mapReviewToApi);
+  const rows = data || [];
+  const out = [];
+  for (const row of rows) {
+    const mapped = mapReviewToApi(row);
+    const generic = /^(öğrenci|ogrenci|veli)$/i.test(String(mapped?.reviewer_name || '').trim());
+    if (mapped && (generic || String(row.reviewer_type || '').toUpperCase() === 'STUDENT')) {
+      mapped.reviewer_name = await resolveDisplayNameForReview(row);
+    }
+    out.push(mapped);
+  }
+  return out;
 }
 
 async function resolveDisplayNameForReview(row) {
-  const current = String(row.reviewer_name || '').trim();
-  const generic = /^(öğrenci|ogrenci|veli)$/i.test(current);
-  if (current && !generic) return current.slice(0, 120);
-
   if (row.reviewer_type === 'PARENT' && row.student_id) {
     const { data: stud } = await supabaseAdmin
       .from('students')
@@ -209,10 +240,26 @@ async function resolveDisplayNameForReview(row) {
       .select('full_name, name, first_name, last_name')
       .eq('id', row.student_id)
       .maybeSingle();
-    const name =
-      String(stud?.full_name || stud?.name || '').trim() ||
-      [stud?.first_name, stud?.last_name].filter(Boolean).join(' ').trim();
-    if (name) return name.slice(0, 120);
+    if (stud) {
+      return formatPublicReviewerName(
+        {
+          full_name: stud.full_name,
+          name: stud.name,
+          first_name: stud.first_name,
+          last_name: stud.last_name
+        },
+        row.reviewer_type === 'PARENT' ? 'Veli' : 'Öğrenci'
+      );
+    }
+  }
+  const current = String(row.reviewer_name || '').trim();
+  const generic = /^(öğrenci|ogrenci|veli)$/i.test(current);
+  if (current && !generic) {
+    // Öğrenci yorumlarında gizlilik: soyadı baş harfe indir
+    if (String(row.reviewer_type || '').toUpperCase() === 'STUDENT') {
+      return formatPublicReviewerName({ full_name: current }, 'Öğrenci');
+    }
+    return current.slice(0, 120);
   }
   return current || (row.reviewer_type === 'PARENT' ? 'Veli' : 'Öğrenci');
 }
