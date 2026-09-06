@@ -19,6 +19,70 @@ function verifyToken() {
   return String(process.env.META_WEBHOOK_VERIFY_TOKEN || process.env.META_VERIFY_TOKEN || '').trim();
 }
 
+/** Meta gerçekten POST atıyor mu? (Supabase meta_webhook_hits — SQL migration gerekir) */
+async function logWebhookHit(body) {
+  try {
+    const objectType = String(body?.object || '').toLowerCase() || null;
+    const entries = Array.isArray(body?.entry) ? body.entry : [];
+    let messageCount = 0;
+    let statusCount = 0;
+    let field = null;
+    let phoneNumberId = null;
+    let displayPhone = null;
+    let waFrom = null;
+    let sample = null;
+
+    for (const entry of entries) {
+      for (const change of Array.isArray(entry?.changes) ? entry.changes : []) {
+        field = field || (change?.field != null ? String(change.field) : null);
+        const value = change?.value && typeof change.value === 'object' ? change.value : {};
+        const msgs = Array.isArray(value.messages) ? value.messages : [];
+        const statuses = Array.isArray(value.statuses) ? value.statuses : [];
+        messageCount += msgs.length;
+        statusCount += statuses.length;
+        phoneNumberId =
+          phoneNumberId || value?.metadata?.phone_number_id || value?.metadata?.phone_number_id || null;
+        displayPhone =
+          displayPhone ||
+          value?.metadata?.display_phone_number ||
+          value?.metadata?.display_phone_number ||
+          null;
+        if (!waFrom && msgs[0]?.from) waFrom = String(msgs[0].from);
+        if (!sample && (msgs.length || statuses.length)) {
+          sample = {
+            field: change?.field,
+            message_types: msgs.map((m) => m?.type).filter(Boolean).slice(0, 5),
+            status_types: statuses.map((s) => s?.status).filter(Boolean).slice(0, 5),
+            first_text: msgs[0]?.text?.body != null ? String(msgs[0].text.body).slice(0, 120) : null
+          };
+        }
+      }
+      // Instagram-style messaging[]
+      const messaging = Array.isArray(entry?.messaging) ? entry.messaging : [];
+      if (messaging.length) {
+        messageCount += messaging.filter((m) => m?.message && !m?.message?.is_echo).length;
+        if (!sample) sample = { field: 'messaging', count: messaging.length };
+      }
+    }
+
+    const { error } = await supabaseAdmin.from('meta_webhook_hits').insert({
+      object_type: objectType,
+      field,
+      message_count: messageCount,
+      status_count: statusCount,
+      phone_number_id: phoneNumberId != null ? String(phoneNumberId) : null,
+      display_phone: displayPhone != null ? String(displayPhone) : null,
+      wa_from: waFrom,
+      sample
+    });
+    if (error && !/meta_webhook_hits|schema cache|does not exist/i.test(error.message || '')) {
+      console.warn('[meta-webhook] hit log:', error.message);
+    }
+  } catch (e) {
+    console.warn('[meta-webhook] hit log failed:', e instanceof Error ? e.message : e);
+  }
+}
+
 /** hub.mode / hub.verify_token / hub.challenge — Vercel query noktalı anahtarları */
 function hubQuery(req) {
   const q = req.query && typeof req.query === 'object' ? req.query : {};
@@ -133,9 +197,51 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const body = req.body && typeof req.body === 'object' ? req.body : {};
+  let body = req.body;
+  if (typeof body === 'string') {
+    try {
+      body = JSON.parse(body || '{}');
+    } catch {
+      body = {};
+    }
+  }
+  if (!body || typeof body !== 'object') body = {};
+
+  // Teşhis kaydı (tablo yoksa sessizce atlanır)
+  void logWebhookHit(body);
+
   const objectType = String(body.object || '').toLowerCase();
   const entries = Array.isArray(body.entry) ? body.entry : [];
+  let waIngested = 0;
+  let igIngested = 0;
+  let statusesApplied = 0;
+  let inboundMessageCount = 0;
+  let statusOnly = true;
+
+  // Teşhis: Meta gerçekten messages mi yolluyor, yoksa sadece statuses mı?
+  try {
+    for (const entry of entries) {
+      for (const change of Array.isArray(entry?.changes) ? entry.changes : []) {
+        const value = change?.value && typeof change.value === 'object' ? change.value : {};
+        const msgN = Array.isArray(value.messages) ? value.messages.length : 0;
+        const stN = Array.isArray(value.statuses) ? value.statuses.length : 0;
+        inboundMessageCount += msgN;
+        if (msgN > 0) statusOnly = false;
+        if (msgN || stN) {
+          console.info('[meta-webhook] change', {
+            object: objectType,
+            field: change?.field,
+            messages: msgN,
+            statuses: stN,
+            phone_number_id: value?.metadata?.phone_number_id || null,
+            display_phone: value?.metadata?.display_phone_number || null
+          });
+        }
+      }
+    }
+  } catch {
+    /* ignore probe errors */
+  }
 
   try {
     // Instagram Messaging (object: instagram)
@@ -143,7 +249,8 @@ export default async function handler(req, res) {
       for (const entry of entries) {
         const messaging = Array.isArray(entry?.messaging) ? entry.messaging : [];
         if (messaging.length) {
-          await ingestInstagramMessagingEvents(messaging);
+          const r = await ingestInstagramMessagingEvents(messaging);
+          igIngested += Number(r?.processed || 0);
         }
         // bazı IG abonelikleri changes[] ile gelir
         const changes = Array.isArray(entry?.changes) ? entry.changes : [];
@@ -155,25 +262,32 @@ export default async function handler(req, res) {
               const from = String(m?.from || m?.sender?.id || '').trim();
               if (!from) continue;
               const text = m?.text?.body != null ? String(m.text.body) : m?.message?.text != null ? String(m.message.text) : null;
-              await ingestInstagramMessagingEvents([
+              const r = await ingestInstagramMessagingEvents([
                 {
                   sender: { id: from },
                   timestamp: m?.timestamp,
                   message: { mid: m?.id || m?.mid, text }
                 }
               ]);
+              igIngested += Number(r?.processed || 0);
             }
           }
         }
       }
-      return res.status(200).json({ ok: true, channel: 'instagram', received: getIstanbulDateString() });
+      return res.status(200).json({
+        ok: true,
+        channel: 'instagram',
+        ingested: igIngested,
+        received: getIstanbulDateString()
+      });
     }
 
     // WhatsApp Cloud API (+ page messaging fallback)
     for (const entry of entries) {
       const messaging = Array.isArray(entry?.messaging) ? entry.messaging : [];
       if (messaging.length && (objectType === 'page' || objectType === 'instagram')) {
-        await ingestInstagramMessagingEvents(messaging);
+        const r = await ingestInstagramMessagingEvents(messaging);
+        igIngested += Number(r?.processed || 0);
       }
 
       const changes = Array.isArray(entry?.changes) ? entry.changes : [];
@@ -184,10 +298,12 @@ export default async function handler(req, res) {
         const statuses = Array.isArray(value.statuses) ? value.statuses : [];
         for (const row of statuses) {
           await applyDeliveryStatus(row.id, row.status, row.errors);
+          statusesApplied += 1;
         }
 
         if (Array.isArray(value.messages) && value.messages.length) {
-          await ingestWhatsAppCloudMessages(value);
+          const r = await ingestWhatsAppCloudMessages(value);
+          waIngested += Number(r?.processed || 0);
         }
       }
     }
@@ -196,5 +312,18 @@ export default async function handler(req, res) {
     // Meta'ya her zaman 200 dön — aksi halde retry storm
   }
 
-  return res.status(200).json({ ok: true, received: getIstanbulDateString() });
+  if (statusOnly && statusesApplied > 0 && waIngested === 0) {
+    console.info(
+      '[meta-webhook] yalnızca teslimat statuses geldi (inbound message yok). Müşteri mesajı yoksa Meta Development Mode / messages aboneliği / yanlış WABA numarası kontrol edin.'
+    );
+  }
+
+  return res.status(200).json({
+    ok: true,
+    received: getIstanbulDateString(),
+    wa_ingested: waIngested,
+    ig_ingested: igIngested,
+    statuses: statusesApplied,
+    inbound_messages_seen: inboundMessageCount
+  });
 }
