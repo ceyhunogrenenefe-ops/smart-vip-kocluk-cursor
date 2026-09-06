@@ -133,9 +133,21 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const body = req.body && typeof req.body === 'object' ? req.body : {};
+  let body = req.body;
+  if (typeof body === 'string') {
+    try {
+      body = JSON.parse(body || '{}');
+    } catch {
+      body = {};
+    }
+  }
+  if (!body || typeof body !== 'object') body = {};
+
   const objectType = String(body.object || '').toLowerCase();
   const entries = Array.isArray(body.entry) ? body.entry : [];
+  let waIngested = 0;
+  let igIngested = 0;
+  let statusesApplied = 0;
 
   try {
     // Instagram Messaging (object: instagram)
@@ -143,7 +155,8 @@ export default async function handler(req, res) {
       for (const entry of entries) {
         const messaging = Array.isArray(entry?.messaging) ? entry.messaging : [];
         if (messaging.length) {
-          await ingestInstagramMessagingEvents(messaging);
+          const r = await ingestInstagramMessagingEvents(messaging);
+          igIngested += Number(r?.processed || 0);
         }
         // bazı IG abonelikleri changes[] ile gelir
         const changes = Array.isArray(entry?.changes) ? entry.changes : [];
@@ -155,25 +168,32 @@ export default async function handler(req, res) {
               const from = String(m?.from || m?.sender?.id || '').trim();
               if (!from) continue;
               const text = m?.text?.body != null ? String(m.text.body) : m?.message?.text != null ? String(m.message.text) : null;
-              await ingestInstagramMessagingEvents([
+              const r = await ingestInstagramMessagingEvents([
                 {
                   sender: { id: from },
                   timestamp: m?.timestamp,
                   message: { mid: m?.id || m?.mid, text }
                 }
               ]);
+              igIngested += Number(r?.processed || 0);
             }
           }
         }
       }
-      return res.status(200).json({ ok: true, channel: 'instagram', received: getIstanbulDateString() });
+      return res.status(200).json({
+        ok: true,
+        channel: 'instagram',
+        ingested: igIngested,
+        received: getIstanbulDateString()
+      });
     }
 
     // WhatsApp Cloud API (+ page messaging fallback)
     for (const entry of entries) {
       const messaging = Array.isArray(entry?.messaging) ? entry.messaging : [];
       if (messaging.length && (objectType === 'page' || objectType === 'instagram')) {
-        await ingestInstagramMessagingEvents(messaging);
+        const r = await ingestInstagramMessagingEvents(messaging);
+        igIngested += Number(r?.processed || 0);
       }
 
       const changes = Array.isArray(entry?.changes) ? entry.changes : [];
@@ -184,10 +204,12 @@ export default async function handler(req, res) {
         const statuses = Array.isArray(value.statuses) ? value.statuses : [];
         for (const row of statuses) {
           await applyDeliveryStatus(row.id, row.status, row.errors);
+          statusesApplied += 1;
         }
 
         if (Array.isArray(value.messages) && value.messages.length) {
-          await ingestWhatsAppCloudMessages(value);
+          const r = await ingestWhatsAppCloudMessages(value);
+          waIngested += Number(r?.processed || 0);
         }
       }
     }
@@ -196,5 +218,11 @@ export default async function handler(req, res) {
     // Meta'ya her zaman 200 dön — aksi halde retry storm
   }
 
-  return res.status(200).json({ ok: true, received: getIstanbulDateString() });
+  return res.status(200).json({
+    ok: true,
+    received: getIstanbulDateString(),
+    wa_ingested: waIngested,
+    ig_ingested: igIngested,
+    statuses: statusesApplied
+  });
 }
