@@ -62,10 +62,19 @@ export {
   upsertPlannerGroups,
 } from './primaryExcelNewTermSchedule';
 
-import { buildLgs8ExcelNewTermPlannerState } from './lgs8ExcelNewTermSchedule';
-import { mergePrimaryExcelIntoPlannerState } from './primaryExcelNewTermSchedule';
+export {
+  buildFullNewTermPlannerState,
+  buildYazBackupNewTermPlannerState,
+  canonicalizePlannerGroupName,
+  countYazBackupLessons,
+  mergeFullNewTermIntoPlannerState,
+  mergeYazBackupIntoPlannerState,
+  plannerNeedsFullNewTermSeed,
+} from './yazDonemiYedekNewTermSchedule';
 
-/** 8A–8F + 2A/4A/5A/6A/7A Excel programlarını birleştirir. */
+import { buildFullNewTermPlannerState } from './yazDonemiYedekNewTermSchedule';
+
+/** 2–12 + YÖS/YKS/SAT (yaz yedek) + Excel 2A–7A + Excel 8A–8F tek program. */
 export function buildCombinedExcelNewTermPlannerState() {
-  return mergePrimaryExcelIntoPlannerState(buildLgs8ExcelNewTermPlannerState());
+  return buildFullNewTermPlannerState();
 }
