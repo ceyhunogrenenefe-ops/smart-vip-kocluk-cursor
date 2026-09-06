@@ -36,6 +36,7 @@ import {
   countLgs8ExcelLessons,
   countPlannerLessonCells,
   countPrimaryExcelLessons,
+  mergeFullNewTermIntoPlannerState,
   mergePrimaryExcelIntoPlannerState,
   pickNewTermPlan,
   upsertPlannerGroups,
@@ -613,7 +614,7 @@ export default function SchedulePlannerPage({ mode = 'default' }: { mode?: 'defa
             const seeded = await applyExcelSeed(existing.id);
             if (!seeded) return;
             toast.success(
-              `Excel 2A–7A + 8A–8F programı uygulandı ve kaydedildi (${countPlannerLessonCells(seeded)} ders).`
+              `2–12 + YÖS/YKS tek program uygulandı ve kaydedildi (${countPlannerLessonCells(seeded)} ders).`
             );
             return;
           }
@@ -635,7 +636,7 @@ export default function SchedulePlannerPage({ mode = 'default' }: { mode?: 'defa
         const seeded = await applyExcelSeed();
         if (!seeded) return;
         toast.success(
-          `Excel 2A–7A + 8A–8F programı yüklendi ve kaydedildi (${countPlannerLessonCells(seeded)} ders).`
+          `2–12 + YÖS/YKS tek program yüklendi ve kaydedildi (${countPlannerLessonCells(seeded)} ders).`
         );
       } catch (e) {
         const msg = String((e as Error).message || e);
@@ -901,7 +902,46 @@ export default function SchedulePlannerPage({ mode = 'default' }: { mode?: 'defa
     } finally {
       setBusy('');
     }
+  }
+
+  const handleLoadFullNewTermSchedule = async () => {
+    if (!iframeReady) return;
+    if (
+      !confirm(
+        'Yaz dönemi yedeği + Excel (2A–7A + 8A–8F) birleştirilip 2–12. sınıf, YÖS, YKS ve SAT tek programa mı yüklensin? Aynı adlı gruplarda dolu program korunur/güncellenir.'
+      )
+    ) {
+      return;
+    }
+    planTouchedRef.current = true;
+    planLoadGenRef.current += 1;
+    setBusy('excel-full');
+    try {
+      if (!institutionId) throw new Error('Kurum seçili değil.');
+      const current = await getPlannerState().catch(() => null);
+      const seeded = mergeFullNewTermIntoPlannerState(
+        (current as Record<string, unknown> | null) || null
+      );
+      await pushPlannerContext({
+        serverPlanActive: true,
+        autoSyncClasses: false,
+        nameOverride: NEW_TERM_PLAN_NAME
+      });
+      await postPlannerMessage(iframeRef.current, 'SET_STATE', seeded);
+      planBootstrappedRef.current = true;
+      await refreshPlannerGroups();
+      setPlanName(NEW_TERM_PLAN_NAME);
+      await persistPlannerJson(seeded as Record<string, unknown>);
+      toast.success(
+        `Tek program aktarıldı (${countPlannerLessonCells(seeded)} ders / ${Array.isArray(seeded.groups) ? seeded.groups.length : 0} grup).`
+      );
+    } catch (e) {
+      toast.error(String((e as Error).message || e));
+    } finally {
+      setBusy('');
+    }
   };
+;
 
   const openExport = async () => {
     setExportOpen(true);
@@ -1130,7 +1170,7 @@ export default function SchedulePlannerPage({ mode = 'default' }: { mode?: 'defa
             <h1 className="text-base font-semibold">{isNewTerm ? NEW_TERM_PLAN_TITLE : 'Ders Program Planlayıcısı'}</h1>
             <p className="text-xs text-slate-500">
               {isNewTerm
-                ? '2026-2027 akademik yıl (1 Eylül 2026 – 19 Haziran 2027). Yaz programı yüklenmez; sınıflar boş gelir, dersleri buradan yerleştirin.'
+                ? '2026-2027 akademik yıl (1 Eylül 2026 – 19 Haziran 2027). Yaz yedeği + Excel ile 2–12 / YÖS tek program; boşsa otomatik yüklenir.'
                 : 'Kurumdaki tüm sınıflar «Tüm Sınıflar» sekmesinde birlikte görünür. Plan adını yazıp Kaydet ile ortak taslağı güncelleyin.'}
             </p>
           </div>
@@ -1243,6 +1283,16 @@ export default function SchedulePlannerPage({ mode = 'default' }: { mode?: 'defa
               >
                 {busy === 'excel-primary' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
                 Excel 2A–7A programı
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleLoadFullNewTermSchedule()}
+                disabled={!!busy || !iframeReady}
+                className="inline-flex items-center gap-1 rounded-lg border border-violet-300 bg-violet-50 px-3 py-1.5 text-sm text-violet-950 hover:bg-violet-100 disabled:opacity-50"
+                title="Yaz yedeği + Excel: 2–12, YÖS, YKS, SAT tek program"
+              >
+                {busy === 'excel-full' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                2–12 + YÖS tek program
               </button>
               <button
                 type="button"
