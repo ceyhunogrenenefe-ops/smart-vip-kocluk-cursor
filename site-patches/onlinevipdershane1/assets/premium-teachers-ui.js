@@ -94,7 +94,12 @@
       experience: Number(t.experience_years) || 0,
       rating: avg,
       total_reviews: Number(t.total_reviews) || 0,
-      lessons: null,
+      lessons:
+        t.lessons != null
+          ? Number(t.lessons)
+          : t.completed_lessons_count != null
+            ? Number(t.completed_lessons_count)
+            : null,
       live: t.online_lessons !== false,
       available: t.accepting_students !== false,
       price: null,
@@ -748,7 +753,8 @@
           branch: t.branch || base.branch || '',
           video: t.video || base.video || '',
           rating: t.rating != null ? t.rating : base.rating,
-          total_reviews: t.total_reviews != null ? t.total_reviews : base.total_reviews
+          total_reviews: t.total_reviews != null ? t.total_reviews : base.total_reviews,
+          lessons: t.lessons != null ? t.lessons : base.lessons
         });
       });
       return Object.keys(bySlug).map(function (k) { return bySlug[k]; });
