@@ -55,18 +55,66 @@ export default async function handler(req, res) {
 
     const body = req.body && typeof req.body === 'object' ? req.body : {};
     const lessonId = String(body.lesson_id || '').trim();
-    if (!lessonId) return res.status(400).json({ error: 'lesson_id_required' });
+    const classSessionId = String(
+      body.class_session_id || body.classSessionId || body.session_id || ''
+    ).trim();
+    const studentIdBody = String(body.student_id || body.studentId || '').trim();
+    if (!lessonId && !classSessionId) {
+      return res.status(400).json({ error: 'lesson_or_session_required' });
+    }
 
     try {
-      const { data: lesson, error } = await supabaseAdmin
-        .from('teacher_lessons')
-        .select('id, teacher_id, student_id, status, title')
-        .eq('id', lessonId)
-        .maybeSingle();
-      if (error) throw error;
-      if (!lesson) return res.status(404).json({ error: 'lesson_not_found' });
-      if (role === 'teacher' && String(lesson.teacher_id) !== String(actor.sub)) {
-        return res.status(403).json({ error: 'forbidden' });
+      let teacherId = '';
+      let studentId = null;
+      let insertLessonId = null;
+      let insertClassSessionId = null;
+
+      if (classSessionId) {
+        const { data: session, error } = await supabaseAdmin
+          .from('class_sessions')
+          .select('id, teacher_id, class_id, status, subject')
+          .eq('id', classSessionId)
+          .maybeSingle();
+        if (error) throw error;
+        if (!session) return res.status(404).json({ error: 'session_not_found' });
+        if (!session.teacher_id) {
+          return res.status(400).json({ error: 'session_no_teacher' });
+        }
+        if (role === 'teacher' && String(session.teacher_id) !== String(actor.sub)) {
+          return res.status(403).json({ error: 'forbidden' });
+        }
+        if (!studentIdBody) {
+          return res.status(400).json({
+            error: 'student_id_required',
+            hint: 'Grup dersi veli daveti için student_id gerekli.'
+          });
+        }
+        const { data: enrolled } = await supabaseAdmin
+          .from('class_students')
+          .select('student_id')
+          .eq('class_id', session.class_id)
+          .eq('student_id', studentIdBody)
+          .maybeSingle();
+        if (!enrolled?.student_id) {
+          return res.status(403).json({ error: 'student_not_in_class' });
+        }
+        teacherId = String(session.teacher_id);
+        studentId = studentIdBody;
+        insertClassSessionId = session.id;
+      } else {
+        const { data: lesson, error } = await supabaseAdmin
+          .from('teacher_lessons')
+          .select('id, teacher_id, student_id, status, title')
+          .eq('id', lessonId)
+          .maybeSingle();
+        if (error) throw error;
+        if (!lesson) return res.status(404).json({ error: 'lesson_not_found' });
+        if (role === 'teacher' && String(lesson.teacher_id) !== String(actor.sub)) {
+          return res.status(403).json({ error: 'forbidden' });
+        }
+        teacherId = String(lesson.teacher_id);
+        studentId = lesson.student_id;
+        insertLessonId = lesson.id;
       }
 
       const hours = Math.min(Math.max(Number(body.expires_hours) || 168, 1), 720);
@@ -78,9 +126,10 @@ export default async function handler(req, res) {
         .from('teacher_review_invite_tokens')
         .insert({
           token,
-          teacher_id: lesson.teacher_id,
-          student_id: lesson.student_id,
-          lesson_id: lesson.id,
+          teacher_id: teacherId,
+          student_id: studentId,
+          lesson_id: insertLessonId,
+          class_session_id: insertClassSessionId,
           parent_name: parentName,
           expires_at: expiresAt,
           created_by: actor.sub
@@ -88,6 +137,12 @@ export default async function handler(req, res) {
         .select('*')
         .maybeSingle();
       if (insErr) {
+        if (/class_session_id|schema cache/i.test(insErr.message || '')) {
+          return res.status(503).json({
+            error: 'migration_required',
+            hint: 'Supabase SQL: student-coaching-system/sql/2026-09-06-teacher-reviews-class-sessions.sql'
+          });
+        }
         if (/teacher_review_invite|does not exist/i.test(insErr.message || '')) {
           return res.status(503).json({
             error: 'table_missing',
@@ -100,9 +155,10 @@ export default async function handler(req, res) {
       const jwt = signAuthToken({
         role: 'parent_review',
         invite_token: token,
-        teacher_id: lesson.teacher_id,
-        lesson_id: lesson.id,
-        student_id: lesson.student_id
+        teacher_id: teacherId,
+        lesson_id: insertLessonId,
+        class_session_id: insertClassSessionId,
+        student_id: studentId
       });
 
       const path = `/review/public?token=${encodeURIComponent(token)}`;
@@ -145,6 +201,7 @@ export default async function handler(req, res) {
           teacher_slug: profile?.slug || null,
           teacher_photo_url: profile?.photo_url || null,
           lesson_id: invite.lesson_id,
+          class_session_id: invite.class_session_id || null,
           parent_name: invite.parent_name,
           expires_at: invite.expires_at,
           average_rating: profile?.average_rating ?? null,
@@ -194,6 +251,7 @@ export default async function handler(req, res) {
     teacher_id: invite.teacher_id,
     student_id: invite.student_id || null,
     lesson_id: invite.lesson_id || null,
+    class_session_id: invite.class_session_id || null,
     reviewer_type: 'PARENT',
     reviewer_name: reviewerName,
     rating,

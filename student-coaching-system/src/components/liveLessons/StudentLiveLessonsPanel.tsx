@@ -46,6 +46,26 @@ export default function StudentLiveLessonsPanel() {
   const [reviewedLessonIds, setReviewedLessonIds] = useState<Set<string>>(() => new Set());
 
   useEffect(() => {
+    if (!myStudentId) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await apiFetch('/api/reviews/student');
+        const j = await res.json().catch(() => ({}));
+        if (!res.ok || cancelled) return;
+        const ids = Array.isArray(j.lesson_ids) ? j.lesson_ids.map(String) : [];
+        setReviewedLessonIds(new Set(ids));
+      } catch {
+        /* ignore */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [myStudentId]);
+
+
+  useEffect(() => {
     const id = window.setInterval(() => setUiTick((x) => x + 1), 30_000);
     return () => window.clearInterval(id);
   }, []);

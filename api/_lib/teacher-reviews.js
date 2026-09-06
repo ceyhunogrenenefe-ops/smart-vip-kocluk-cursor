@@ -122,6 +122,7 @@ export function mapReviewToApi(row) {
     teacher_id: row.teacher_id,
     student_id: row.student_id || null,
     lesson_id: row.lesson_id || null,
+    class_session_id: row.class_session_id || null,
     reviewer_type: row.reviewer_type,
     reviewer_name: row.reviewer_name,
     rating: row.rating,
