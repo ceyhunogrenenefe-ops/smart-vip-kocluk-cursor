@@ -1,3 +1,4 @@
+import AdminTeacherReviewsPanel from '../components/teacher/AdminTeacherReviewsPanel';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Ban,
@@ -428,7 +429,7 @@ export default function TeacherProfileApprovalsPage() {
     <div className="mx-auto max-w-6xl space-y-6 p-4 sm:p-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-xl font-bold text-slate-900 sm:text-2xl">Öğretmen Profil Onayları</h1>
+          <h1 className="text-xl font-bold text-slate-900 sm:text-2xl">Öğretmen Profil & Yorum Onayları</h1>
           <p className="mt-1 text-sm text-slate-600">{statsHint}</p>
         </div>
         <button
@@ -441,6 +442,8 @@ export default function TeacherProfileApprovalsPage() {
       </div>
 
       <div className="flex flex-wrap gap-2">
+      <AdminTeacherReviewsPanel />
+
         {FILTERS.map((f) => (
           <button
             key={f || 'all'}
