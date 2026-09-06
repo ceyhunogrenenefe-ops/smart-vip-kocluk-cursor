@@ -8,6 +8,7 @@ import { normalizePhoneToE164 } from '../api/_lib/phone-whatsapp.js';
 import { metaWhatsAppConfigured } from '../api/_lib/meta-whatsapp.js';
 import { sendAutomatedWhatsApp } from '../api/_lib/whatsapp-outbound.js';
 import { syncClassSessionsScheduledToCompleted } from '../api/_lib/class-sessions-sync.js';
+import { refreshTeacherCompletedLessonCount } from '../api/_lib/teacher-reviews.js';
 import { handleLivePresenceRequest } from '../api/_lib/live-presence-api.js';
 import { resolveStudentRowForUser } from '../api/_lib/resolve-student-id.js';
 import {
@@ -3003,6 +3004,21 @@ export default async function handler(req, res) {
           .select('*');
         if (batchErr) return res.status(500).json({ error: batchErr.message });
         const primary = (batchRows || []).find((r) => String(r.id) === rowId) || batchRows?.[0] || null;
+        if (patch.status) {
+          const tids = new Set(
+            (batchRows || [])
+              .map((r) => String(r.teacher_id || '').trim())
+              .filter(Boolean)
+          );
+          if (session?.teacher_id) tids.add(String(session.teacher_id));
+          for (const tid of tids) {
+            try {
+              await refreshTeacherCompletedLessonCount(tid);
+            } catch (_) {
+              /* best-effort */
+            }
+          }
+        }
         return res.status(200).json({
           data: primary,
           updated_count: batchRows?.length ?? peerIds.length,
@@ -3018,6 +3034,16 @@ export default async function handler(req, res) {
       .select('*')
       .maybeSingle();
     if (error) return res.status(500).json({ error: error.message });
+    if (patch.status) {
+      const tid = String(data?.teacher_id || session?.teacher_id || '').trim();
+      if (tid) {
+        try {
+          await refreshTeacherCompletedLessonCount(tid);
+        } catch (_) {
+          /* best-effort */
+        }
+      }
+    }
     return res.status(200).json({ data });
   }
 
