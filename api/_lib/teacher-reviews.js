@@ -230,16 +230,40 @@ export async function refreshTeacherReviewStats(teacherId) {
 export async function refreshTeacherCompletedLessonCount(teacherId) {
   const tid = String(teacherId || '').trim();
   if (!tid) return 0;
-  const { count, error } = await supabaseAdmin
-    .from('teacher_lessons')
-    .select('id', { count: 'exact', head: true })
-    .eq('teacher_id', tid)
-    .eq('status', 'completed');
-  if (error) {
-    console.warn('[teacher-reviews] lesson count:', errorMessage(error));
-    return 0;
+
+  // Özel ders (1:1) + grup canlı ders (class_sessions) tamamlananlar
+  let privateCount = 0;
+  {
+    const { count, error } = await supabaseAdmin
+      .from('teacher_lessons')
+      .select('id', { count: 'exact', head: true })
+      .eq('teacher_id', tid)
+      .eq('status', 'completed');
+    if (error) {
+      console.warn('[teacher-reviews] private lesson count:', errorMessage(error));
+    } else {
+      privateCount = Number(count) || 0;
+    }
   }
-  const n = Number(count) || 0;
+
+  let groupCount = 0;
+  {
+    const { count, error } = await supabaseAdmin
+      .from('class_sessions')
+      .select('id', { count: 'exact', head: true })
+      .eq('teacher_id', tid)
+      .eq('status', 'completed');
+    if (error) {
+      // tablo/kolon yoksa yut — özel ders sayısı yine yazılsın
+      if (!/class_sessions|schema cache|does not exist|column/i.test(error.message || '')) {
+        console.warn('[teacher-reviews] group lesson count:', errorMessage(error));
+      }
+    } else {
+      groupCount = Number(count) || 0;
+    }
+  }
+
+  const n = privateCount + groupCount;
   const { error: upErr } = await supabaseAdmin
     .from('teacher_profiles')
     .update({
@@ -394,6 +418,11 @@ export async function approveTeacherReview(reviewId, actorId) {
   if (upErr) throw upErr;
 
   const stats = await refreshTeacherReviewStats(row.teacher_id);
+  try {
+    await refreshTeacherCompletedLessonCount(row.teacher_id);
+  } catch (e) {
+    console.warn('[teacher-reviews] lesson count on approve:', errorMessage(e));
+  }
   return { review: mapReviewToApi(saved), stats };
 }
 
