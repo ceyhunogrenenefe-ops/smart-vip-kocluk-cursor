@@ -1,11 +1,15 @@
-import { useEffect, useState } from 'react';
+import { FormEvent, useEffect, useId, useRef, useState } from 'react';
 import { Loader2, Star, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiFetch } from '../../lib/session';
+import { AppModal, AppModalBody, AppModalFooter, AppModalHeader } from '../ui/AppModal';
 
 type Props = {
   open: boolean;
-  lessonId: string;
+  /** Özel ders (teacher_lessons) id — classSessionId yoksa zorunlu */
+  lessonId?: string;
+  /** Grup canlı ders (class_sessions) id */
+  classSessionId?: string;
   teacherName?: string;
   lessonTitle?: string;
   onClose: () => void;
@@ -14,7 +18,8 @@ type Props = {
 
 export default function TeacherReviewModal({
   open,
-  lessonId,
+  lessonId = '',
+  classSessionId = '',
   teacherName,
   lessonTitle,
   onClose,
@@ -24,32 +29,46 @@ export default function TeacherReviewModal({
   const [hover, setHover] = useState(0);
   const [comment, setComment] = useState('');
   const [saving, setSaving] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const commentId = useId();
+  const targetKey = classSessionId || lessonId;
 
   useEffect(() => {
-    if (open) {
-      setRating(5);
-      setHover(0);
-      setComment('');
-    }
-  }, [open, lessonId]);
+    if (!open) return;
+    setRating(5);
+    setHover(0);
+    setComment('');
+    const t = window.setTimeout(() => {
+      textareaRef.current?.focus({ preventScroll: true });
+    }, 80);
+    return () => window.clearTimeout(t);
+  }, [open, targetKey]);
 
-  if (!open) return null;
-
-  const submit = async () => {
+  const submit = async (e?: FormEvent) => {
+    e?.preventDefault();
     if (rating < 1 || rating > 5) {
       toast.error('Lütfen 1-5 arası puan seçin');
       return;
     }
+    const sid = String(classSessionId || '').trim();
+    const lid = String(lessonId || '').trim();
+    if (!sid && !lid) {
+      toast.error('Ders bilgisi eksik');
+      return;
+    }
     setSaving(true);
     try {
+      const body: Record<string, unknown> = {
+        rating,
+        comment: comment.trim() || null
+      };
+      if (sid) body.class_session_id = sid;
+      else body.lesson_id = lid;
+
       const res = await apiFetch('/api/reviews/student', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          lesson_id: lessonId,
-          rating,
-          comment: comment.trim() || null
-        })
+        body: JSON.stringify(body)
       });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -64,30 +83,41 @@ export default function TeacherReviewModal({
       toast.success('Değerlendirmeniz alındı. Admin onayından sonra sitede yayınlanır.');
       onSubmitted?.();
       onClose();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Gönderilemedi');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Gönderilemedi');
     } finally {
       setSaving(false);
     }
   };
 
   return (
-    <div className="fixed inset-0 z-[80] flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4">
-      <div className="w-full max-w-md rounded-t-2xl bg-white shadow-xl dark:bg-slate-900 sm:rounded-2xl">
-        <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3 dark:border-slate-700">
-          <div>
-            <h3 className="font-semibold text-slate-900 dark:text-white">Öğretmeni Değerlendir</h3>
-            <p className="text-xs text-slate-500">
-              {teacherName || 'Öğretmen'}
-              {lessonTitle ? ` · ${lessonTitle}` : ''}
-            </p>
-          </div>
-          <button type="button" onClick={onClose} className="rounded-lg p-2 hover:bg-slate-100 dark:hover:bg-slate-800">
-            <X className="h-5 w-5" />
-          </button>
+    <AppModal open={open} onClose={onClose} align="center" panelClassName="max-w-md">
+      <AppModalHeader className="items-start gap-3 p-4 sm:p-5">
+        <div className="min-w-0 flex-1">
+          <h3 className="font-semibold text-slate-900 dark:text-white">Öğretmeni Değerlendir</h3>
+          <p className="mt-0.5 text-xs uppercase tracking-wide text-slate-500">
+            {teacherName || 'Öğretmen'}
+            {lessonTitle ? ` · ${lessonTitle}` : ''}
+          </p>
         </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
+          aria-label="Yorumu kapat"
+        >
+          <X className="h-4 w-4" />
+          Kapat
+        </button>
+      </AppModalHeader>
 
-        <div className="space-y-4 p-4">
+      <form
+        onSubmit={(ev) => {
+          void submit(ev);
+        }}
+        className="flex min-h-0 flex-1 flex-col"
+      >
+        <AppModalBody className="space-y-4 p-4 sm:p-5">
           <div>
             <p className="mb-2 text-sm font-medium text-slate-700 dark:text-slate-200">Puanınız</p>
             <div className="flex gap-1">
@@ -111,30 +141,46 @@ export default function TeacherReviewModal({
           </div>
 
           <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-200">
+            <label htmlFor={commentId} className="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-200">
               Yorumunuz (isteğe bağlı)
             </label>
             <textarea
+              ref={textareaRef}
+              id={commentId}
+              name="teacher_review_comment"
               value={comment}
               onChange={(e) => setComment(e.target.value)}
+              onKeyDown={(e) => e.stopPropagation()}
+              onKeyUp={(e) => e.stopPropagation()}
+              onPointerDown={(e) => e.stopPropagation()}
               rows={4}
               maxLength={2000}
+              autoComplete="off"
               placeholder="Ders hakkında kısa bir yorum yazabilirsiniz…"
-              className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-indigo-400 dark:border-slate-600 dark:bg-slate-800"
+              className="relative z-10 w-full resize-y rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none ring-0 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-200 dark:border-slate-600 dark:bg-slate-800 dark:text-white"
             />
           </div>
+        </AppModalBody>
 
+        <AppModalFooter className="gap-2 p-4 sm:p-5">
           <button
             type="button"
+            onClick={onClose}
             disabled={saving}
-            onClick={() => void submit()}
-            className="flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-3 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-60"
+            className="flex-1 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
+          >
+            Yorumu kapat
+          </button>
+          <button
+            type="submit"
+            disabled={saving}
+            className="flex flex-[1.4] items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-3 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-60"
           >
             {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
             Gönder
           </button>
-        </div>
-      </div>
-    </div>
+        </AppModalFooter>
+      </form>
+    </AppModal>
   );
 }

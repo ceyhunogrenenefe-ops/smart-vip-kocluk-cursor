@@ -62,7 +62,7 @@ export default function AdminTeacherReviewsPanel() {
         <div>
           <h2 className="text-base font-bold text-slate-900">Öğretmen yorum onayları</h2>
           <p className="mt-0.5 text-xs text-slate-600">
-            Onaylanınca öğrenci/veli adıyla sitede yayınlanır.
+            Admin / süper admin menüsü: Öğretmen profil & yorum onayları. Onaylanınca sitede yayınlanır.
           </p>
         </div>
         <button

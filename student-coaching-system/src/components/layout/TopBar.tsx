@@ -87,7 +87,7 @@ export default function TopBar({ onMenuClick, drawerOpen = false, hideMenuButton
       '/kitap-pazaryeri': 'Kitap Pazaryeri',
       '/kitap-siparisleri': 'Kitap Pazaryeri',
       '/ozel-ders-talepleri': 'Özel ders talepleri',
-      '/ogretmen-profil-onaylari': 'Öğretmen profil onayları',
+      '/ogretmen-profil-onaylari': 'Öğretmen profil & yorum onayları',
       '/profilimi-duzenle': 'Profilimi Düzenle',
       '/musaitlik-takvimim': 'Müsaitlik Takvimim',
       '/login': 'Giriş',
