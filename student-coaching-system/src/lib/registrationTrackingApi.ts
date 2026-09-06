@@ -36,8 +36,25 @@ export type RegLead = {
   lost_description?: string | null;
   confirmed_at?: string | null;
   confirmed_by?: string | null;
+  last_inbound_channel?: 'whatsapp' | 'instagram' | string | null;
+  last_inbound_snippet?: string | null;
+  last_inbound_at?: string | null;
+  instagram_scoped_id?: string | null;
   created_at: string;
   updated_at: string;
+};
+
+export type RegChannelMessage = {
+  id: string;
+  channel: 'whatsapp' | 'instagram' | string;
+  direction: 'inbound' | 'outbound' | string;
+  body?: string | null;
+  message_type?: string | null;
+  contact_name?: string | null;
+  phone?: string | null;
+  occurred_at: string;
+  external_message_id?: string | null;
+  created_at?: string;
 };
 
 export type RegDashboard = {
@@ -62,6 +79,7 @@ export type RegLeadDetail = {
   meeting_links: Array<Record<string, unknown>>;
   audit_logs: Array<Record<string, unknown>>;
   tags: Array<{ id: string; name: string; color?: string | null }>;
+  channel_messages?: RegChannelMessage[];
 };
 
 async function rtFetch<T>(op: string, init: RequestInit & { query?: Record<string, string> } = {}): Promise<T> {
