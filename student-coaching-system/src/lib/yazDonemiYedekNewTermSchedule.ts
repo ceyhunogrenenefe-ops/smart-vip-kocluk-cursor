@@ -212,7 +212,8 @@ export function mergePlannerStatesPreferFilled(
     name: canonicalizePlannerGroupName(g.name) || g.name,
   }));
 
-  // Overlay yalnızca doluysa veya base boşsa yazsın
+  // Eski dolu programı bozma: overlay yalnızca yeni grup ekler veya
+  // base boşken / overlay daha doluysa günceller. Hücre bazında base korunur.
   const smartOverlay: PlannerGroup[] = [];
   const baseBy = new Map(
     normedBase.map((g) => [g.name.toLocaleLowerCase('tr-TR'), g] as const)
@@ -224,8 +225,26 @@ export function mergePlannerStatesPreferFilled(
       smartOverlay.push(g);
       continue;
     }
-    if (countLessons(g.schedule) >= countLessons(prev.schedule)) {
+    const prevCount = countLessons(prev.schedule);
+    const nextCount = countLessons(g.schedule);
+    if (prevCount === 0 && nextCount > 0) {
       smartOverlay.push(g);
+      continue;
+    }
+    if (nextCount > prevCount) {
+      // Dolu hücreleri koru, yalnızca boşlara overlay yaz
+      smartOverlay.push({
+        ...prev,
+        ...g,
+        id: prev.id || g.id,
+        name: prev.name || g.name,
+        schedule: { ...(g.schedule || {}), ...(prev.schedule || {}) },
+        periods: prev.periods?.length ? prev.periods : g.periods,
+        periodsByDay:
+          prev.periodsByDay && Object.keys(prev.periodsByDay).length
+            ? prev.periodsByDay
+            : g.periodsByDay,
+      });
     }
   }
 

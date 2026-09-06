@@ -5,6 +5,7 @@ import {
   canonicalizePlannerGroupName,
   countYazBackupLessons,
   plannerNeedsFullNewTermSeed,
+  mergeYazBackupIntoPlannerState,
 } from './yazDonemiYedekNewTermSchedule.ts';
 
 describe('yazDonemiYedekNewTermSchedule', () => {
@@ -44,3 +45,26 @@ describe('yazDonemiYedekNewTermSchedule', () => {
     expect(plannerNeedsFullNewTermSeed(full)).toBe(false);
   });
 });
+
+  it('does not wipe filled existing groups when merging yaz backup shells', () => {
+    const current = {
+      groups: [
+        {
+          id: 'keep-8a',
+          name: '8A',
+          schedule: {
+            '0_0': { subject: 'MATEMATİK', teacher: 'Ali' },
+            '0_1': { subject: 'MATEMATİK', teacher: 'Ali' },
+            '1_0': { subject: 'FEN', teacher: 'Veli' },
+          },
+        },
+      ],
+    };
+    const merged = mergeYazBackupIntoPlannerState(current);
+    const eightA = merged.groups.find((g) => g.name === '8A');
+    expect(eightA?.schedule['0_0']).toEqual({ subject: 'MATEMATİK', teacher: 'Ali' });
+    expect(Object.keys(eightA?.schedule || {}).length).toBeGreaterThanOrEqual(3);
+    // yaz backup high-school still added
+    expect(merged.groups.some((g) => g.name === 'YÖS')).toBe(true);
+    expect(merged.groups.some((g) => g.name === '9A')).toBe(true);
+  });
