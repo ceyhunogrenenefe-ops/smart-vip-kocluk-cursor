@@ -24,11 +24,14 @@ describe('newTermSchedulePlanner', () => {
     expect(picked?.id).toBe('new');
   });
 
-  it('starts empty with academic-year dates', () => {
+  it('starts empty with academic-year dates and Excel evening slots', () => {
     const s = blankNewTermPlannerState();
     expect(s.groups).toEqual([]);
     expect(s.term.start).toBe(NEW_TERM_START);
     expect(s.term.end).toBe(NEW_TERM_END);
-    expect(s.periods[0].time).toMatch(/17:00/);
+    expect(s.days).toContain('Pazar');
+    expect(s.periods).toHaveLength(5);
+    expect(s.periods[0].time).toBe('17:00–17:40');
+    expect(s.periods[4].time).toBe('20:40–21:20');
   });
 });

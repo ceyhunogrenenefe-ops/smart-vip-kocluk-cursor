@@ -31,6 +31,9 @@ import {
   NEW_TERM_PLANNER_PATH,
   NEW_TERM_START,
   blankNewTermPlannerState,
+  buildLgs8ExcelNewTermPlannerState,
+  countLgs8ExcelLessons,
+  countPlannerLessonCells,
   pickNewTermPlan,
 } from '../lib/newTermSchedulePlanner';
 
@@ -540,11 +543,77 @@ export default function SchedulePlannerPage({ mode = 'default' }: { mode?: 'defa
     void (async () => {
       try {
         if (planTouchedRef.current || gen !== planLoadGenRef.current) return;
+
+        const applyExcelSeed = async (planIdToUpdate?: string) => {
+          const seeded = buildLgs8ExcelNewTermPlannerState();
+          await pushPlannerContext({
+            serverPlanActive: true,
+            autoSyncClasses: false,
+            nameOverride: NEW_TERM_PLAN_NAME
+          });
+          if (planTouchedRef.current || gen !== planLoadGenRef.current) return null;
+          await postPlannerMessage(iframeRef.current, 'SET_STATE', seeded);
+          planBootstrappedRef.current = true;
+          await refreshPlannerGroups();
+          setPlanName(NEW_TERM_PLAN_NAME);
+
+          // Kalıcı olsun: boş/eksik taslağın üzerine kaydet
+          if (planIdToUpdate) {
+            const res = await apiFetch('/api/class-schedule-plans', {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                id: planIdToUpdate,
+                name: NEW_TERM_PLAN_NAME,
+                planner_json: seeded,
+                institution_id: institutionId
+              })
+            });
+            const j = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(j.error || 'excel_seed_save_failed');
+            setSelectedPlanId(planIdToUpdate);
+            rememberSharedPlan(planIdToUpdate);
+          } else {
+            const res = await apiFetch('/api/class-schedule-plans', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                name: NEW_TERM_PLAN_NAME,
+                planner_json: seeded,
+                institution_id: institutionId
+              })
+            });
+            const j = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(j.error || 'excel_seed_save_failed');
+            const id = String(j.data?.id || '');
+            if (id) {
+              setSelectedPlanId(id);
+              rememberSharedPlan(id);
+            } else {
+              setSelectedPlanId('');
+            }
+            await loadPlans();
+          }
+          return seeded;
+        };
+
         if (existing?.id) {
           const res = await apiFetch(`/api/class-schedule-plans?id=${encodeURIComponent(existing.id)}`);
           const j = await res.json().catch(() => ({}));
           if (!res.ok || !j.data?.planner_json) throw new Error(j.error || 'plan_load_failed');
           if (planTouchedRef.current || gen !== planLoadGenRef.current) return;
+
+          const lessonCount = countPlannerLessonCells(j.data.planner_json);
+          if (lessonCount === 0) {
+            // Boş kayıtlı taslak Excel'i engelliyordu
+            const seeded = await applyExcelSeed(existing.id);
+            if (!seeded) return;
+            toast.success(
+              `Excel 8A–8F programı uygulandı ve kaydedildi (${countLgs8ExcelLessons(seeded)} ders).`
+            );
+            return;
+          }
+
           await pushPlannerContext({
             serverPlanActive: false,
             autoSyncClasses: true,
@@ -558,18 +627,12 @@ export default function SchedulePlannerPage({ mode = 'default' }: { mode?: 'defa
           toast.success('2026-2027 dönem taslağı yüklendi.');
           return;
         }
-        await postPlannerMessage(iframeRef.current, 'SET_STATE', blankNewTermPlannerState());
-        planBootstrappedRef.current = true;
-        await pushPlannerContext({
-          serverPlanActive: true,
-          autoSyncClasses: true,
-          nameOverride: NEW_TERM_PLAN_NAME,
-          freshBlank: true
-        });
-        await refreshPlannerGroups();
-        setSelectedPlanId('');
-        setPlanName(NEW_TERM_PLAN_NAME);
-        toast.message('Yeni dönem boş program açıldı. Dersleri yerleştirip Kaydet deyin.');
+
+        const seeded = await applyExcelSeed();
+        if (!seeded) return;
+        toast.success(
+          `Excel 8A/8B/8C/8F programı yüklendi ve kaydedildi (${countLgs8ExcelLessons(seeded)} ders).`
+        );
       } catch (e) {
         const msg = String((e as Error).message || e);
         setLoadError(`Yeni dönem programı açılamadı: ${msg}`);
@@ -587,7 +650,8 @@ export default function SchedulePlannerPage({ mode = 'default' }: { mode?: 'defa
     applyServerPlanToIframe,
     rememberSharedPlan,
     pushPlannerContext,
-    refreshPlannerGroups
+    refreshPlannerGroups,
+    loadPlans
   ]);
 
   useEffect(() => {
@@ -708,6 +772,75 @@ export default function SchedulePlannerPage({ mode = 'default' }: { mode?: 'defa
       setSelectedPlanId('');
       setPlanName(NEW_TERM_PLAN_NAME);
       toast.success('Boş 2026-2027 programı açıldı.');
+    } catch (e) {
+      toast.error(String((e as Error).message || e));
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const handleLoadLgs8ExcelSchedule = async () => {
+    if (!iframeReady) return;
+    if (
+      !confirm(
+        'Excel’deki 8A / 8B / 8C / 8F programı (öğretmenlerle) yeni dönem planlayıcısına yüklensin ve kaydedilsin mi? Mevcut grid üzerine yazılır.'
+      )
+    ) {
+      return;
+    }
+    planTouchedRef.current = true;
+    planLoadGenRef.current += 1;
+    setBusy('excel');
+    try {
+      if (!institutionId) throw new Error('Kurum seçili değil.');
+      const seeded = buildLgs8ExcelNewTermPlannerState();
+      await pushPlannerContext({
+        serverPlanActive: true,
+        autoSyncClasses: false,
+        nameOverride: NEW_TERM_PLAN_NAME
+      });
+      await postPlannerMessage(iframeRef.current, 'SET_STATE', seeded);
+      planBootstrappedRef.current = true;
+      await refreshPlannerGroups();
+      setPlanName(NEW_TERM_PLAN_NAME);
+
+      if (selectedPlanId) {
+        const res = await apiFetch('/api/class-schedule-plans', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id: selectedPlanId,
+            name: NEW_TERM_PLAN_NAME,
+            planner_json: seeded,
+            institution_id: institutionId
+          })
+        });
+        const j = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(j.error || 'excel_save_failed');
+        rememberSharedPlan(selectedPlanId);
+      } else {
+        const res = await apiFetch('/api/class-schedule-plans', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: NEW_TERM_PLAN_NAME,
+            planner_json: seeded,
+            institution_id: institutionId
+          })
+        });
+        const j = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(j.error || 'excel_save_failed');
+        const id = String(j.data?.id || '');
+        if (id) {
+          setSelectedPlanId(id);
+          rememberSharedPlan(id);
+        }
+        await loadPlans();
+      }
+
+      toast.success(
+        `Excel programı aktarıldı ve kaydedildi: 8A–8F, ${countLgs8ExcelLessons(seeded)} ders. Şimdi her sınıf için «Sınıfa aktar» kullanın.`
+      );
     } catch (e) {
       toast.error(String((e as Error).message || e));
     } finally {
@@ -1037,6 +1170,15 @@ export default function SchedulePlannerPage({ mode = 'default' }: { mode?: 'defa
               >
                 Eski / yaz taslağı
               </Link>
+              <button
+                type="button"
+                onClick={() => void handleLoadLgs8ExcelSchedule()}
+                disabled={!!busy || !iframeReady}
+                className="inline-flex items-center gap-1 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-sm text-emerald-900 hover:bg-emerald-100 disabled:opacity-50"
+              >
+                {busy === 'excel' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                Excel 8. sınıf programı
+              </button>
               <button
                 type="button"
                 onClick={() => void handleStartBlankNewTerm()}
