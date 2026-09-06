@@ -48,8 +48,19 @@ export function blankNewTermPlannerState() {
 }
 
 export {
-  buildLgs8ExcelNewTermPlannerState,
-  countLgs8ExcelLessons,
-  countPlannerLessonCells,
-  plannerNeedsLgs8ExcelSeed,
-} from './lgs8ExcelNewTermSchedule';
+  buildFullNewTermPlannerState,
+  buildYazBackupNewTermPlannerState,
+  canonicalizePlannerGroupName,
+  countYazBackupLessons,
+  mergeFullNewTermIntoPlannerState,
+  mergeYazBackupIntoPlannerState,
+  plannerNeedsFullNewTermSeed,
+  writeYazBackupJsonIntoPlanner,
+} from './yazDonemiYedekNewTermSchedule';
+
+import { buildFullNewTermPlannerState } from './yazDonemiYedekNewTermSchedule';
+
+/** 2–12 + YÖS/YKS/SAT (yaz yedek) + Excel 2A–7A + Excel 8A–8F tek program. */
+export function buildCombinedExcelNewTermPlannerState() {
+  return buildFullNewTermPlannerState();
+}

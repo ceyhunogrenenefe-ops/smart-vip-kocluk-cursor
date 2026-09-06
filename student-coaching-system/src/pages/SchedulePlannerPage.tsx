@@ -31,10 +31,18 @@ import {
   NEW_TERM_PLANNER_PATH,
   NEW_TERM_START,
   blankNewTermPlannerState,
+  buildCombinedExcelNewTermPlannerState,
   buildLgs8ExcelNewTermPlannerState,
   countLgs8ExcelLessons,
   countPlannerLessonCells,
+  countPrimaryExcelLessons,
+  mergeFullNewTermIntoPlannerState,
+  mergePrimaryExcelIntoPlannerState,
+  mergeYazBackupIntoPlannerState,
+  writeYazBackupJsonIntoPlanner,
+  countYazBackupLessons,
   pickNewTermPlan,
+  upsertPlannerGroups,
 } from '../lib/newTermSchedulePlanner';
 
 type PlannerTeacher = { id: string; name: string; email?: string; branches?: string[] };
@@ -545,7 +553,7 @@ export default function SchedulePlannerPage({ mode = 'default' }: { mode?: 'defa
         if (planTouchedRef.current || gen !== planLoadGenRef.current) return;
 
         const applyExcelSeed = async (planIdToUpdate?: string) => {
-          const seeded = buildLgs8ExcelNewTermPlannerState();
+          const seeded = buildCombinedExcelNewTermPlannerState();
           await pushPlannerContext({
             serverPlanActive: true,
             autoSyncClasses: false,
@@ -609,7 +617,7 @@ export default function SchedulePlannerPage({ mode = 'default' }: { mode?: 'defa
             const seeded = await applyExcelSeed(existing.id);
             if (!seeded) return;
             toast.success(
-              `Excel 8A–8F programı uygulandı ve kaydedildi (${countLgs8ExcelLessons(seeded)} ders).`
+              `2–12 + YÖS/YKS tek program uygulandı ve kaydedildi (${countPlannerLessonCells(seeded)} ders).`
             );
             return;
           }
@@ -631,7 +639,7 @@ export default function SchedulePlannerPage({ mode = 'default' }: { mode?: 'defa
         const seeded = await applyExcelSeed();
         if (!seeded) return;
         toast.success(
-          `Excel 8A/8B/8C/8F programı yüklendi ve kaydedildi (${countLgs8ExcelLessons(seeded)} ders).`
+          `2–12 + YÖS/YKS tek program yüklendi ve kaydedildi (${countPlannerLessonCells(seeded)} ders).`
         );
       } catch (e) {
         const msg = String((e as Error).message || e);
@@ -779,11 +787,48 @@ export default function SchedulePlannerPage({ mode = 'default' }: { mode?: 'defa
     }
   };
 
+  const persistPlannerJson = async (planner_json: Record<string, unknown>) => {
+    if (selectedPlanId) {
+      const res = await apiFetch('/api/class-schedule-plans', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: selectedPlanId,
+          name: NEW_TERM_PLAN_NAME,
+          planner_json,
+          institution_id: institutionId
+        })
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j.error || 'excel_save_failed');
+      rememberSharedPlan(selectedPlanId);
+      return selectedPlanId;
+    }
+    const res = await apiFetch('/api/class-schedule-plans', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: NEW_TERM_PLAN_NAME,
+        planner_json,
+        institution_id: institutionId
+      })
+    });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(j.error || 'excel_save_failed');
+    const id = String(j.data?.id || '');
+    if (id) {
+      setSelectedPlanId(id);
+      rememberSharedPlan(id);
+    }
+    await loadPlans();
+    return id;
+  };
+
   const handleLoadLgs8ExcelSchedule = async () => {
     if (!iframeReady) return;
     if (
       !confirm(
-        'Excel’deki 8A / 8B / 8C / 8F programı (öğretmenlerle) yeni dönem planlayıcısına yüklensin ve kaydedilsin mi? Mevcut grid üzerine yazılır.'
+        'Excel’deki 8A / 8B / 8C / 8F programı (öğretmenlerle) planlayıcıya yüklensin mi? Aynı adlı gruplar güncellenir; 2A–7A gibi diğer sınıflar korunur.'
       )
     ) {
       return;
@@ -793,7 +838,17 @@ export default function SchedulePlannerPage({ mode = 'default' }: { mode?: 'defa
     setBusy('excel');
     try {
       if (!institutionId) throw new Error('Kurum seçili değil.');
-      const seeded = buildLgs8ExcelNewTermPlannerState();
+      const current = await getPlannerState().catch(() => null);
+      const lgs8 = buildLgs8ExcelNewTermPlannerState();
+      const seeded = {
+        ...lgs8,
+        groups: upsertPlannerGroups(
+          Array.isArray((current as { groups?: unknown } | null)?.groups)
+            ? ((current as { groups: { name?: string }[] }).groups as { name?: string }[])
+            : [],
+          lgs8.groups
+        )
+      };
       await pushPlannerContext({
         serverPlanActive: true,
         autoSyncClasses: false,
@@ -803,43 +858,9 @@ export default function SchedulePlannerPage({ mode = 'default' }: { mode?: 'defa
       planBootstrappedRef.current = true;
       await refreshPlannerGroups();
       setPlanName(NEW_TERM_PLAN_NAME);
-
-      if (selectedPlanId) {
-        const res = await apiFetch('/api/class-schedule-plans', {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            id: selectedPlanId,
-            name: NEW_TERM_PLAN_NAME,
-            planner_json: seeded,
-            institution_id: institutionId
-          })
-        });
-        const j = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(j.error || 'excel_save_failed');
-        rememberSharedPlan(selectedPlanId);
-      } else {
-        const res = await apiFetch('/api/class-schedule-plans', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            name: NEW_TERM_PLAN_NAME,
-            planner_json: seeded,
-            institution_id: institutionId
-          })
-        });
-        const j = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(j.error || 'excel_save_failed');
-        const id = String(j.data?.id || '');
-        if (id) {
-          setSelectedPlanId(id);
-          rememberSharedPlan(id);
-        }
-        await loadPlans();
-      }
-
+      await persistPlannerJson(seeded as Record<string, unknown>);
       toast.success(
-        `Excel programı aktarıldı ve kaydedildi: 8A–8F, ${countLgs8ExcelLessons(seeded)} ders. Şimdi her sınıf için «Sınıfa aktar» kullanın.`
+        `Excel 8A–8F aktarıldı (${countLgs8ExcelLessons(lgs8)} ders). Diğer sınıflar korundu.`
       );
     } catch (e) {
       toast.error(String((e as Error).message || e));
@@ -847,6 +868,129 @@ export default function SchedulePlannerPage({ mode = 'default' }: { mode?: 'defa
       setBusy('');
     }
   };
+
+  const handleLoadPrimaryExcelSchedule = async () => {
+    if (!iframeReady) return;
+    if (
+      !confirm(
+        'PNG/Excel’deki 2A / 4A / 5A / 6A / 7A programı planlayıcıya aktarılsın mı? Aynı adlı gruplar güncellenir; 8. sınıflar korunur.'
+      )
+    ) {
+      return;
+    }
+    planTouchedRef.current = true;
+    planLoadGenRef.current += 1;
+    setBusy('excel-primary');
+    try {
+      if (!institutionId) throw new Error('Kurum seçili değil.');
+      const current = await getPlannerState().catch(() => null);
+      const seeded = mergePrimaryExcelIntoPlannerState(
+        (current as Record<string, unknown> | null) || null
+      );
+      await pushPlannerContext({
+        serverPlanActive: true,
+        autoSyncClasses: false,
+        nameOverride: NEW_TERM_PLAN_NAME
+      });
+      await postPlannerMessage(iframeRef.current, 'SET_STATE', seeded);
+      planBootstrappedRef.current = true;
+      await refreshPlannerGroups();
+      setPlanName(NEW_TERM_PLAN_NAME);
+      await persistPlannerJson(seeded as Record<string, unknown>);
+      toast.success(
+        `2A–7A programı aktarıldı (${countPrimaryExcelLessons(seeded.groups)} ders). 8. sınıflar korundu.`
+      );
+    } catch (e) {
+      toast.error(String((e as Error).message || e));
+    } finally {
+      setBusy('');
+    }
+  }
+
+  const handleLoadFullNewTermSchedule = async () => {
+    if (!iframeReady) return;
+    if (
+      !confirm(
+        'Yaz dönemi yedeği + Excel (2A–7A + 8A–8F) birleştirilip 2–12. sınıf, YÖS, YKS ve SAT tek programa mı yüklensin? Aynı adlı gruplarda dolu program korunur/güncellenir.'
+      )
+    ) {
+      return;
+    }
+    planTouchedRef.current = true;
+    planLoadGenRef.current += 1;
+    setBusy('excel-full');
+    try {
+      if (!institutionId) throw new Error('Kurum seçili değil.');
+      const current = await getPlannerState().catch(() => null);
+      const seeded = mergeFullNewTermIntoPlannerState(
+        (current as Record<string, unknown> | null) || null
+      );
+      await pushPlannerContext({
+        serverPlanActive: true,
+        autoSyncClasses: false,
+        nameOverride: NEW_TERM_PLAN_NAME
+      });
+      await postPlannerMessage(iframeRef.current, 'SET_STATE', seeded);
+      planBootstrappedRef.current = true;
+      await refreshPlannerGroups();
+      setPlanName(NEW_TERM_PLAN_NAME);
+      await persistPlannerJson(seeded as Record<string, unknown>);
+      toast.success(
+        `Tek program aktarıldı (${countPlannerLessonCells(seeded)} ders / ${Array.isArray(seeded.groups) ? seeded.groups.length : 0} grup).`
+      );
+    } catch (e) {
+      toast.error(String((e as Error).message || e));
+    } finally {
+      setBusy('');
+    }
+  };
+
+
+  /** Yaz yedek (16): mevcut programı silmeden grup/ders ekler. */
+  const handleLoadYazBackupPreserve = async () => {
+    if (!iframeReady) return;
+    if (
+      !confirm(
+        'Yedek JSON (16+17) mevcut ders programına yazılsın mı?\n\nProgramın yapısı (gün/saat dilimleri) bozulmaz. Dolu sınıflar korunur; eksik gruplar ve boş hücreler yedekten doldurulur.'
+      )
+    ) {
+      return;
+    }
+    planTouchedRef.current = true;
+    planLoadGenRef.current += 1;
+    setBusy('yaz-yedek');
+    try {
+      if (!institutionId) throw new Error('Kurum seçili değil.');
+      const current = await getPlannerState().catch(() => null);
+      const beforeGroups = Array.isArray((current as { groups?: unknown } | null)?.groups)
+        ? ((current as { groups: unknown[] }).groups as unknown[]).length
+        : 0;
+      const beforeLessons = countPlannerLessonCells(current);
+      const seeded = writeYazBackupJsonIntoPlanner(
+        (current as Record<string, unknown> | null) || null
+      );
+      await pushPlannerContext({
+        serverPlanActive: true,
+        autoSyncClasses: false,
+        nameOverride: isNewTerm ? NEW_TERM_PLAN_NAME : planName || NEW_TERM_PLAN_NAME
+      });
+      await postPlannerMessage(iframeRef.current, 'SET_STATE', seeded);
+      planBootstrappedRef.current = true;
+      await refreshPlannerGroups();
+      if (isNewTerm) setPlanName(NEW_TERM_PLAN_NAME);
+      await persistPlannerJson(seeded as Record<string, unknown>);
+      const afterLessons = countPlannerLessonCells(seeded);
+      const afterGroups = Array.isArray(seeded.groups) ? seeded.groups.length : 0;
+      toast.success(
+        `Yedek JSON yazıldı (yapı korundu). Grup ${beforeGroups}→${afterGroups}, ders ${beforeLessons}→${afterLessons}.`
+      );
+    } catch (e) {
+      toast.error(String((e as Error).message || e));
+    } finally {
+      setBusy('');
+    }
+  };
+
 
   const openExport = async () => {
     setExportOpen(true);
@@ -1075,7 +1219,7 @@ export default function SchedulePlannerPage({ mode = 'default' }: { mode?: 'defa
             <h1 className="text-base font-semibold">{isNewTerm ? NEW_TERM_PLAN_TITLE : 'Ders Program Planlayıcısı'}</h1>
             <p className="text-xs text-slate-500">
               {isNewTerm
-                ? '2026-2027 akademik yıl (1 Eylül 2026 – 19 Haziran 2027). Yaz programı yüklenmez; sınıflar boş gelir, dersleri buradan yerleştirin.'
+                ? '2026-2027 akademik yıl (1 Eylül 2026 – 19 Haziran 2027). Yaz yedeği + Excel ile 2–12 / YÖS tek program; boşsa otomatik yüklenir.'
                 : 'Kurumdaki tüm sınıflar «Tüm Sınıflar» sekmesinde birlikte görünür. Plan adını yazıp Kaydet ile ortak taslağı güncelleyin.'}
             </p>
           </div>
@@ -1181,6 +1325,36 @@ export default function SchedulePlannerPage({ mode = 'default' }: { mode?: 'defa
               </button>
               <button
                 type="button"
+                onClick={() => void handleLoadPrimaryExcelSchedule()}
+                disabled={!!busy || !iframeReady}
+                className="inline-flex items-center gap-1 rounded-lg border border-sky-300 bg-sky-50 px-3 py-1.5 text-sm text-sky-950 hover:bg-sky-100 disabled:opacity-50"
+                title="PNG’deki 2A / 4A / 5A / 6A / 7A programını planlayıcıya aktar"
+              >
+                {busy === 'excel-primary' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                Excel 2A–7A programı
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleLoadFullNewTermSchedule()}
+                disabled={!!busy || !iframeReady}
+                className="inline-flex items-center gap-1 rounded-lg border border-violet-300 bg-violet-50 px-3 py-1.5 text-sm text-violet-950 hover:bg-violet-100 disabled:opacity-50"
+                title="Yaz yedeği + Excel: 2–12, YÖS, YKS, SAT tek program"
+              >
+                {busy === 'excel-full' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                2–12 + YÖS tek program
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleLoadYazBackupPreserve()}
+                disabled={!!busy || !iframeReady}
+                className="inline-flex items-center gap-1 rounded-lg border border-teal-300 bg-teal-50 px-3 py-1.5 text-sm text-teal-950 hover:bg-teal-100 disabled:opacity-50"
+                title="yaz-donemi-yedek (16).json — dolu programları silmeden aktar"
+              >
+                {busy === 'yaz-yedek' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                Yedek JSON yaz (yapıyı koru)
+              </button>
+              <button
+                type="button"
                 onClick={() => void handleStartBlankNewTerm()}
                 disabled={!!busy || !iframeReady}
                 className="inline-flex items-center gap-1 rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-sm text-amber-900 hover:bg-amber-100 disabled:opacity-50"
@@ -1189,12 +1363,24 @@ export default function SchedulePlannerPage({ mode = 'default' }: { mode?: 'defa
               </button>
             </>
           ) : (
-            <Link
-              to={NEW_TERM_PLANNER_PATH}
-              className="inline-flex items-center gap-1 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-sm font-medium text-indigo-800 hover:bg-indigo-100"
-            >
-              Yeni dönem programı
-            </Link>
+            <>
+              <button
+                type="button"
+                onClick={() => void handleLoadYazBackupPreserve()}
+                disabled={!!busy || !iframeReady}
+                className="inline-flex items-center gap-1 rounded-lg border border-teal-300 bg-teal-50 px-3 py-1.5 text-sm text-teal-950 hover:bg-teal-100 disabled:opacity-50"
+                title="yaz-donemi-yedek (16).json — dolu programları silmeden aktar"
+              >
+                {busy === 'yaz-yedek' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                Yedek JSON yaz (yapıyı koru)
+              </button>
+              <Link
+                to={NEW_TERM_PLANNER_PATH}
+                className="inline-flex items-center gap-1 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-sm font-medium text-indigo-800 hover:bg-indigo-100"
+              >
+                Yeni dönem programı
+              </Link>
+            </>
           )}
           {isNewTerm ? null : (
           <button

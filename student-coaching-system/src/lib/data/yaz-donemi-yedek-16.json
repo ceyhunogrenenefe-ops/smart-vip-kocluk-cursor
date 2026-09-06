@@ -1,0 +1,5964 @@
+{
+  "days": [
+    "Pazartesi",
+    "Salı",
+    "Çarşamba",
+    "Perşembe",
+    "Cuma",
+    "Cumartesi",
+    "Pazar"
+  ],
+  "term": {
+    "end": "2027-06-19",
+    "start": "2026-09-01"
+  },
+  "groups": [
+    {
+      "id": "idmtj4tkhlrogg",
+      "name": "2026-2027 10-A SINIFI",
+      "color": "#2E4C8C",
+      "branch": null,
+      "locked": false,
+      "advisor": "",
+      "classId": "d1d1d074-276c-426c-910a-819307ffcf44",
+      "periods": [
+        {
+          "time": "17:00–17:40",
+          "label": "1. Ders"
+        },
+        {
+          "time": "17:50–18:30",
+          "label": "2. Ders"
+        },
+        {
+          "time": "18:40–19:20",
+          "label": "3. Ders"
+        },
+        {
+          "time": "19:30–20:10",
+          "label": "4. Ders"
+        },
+        {
+          "time": "20:30-21:10",
+          "label": "5. Ders"
+        },
+        {
+          "time": "21:20-22:00",
+          "label": "6. Ders"
+        }
+      ],
+      "schedule": {
+        "0_4": {
+          "subject": "Etüt",
+          "teacher": ""
+        },
+        "0_5": {
+          "subject": "Etüt",
+          "teacher": ""
+        },
+        "1_4": {
+          "subject": "Etüt",
+          "teacher": ""
+        },
+        "1_5": {
+          "subject": "Etüt",
+          "teacher": ""
+        },
+        "2_3": {
+          "subject": "Kimya",
+          "teacher": "Yasin Kandemir"
+        },
+        "2_4": {
+          "subject": "Kimya",
+          "teacher": "Yasin Kandemir"
+        },
+        "3_3": {
+          "subject": "Matematik",
+          "teacher": "GÖKHAN MUMCU"
+        },
+        "3_4": {
+          "subject": "Matematik",
+          "teacher": "GÖKHAN MUMCU"
+        },
+        "3_5": {
+          "subject": "Edebiyat",
+          "teacher": "EMRE KARABOYUN"
+        },
+        "4_4": {
+          "subject": "Etüt",
+          "teacher": ""
+        },
+        "4_5": {
+          "subject": "Etüt",
+          "teacher": ""
+        },
+        "5_1": {
+          "subject": "Fizik",
+          "teacher": "ALİ AKTAŞ"
+        },
+        "5_2": {
+          "subject": "Fizik",
+          "teacher": "ALİ AKTAŞ"
+        },
+        "5_3": {
+          "subject": "Biyoloji",
+          "teacher": "GÖNÜL ÇAVUŞOĞLU"
+        },
+        "5_4": {
+          "subject": "Biyoloji",
+          "teacher": "GÖNÜL ÇAVUŞOĞLU"
+        }
+      },
+      "students": [
+        {
+          "id": "idmtj4tkhmbe7j",
+          "name": "Abdulsamet Olgun",
+          "systemId": "53d66ebb-a1ac-42bd-a853-36f7b7c154ca"
+        },
+        {
+          "id": "idmtj4tkhm513f",
+          "name": "Aylin Atalay",
+          "systemId": "e5e2c541-14b4-4d41-a622-844d5f9943c4"
+        },
+        {
+          "id": "idmtj4tkhmddhn",
+          "name": "Ayşe Sena Tuncer",
+          "systemId": "a4edd331-4b2d-4eb0-ae9b-5727e7a22407"
+        },
+        {
+          "id": "idmtj4tkhmzo46",
+          "name": "BELİZ KIZILYÜCE",
+          "systemId": "ef633a26-6271-465a-8d5b-4ab5d775ef8d"
+        },
+        {
+          "id": "idmtj4tkhmq298",
+          "name": "Ceylin Somyürek",
+          "systemId": "2a73a8ea-845e-4e71-9ebb-adca58a0f2c6"
+        },
+        {
+          "id": "idmtj4tkhmnys7",
+          "name": "Ecem Naz Sevimli",
+          "systemId": "e669c330-c36d-4659-adca-9e45236e8015"
+        },
+        {
+          "id": "idmtj4tkhmk4w7",
+          "name": "ela nur ayer",
+          "systemId": "b4ea0608-05b6-4941-ac33-093208bd701e"
+        },
+        {
+          "id": "idmtj4tkhm2dlu",
+          "name": "Gülsüm Elif Ekşioğlu",
+          "systemId": "44b1be47-c565-4db1-926d-f624f3edf70c"
+        },
+        {
+          "id": "idmtj4tkhmyy3c",
+          "name": "Kerem Demir",
+          "systemId": "2c73f6aa-516c-4fc6-ab1c-544d114e4b48"
+        },
+        {
+          "id": "idmtj4tkhm6yjb",
+          "name": "mehmet emre baykara",
+          "systemId": "99d11a7b-3cf9-4925-be92-c3c62681abd2"
+        },
+        {
+          "id": "idmtj4tkhmgj1x",
+          "name": "Mert Aslan Yıldız",
+          "systemId": "fe3ab47c-4ff4-4dc7-9c56-47e75372647d"
+        },
+        {
+          "id": "idmtj4tkhml21x",
+          "name": "Mesude Yavuz",
+          "systemId": "8254c2fb-2be9-47a3-9a19-79ea11c92621"
+        },
+        {
+          "id": "idmtj4tkhndrc4",
+          "name": "Sinemnur Güneş",
+          "systemId": "c5ccc827-6cb5-4b48-93d3-2f970f8facbc"
+        },
+        {
+          "id": "idmtj4tkhnq0v1",
+          "name": "Yağız Mehmet Türker",
+          "systemId": "c5d62d9f-bd46-4465-84fe-d69c9391e72f"
+        }
+      ],
+      "classLevel": "9",
+      "curriculum": [],
+      "periodsByDay": {}
+    },
+    {
+      "id": "idmtj4tkhntsq6",
+      "name": "2026-2027 11-A SINIFI",
+      "color": "#0E8A6B",
+      "branch": "MAARİF",
+      "locked": false,
+      "advisor": "",
+      "classId": "7e6c5286-134f-459d-97cc-5f7aa3f2fe11",
+      "periods": [
+        {
+          "time": "17:00–17:40",
+          "label": "1. Ders"
+        },
+        {
+          "time": "17:50–18:30",
+          "label": "2. Ders"
+        },
+        {
+          "time": "18:40–19:20",
+          "label": "3. Ders"
+        },
+        {
+          "time": "19:30–20:10",
+          "label": "4. Ders"
+        },
+        {
+          "time": "20:30-21:10",
+          "label": "5. Ders"
+        },
+        {
+          "time": "21:20-22:00",
+          "label": "6. Ders"
+        }
+      ],
+      "schedule": {
+        "0_4": {
+          "subject": "Etüt",
+          "teacher": ""
+        },
+        "0_5": {
+          "subject": "Etüt",
+          "teacher": ""
+        },
+        "1_4": {
+          "subject": "Etüt",
+          "teacher": ""
+        },
+        "1_5": {
+          "subject": "Etüt",
+          "teacher": ""
+        },
+        "2_2": {
+          "subject": "Matematik",
+          "teacher": "SİNAN ERCAN"
+        },
+        "2_3": {
+          "subject": "Matematik",
+          "teacher": "SİNAN ERCAN"
+        },
+        "2_4": {
+          "subject": "Edebiyat",
+          "teacher": "EMRE KARABOYUN"
+        },
+        "3_2": {
+          "subject": "Fizik",
+          "teacher": "CEYHUN ÖĞRENENEFE"
+        },
+        "3_3": {
+          "subject": "Fizik",
+          "teacher": "CEYHUN ÖĞRENENEFE"
+        },
+        "3_4": {
+          "subject": "Edebiyat",
+          "teacher": "EMRE KARABOYUN"
+        },
+        "4_4": {
+          "subject": "Etüt",
+          "teacher": ""
+        },
+        "4_5": {
+          "subject": "Etüt",
+          "teacher": ""
+        },
+        "5_1": {
+          "subject": "Kimya",
+          "teacher": "Yasin Kandemir"
+        },
+        "5_2": {
+          "subject": "Kimya",
+          "teacher": "Yasin Kandemir"
+        },
+        "5_3": {
+          "subject": "Biyoloji",
+          "teacher": "TAYYİBE ÖĞRENENEFE"
+        },
+        "5_4": {
+          "subject": "Biyoloji",
+          "teacher": "TAYYİBE ÖĞRENENEFE"
+        }
+      },
+      "students": [
+        {
+          "id": "idmtj4tkhnnowa",
+          "name": "Ali ihsan Urhan",
+          "systemId": "38a31791-1f39-44c3-9df9-91c07cb614aa"
+        },
+        {
+          "id": "idmtj4tkhnz011",
+          "name": "AYŞE NAZ BAŞARSLAN",
+          "systemId": "2261eb6a-2c6c-4c58-94ff-1d0e4ced5451"
+        },
+        {
+          "id": "idmtj4tkhn3o2k",
+          "name": "BEGÜM TÜRKAN KEYİF",
+          "systemId": "2a70bc01-ebc8-49fd-b78f-a70eda6a7380"
+        },
+        {
+          "id": "idmtj4tkhns3nv",
+          "name": "Bengisu Elif Ardıç",
+          "systemId": "285d9452-0db8-4b80-9214-1e3580168ee4"
+        },
+        {
+          "id": "idmtj4tkhnm6bm",
+          "name": "Ekin Sevinç",
+          "systemId": "d0c9efd5-251c-4909-8159-64fcf735d3ed"
+        },
+        {
+          "id": "idmtj4tkhndb9d",
+          "name": "Eylül Nisa YILDIRIM",
+          "systemId": "8b024130-7432-446d-a8ff-4ec1fe19bfc7"
+        },
+        {
+          "id": "idmtj4tkhnnq5b",
+          "name": "Melis Okuturlar",
+          "systemId": "ddec0db1-fa3b-45db-b694-9ebe5a6062c1"
+        },
+        {
+          "id": "idmtj4tkhnamvc",
+          "name": "Muhammed Furkan Bilen",
+          "systemId": "477633c5-d236-4769-bf61-27e1f9be01c1"
+        },
+        {
+          "id": "idmtj4tkhn8mlq",
+          "name": "Zeynep Berra GÖKÇE",
+          "systemId": "6958b589-b280-4837-a448-97c31f8a2586"
+        },
+        {
+          "id": "idmtj4tkhnxh54",
+          "name": "ZEYNEP ESLEM BOZKURT",
+          "systemId": "0d5a343a-cdb1-4ae3-b5d3-8ef7373aae79"
+        },
+        {
+          "id": "idmtj4tkhnpu3u",
+          "name": "Zübeyde Bade Mersin",
+          "systemId": "2d359307-ac12-4adf-91cf-57a722066e23"
+        }
+      ],
+      "classLevel": "TYT",
+      "curriculum": [],
+      "periodsByDay": {}
+    },
+    {
+      "id": "idmtj4tkhni8bi",
+      "name": "2026-2027 11-B SINIFI",
+      "color": "#B4541E",
+      "branch": null,
+      "locked": false,
+      "advisor": "",
+      "classId": "32bf809f-9802-4284-a203-a3a6dbd0d02c",
+      "periods": [
+        {
+          "time": "17:00–17:40",
+          "label": "1. Ders"
+        },
+        {
+          "time": "17:50–18:30",
+          "label": "2. Ders"
+        },
+        {
+          "time": "18:40–19:20",
+          "label": "3. Ders"
+        },
+        {
+          "time": "19:30–20:10",
+          "label": "4. Ders"
+        },
+        {
+          "time": "20:30-21:10",
+          "label": "5. Ders"
+        },
+        {
+          "time": "21:20-22:00",
+          "label": "6. Ders"
+        }
+      ],
+      "schedule": {
+        "0_4": {
+          "subject": "Etüt",
+          "teacher": ""
+        },
+        "0_5": {
+          "subject": "Etüt",
+          "teacher": ""
+        },
+        "1_4": {
+          "subject": "Etüt",
+          "teacher": ""
+        },
+        "1_5": {
+          "subject": "Etüt",
+          "teacher": ""
+        },
+        "2_2": {
+          "subject": "Fizik",
+          "teacher": "ALİ AKTAŞ"
+        },
+        "2_3": {
+          "subject": "Fizik",
+          "teacher": "ALİ AKTAŞ"
+        },
+        "2_4": {
+          "subject": "Türkçe",
+          "teacher": "Sultan KURT"
+        },
+        "3_2": {
+          "subject": "Matematik",
+          "teacher": "SİNAN ERCAN"
+        },
+        "3_3": {
+          "subject": "Matematik",
+          "teacher": "SİNAN ERCAN"
+        },
+        "3_4": {
+          "subject": "Türkçe",
+          "teacher": "Sultan KURT"
+        },
+        "4_4": {
+          "subject": "Etüt",
+          "teacher": ""
+        },
+        "4_5": {
+          "subject": "Etüt",
+          "teacher": ""
+        },
+        "5_0": {
+          "subject": "DENEME",
+          "teacher": ""
+        },
+        "5_1": {
+          "subject": "Biyoloji",
+          "teacher": "GÖNÜL ÇAVUŞOĞLU"
+        },
+        "5_2": {
+          "subject": "Biyoloji",
+          "teacher": "GÖNÜL ÇAVUŞOĞLU"
+        },
+        "5_3": {
+          "subject": "Kimya",
+          "teacher": "HURİ  BALCI"
+        },
+        "5_4": {
+          "subject": "Kimya",
+          "teacher": "HURİ  BALCI"
+        }
+      },
+      "students": [
+        {
+          "id": "idmtj4tkhnlvyn",
+          "name": "ASUDE KÜLAHLI",
+          "systemId": "c3fc97f9-e8db-41f4-b5e7-f02edebac6df"
+        },
+        {
+          "id": "idmtj4tkhnls18",
+          "name": "BELEN RODOPLU",
+          "systemId": "89cc0123-47fd-4b5c-8761-317e5e369d2d"
+        },
+        {
+          "id": "idmtj4tkhnej10",
+          "name": "Berrak Ece Gümüştaş",
+          "systemId": "5e1c77d2-74c6-41f2-9abd-bd26173f050a"
+        },
+        {
+          "id": "idmtj4tkhn1ali",
+          "name": "ECRİN TAŞ",
+          "systemId": "6d9d2ee0-c3a9-47dc-b209-3d2968d74582"
+        },
+        {
+          "id": "idmtj4tkhngrgr",
+          "name": "Efe KARACA",
+          "systemId": "aaa61d55-64c6-490f-8de8-73eb6481abbe"
+        },
+        {
+          "id": "idmtj4tkhn96vm",
+          "name": "ERVA  KARACA",
+          "systemId": "e1cec720-d152-4caf-bbed-3b31d17dfc08"
+        },
+        {
+          "id": "idmtj4tkho57wl",
+          "name": "Hamza SAKA",
+          "systemId": "b646d1bb-1bc0-4251-bad4-34bd910c8b1c"
+        },
+        {
+          "id": "idmtj4tkhov0qp",
+          "name": "Salih Kerem Ekici",
+          "systemId": "55f42940-790a-4436-bf79-8f302b2eaf56"
+        },
+        {
+          "id": "idmtj4tkhoxz3i",
+          "name": "Yağmur Tuğ",
+          "systemId": "12a3e59f-00c1-4dd9-9f71-f80669a76f8c"
+        },
+        {
+          "id": "idmtj4tkhowjwx",
+          "name": "Zeynep Aslanhan",
+          "systemId": "879d7c33-31ca-41eb-8f0a-54479f571386"
+        }
+      ],
+      "classLevel": "TYT",
+      "curriculum": [],
+      "periodsByDay": {}
+    },
+    {
+      "id": "idmtj4tkho6e6f",
+      "name": "2026-2027 9 A SINIFI",
+      "color": "#7A3FA0",
+      "branch": null,
+      "locked": false,
+      "advisor": "",
+      "classId": "30efa130-0bd0-4b84-bcbe-b83ac029c610",
+      "periods": [
+        {
+          "time": "17:00–17:40",
+          "label": "1. Ders"
+        },
+        {
+          "time": "17:50–18:30",
+          "label": "2. Ders"
+        },
+        {
+          "time": "18:40–19:20",
+          "label": "3. Ders"
+        },
+        {
+          "time": "19:30–20:10",
+          "label": "4. Ders"
+        },
+        {
+          "time": "20:30-21:10",
+          "label": "5. Ders"
+        },
+        {
+          "time": "21:20-22:00",
+          "label": "6. Ders"
+        }
+      ],
+      "schedule": {
+        "0_4": {
+          "subject": "Etüt",
+          "teacher": ""
+        },
+        "0_5": {
+          "subject": "Etüt",
+          "teacher": ""
+        },
+        "1_4": {
+          "subject": "Etüt",
+          "teacher": ""
+        },
+        "1_5": {
+          "subject": "Etüt",
+          "teacher": ""
+        },
+        "2_2": {
+          "subject": "Fizik",
+          "teacher": "SALİH ÖNGÜL"
+        },
+        "2_3": {
+          "subject": "Fizik",
+          "teacher": "SALİH ÖNGÜL"
+        },
+        "2_4": {
+          "subject": "Edebiyat",
+          "teacher": "Reha Apaydın"
+        },
+        "3_2": {
+          "subject": "Biyoloji",
+          "teacher": "TAYYİBE ÖĞRENENEFE"
+        },
+        "3_3": {
+          "subject": "Biyoloji",
+          "teacher": "TAYYİBE ÖĞRENENEFE"
+        },
+        "4_4": {
+          "subject": "Etüt",
+          "teacher": ""
+        },
+        "4_5": {
+          "subject": "Etüt",
+          "teacher": ""
+        },
+        "5_0": {
+          "subject": "DENEME",
+          "teacher": ""
+        },
+        "5_1": {
+          "subject": "Kimya",
+          "teacher": "HURİ  BALCI"
+        },
+        "5_2": {
+          "subject": "Kimya",
+          "teacher": "HURİ  BALCI"
+        },
+        "5_3": {
+          "subject": "Matematik",
+          "teacher": "GÖKHAN MUMCU"
+        },
+        "5_4": {
+          "subject": "Matematik",
+          "teacher": "GÖKHAN MUMCU"
+        }
+      },
+      "students": [
+        {
+          "id": "idmtj4tkhoueo4",
+          "name": "Abdulsamet Olgun",
+          "systemId": "53d66ebb-a1ac-42bd-a853-36f7b7c154ca"
+        },
+        {
+          "id": "idmtj4tkho8n8i",
+          "name": "Aylin Atalay",
+          "systemId": "e5e2c541-14b4-4d41-a622-844d5f9943c4"
+        },
+        {
+          "id": "idmtj4tkhox8nt",
+          "name": "Ayşe Sena Tuncer",
+          "systemId": "a4edd331-4b2d-4eb0-ae9b-5727e7a22407"
+        },
+        {
+          "id": "idmtj4tkho35ou",
+          "name": "Kerem Demir",
+          "systemId": "2c73f6aa-516c-4fc6-ab1c-544d114e4b48"
+        },
+        {
+          "id": "idmtj4tkhoeva6",
+          "name": "Mesude Yavuz",
+          "systemId": "8254c2fb-2be9-47a3-9a19-79ea11c92621"
+        },
+        {
+          "id": "idmtj4tkhof2wb",
+          "name": "Yağız Mehmet Türker",
+          "systemId": "c5d62d9f-bd46-4465-84fe-d69c9391e72f"
+        }
+      ],
+      "classLevel": "9",
+      "curriculum": [],
+      "periodsByDay": {}
+    },
+    {
+      "id": "idmtj4tkhof8uw",
+      "name": "5A YAZ KAMPI",
+      "color": "#C0392B",
+      "branch": null,
+      "locked": false,
+      "advisor": "",
+      "classId": "8a23c803-e3db-46b1-8e9d-722228600397",
+      "periods": [
+        {
+          "time": "17:00–17:40",
+          "label": "1. Ders"
+        },
+        {
+          "time": "17:50–18:30",
+          "label": "2. Ders"
+        },
+        {
+          "time": "18:40–19:20",
+          "label": "3. Ders"
+        },
+        {
+          "time": "19:30–20:10",
+          "label": "4. Ders"
+        },
+        {
+          "time": "20:30-21:10",
+          "label": "5. Ders"
+        },
+        {
+          "time": "21:20-22:00",
+          "label": "6. Ders"
+        }
+      ],
+      "schedule": {},
+      "students": [
+        {
+          "id": "idmtj4tkhopacz",
+          "name": "Ahmet Mithat Çetinkaya",
+          "systemId": "2eb8582e-bbfc-4297-8826-1bd630f59268"
+        },
+        {
+          "id": "idmtj4tkho8aj7",
+          "name": "Beren Karaaslan",
+          "systemId": "47bf9207-e8ef-4956-90ed-0766960c15e0"
+        },
+        {
+          "id": "idmtj4tkhoxwod",
+          "name": "Emir aras Uzun",
+          "systemId": "55a8ca8e-e65c-4ab0-8606-58f7a5ab06da"
+        },
+        {
+          "id": "idmtj4tkho864o",
+          "name": "Erva Odabaş",
+          "systemId": "5f409cf4-3c43-4934-8084-f42c0c82565a"
+        },
+        {
+          "id": "idmtj4tkho73e6",
+          "name": "İkra Saç",
+          "systemId": "6fede419-4cb0-48f8-99d2-2352345916f0"
+        },
+        {
+          "id": "idmtj4tkhox453",
+          "name": "Naile ÖĞRENENEFE",
+          "systemId": "8cb6043b-7183-41e5-90bb-b6efb1819d74"
+        },
+        {
+          "id": "idmtj4tkhoymnd",
+          "name": "Raziye Nur Kaya",
+          "systemId": "6d2ffcb0-1d32-4284-a57a-eb6e36421588"
+        },
+        {
+          "id": "idmtj4tkho7tbm",
+          "name": "Tuna abdullah Şancı",
+          "systemId": "e42ff457-5e21-4a22-9a5d-43bf1fb33c2e"
+        }
+      ],
+      "classLevel": "5",
+      "curriculum": [],
+      "periodsByDay": {}
+    },
+    {
+      "id": "idmtj4tkho6gxr",
+      "name": "6A YAZ KAMPI",
+      "color": "#1E7FA8",
+      "branch": null,
+      "locked": false,
+      "advisor": "",
+      "classId": "c6d04176-a01c-4058-8dc7-6a7da8c90c22",
+      "periods": [
+        {
+          "time": "17:00–17:40",
+          "label": "1. Ders"
+        },
+        {
+          "time": "17:50–18:30",
+          "label": "2. Ders"
+        },
+        {
+          "time": "18:40–19:20",
+          "label": "3. Ders"
+        },
+        {
+          "time": "19:30–20:10",
+          "label": "4. Ders"
+        },
+        {
+          "time": "20:30-21:10",
+          "label": "5. Ders"
+        },
+        {
+          "time": "21:20-22:00",
+          "label": "6. Ders"
+        }
+      ],
+      "schedule": {},
+      "students": [
+        {
+          "id": "idmtj4tkhof4ww",
+          "name": "Ali Aslan",
+          "systemId": "c7afcf09-19e8-4e71-a148-4ae9f7f15a72"
+        },
+        {
+          "id": "idmtj4tkho5zvk",
+          "name": "Ayse melike İyilik",
+          "systemId": "e2a7eccc-1665-414b-afdf-f5880b7994b2"
+        },
+        {
+          "id": "idmtj4tkhowxrn",
+          "name": "Azra Avcı",
+          "systemId": "17e6a602-ce6b-44fd-b5d7-7c8e2aea0561"
+        },
+        {
+          "id": "idmtj4tkhoqq36",
+          "name": "Azra Elif Karaca",
+          "systemId": "79a365ce-ed7e-4f7d-b269-309a307d6421"
+        },
+        {
+          "id": "idmtj4tkhouoij",
+          "name": "AZRA KARACA",
+          "systemId": "c86d2633-b38c-4d35-be4b-a9eabd8e56c9"
+        },
+        {
+          "id": "idmtj4tkho8a2e",
+          "name": "Beyda Gül Ertaş",
+          "systemId": "550f24f2-6122-472c-bf44-41749106f331"
+        },
+        {
+          "id": "idmtj4tkhoxla1",
+          "name": "Çınar Kısmetli",
+          "systemId": "1b58633d-9103-42fe-b6a8-b8664c828483"
+        },
+        {
+          "id": "idmtj4tkhovfy6",
+          "name": "Elif sena Çomak",
+          "systemId": "a3c929c0-de04-4cb0-9861-f57bb3eddaaf"
+        },
+        {
+          "id": "idmtj4tkhoszvc",
+          "name": "Hifa İşci",
+          "systemId": "60e67d14-ef88-4932-971e-9ff8fb96f712"
+        },
+        {
+          "id": "idmtj4tkho2edc",
+          "name": "Kerem Akbunar",
+          "systemId": "c8b98d01-19d7-4502-abbc-233b32b6b129"
+        },
+        {
+          "id": "idmtj4tkhopb73",
+          "name": "Nira Mersin",
+          "systemId": "bd80c443-34c8-4022-ad3c-8471802d6044"
+        },
+        {
+          "id": "idmtj4tkhot23d",
+          "name": "ömer arslan",
+          "systemId": "520687e5-0ce4-4374-9aac-4a9393e14055"
+        },
+        {
+          "id": "idmtj4tkhpt6t2",
+          "name": "Rukiye Ekşioğlu",
+          "systemId": "f77e9020-2725-495f-8bcd-3ef144238f35"
+        },
+        {
+          "id": "idmtj4tkhpao1s",
+          "name": "Serap mira Ozyanık",
+          "systemId": "66175d1c-98d5-4fe9-aec3-86943ef8514f"
+        },
+        {
+          "id": "idmtj4tkhpdtp5",
+          "name": "Şamil Kaptan",
+          "systemId": "c6b4b987-532d-4a3d-9c56-ab2b2a151803"
+        },
+        {
+          "id": "idmtj4tkhplgrm",
+          "name": "Talha ayaydın",
+          "systemId": "c92e9b15-63a8-45fd-a21c-88b761f94799"
+        },
+        {
+          "id": "idmtj4tkhpv0d8",
+          "name": "Zahide Sena AKTÜRK",
+          "systemId": "4307aebe-7419-4c75-8260-0301bf110471"
+        }
+      ],
+      "classLevel": "6",
+      "curriculum": [],
+      "periodsByDay": {}
+    },
+    {
+      "id": "idmtj4tkhpmqeg",
+      "name": "6B YAZ KAMPI",
+      "color": "#2E4C8C",
+      "branch": null,
+      "locked": false,
+      "advisor": "",
+      "classId": "9fc5705e-ce8f-427c-938f-bbee6e370fd1",
+      "periods": [
+        {
+          "time": "17:00–17:40",
+          "label": "1. Ders"
+        },
+        {
+          "time": "17:50–18:30",
+          "label": "2. Ders"
+        },
+        {
+          "time": "18:40–19:20",
+          "label": "3. Ders"
+        },
+        {
+          "time": "19:30–20:10",
+          "label": "4. Ders"
+        },
+        {
+          "time": "20:30-21:10",
+          "label": "5. Ders"
+        },
+        {
+          "time": "21:20-22:00",
+          "label": "6. Ders"
+        }
+      ],
+      "schedule": {},
+      "students": [
+        {
+          "id": "idmtj4tkhpyy38",
+          "name": "Ali Aslan",
+          "systemId": "c7afcf09-19e8-4e71-a148-4ae9f7f15a72"
+        },
+        {
+          "id": "idmtj4tkhpshyd",
+          "name": "Ayse melike İyilik",
+          "systemId": "e2a7eccc-1665-414b-afdf-f5880b7994b2"
+        },
+        {
+          "id": "idmtj4tkhp3dkn",
+          "name": "Azra Avcı",
+          "systemId": "17e6a602-ce6b-44fd-b5d7-7c8e2aea0561"
+        },
+        {
+          "id": "idmtj4tkhp4nxj",
+          "name": "Azra Elif Karaca",
+          "systemId": "79a365ce-ed7e-4f7d-b269-309a307d6421"
+        },
+        {
+          "id": "idmtj4tkhp5x99",
+          "name": "AZRA KARACA",
+          "systemId": "c86d2633-b38c-4d35-be4b-a9eabd8e56c9"
+        },
+        {
+          "id": "idmtj4tkhps9l3",
+          "name": "Beyda Gül Ertaş",
+          "systemId": "550f24f2-6122-472c-bf44-41749106f331"
+        },
+        {
+          "id": "idmtj4tkhpefms",
+          "name": "Çınar Kısmetli",
+          "systemId": "1b58633d-9103-42fe-b6a8-b8664c828483"
+        },
+        {
+          "id": "idmtj4tkhp9we9",
+          "name": "Elif sena Çomak",
+          "systemId": "a3c929c0-de04-4cb0-9861-f57bb3eddaaf"
+        },
+        {
+          "id": "idmtj4tkhpkixq",
+          "name": "Hifa İşci",
+          "systemId": "60e67d14-ef88-4932-971e-9ff8fb96f712"
+        },
+        {
+          "id": "idmtj4tkhpytlt",
+          "name": "Kerem Akbunar",
+          "systemId": "c8b98d01-19d7-4502-abbc-233b32b6b129"
+        },
+        {
+          "id": "idmtj4tkhpvwdg",
+          "name": "Nira Mersin",
+          "systemId": "bd80c443-34c8-4022-ad3c-8471802d6044"
+        },
+        {
+          "id": "idmtj4tkhp2lpo",
+          "name": "ömer arslan",
+          "systemId": "520687e5-0ce4-4374-9aac-4a9393e14055"
+        },
+        {
+          "id": "idmtj4tkhp3adb",
+          "name": "Rukiye Ekşioğlu",
+          "systemId": "f77e9020-2725-495f-8bcd-3ef144238f35"
+        },
+        {
+          "id": "idmtj4tkhp4rt2",
+          "name": "Serap mira Ozyanık",
+          "systemId": "66175d1c-98d5-4fe9-aec3-86943ef8514f"
+        },
+        {
+          "id": "idmtj4tkhpv5ha",
+          "name": "Şamil Kaptan",
+          "systemId": "c6b4b987-532d-4a3d-9c56-ab2b2a151803"
+        },
+        {
+          "id": "idmtj4tkhq0lly",
+          "name": "Talha ayaydın",
+          "systemId": "c92e9b15-63a8-45fd-a21c-88b761f94799"
+        },
+        {
+          "id": "idmtj4tkhq2owm",
+          "name": "Zahide Sena AKTÜRK",
+          "systemId": "4307aebe-7419-4c75-8260-0301bf110471"
+        }
+      ],
+      "classLevel": "6",
+      "curriculum": [],
+      "periodsByDay": {}
+    },
+    {
+      "id": "idmtj4tkhqcrjj",
+      "name": "7A YAZ KAMPI",
+      "color": "#0E8A6B",
+      "branch": null,
+      "locked": false,
+      "advisor": "",
+      "classId": "162c355d-9ea4-4248-bcbf-e10f9cec59ed",
+      "periods": [
+        {
+          "time": "17:00–17:40",
+          "label": "1. Ders"
+        },
+        {
+          "time": "17:50–18:30",
+          "label": "2. Ders"
+        },
+        {
+          "time": "18:40–19:20",
+          "label": "3. Ders"
+        },
+        {
+          "time": "19:30–20:10",
+          "label": "4. Ders"
+        },
+        {
+          "time": "20:30-21:10",
+          "label": "5. Ders"
+        },
+        {
+          "time": "21:20-22:00",
+          "label": "6. Ders"
+        }
+      ],
+      "schedule": {},
+      "students": [
+        {
+          "id": "idmtj4tkhqg1ws",
+          "name": "Azra Güre",
+          "systemId": "31fd9bfa-eafb-44bf-a2dd-bfca23b05af4"
+        },
+        {
+          "id": "idmtj4tkhqa8s5",
+          "name": "Barbaros Çakıl",
+          "systemId": "7bf62d49-70da-418a-a237-70ea3ac63dff"
+        },
+        {
+          "id": "idmtj4tkhq8ze2",
+          "name": "Boğaçhan Erken",
+          "systemId": "8a50e00d-97a4-4e47-a7c6-10f7291ec0d5"
+        },
+        {
+          "id": "idmtj4tkhq1834",
+          "name": "Defne Asel YILDIRIM",
+          "systemId": "d1856168-6cec-421a-8540-e81884ae1d22"
+        },
+        {
+          "id": "idmtj4tkhqzkxu",
+          "name": "DURU YILMAZ",
+          "systemId": "9d2e9609-85f4-4389-b7df-be5c6c1f4089"
+        },
+        {
+          "id": "idmtj4tkhqbutj",
+          "name": "Haktan Saç",
+          "systemId": "21a620ee-b6f4-43dc-a9da-90405d30e11b"
+        },
+        {
+          "id": "idmtj4tkhqmvqt",
+          "name": "Kaan Ata Türkaydın",
+          "systemId": "77806ecd-ec83-4eb5-b0e1-6e52decbd715"
+        },
+        {
+          "id": "idmtj4tkhqv7cr",
+          "name": "Mehmet Baran Öğrenenefe",
+          "systemId": "ae143af5-39db-4e65-ae8c-b1b9d180947e"
+        },
+        {
+          "id": "idmtj4tkhqr0be",
+          "name": "Melike Önder",
+          "systemId": "df2fea8b-56ab-4055-aaa5-a6dfc0d38ad1"
+        },
+        {
+          "id": "idmtj4tkhqxma7",
+          "name": "Pelin Rodoplu",
+          "systemId": "75440629-db76-4de6-9643-fead48eb972e"
+        },
+        {
+          "id": "idmtj4tkhqymgq",
+          "name": "YUNUS EYMEN ÇITIR",
+          "systemId": "c273a3fc-11c6-48c6-8cfe-ef529aa9b46c"
+        },
+        {
+          "id": "idmtj4tkhqitxb",
+          "name": "ZEHRA BAŞARAN",
+          "systemId": "928fd12d-126c-42ba-8005-ab64d508054b"
+        },
+        {
+          "id": "idmtj4tkhq2i37",
+          "name": "Zeynep Duru SAĞMEN",
+          "systemId": "294d8286-d2a9-481d-9ab0-73cef795d607"
+        },
+        {
+          "id": "idmtj4tkhq0p0f",
+          "name": "Zeynep Erdoğan",
+          "systemId": "2485b3fb-a558-47c9-9ec6-98bb7ada8422"
+        }
+      ],
+      "classLevel": "7",
+      "curriculum": [],
+      "periodsByDay": {}
+    },
+    {
+      "id": "idmtj4tkhq5s5c",
+      "name": "8A YAZ KAMPI",
+      "color": "#B4541E",
+      "branch": null,
+      "locked": false,
+      "advisor": "",
+      "classId": "f14b1b1d-be9d-416a-aa82-1899b1c9fc08",
+      "periods": [
+        {
+          "time": "17:00–17:40",
+          "label": "1. Ders"
+        },
+        {
+          "time": "17:50–18:30",
+          "label": "2. Ders"
+        },
+        {
+          "time": "18:40–19:20",
+          "label": "3. Ders"
+        },
+        {
+          "time": "19:30–20:10",
+          "label": "4. Ders"
+        },
+        {
+          "time": "20:30-21:10",
+          "label": "5. Ders"
+        },
+        {
+          "time": "21:20-22:00",
+          "label": "6. Ders"
+        }
+      ],
+      "schedule": {},
+      "students": [
+        {
+          "id": "idmtj4tkhqkii8",
+          "name": "Abdullah Emir Güven",
+          "systemId": "85a36e75-6a42-426a-ba11-d7bcb0258447"
+        },
+        {
+          "id": "idmtj4tkhqbl2w",
+          "name": "Ada Kılıçarslan",
+          "systemId": "e9d897ff-6444-4d7d-b001-7a60ef46cf2d"
+        },
+        {
+          "id": "idmtj4tkhqueu4",
+          "name": "Adil Eymen Yaşar",
+          "systemId": "fe1d235b-038b-47cb-a8ef-8078a6bad77c"
+        },
+        {
+          "id": "idmtj4tkhq22ik",
+          "name": "Ayşegül Şanlı",
+          "systemId": "72c7f6cd-1a36-47ed-b76f-2f521c04039e"
+        },
+        {
+          "id": "idmtj4tkhq9e4f",
+          "name": "Ayşegül Zeynep Yıldırım",
+          "systemId": "7c8f0995-c268-4418-969e-ae2318c102f7"
+        },
+        {
+          "id": "idmtj4tkhre15a",
+          "name": "belinay akar",
+          "systemId": "4ad3fe75-5f13-49d2-8943-e145a02e18e2"
+        },
+        {
+          "id": "idmtj4tkhr920y",
+          "name": "BEREN SU  KAHRAMAN",
+          "systemId": "5f760223-e9e9-49fd-aff1-fd6ee8cd4b98"
+        },
+        {
+          "id": "idmtj4tkhraqnd",
+          "name": "Betül Ateşci",
+          "systemId": "aa8c0fda-2a9d-4cfd-89ec-56c8067dedff"
+        },
+        {
+          "id": "idmtj4tkhr2ryb",
+          "name": "BETÜL ERVA KAPLAN",
+          "systemId": "ccccfd3c-7ea6-44c5-8fb2-c9b4be865b04"
+        },
+        {
+          "id": "idmtj4tkhrh13o",
+          "name": "Beytullah tuna Çakan",
+          "systemId": "5222eff2-e885-4bc6-b889-9ea659878e81"
+        },
+        {
+          "id": "idmtj4tkhrpdo8",
+          "name": "Beyza Ahsen Çakmak",
+          "systemId": "fcf3dd86-2307-4d55-879d-d7ae188350ed"
+        },
+        {
+          "id": "idmtj4tkhrec0n",
+          "name": "Cemre Zülal KARAKIŞ",
+          "systemId": "a2495e47-4813-4c61-8727-b6f630d47ed2"
+        },
+        {
+          "id": "idmtj4tkhryxut",
+          "name": "Ceren Coşkun",
+          "systemId": "6ec8b4a6-fb71-4524-96d3-466501f19907"
+        },
+        {
+          "id": "idmtj4tkhrkcyn",
+          "name": "Cihangir Aslan",
+          "systemId": "060038d6-6d2c-4b27-8786-813cecff58ab"
+        },
+        {
+          "id": "idmtj4tkhrccjd",
+          "name": "Deniz Sadi Yüce",
+          "systemId": "115bf51c-672a-4e95-a31b-66bb0976d28a"
+        },
+        {
+          "id": "idmtj4tkhrs17k",
+          "name": "ELA  AKGÜN",
+          "systemId": "d55a9c21-075f-4c5f-b824-fa878f1a90f3"
+        },
+        {
+          "id": "idmtj4tkhri8ks",
+          "name": "Elif Beril Tığlı",
+          "systemId": "bc8aad79-b22c-4822-bfc6-43ec5c9ec96c"
+        },
+        {
+          "id": "idmtj4tkhr97ed",
+          "name": "Erva İşci",
+          "systemId": "3daa11ab-ec0b-487c-aaa6-59b480159c5b"
+        },
+        {
+          "id": "idmtj4tkhrkynm",
+          "name": "Esila Erten",
+          "systemId": "4951b4b9-6fd9-4d7f-b730-45c1580aa3fd"
+        },
+        {
+          "id": "idmtj4tkhrwebz",
+          "name": "Eylül Karlatlı",
+          "systemId": "6424c763-efb5-466b-8aa5-ce2e3591c900"
+        },
+        {
+          "id": "idmtj4tkhr0dxh",
+          "name": "Göktan çelik",
+          "systemId": "936e348e-7c5a-40bf-86b7-ec2b4b348286"
+        },
+        {
+          "id": "idmtj4tkhsoakd",
+          "name": "Hakan Emin İnaltekin",
+          "systemId": "03c889da-5edf-4fb4-8677-c71844ec3af2"
+        },
+        {
+          "id": "idmtj4tkhsgm4l",
+          "name": "Irmak can Dilekçi",
+          "systemId": "36900315-dbf1-4f43-95f4-804c0e5f259c"
+        },
+        {
+          "id": "idmtj4tkhsw7d6",
+          "name": "Işıl Ecesu  ÇALIŞKAN",
+          "systemId": "46082b67-a9d3-48c2-9e07-538814a0ad5f"
+        },
+        {
+          "id": "idmtj4tkhsmxe4",
+          "name": "Mahir Demirbaş",
+          "systemId": "d589a378-c688-43c3-a612-c1f79373cd55"
+        },
+        {
+          "id": "idmtj4tkhstrzy",
+          "name": "Mehmet Işık",
+          "systemId": "4254d577-f2d7-4b56-a47b-998113b54838"
+        },
+        {
+          "id": "idmtj4tkhszefm",
+          "name": "Muhammed kağan Kaplan",
+          "systemId": "844b03ca-05be-4c57-a942-6179c3fda535"
+        },
+        {
+          "id": "idmtj4tkhsns03",
+          "name": "Muhammed Salih Özkaya",
+          "systemId": "7ce5de76-b652-4162-a0bb-7f146890139d"
+        },
+        {
+          "id": "idmtj4tkhsjq4t",
+          "name": "Muhammed Talha Cevik",
+          "systemId": "bd9496d1-8683-415d-a926-bae6348b8269"
+        },
+        {
+          "id": "idmtj4tkhssjac",
+          "name": "Nilsu Zeynep Yıldız",
+          "systemId": "877776d6-26df-4fa9-a7cd-1a6f5517a7a3"
+        },
+        {
+          "id": "idmtj4tkhtxgzd",
+          "name": "Nilüfer Peker",
+          "systemId": "d452d830-1ccd-4807-8ca9-8b5275c882bd"
+        },
+        {
+          "id": "idmtj4tkht9rjg",
+          "name": "Nisan Özen",
+          "systemId": "85d96332-fbe7-4a95-ba7a-1a0301fcac15"
+        },
+        {
+          "id": "idmtj4tkht5osd",
+          "name": "Nusret Orhan KUŞ",
+          "systemId": "5e678dd0-d997-4125-8bc1-f53990c214b9"
+        },
+        {
+          "id": "idmtj4tkhtgw5g",
+          "name": "Ömer Selim Emek",
+          "systemId": "9baf1c4d-c8c0-45a8-8d19-829a357ea9dc"
+        },
+        {
+          "id": "idmtj4tkhtts1a",
+          "name": "Poyraz Tüylü",
+          "systemId": "886781ed-7be1-4c98-a48a-bab426add55f"
+        },
+        {
+          "id": "idmtj4tkhtpybo",
+          "name": "Reyyan Mergen",
+          "systemId": "cad26903-fa71-4524-9a9b-cb3c9b661451"
+        },
+        {
+          "id": "idmtj4tkht44pp",
+          "name": "saffet deveci",
+          "systemId": "00214d42-0366-4eaf-b4ba-ea4d7d8e5c2c"
+        },
+        {
+          "id": "idmtj4tkhuaegc",
+          "name": "SAFİYE ÖĞRENENEFE",
+          "systemId": "12b61ed4-63b7-4503-acc0-444aa275aa1c"
+        },
+        {
+          "id": "idmtj4tkhulkc5",
+          "name": "Sevim Nisa Soydemir",
+          "systemId": "ad868d7d-b6e5-4017-8196-f6fec61d9050"
+        },
+        {
+          "id": "idmtj4tkhuijhh",
+          "name": "ŞEYMA TURAN",
+          "systemId": "50d1da65-a2b9-47c3-a7ba-32710bc1f587"
+        },
+        {
+          "id": "idmtj4tkhu66o8",
+          "name": "Şeyma Uslu",
+          "systemId": "7c06d8dc-7e5b-4ae0-a2ec-6f4c26286cd2"
+        },
+        {
+          "id": "idmtj4tkhu7f7u",
+          "name": "TEBESSÜM AKTÜRK",
+          "systemId": "5a8633ed-6ecd-4be2-a086-201f382b4bce"
+        },
+        {
+          "id": "idmtj4tkhvuth1",
+          "name": "Tuğhan Kalaycı",
+          "systemId": "81630ddc-cce3-4d83-b99c-7d667b0c087a"
+        },
+        {
+          "id": "idmtj4tkhvumxl",
+          "name": "Umay Karadağ",
+          "systemId": "f30dbba9-635f-4cb6-819a-259bf694a65e"
+        },
+        {
+          "id": "idmtj4tkhvn6kv",
+          "name": "Yasir Tavlar",
+          "systemId": "3e07c8bb-bcd0-4862-afd2-237ab83e7aa1"
+        },
+        {
+          "id": "idmtj4tkhwayle",
+          "name": "Yavuz",
+          "systemId": "965e9bd3-5243-49d2-b570-124714dbf49e"
+        },
+        {
+          "id": "idmtj4tkhwhena",
+          "name": "Yusuf poyraz Cihangir",
+          "systemId": "a398142d-04a1-4006-8ee2-6fe4a8605afb"
+        },
+        {
+          "id": "idmtj4tkhwsfqs",
+          "name": "Zehra AK",
+          "systemId": "23d4a48e-e229-4a2d-9e33-cd2df23dd39a"
+        },
+        {
+          "id": "idmtj4tkhw5kss",
+          "name": "Zeynep   GÜMÜŞ",
+          "systemId": "baf66c47-9bb5-4465-a34d-ef8991e6be65"
+        },
+        {
+          "id": "idmtj4tkhxfhu6",
+          "name": "Zeynep ÇAKMAK",
+          "systemId": "fb21c6ce-bd90-4f47-9383-538ef7ccc597"
+        },
+        {
+          "id": "idmtj4tkhx0x62",
+          "name": "ZEYNEP İNCE",
+          "systemId": "5bba6d79-29e9-49e3-ad49-7c3de3ef61d7"
+        },
+        {
+          "id": "idmtj4tkhxvb81",
+          "name": "Zeynep Tanem",
+          "systemId": "9826ad51-7240-489a-859d-d925e12e02ce"
+        }
+      ],
+      "classLevel": "LGS",
+      "curriculum": [],
+      "periodsByDay": {}
+    },
+    {
+      "id": "idmtj4tkhxdylq",
+      "name": "8B YAZ KAMPI",
+      "color": "#7A3FA0",
+      "branch": null,
+      "locked": false,
+      "advisor": "",
+      "classId": "a45cae1a-0ec3-420e-9bd1-280a06f4196c",
+      "periods": [
+        {
+          "time": "17:00–17:40",
+          "label": "1. Ders"
+        },
+        {
+          "time": "17:50–18:30",
+          "label": "2. Ders"
+        },
+        {
+          "time": "18:40–19:20",
+          "label": "3. Ders"
+        },
+        {
+          "time": "19:30–20:10",
+          "label": "4. Ders"
+        },
+        {
+          "time": "20:30-21:10",
+          "label": "5. Ders"
+        },
+        {
+          "time": "21:20-22:00",
+          "label": "6. Ders"
+        }
+      ],
+      "schedule": {},
+      "students": [
+        {
+          "id": "idmtj4tkhxbum7",
+          "name": "Abdullah Emir Güven",
+          "systemId": "85a36e75-6a42-426a-ba11-d7bcb0258447"
+        },
+        {
+          "id": "idmtj4tkhxb2og",
+          "name": "Ada Kılıçarslan",
+          "systemId": "e9d897ff-6444-4d7d-b001-7a60ef46cf2d"
+        },
+        {
+          "id": "idmtj4tkhx0p2z",
+          "name": "Adil Eymen Yaşar",
+          "systemId": "fe1d235b-038b-47cb-a8ef-8078a6bad77c"
+        },
+        {
+          "id": "idmtj4tkhxi9l1",
+          "name": "Ayşegül Şanlı",
+          "systemId": "72c7f6cd-1a36-47ed-b76f-2f521c04039e"
+        },
+        {
+          "id": "idmtj4tkhx7mfr",
+          "name": "Ayşegül Zeynep Yıldırım",
+          "systemId": "7c8f0995-c268-4418-969e-ae2318c102f7"
+        },
+        {
+          "id": "idmtj4tkhxjqew",
+          "name": "belinay akar",
+          "systemId": "4ad3fe75-5f13-49d2-8943-e145a02e18e2"
+        },
+        {
+          "id": "idmtj4tkhxbts2",
+          "name": "BEREN SU  KAHRAMAN",
+          "systemId": "5f760223-e9e9-49fd-aff1-fd6ee8cd4b98"
+        },
+        {
+          "id": "idmtj4tkhy9rsm",
+          "name": "Betül Ateşci",
+          "systemId": "aa8c0fda-2a9d-4cfd-89ec-56c8067dedff"
+        },
+        {
+          "id": "idmtj4tkhybf53",
+          "name": "BETÜL ERVA KAPLAN",
+          "systemId": "ccccfd3c-7ea6-44c5-8fb2-c9b4be865b04"
+        },
+        {
+          "id": "idmtj4tkhy9zoq",
+          "name": "Beytullah tuna Çakan",
+          "systemId": "5222eff2-e885-4bc6-b889-9ea659878e81"
+        },
+        {
+          "id": "idmtj4tkhy4qmw",
+          "name": "Beyza Ahsen Çakmak",
+          "systemId": "fcf3dd86-2307-4d55-879d-d7ae188350ed"
+        },
+        {
+          "id": "idmtj4tkhy4yb3",
+          "name": "Cemre Zülal KARAKIŞ",
+          "systemId": "a2495e47-4813-4c61-8727-b6f630d47ed2"
+        },
+        {
+          "id": "idmtj4tkhy56me",
+          "name": "Ceren Coşkun",
+          "systemId": "6ec8b4a6-fb71-4524-96d3-466501f19907"
+        },
+        {
+          "id": "idmtj4tkhya6gp",
+          "name": "Cihangir Aslan",
+          "systemId": "060038d6-6d2c-4b27-8786-813cecff58ab"
+        },
+        {
+          "id": "idmtj4tkhye54x",
+          "name": "Deniz Sadi Yüce",
+          "systemId": "115bf51c-672a-4e95-a31b-66bb0976d28a"
+        },
+        {
+          "id": "idmtj4tkhy0ovq",
+          "name": "ELA  AKGÜN",
+          "systemId": "d55a9c21-075f-4c5f-b824-fa878f1a90f3"
+        },
+        {
+          "id": "idmtj4tkhyp15c",
+          "name": "Elif Beril Tığlı",
+          "systemId": "bc8aad79-b22c-4822-bfc6-43ec5c9ec96c"
+        },
+        {
+          "id": "idmtj4tkhys4v1",
+          "name": "Erva İşci",
+          "systemId": "3daa11ab-ec0b-487c-aaa6-59b480159c5b"
+        },
+        {
+          "id": "idmtj4tkhybag6",
+          "name": "Esila Erten",
+          "systemId": "4951b4b9-6fd9-4d7f-b730-45c1580aa3fd"
+        },
+        {
+          "id": "idmtj4tkhyvsuv",
+          "name": "Eylül Karlatlı",
+          "systemId": "6424c763-efb5-466b-8aa5-ce2e3591c900"
+        },
+        {
+          "id": "idmtj4tkhyp1jn",
+          "name": "Göktan çelik",
+          "systemId": "936e348e-7c5a-40bf-86b7-ec2b4b348286"
+        },
+        {
+          "id": "idmtj4tkhymcrx",
+          "name": "Hakan Emin İnaltekin",
+          "systemId": "03c889da-5edf-4fb4-8677-c71844ec3af2"
+        },
+        {
+          "id": "idmtj4tkhzmzki",
+          "name": "Irmak can Dilekçi",
+          "systemId": "36900315-dbf1-4f43-95f4-804c0e5f259c"
+        },
+        {
+          "id": "idmtj4tkhzqpia",
+          "name": "Işıl Ecesu  ÇALIŞKAN",
+          "systemId": "46082b67-a9d3-48c2-9e07-538814a0ad5f"
+        },
+        {
+          "id": "idmtj4tkhzkyb3",
+          "name": "Mahir Demirbaş",
+          "systemId": "d589a378-c688-43c3-a612-c1f79373cd55"
+        },
+        {
+          "id": "idmtj4tkhzohor",
+          "name": "Mehmet Işık",
+          "systemId": "4254d577-f2d7-4b56-a47b-998113b54838"
+        },
+        {
+          "id": "idmtj4tkhzv393",
+          "name": "Muhammed kağan Kaplan",
+          "systemId": "844b03ca-05be-4c57-a942-6179c3fda535"
+        },
+        {
+          "id": "idmtj4tkhz75ou",
+          "name": "Muhammed Salih Özkaya",
+          "systemId": "7ce5de76-b652-4162-a0bb-7f146890139d"
+        },
+        {
+          "id": "idmtj4tkhzcynd",
+          "name": "Muhammed Talha Cevik",
+          "systemId": "bd9496d1-8683-415d-a926-bae6348b8269"
+        },
+        {
+          "id": "idmtj4tkhz8r4r",
+          "name": "Nilsu Zeynep Yıldız",
+          "systemId": "877776d6-26df-4fa9-a7cd-1a6f5517a7a3"
+        },
+        {
+          "id": "idmtj4tki0osgd",
+          "name": "Nilüfer Peker",
+          "systemId": "d452d830-1ccd-4807-8ca9-8b5275c882bd"
+        },
+        {
+          "id": "idmtj4tki0zfki",
+          "name": "Nisan Özen",
+          "systemId": "85d96332-fbe7-4a95-ba7a-1a0301fcac15"
+        },
+        {
+          "id": "idmtj4tki0xy9n",
+          "name": "Nusret Orhan KUŞ",
+          "systemId": "5e678dd0-d997-4125-8bc1-f53990c214b9"
+        },
+        {
+          "id": "idmtj4tki0yr5z",
+          "name": "Ömer Selim Emek",
+          "systemId": "9baf1c4d-c8c0-45a8-8d19-829a357ea9dc"
+        },
+        {
+          "id": "idmtj4tki0vgjp",
+          "name": "Poyraz Tüylü",
+          "systemId": "886781ed-7be1-4c98-a48a-bab426add55f"
+        },
+        {
+          "id": "idmtj4tki0tkfe",
+          "name": "Reyyan Mergen",
+          "systemId": "cad26903-fa71-4524-9a9b-cb3c9b661451"
+        },
+        {
+          "id": "idmtj4tki1r2pp",
+          "name": "saffet deveci",
+          "systemId": "00214d42-0366-4eaf-b4ba-ea4d7d8e5c2c"
+        },
+        {
+          "id": "idmtj4tki1zzgc",
+          "name": "SAFİYE ÖĞRENENEFE",
+          "systemId": "12b61ed4-63b7-4503-acc0-444aa275aa1c"
+        },
+        {
+          "id": "idmtj4tki1witf",
+          "name": "Sevim Nisa Soydemir",
+          "systemId": "ad868d7d-b6e5-4017-8196-f6fec61d9050"
+        },
+        {
+          "id": "idmtj4tki11v4b",
+          "name": "ŞEYMA TURAN",
+          "systemId": "50d1da65-a2b9-47c3-a7ba-32710bc1f587"
+        },
+        {
+          "id": "idmtj4tki1uuyt",
+          "name": "Şeyma Uslu",
+          "systemId": "7c06d8dc-7e5b-4ae0-a2ec-6f4c26286cd2"
+        },
+        {
+          "id": "idmtj4tki1at82",
+          "name": "TEBESSÜM AKTÜRK",
+          "systemId": "5a8633ed-6ecd-4be2-a086-201f382b4bce"
+        },
+        {
+          "id": "idmtj4tki2eatr",
+          "name": "Tuğhan Kalaycı",
+          "systemId": "81630ddc-cce3-4d83-b99c-7d667b0c087a"
+        },
+        {
+          "id": "idmtj4tki2dlh5",
+          "name": "Umay Karadağ",
+          "systemId": "f30dbba9-635f-4cb6-819a-259bf694a65e"
+        },
+        {
+          "id": "idmtj4tki24twu",
+          "name": "Yasir Tavlar",
+          "systemId": "3e07c8bb-bcd0-4862-afd2-237ab83e7aa1"
+        },
+        {
+          "id": "idmtj4tki2kucr",
+          "name": "Yavuz",
+          "systemId": "965e9bd3-5243-49d2-b570-124714dbf49e"
+        },
+        {
+          "id": "idmtj4tki2ydqm",
+          "name": "Yusuf poyraz Cihangir",
+          "systemId": "a398142d-04a1-4006-8ee2-6fe4a8605afb"
+        },
+        {
+          "id": "idmtj4tki3iep2",
+          "name": "Zehra AK",
+          "systemId": "23d4a48e-e229-4a2d-9e33-cd2df23dd39a"
+        },
+        {
+          "id": "idmtj4tki36ssn",
+          "name": "Zeynep   GÜMÜŞ",
+          "systemId": "baf66c47-9bb5-4465-a34d-ef8991e6be65"
+        },
+        {
+          "id": "idmtj4tki3ordx",
+          "name": "Zeynep ÇAKMAK",
+          "systemId": "fb21c6ce-bd90-4f47-9383-538ef7ccc597"
+        },
+        {
+          "id": "idmtj4tki389hg",
+          "name": "ZEYNEP İNCE",
+          "systemId": "5bba6d79-29e9-49e3-ad49-7c3de3ef61d7"
+        },
+        {
+          "id": "idmtj4tki4pqks",
+          "name": "Zeynep Tanem",
+          "systemId": "9826ad51-7240-489a-859d-d925e12e02ce"
+        }
+      ],
+      "classLevel": "LGS",
+      "curriculum": [],
+      "periodsByDay": {}
+    },
+    {
+      "id": "idmtj4tki4samx",
+      "name": "8C SINIFI",
+      "color": "#C0392B",
+      "branch": null,
+      "locked": false,
+      "advisor": "",
+      "classId": "822f8c84-f6e7-4d04-9669-c54841a5f3fa",
+      "periods": [
+        {
+          "time": "17:00–17:40",
+          "label": "1. Ders"
+        },
+        {
+          "time": "17:50–18:30",
+          "label": "2. Ders"
+        },
+        {
+          "time": "18:40–19:20",
+          "label": "3. Ders"
+        },
+        {
+          "time": "19:30–20:10",
+          "label": "4. Ders"
+        },
+        {
+          "time": "20:30-21:10",
+          "label": "5. Ders"
+        },
+        {
+          "time": "21:20-22:00",
+          "label": "6. Ders"
+        }
+      ],
+      "schedule": {},
+      "students": [
+        {
+          "id": "idmtj4tki42jk0",
+          "name": "Abdullah Emir Güven",
+          "systemId": "85a36e75-6a42-426a-ba11-d7bcb0258447"
+        },
+        {
+          "id": "idmtj4tki4q9ra",
+          "name": "Ada Kılıçarslan",
+          "systemId": "e9d897ff-6444-4d7d-b001-7a60ef46cf2d"
+        },
+        {
+          "id": "idmtj4tki46aha",
+          "name": "Adil Eymen Yaşar",
+          "systemId": "fe1d235b-038b-47cb-a8ef-8078a6bad77c"
+        },
+        {
+          "id": "idmtj4tki4me1e",
+          "name": "Ayşegül Şanlı",
+          "systemId": "72c7f6cd-1a36-47ed-b76f-2f521c04039e"
+        },
+        {
+          "id": "idmtj4tki4t0sm",
+          "name": "Ayşegül Zeynep Yıldırım",
+          "systemId": "7c8f0995-c268-4418-969e-ae2318c102f7"
+        },
+        {
+          "id": "idmtj4tki4v2zg",
+          "name": "belinay akar",
+          "systemId": "4ad3fe75-5f13-49d2-8943-e145a02e18e2"
+        },
+        {
+          "id": "idmtj4tki4z9xt",
+          "name": "BEREN SU  KAHRAMAN",
+          "systemId": "5f760223-e9e9-49fd-aff1-fd6ee8cd4b98"
+        },
+        {
+          "id": "idmtj4tki4y94i",
+          "name": "Betül Ateşci",
+          "systemId": "aa8c0fda-2a9d-4cfd-89ec-56c8067dedff"
+        },
+        {
+          "id": "idmtj4tki4detm",
+          "name": "BETÜL ERVA KAPLAN",
+          "systemId": "ccccfd3c-7ea6-44c5-8fb2-c9b4be865b04"
+        },
+        {
+          "id": "idmtj4tki4971t",
+          "name": "Beytullah tuna Çakan",
+          "systemId": "5222eff2-e885-4bc6-b889-9ea659878e81"
+        },
+        {
+          "id": "idmtj4tki4c8z4",
+          "name": "Beyza Ahsen Çakmak",
+          "systemId": "fcf3dd86-2307-4d55-879d-d7ae188350ed"
+        },
+        {
+          "id": "idmtj4tki46c74",
+          "name": "Cemre Zülal KARAKIŞ",
+          "systemId": "a2495e47-4813-4c61-8727-b6f630d47ed2"
+        },
+        {
+          "id": "idmtj4tki4d8y6",
+          "name": "Ceren Coşkun",
+          "systemId": "6ec8b4a6-fb71-4524-96d3-466501f19907"
+        },
+        {
+          "id": "idmtj4tki4r2nh",
+          "name": "Cihangir Aslan",
+          "systemId": "060038d6-6d2c-4b27-8786-813cecff58ab"
+        },
+        {
+          "id": "idmtj4tki4yf7h",
+          "name": "Deniz Sadi Yüce",
+          "systemId": "115bf51c-672a-4e95-a31b-66bb0976d28a"
+        },
+        {
+          "id": "idmtj4tki4sx9z",
+          "name": "ELA  AKGÜN",
+          "systemId": "d55a9c21-075f-4c5f-b824-fa878f1a90f3"
+        },
+        {
+          "id": "idmtj4tki4ekhf",
+          "name": "Elif Beril Tığlı",
+          "systemId": "bc8aad79-b22c-4822-bfc6-43ec5c9ec96c"
+        },
+        {
+          "id": "idmtj4tki57s4y",
+          "name": "Erva İşci",
+          "systemId": "3daa11ab-ec0b-487c-aaa6-59b480159c5b"
+        },
+        {
+          "id": "idmtj4tki5wy2g",
+          "name": "Esila Erten",
+          "systemId": "4951b4b9-6fd9-4d7f-b730-45c1580aa3fd"
+        },
+        {
+          "id": "idmtj4tki5qm89",
+          "name": "Eylül Karlatlı",
+          "systemId": "6424c763-efb5-466b-8aa5-ce2e3591c900"
+        },
+        {
+          "id": "idmtj4tki5i54u",
+          "name": "Göktan çelik",
+          "systemId": "936e348e-7c5a-40bf-86b7-ec2b4b348286"
+        },
+        {
+          "id": "idmtj4tki523pz",
+          "name": "Hakan Emin İnaltekin",
+          "systemId": "03c889da-5edf-4fb4-8677-c71844ec3af2"
+        },
+        {
+          "id": "idmtj4tki5b35j",
+          "name": "Irmak can Dilekçi",
+          "systemId": "36900315-dbf1-4f43-95f4-804c0e5f259c"
+        },
+        {
+          "id": "idmtj4tki51mt1",
+          "name": "Işıl Ecesu  ÇALIŞKAN",
+          "systemId": "46082b67-a9d3-48c2-9e07-538814a0ad5f"
+        },
+        {
+          "id": "idmtj4tki5zwpu",
+          "name": "Mahir Demirbaş",
+          "systemId": "d589a378-c688-43c3-a612-c1f79373cd55"
+        },
+        {
+          "id": "idmtj4tki5mi7o",
+          "name": "Mehmet Işık",
+          "systemId": "4254d577-f2d7-4b56-a47b-998113b54838"
+        },
+        {
+          "id": "idmtj4tki6c6eo",
+          "name": "Muhammed kağan Kaplan",
+          "systemId": "844b03ca-05be-4c57-a942-6179c3fda535"
+        },
+        {
+          "id": "idmtj4tki69z0e",
+          "name": "Muhammed Salih Özkaya",
+          "systemId": "7ce5de76-b652-4162-a0bb-7f146890139d"
+        },
+        {
+          "id": "idmtj4tki6uuxf",
+          "name": "Muhammed Talha Cevik",
+          "systemId": "bd9496d1-8683-415d-a926-bae6348b8269"
+        },
+        {
+          "id": "idmtj4tki6f5mk",
+          "name": "Nilsu Zeynep Yıldız",
+          "systemId": "877776d6-26df-4fa9-a7cd-1a6f5517a7a3"
+        },
+        {
+          "id": "idmtj4tki6cvoi",
+          "name": "Nilüfer Peker",
+          "systemId": "d452d830-1ccd-4807-8ca9-8b5275c882bd"
+        },
+        {
+          "id": "idmtj4tki6ti09",
+          "name": "Nisan Özen",
+          "systemId": "85d96332-fbe7-4a95-ba7a-1a0301fcac15"
+        },
+        {
+          "id": "idmtj4tki6rnrt",
+          "name": "Nusret Orhan KUŞ",
+          "systemId": "5e678dd0-d997-4125-8bc1-f53990c214b9"
+        },
+        {
+          "id": "idmtj4tki7hkpq",
+          "name": "Ömer Selim Emek",
+          "systemId": "9baf1c4d-c8c0-45a8-8d19-829a357ea9dc"
+        },
+        {
+          "id": "idmtj4tki7ptr8",
+          "name": "Poyraz Tüylü",
+          "systemId": "886781ed-7be1-4c98-a48a-bab426add55f"
+        },
+        {
+          "id": "idmtj4tki756fs",
+          "name": "Reyyan Mergen",
+          "systemId": "cad26903-fa71-4524-9a9b-cb3c9b661451"
+        },
+        {
+          "id": "idmtj4tki7wn0f",
+          "name": "saffet deveci",
+          "systemId": "00214d42-0366-4eaf-b4ba-ea4d7d8e5c2c"
+        },
+        {
+          "id": "idmtj4tki7gn9g",
+          "name": "SAFİYE ÖĞRENENEFE",
+          "systemId": "12b61ed4-63b7-4503-acc0-444aa275aa1c"
+        },
+        {
+          "id": "idmtj4tki7bfcj",
+          "name": "Sevim Nisa Soydemir",
+          "systemId": "ad868d7d-b6e5-4017-8196-f6fec61d9050"
+        },
+        {
+          "id": "idmtj4tki80mkp",
+          "name": "ŞEYMA TURAN",
+          "systemId": "50d1da65-a2b9-47c3-a7ba-32710bc1f587"
+        },
+        {
+          "id": "idmtj4tki8rtjr",
+          "name": "Şeyma Uslu",
+          "systemId": "7c06d8dc-7e5b-4ae0-a2ec-6f4c26286cd2"
+        },
+        {
+          "id": "idmtj4tki8fc73",
+          "name": "TEBESSÜM AKTÜRK",
+          "systemId": "5a8633ed-6ecd-4be2-a086-201f382b4bce"
+        },
+        {
+          "id": "idmtj4tki8igr0",
+          "name": "Tuğhan Kalaycı",
+          "systemId": "81630ddc-cce3-4d83-b99c-7d667b0c087a"
+        },
+        {
+          "id": "idmtj4tki8du5d",
+          "name": "Umay Karadağ",
+          "systemId": "f30dbba9-635f-4cb6-819a-259bf694a65e"
+        },
+        {
+          "id": "idmtj4tki9issh",
+          "name": "Yasir Tavlar",
+          "systemId": "3e07c8bb-bcd0-4862-afd2-237ab83e7aa1"
+        },
+        {
+          "id": "idmtj4tki960px",
+          "name": "Yavuz",
+          "systemId": "965e9bd3-5243-49d2-b570-124714dbf49e"
+        },
+        {
+          "id": "idmtj4tki9dgz0",
+          "name": "Yusuf poyraz Cihangir",
+          "systemId": "a398142d-04a1-4006-8ee2-6fe4a8605afb"
+        },
+        {
+          "id": "idmtj4tki9jxo7",
+          "name": "Zehra AK",
+          "systemId": "23d4a48e-e229-4a2d-9e33-cd2df23dd39a"
+        },
+        {
+          "id": "idmtj4tki9vqxs",
+          "name": "Zeynep   GÜMÜŞ",
+          "systemId": "baf66c47-9bb5-4465-a34d-ef8991e6be65"
+        },
+        {
+          "id": "idmtj4tkiaaxuu",
+          "name": "Zeynep ÇAKMAK",
+          "systemId": "fb21c6ce-bd90-4f47-9383-538ef7ccc597"
+        },
+        {
+          "id": "idmtj4tkia4vav",
+          "name": "ZEYNEP İNCE",
+          "systemId": "5bba6d79-29e9-49e3-ad49-7c3de3ef61d7"
+        },
+        {
+          "id": "idmtj4tkiakxzt",
+          "name": "Zeynep Tanem",
+          "systemId": "9826ad51-7240-489a-859d-d925e12e02ce"
+        }
+      ],
+      "classLevel": "LGS",
+      "curriculum": [],
+      "periodsByDay": {}
+    },
+    {
+      "id": "idmtj4tkiaz2vs",
+      "name": "8E YAZ KAMPI",
+      "color": "#1E7FA8",
+      "branch": null,
+      "locked": false,
+      "advisor": "",
+      "classId": "132f7a34-08b9-4910-9034-2e40652a33ba",
+      "periods": [
+        {
+          "time": "17:00–17:40",
+          "label": "1. Ders"
+        },
+        {
+          "time": "17:50–18:30",
+          "label": "2. Ders"
+        },
+        {
+          "time": "18:40–19:20",
+          "label": "3. Ders"
+        },
+        {
+          "time": "19:30–20:10",
+          "label": "4. Ders"
+        },
+        {
+          "time": "20:30-21:10",
+          "label": "5. Ders"
+        },
+        {
+          "time": "21:20-22:00",
+          "label": "6. Ders"
+        }
+      ],
+      "schedule": {},
+      "students": [
+        {
+          "id": "idmtj4tkiahry9",
+          "name": "Abdullah Emir Güven",
+          "systemId": "85a36e75-6a42-426a-ba11-d7bcb0258447"
+        },
+        {
+          "id": "idmtj4tkiaqyhm",
+          "name": "Ada Kılıçarslan",
+          "systemId": "e9d897ff-6444-4d7d-b001-7a60ef46cf2d"
+        },
+        {
+          "id": "idmtj4tkiasuhm",
+          "name": "Adil Eymen Yaşar",
+          "systemId": "fe1d235b-038b-47cb-a8ef-8078a6bad77c"
+        },
+        {
+          "id": "idmtj4tkia8z8m",
+          "name": "Ayşegül Şanlı",
+          "systemId": "72c7f6cd-1a36-47ed-b76f-2f521c04039e"
+        },
+        {
+          "id": "idmtj4tkiavsd5",
+          "name": "Ayşegül Zeynep Yıldırım",
+          "systemId": "7c8f0995-c268-4418-969e-ae2318c102f7"
+        },
+        {
+          "id": "idmtj4tkiaf0bv",
+          "name": "belinay akar",
+          "systemId": "4ad3fe75-5f13-49d2-8943-e145a02e18e2"
+        },
+        {
+          "id": "idmtj4tkiar8zg",
+          "name": "BEREN SU  KAHRAMAN",
+          "systemId": "5f760223-e9e9-49fd-aff1-fd6ee8cd4b98"
+        },
+        {
+          "id": "idmtj4tkiav8cg",
+          "name": "Betül Ateşci",
+          "systemId": "aa8c0fda-2a9d-4cfd-89ec-56c8067dedff"
+        },
+        {
+          "id": "idmtj4tkiap5jd",
+          "name": "BETÜL ERVA KAPLAN",
+          "systemId": "ccccfd3c-7ea6-44c5-8fb2-c9b4be865b04"
+        },
+        {
+          "id": "idmtj4tkia62pm",
+          "name": "Beytullah tuna Çakan",
+          "systemId": "5222eff2-e885-4bc6-b889-9ea659878e81"
+        },
+        {
+          "id": "idmtj4tkia919b",
+          "name": "Beyza Ahsen Çakmak",
+          "systemId": "fcf3dd86-2307-4d55-879d-d7ae188350ed"
+        },
+        {
+          "id": "idmtj4tkian7hg",
+          "name": "Cemre Zülal KARAKIŞ",
+          "systemId": "a2495e47-4813-4c61-8727-b6f630d47ed2"
+        },
+        {
+          "id": "idmtj4tkibqvdv",
+          "name": "Ceren Coşkun",
+          "systemId": "6ec8b4a6-fb71-4524-96d3-466501f19907"
+        },
+        {
+          "id": "idmtj4tkibdsjo",
+          "name": "Cihangir Aslan",
+          "systemId": "060038d6-6d2c-4b27-8786-813cecff58ab"
+        },
+        {
+          "id": "idmtj4tkib1cdk",
+          "name": "Deniz Sadi Yüce",
+          "systemId": "115bf51c-672a-4e95-a31b-66bb0976d28a"
+        },
+        {
+          "id": "idmtj4tkib8oai",
+          "name": "ELA  AKGÜN",
+          "systemId": "d55a9c21-075f-4c5f-b824-fa878f1a90f3"
+        },
+        {
+          "id": "idmtj4tkibga74",
+          "name": "Elif Beril Tığlı",
+          "systemId": "bc8aad79-b22c-4822-bfc6-43ec5c9ec96c"
+        },
+        {
+          "id": "idmtj4tkibejkk",
+          "name": "Erva İşci",
+          "systemId": "3daa11ab-ec0b-487c-aaa6-59b480159c5b"
+        },
+        {
+          "id": "idmtj4tkibsk1u",
+          "name": "Esila Erten",
+          "systemId": "4951b4b9-6fd9-4d7f-b730-45c1580aa3fd"
+        },
+        {
+          "id": "idmtj4tkib9ka9",
+          "name": "Eylül Karlatlı",
+          "systemId": "6424c763-efb5-466b-8aa5-ce2e3591c900"
+        },
+        {
+          "id": "idmtj4tkibpegp",
+          "name": "Göktan çelik",
+          "systemId": "936e348e-7c5a-40bf-86b7-ec2b4b348286"
+        },
+        {
+          "id": "idmtj4tkibb0dp",
+          "name": "Hakan Emin İnaltekin",
+          "systemId": "03c889da-5edf-4fb4-8677-c71844ec3af2"
+        },
+        {
+          "id": "idmtj4tkibef0v",
+          "name": "Irmak can Dilekçi",
+          "systemId": "36900315-dbf1-4f43-95f4-804c0e5f259c"
+        },
+        {
+          "id": "idmtj4tkicxato",
+          "name": "Işıl Ecesu  ÇALIŞKAN",
+          "systemId": "46082b67-a9d3-48c2-9e07-538814a0ad5f"
+        },
+        {
+          "id": "idmtj4tkic7wnw",
+          "name": "Mahir Demirbaş",
+          "systemId": "d589a378-c688-43c3-a612-c1f79373cd55"
+        },
+        {
+          "id": "idmtj4tkiche42",
+          "name": "Mehmet Işık",
+          "systemId": "4254d577-f2d7-4b56-a47b-998113b54838"
+        },
+        {
+          "id": "idmtj4tkic5sdo",
+          "name": "Muhammed kağan Kaplan",
+          "systemId": "844b03ca-05be-4c57-a942-6179c3fda535"
+        },
+        {
+          "id": "idmtj4tkicujo4",
+          "name": "Muhammed Salih Özkaya",
+          "systemId": "7ce5de76-b652-4162-a0bb-7f146890139d"
+        },
+        {
+          "id": "idmtj4tkicjg4g",
+          "name": "Muhammed Talha Cevik",
+          "systemId": "bd9496d1-8683-415d-a926-bae6348b8269"
+        },
+        {
+          "id": "idmtj4tkicq985",
+          "name": "Nilsu Zeynep Yıldız",
+          "systemId": "877776d6-26df-4fa9-a7cd-1a6f5517a7a3"
+        },
+        {
+          "id": "idmtj4tkict1n6",
+          "name": "Nilüfer Peker",
+          "systemId": "d452d830-1ccd-4807-8ca9-8b5275c882bd"
+        },
+        {
+          "id": "idmtj4tkidshes",
+          "name": "Nisan Özen",
+          "systemId": "85d96332-fbe7-4a95-ba7a-1a0301fcac15"
+        },
+        {
+          "id": "idmtj4tkid9rzj",
+          "name": "Nusret Orhan KUŞ",
+          "systemId": "5e678dd0-d997-4125-8bc1-f53990c214b9"
+        },
+        {
+          "id": "idmtj4tkidiicn",
+          "name": "Ömer Selim Emek",
+          "systemId": "9baf1c4d-c8c0-45a8-8d19-829a357ea9dc"
+        },
+        {
+          "id": "idmtj4tkido6yr",
+          "name": "Poyraz Tüylü",
+          "systemId": "886781ed-7be1-4c98-a48a-bab426add55f"
+        },
+        {
+          "id": "idmtj4tkidrusn",
+          "name": "Reyyan Mergen",
+          "systemId": "cad26903-fa71-4524-9a9b-cb3c9b661451"
+        },
+        {
+          "id": "idmtj4tkidue5x",
+          "name": "saffet deveci",
+          "systemId": "00214d42-0366-4eaf-b4ba-ea4d7d8e5c2c"
+        },
+        {
+          "id": "idmtj4tkiddvt5",
+          "name": "SAFİYE ÖĞRENENEFE",
+          "systemId": "12b61ed4-63b7-4503-acc0-444aa275aa1c"
+        },
+        {
+          "id": "idmtj4tkiexknh",
+          "name": "Sevim Nisa Soydemir",
+          "systemId": "ad868d7d-b6e5-4017-8196-f6fec61d9050"
+        },
+        {
+          "id": "idmtj4tkie7u1q",
+          "name": "ŞEYMA TURAN",
+          "systemId": "50d1da65-a2b9-47c3-a7ba-32710bc1f587"
+        },
+        {
+          "id": "idmtj4tkiekym2",
+          "name": "Şeyma Uslu",
+          "systemId": "7c06d8dc-7e5b-4ae0-a2ec-6f4c26286cd2"
+        },
+        {
+          "id": "idmtj4tkietzie",
+          "name": "TEBESSÜM AKTÜRK",
+          "systemId": "5a8633ed-6ecd-4be2-a086-201f382b4bce"
+        },
+        {
+          "id": "idmtj4tkiekhg9",
+          "name": "Tuğhan Kalaycı",
+          "systemId": "81630ddc-cce3-4d83-b99c-7d667b0c087a"
+        },
+        {
+          "id": "idmtj4tkif77w7",
+          "name": "Umay Karadağ",
+          "systemId": "f30dbba9-635f-4cb6-819a-259bf694a65e"
+        },
+        {
+          "id": "idmtj4tkifjhqr",
+          "name": "Yasir Tavlar",
+          "systemId": "3e07c8bb-bcd0-4862-afd2-237ab83e7aa1"
+        },
+        {
+          "id": "idmtj4tkifh4x7",
+          "name": "Yavuz",
+          "systemId": "965e9bd3-5243-49d2-b570-124714dbf49e"
+        },
+        {
+          "id": "idmtj4tkifrbp9",
+          "name": "Yusuf poyraz Cihangir",
+          "systemId": "a398142d-04a1-4006-8ee2-6fe4a8605afb"
+        },
+        {
+          "id": "idmtj4tkifzqpq",
+          "name": "Zehra AK",
+          "systemId": "23d4a48e-e229-4a2d-9e33-cd2df23dd39a"
+        },
+        {
+          "id": "idmtj4tkigfxmb",
+          "name": "Zeynep   GÜMÜŞ",
+          "systemId": "baf66c47-9bb5-4465-a34d-ef8991e6be65"
+        },
+        {
+          "id": "idmtj4tkiggyby",
+          "name": "Zeynep ÇAKMAK",
+          "systemId": "fb21c6ce-bd90-4f47-9383-538ef7ccc597"
+        },
+        {
+          "id": "idmtj4tkig4bgt",
+          "name": "ZEYNEP İNCE",
+          "systemId": "5bba6d79-29e9-49e3-ad49-7c3de3ef61d7"
+        },
+        {
+          "id": "idmtj4tkigydot",
+          "name": "Zeynep Tanem",
+          "systemId": "9826ad51-7240-489a-859d-d925e12e02ce"
+        }
+      ],
+      "classLevel": "LGS",
+      "curriculum": [],
+      "periodsByDay": {}
+    },
+    {
+      "id": "idmtj4tkig49jm",
+      "name": "8F YAZ KAMPI",
+      "color": "#2E4C8C",
+      "branch": null,
+      "locked": false,
+      "advisor": "",
+      "classId": "7cc4e2e4-8c4f-478d-ae9c-a4554fe8ba11",
+      "periods": [
+        {
+          "time": "17:00–17:40",
+          "label": "1. Ders"
+        },
+        {
+          "time": "17:50–18:30",
+          "label": "2. Ders"
+        },
+        {
+          "time": "18:40–19:20",
+          "label": "3. Ders"
+        },
+        {
+          "time": "19:30–20:10",
+          "label": "4. Ders"
+        },
+        {
+          "time": "20:30-21:10",
+          "label": "5. Ders"
+        },
+        {
+          "time": "21:20-22:00",
+          "label": "6. Ders"
+        }
+      ],
+      "schedule": {},
+      "students": [
+        {
+          "id": "idmtj4tkigy4z0",
+          "name": "Abdullah Emir Güven",
+          "systemId": "85a36e75-6a42-426a-ba11-d7bcb0258447"
+        },
+        {
+          "id": "idmtj4tkigzo6w",
+          "name": "Ada Kılıçarslan",
+          "systemId": "e9d897ff-6444-4d7d-b001-7a60ef46cf2d"
+        },
+        {
+          "id": "idmtj4tkig8rpi",
+          "name": "Adil Eymen Yaşar",
+          "systemId": "fe1d235b-038b-47cb-a8ef-8078a6bad77c"
+        },
+        {
+          "id": "idmtj4tkig8qbg",
+          "name": "Ayşegül Şanlı",
+          "systemId": "72c7f6cd-1a36-47ed-b76f-2f521c04039e"
+        },
+        {
+          "id": "idmtj4tkigf05l",
+          "name": "Ayşegül Zeynep Yıldırım",
+          "systemId": "7c8f0995-c268-4418-969e-ae2318c102f7"
+        },
+        {
+          "id": "idmtj4tkig0xq6",
+          "name": "belinay akar",
+          "systemId": "4ad3fe75-5f13-49d2-8943-e145a02e18e2"
+        },
+        {
+          "id": "idmtj4tkihtc5c",
+          "name": "BEREN SU  KAHRAMAN",
+          "systemId": "5f760223-e9e9-49fd-aff1-fd6ee8cd4b98"
+        },
+        {
+          "id": "idmtj4tkihhofu",
+          "name": "Betül Ateşci",
+          "systemId": "aa8c0fda-2a9d-4cfd-89ec-56c8067dedff"
+        },
+        {
+          "id": "idmtj4tkihymgm",
+          "name": "BETÜL ERVA KAPLAN",
+          "systemId": "ccccfd3c-7ea6-44c5-8fb2-c9b4be865b04"
+        },
+        {
+          "id": "idmtj4tkihdv4l",
+          "name": "Beytullah tuna Çakan",
+          "systemId": "5222eff2-e885-4bc6-b889-9ea659878e81"
+        },
+        {
+          "id": "idmtj4tkihfn6n",
+          "name": "Beyza Ahsen Çakmak",
+          "systemId": "fcf3dd86-2307-4d55-879d-d7ae188350ed"
+        },
+        {
+          "id": "idmtj4tkihoctu",
+          "name": "Cemre Zülal KARAKIŞ",
+          "systemId": "a2495e47-4813-4c61-8727-b6f630d47ed2"
+        },
+        {
+          "id": "idmtj4tkihorb4",
+          "name": "Ceren Coşkun",
+          "systemId": "6ec8b4a6-fb71-4524-96d3-466501f19907"
+        },
+        {
+          "id": "idmtj4tkihpylb",
+          "name": "Cihangir Aslan",
+          "systemId": "060038d6-6d2c-4b27-8786-813cecff58ab"
+        },
+        {
+          "id": "idmtj4tkihgy94",
+          "name": "Deniz Sadi Yüce",
+          "systemId": "115bf51c-672a-4e95-a31b-66bb0976d28a"
+        },
+        {
+          "id": "idmtj4tkihfbdq",
+          "name": "ELA  AKGÜN",
+          "systemId": "d55a9c21-075f-4c5f-b824-fa878f1a90f3"
+        },
+        {
+          "id": "idmtj4tkihhysd",
+          "name": "Elif Beril Tığlı",
+          "systemId": "bc8aad79-b22c-4822-bfc6-43ec5c9ec96c"
+        },
+        {
+          "id": "idmtj4tkihnz69",
+          "name": "Erva İşci",
+          "systemId": "3daa11ab-ec0b-487c-aaa6-59b480159c5b"
+        },
+        {
+          "id": "idmtj4tkihz5hh",
+          "name": "Esila Erten",
+          "systemId": "4951b4b9-6fd9-4d7f-b730-45c1580aa3fd"
+        },
+        {
+          "id": "idmtj4tkihimbg",
+          "name": "Eylül Karlatlı",
+          "systemId": "6424c763-efb5-466b-8aa5-ce2e3591c900"
+        },
+        {
+          "id": "idmtj4tkihnady",
+          "name": "Göktan çelik",
+          "systemId": "936e348e-7c5a-40bf-86b7-ec2b4b348286"
+        },
+        {
+          "id": "idmtj4tkihon5g",
+          "name": "Hakan Emin İnaltekin",
+          "systemId": "03c889da-5edf-4fb4-8677-c71844ec3af2"
+        },
+        {
+          "id": "idmtj4tkiiwzil",
+          "name": "Irmak can Dilekçi",
+          "systemId": "36900315-dbf1-4f43-95f4-804c0e5f259c"
+        },
+        {
+          "id": "idmtj4tkiios7h",
+          "name": "Işıl Ecesu  ÇALIŞKAN",
+          "systemId": "46082b67-a9d3-48c2-9e07-538814a0ad5f"
+        },
+        {
+          "id": "idmtj4tkiiflbd",
+          "name": "Mahir Demirbaş",
+          "systemId": "d589a378-c688-43c3-a612-c1f79373cd55"
+        },
+        {
+          "id": "idmtj4tkiiaimc",
+          "name": "Mehmet Işık",
+          "systemId": "4254d577-f2d7-4b56-a47b-998113b54838"
+        },
+        {
+          "id": "idmtj4tkii65g0",
+          "name": "Muhammed kağan Kaplan",
+          "systemId": "844b03ca-05be-4c57-a942-6179c3fda535"
+        },
+        {
+          "id": "idmtj4tkiiuxy8",
+          "name": "Muhammed Salih Özkaya",
+          "systemId": "7ce5de76-b652-4162-a0bb-7f146890139d"
+        },
+        {
+          "id": "idmtj4tkiiqoku",
+          "name": "Muhammed Talha Cevik",
+          "systemId": "bd9496d1-8683-415d-a926-bae6348b8269"
+        },
+        {
+          "id": "idmtj4tkiidtg7",
+          "name": "Nilsu Zeynep Yıldız",
+          "systemId": "877776d6-26df-4fa9-a7cd-1a6f5517a7a3"
+        },
+        {
+          "id": "idmtj4tkijz9dq",
+          "name": "Nilüfer Peker",
+          "systemId": "d452d830-1ccd-4807-8ca9-8b5275c882bd"
+        },
+        {
+          "id": "idmtj4tkijor48",
+          "name": "Nisan Özen",
+          "systemId": "85d96332-fbe7-4a95-ba7a-1a0301fcac15"
+        },
+        {
+          "id": "idmtj4tkijr7sf",
+          "name": "Nusret Orhan KUŞ",
+          "systemId": "5e678dd0-d997-4125-8bc1-f53990c214b9"
+        },
+        {
+          "id": "idmtj4tkijmt68",
+          "name": "Ömer Selim Emek",
+          "systemId": "9baf1c4d-c8c0-45a8-8d19-829a357ea9dc"
+        },
+        {
+          "id": "idmtj4tkij40ap",
+          "name": "Poyraz Tüylü",
+          "systemId": "886781ed-7be1-4c98-a48a-bab426add55f"
+        },
+        {
+          "id": "idmtj4tkijxgiq",
+          "name": "Reyyan Mergen",
+          "systemId": "cad26903-fa71-4524-9a9b-cb3c9b661451"
+        },
+        {
+          "id": "idmtj4tkijvxwc",
+          "name": "saffet deveci",
+          "systemId": "00214d42-0366-4eaf-b4ba-ea4d7d8e5c2c"
+        },
+        {
+          "id": "idmtj4tkik7o1v",
+          "name": "SAFİYE ÖĞRENENEFE",
+          "systemId": "12b61ed4-63b7-4503-acc0-444aa275aa1c"
+        },
+        {
+          "id": "idmtj4tkikci49",
+          "name": "Sevim Nisa Soydemir",
+          "systemId": "ad868d7d-b6e5-4017-8196-f6fec61d9050"
+        },
+        {
+          "id": "idmtj4tkik1i76",
+          "name": "ŞEYMA TURAN",
+          "systemId": "50d1da65-a2b9-47c3-a7ba-32710bc1f587"
+        },
+        {
+          "id": "idmtj4tkikbzif",
+          "name": "Şeyma Uslu",
+          "systemId": "7c06d8dc-7e5b-4ae0-a2ec-6f4c26286cd2"
+        },
+        {
+          "id": "idmtj4tkikkc6c",
+          "name": "TEBESSÜM AKTÜRK",
+          "systemId": "5a8633ed-6ecd-4be2-a086-201f382b4bce"
+        },
+        {
+          "id": "idmtj4tkil336c",
+          "name": "Tuğhan Kalaycı",
+          "systemId": "81630ddc-cce3-4d83-b99c-7d667b0c087a"
+        },
+        {
+          "id": "idmtj4tkiloyil",
+          "name": "Umay Karadağ",
+          "systemId": "f30dbba9-635f-4cb6-819a-259bf694a65e"
+        },
+        {
+          "id": "idmtj4tkilq5o5",
+          "name": "Yasir Tavlar",
+          "systemId": "3e07c8bb-bcd0-4862-afd2-237ab83e7aa1"
+        },
+        {
+          "id": "idmtj4tkilmtff",
+          "name": "Yavuz",
+          "systemId": "965e9bd3-5243-49d2-b570-124714dbf49e"
+        },
+        {
+          "id": "idmtj4tkimsafk",
+          "name": "Yusuf poyraz Cihangir",
+          "systemId": "a398142d-04a1-4006-8ee2-6fe4a8605afb"
+        },
+        {
+          "id": "idmtj4tkimb819",
+          "name": "Zehra AK",
+          "systemId": "23d4a48e-e229-4a2d-9e33-cd2df23dd39a"
+        },
+        {
+          "id": "idmtj4tkimlp9t",
+          "name": "Zeynep   GÜMÜŞ",
+          "systemId": "baf66c47-9bb5-4465-a34d-ef8991e6be65"
+        },
+        {
+          "id": "idmtj4tkim01qv",
+          "name": "Zeynep ÇAKMAK",
+          "systemId": "fb21c6ce-bd90-4f47-9383-538ef7ccc597"
+        },
+        {
+          "id": "idmtj4tkim0ogh",
+          "name": "ZEYNEP İNCE",
+          "systemId": "5bba6d79-29e9-49e3-ad49-7c3de3ef61d7"
+        },
+        {
+          "id": "idmtj4tkinmkei",
+          "name": "Zeynep Tanem",
+          "systemId": "9826ad51-7240-489a-859d-d925e12e02ce"
+        }
+      ],
+      "classLevel": "LGS",
+      "curriculum": [],
+      "periodsByDay": {}
+    },
+    {
+      "id": "idmtj4tkinstdy",
+      "name": "SAT",
+      "color": "#0E8A6B",
+      "branch": "A",
+      "locked": false,
+      "advisor": "",
+      "classId": "086447e1-7bdf-40e0-a58d-6588a2b7a7b6",
+      "periods": [
+        {
+          "time": "17:00–17:40",
+          "label": "1. Ders"
+        },
+        {
+          "time": "17:50–18:30",
+          "label": "2. Ders"
+        },
+        {
+          "time": "18:40–19:20",
+          "label": "3. Ders"
+        },
+        {
+          "time": "19:30–20:10",
+          "label": "4. Ders"
+        },
+        {
+          "time": "20:30-21:10",
+          "label": "5. Ders"
+        },
+        {
+          "time": "21:20-22:00",
+          "label": "6. Ders"
+        }
+      ],
+      "schedule": {},
+      "students": [],
+      "classLevel": "AP",
+      "curriculum": [],
+      "periodsByDay": {}
+    },
+    {
+      "id": "idmtj4tkinvjq9",
+      "name": "2026-2027 YILDIZLAR YKS GRUBU",
+      "color": "#B4541E",
+      "branch": "A",
+      "locked": false,
+      "advisor": "",
+      "classId": "fe83cf5b-41e1-4b5f-91de-d63333ba0f05",
+      "periods": [
+        {
+          "time": "17:00–17:40",
+          "label": "1. Ders"
+        },
+        {
+          "time": "17:50–18:30",
+          "label": "2. Ders"
+        },
+        {
+          "time": "18:40–19:20",
+          "label": "3. Ders"
+        },
+        {
+          "time": "19:30–20:10",
+          "label": "4. Ders"
+        },
+        {
+          "time": "20:30-21:10",
+          "label": "5. Ders"
+        },
+        {
+          "time": "21:20-22:00",
+          "label": "6. Ders"
+        }
+      ],
+      "schedule": {
+        "0_2": {
+          "subject": "AYT FİZİK",
+          "teacher": "SALİH ÖNGÜL"
+        },
+        "0_3": {
+          "subject": "AYT FİZİK",
+          "teacher": "SALİH ÖNGÜL"
+        },
+        "0_4": {
+          "subject": "ETÜT",
+          "teacher": ""
+        },
+        "0_5": {
+          "subject": "ETÜT",
+          "teacher": ""
+        },
+        "1_1": {
+          "subject": "AYT KİMYA",
+          "teacher": "Yasin Kandemir"
+        },
+        "1_2": {
+          "subject": "TYT MATEMATİK",
+          "teacher": "YILMAZ IŞIK"
+        },
+        "1_3": {
+          "subject": "TYT MATEMATİK",
+          "teacher": "YILMAZ IŞIK"
+        },
+        "1_4": {
+          "subject": "ETÜT",
+          "teacher": ""
+        },
+        "1_5": {
+          "subject": "ETÜT",
+          "teacher": ""
+        },
+        "2_1": {
+          "subject": "TÜRKÇE",
+          "teacher": "Merve Yetkin"
+        },
+        "2_2": {
+          "subject": "AYT MATEMATİK",
+          "teacher": "YILMAZ IŞIK"
+        },
+        "2_3": {
+          "subject": "AYT MATEMATİK",
+          "teacher": "YILMAZ IŞIK"
+        },
+        "2_4": {
+          "subject": "ETÜT",
+          "teacher": ""
+        },
+        "2_5": {
+          "subject": "ETÜT",
+          "teacher": ""
+        },
+        "3_1": {
+          "subject": "AYT BİYOLOJİ",
+          "teacher": "TAYYİBE ÖĞRENENEFE"
+        },
+        "3_2": {
+          "subject": "TYT GEOMETRİ",
+          "teacher": "NURULLAH VAROL"
+        },
+        "3_3": {
+          "subject": "TYT GEOMETRİ",
+          "teacher": "NURULLAH VAROL"
+        },
+        "3_4": {
+          "subject": "ETÜT",
+          "teacher": ""
+        },
+        "3_5": {
+          "subject": "ETUT",
+          "teacher": ""
+        },
+        "4_1": {
+          "subject": "TÜRKÇE",
+          "teacher": "Merve Yetkin"
+        },
+        "4_2": {
+          "subject": "TYT FİZİK",
+          "teacher": "ALİ AKTAŞ"
+        },
+        "4_3": {
+          "subject": "TYT FİZİK",
+          "teacher": "ALİ AKTAŞ"
+        },
+        "4_4": {
+          "subject": "ETUT",
+          "teacher": ""
+        },
+        "4_5": {
+          "subject": "ETUT",
+          "teacher": ""
+        },
+        "5_0": {
+          "subject": "DENEME",
+          "teacher": ""
+        },
+        "5_1": {
+          "subject": "TYT BİYOLOJİ",
+          "teacher": "TAYYİBE ÖĞRENENEFE"
+        },
+        "5_2": {
+          "subject": "TYT BİYOLOJİ",
+          "teacher": "TAYYİBE ÖĞRENENEFE"
+        },
+        "5_3": {
+          "subject": "TYT KİMYA",
+          "teacher": "Yasin Kandemir"
+        },
+        "5_4": {
+          "subject": "TYT KİMYA",
+          "teacher": "Yasin Kandemir"
+        },
+        "5_5": {
+          "subject": "DENEME ANALİZİ",
+          "teacher": ""
+        },
+        "6_0": {
+          "subject": "DENEME",
+          "teacher": ""
+        },
+        "6_1": {
+          "subject": "DENEME ANALİZİ",
+          "teacher": ""
+        }
+      },
+      "students": [
+        {
+          "id": "idmtj4tkin36a9",
+          "name": "Adil Demirtaş",
+          "systemId": "dddc824a-1bac-4e35-aa97-fc101a6841b0"
+        },
+        {
+          "id": "idmtj4tkintqhb",
+          "name": "Ahmet Oğuz",
+          "systemId": "847f58f2-26ba-4b1e-9280-576aa5f2dc88"
+        },
+        {
+          "id": "idmtj4tkinuvh3",
+          "name": "Ahmet Renas KORKUSUZ",
+          "systemId": "754066fd-a49d-4f9a-91c3-baa83b3fd7e9"
+        },
+        {
+          "id": "idmtj4tkinqhwu",
+          "name": "Ajita Hashimi",
+          "systemId": "61dbdfae-4b69-4a98-a2f7-d8633c6062cd"
+        },
+        {
+          "id": "idmtj4tkin6r3g",
+          "name": "Betül Fatıma Özcan",
+          "systemId": "929d5b49-a8e1-4c89-b729-799c439c4f3f"
+        },
+        {
+          "id": "idmtj4tkinvmri",
+          "name": "Burçin Bayrak",
+          "systemId": "0b7e5226-f27b-4c82-960e-2892cfdbe74f"
+        },
+        {
+          "id": "idmtj4tkin2l3c",
+          "name": "Dila Öztürk",
+          "systemId": "cdc01a23-8b45-44e9-b41d-e4240b4369a8"
+        },
+        {
+          "id": "idmtj4tkin09ik",
+          "name": "EFE ÇONKAR",
+          "systemId": "60a81cf6-bc46-41cc-a1b3-20bcb833ff29"
+        },
+        {
+          "id": "idmtj4tkinz5ca",
+          "name": "Hatice Yaren Açıkgöz",
+          "systemId": "224da257-2c46-4601-8911-6509af969cf9"
+        },
+        {
+          "id": "idmtj4tkinyojg",
+          "name": "MEHMET EMİN ATEŞ",
+          "systemId": "2c4e624b-3232-4369-a9cf-e25fda20f33d"
+        },
+        {
+          "id": "idmtj4tkinhyxd",
+          "name": "Nesibe Esmanur Yavuz",
+          "systemId": "fdb6ad6a-819c-4b64-b7e3-bd5a292a31b2"
+        },
+        {
+          "id": "idmtj4tkinyesg",
+          "name": "Ravza Bahar Baydaroğlu",
+          "systemId": "d42efa7e-9f20-4d91-bdc6-87200203a96b"
+        },
+        {
+          "id": "idmtj4tking1sb",
+          "name": "Vedat Pehlivan",
+          "systemId": "85d1b20a-35df-4e36-a7bf-91f93369e57b"
+        },
+        {
+          "id": "idmtj4tkiny7kr",
+          "name": "zeynep betül tığlı",
+          "systemId": "9b50fdf0-1c3c-4557-a4c6-bd9b34d21752"
+        }
+      ],
+      "classLevel": "YKS SAYISAL",
+      "curriculum": [],
+      "periodsByDay": {
+        "5": [
+          {
+            "time": "10:00–12:45",
+            "label": "1. Ders"
+          },
+          {
+            "time": "13:30–14:10",
+            "label": "2. Ders"
+          },
+          {
+            "time": "14:20–15:00",
+            "label": "3. Ders"
+          },
+          {
+            "time": "15:10–15:50",
+            "label": "4. Ders"
+          },
+          {
+            "time": "16:00-16:40",
+            "label": "5. Ders"
+          },
+          {
+            "time": "16:50-17:30",
+            "label": "6. Ders"
+          }
+        ],
+        "6": [
+          {
+            "time": "10:00–12:45",
+            "label": "1. Ders"
+          },
+          {
+            "time": "13:30–14:10",
+            "label": "2. Ders"
+          },
+          {
+            "time": "18:40–19:20",
+            "label": "3. Ders"
+          },
+          {
+            "time": "19:30–20:10",
+            "label": "4. Ders"
+          },
+          {
+            "time": "20:30-21:10",
+            "label": "5. Ders"
+          },
+          {
+            "time": "21:20-22:00",
+            "label": "6. Ders"
+          }
+        ]
+      }
+    },
+    {
+      "id": "idmtj4tkincdxk",
+      "name": "YÖS 2026 EKİM YILDIZLAR",
+      "color": "#7A3FA0",
+      "branch": "2026",
+      "locked": false,
+      "advisor": "",
+      "classId": "46cff3f2-316e-4b91-9b2f-50722f6ceede",
+      "periods": [
+        {
+          "time": "17:00–17:40",
+          "label": "1. Ders"
+        },
+        {
+          "time": "17:50–18:30",
+          "label": "2. Ders"
+        },
+        {
+          "time": "18:40–19:20",
+          "label": "3. Ders"
+        },
+        {
+          "time": "19:30–20:10",
+          "label": "4. Ders"
+        },
+        {
+          "time": "20:30-21:10",
+          "label": "5. Ders"
+        },
+        {
+          "time": "21:20-22:00",
+          "label": "6. Ders"
+        }
+      ],
+      "schedule": {
+        "0_3": {
+          "subject": "Matematik",
+          "teacher": "SİNAN ERCAN"
+        },
+        "0_4": {
+          "subject": "Matematik",
+          "teacher": "SİNAN ERCAN"
+        },
+        "1_3": {
+          "subject": "Geometri",
+          "teacher": "NURULLAH VAROL"
+        },
+        "1_4": {
+          "subject": "Geometri",
+          "teacher": "NURULLAH VAROL"
+        },
+        "2_3": {
+          "subject": "Matematik",
+          "teacher": "GÖKHAN MUMCU"
+        },
+        "2_4": {
+          "subject": "Matematik",
+          "teacher": "GÖKHAN MUMCU"
+        },
+        "4_3": {
+          "subject": "IQ",
+          "teacher": "KİFAYET  ALLAHVERDİ"
+        },
+        "4_4": {
+          "subject": "IQ",
+          "teacher": "KİFAYET  ALLAHVERDİ"
+        }
+      },
+      "students": [
+        {
+          "id": "idmtj4tkio2wec",
+          "name": "Arif Faruk Tüfekci",
+          "systemId": "1e162833-b5b4-4472-8b7f-5f61abac58c1"
+        },
+        {
+          "id": "idmtj4tkio084i",
+          "name": "BEYZA KURAY",
+          "systemId": "82ad4740-7cd0-4608-bb92-5829520d8642"
+        },
+        {
+          "id": "idmtj4tkiorreq",
+          "name": "Cemile YILDIZ",
+          "systemId": "e39b2f64-a167-4716-abf0-2e78414d09eb"
+        },
+        {
+          "id": "idmtj4tkiokd5u",
+          "name": "Filiz Köroğlu",
+          "systemId": "6d079939-c31f-4810-b411-a9d20ba8f0a6"
+        },
+        {
+          "id": "idmtj4tkiohl9v",
+          "name": "firdevs gebel",
+          "systemId": "90d5775c-e822-49d1-96d7-e3655726ea8b"
+        },
+        {
+          "id": "idmtj4tkio8bn8",
+          "name": "Gökdeniz Ayran",
+          "systemId": "bb98dd38-0f03-4ff3-994d-1422e11e435b"
+        },
+        {
+          "id": "idmtj4tkioxawf",
+          "name": "Hansa Yağmur Ayçiçek",
+          "systemId": "a969b526-e946-4848-9117-205c1e30c4b6"
+        },
+        {
+          "id": "idmtj4tkiokcbf",
+          "name": "Mehmet Emin Celenk",
+          "systemId": "3f2b52d4-81e7-4edd-8cff-83c3b2cfc6d9"
+        },
+        {
+          "id": "idmtj4tkiox8uz",
+          "name": "Nurseren Filiz Akar",
+          "systemId": "f793ea80-dac0-4778-80cc-f22d36b8b809"
+        },
+        {
+          "id": "idmtj4tkiouqih",
+          "name": "Ömer Zafer Avan",
+          "systemId": "6def51d0-7dc4-4fa9-861b-71893252c4c0"
+        },
+        {
+          "id": "idmtj4tkiozfx2",
+          "name": "Vehbi Hocaoğlu",
+          "systemId": "8024f561-98d9-4b6c-b2d0-4777439b3b1d"
+        },
+        {
+          "id": "idmtj4tkio3pcl",
+          "name": "Yavuz Selim Dos",
+          "systemId": "3c622793-ee22-4e1a-a152-28417c18cb5b"
+        },
+        {
+          "id": "idmtj4tkio19mk",
+          "name": "Yusuf Furkan Durna",
+          "systemId": "7f0958d4-9298-4857-859a-c7547ba05094"
+        },
+        {
+          "id": "idmtj4tkio3snc",
+          "name": "zehra ülker",
+          "systemId": "e4a5b218-70ca-4c72-8843-eb848605a9e1"
+        }
+      ],
+      "classLevel": "YÖS",
+      "curriculum": [],
+      "periodsByDay": {
+        "0": [
+          {
+            "time": "17:00–17:40",
+            "label": "1. Ders"
+          },
+          {
+            "time": "17:50–18:30",
+            "label": "2. Ders"
+          },
+          {
+            "time": "18:40–19:20",
+            "label": "3. Ders"
+          },
+          {
+            "time": "20:00–20:40",
+            "label": "4. Ders"
+          },
+          {
+            "time": "20:50-21:30",
+            "label": "5. Ders"
+          },
+          {
+            "time": "21:40-22:00",
+            "label": "6. Ders"
+          }
+        ],
+        "1": [
+          {
+            "time": "17:00–17:40",
+            "label": "1. Ders"
+          },
+          {
+            "time": "17:50–18:30",
+            "label": "2. Ders"
+          },
+          {
+            "time": "18:40–19:20",
+            "label": "3. Ders"
+          },
+          {
+            "time": "20:00–20:40",
+            "label": "4. Ders"
+          },
+          {
+            "time": "20:50-21:30",
+            "label": "5. Ders"
+          },
+          {
+            "time": "21:40-22:00",
+            "label": "6. Ders"
+          }
+        ],
+        "2": [
+          {
+            "time": "17:00–17:40",
+            "label": "1. Ders"
+          },
+          {
+            "time": "17:50–18:30",
+            "label": "2. Ders"
+          },
+          {
+            "time": "18:40–19:20",
+            "label": "3. Ders"
+          },
+          {
+            "time": "20:00–20:40",
+            "label": "4. Ders"
+          },
+          {
+            "time": "20:50-21:30",
+            "label": "5. Ders"
+          },
+          {
+            "time": "21:40-22:00",
+            "label": "6. Ders"
+          }
+        ],
+        "3": [
+          {
+            "time": "17:00–17:40",
+            "label": "1. Ders"
+          },
+          {
+            "time": "17:50–18:30",
+            "label": "2. Ders"
+          },
+          {
+            "time": "18:40–19:20",
+            "label": "3. Ders"
+          },
+          {
+            "time": "20:00–20:40",
+            "label": "4. Ders"
+          },
+          {
+            "time": "20:50-21:30",
+            "label": "5. Ders"
+          },
+          {
+            "time": "21:40-22:00",
+            "label": "6. Ders"
+          }
+        ],
+        "4": [
+          {
+            "time": "17:00–17:40",
+            "label": "1. Ders"
+          },
+          {
+            "time": "17:50–18:30",
+            "label": "2. Ders"
+          },
+          {
+            "time": "18:40–19:20",
+            "label": "3. Ders"
+          },
+          {
+            "time": "20:00–20:40",
+            "label": "4. Ders"
+          },
+          {
+            "time": "20:50-21:30",
+            "label": "5. Ders"
+          },
+          {
+            "time": "21:40-22:00",
+            "label": "6. Ders"
+          }
+        ],
+        "5": [
+          {
+            "time": "10:00–12:45",
+            "label": "1. Ders"
+          },
+          {
+            "time": "17:50–18:30",
+            "label": "2. Ders"
+          },
+          {
+            "time": "18:40–19:20",
+            "label": "3. Ders"
+          },
+          {
+            "time": "19:30–20:10",
+            "label": "4. Ders"
+          },
+          {
+            "time": "20:30-21:10",
+            "label": "5. Ders"
+          },
+          {
+            "time": "21:20-22:00",
+            "label": "6. Ders"
+          }
+        ]
+      }
+    },
+    {
+      "id": "idmtoah5agtc7e",
+      "name": "2026-2027 2-A SINIFI",
+      "color": "#C0392B",
+      "branch": "A",
+      "locked": false,
+      "advisor": "",
+      "classId": "1f5409b3-7cea-4902-8e04-31063218e760",
+      "periods": [
+        {
+          "time": "17:00–17:40",
+          "label": "1. Ders"
+        },
+        {
+          "time": "17:50–18:30",
+          "label": "2. Ders"
+        },
+        {
+          "time": "18:40–19:20",
+          "label": "3. Ders"
+        },
+        {
+          "time": "19:30–20:10",
+          "label": "4. Ders"
+        },
+        {
+          "time": "20:20–21:00",
+          "label": "5. Ders"
+        },
+        {
+          "time": "21:10–21:50",
+          "label": "6. Ders"
+        }
+      ],
+      "schedule": {},
+      "students": [],
+      "classLevel": "2",
+      "curriculum": [],
+      "periodsByDay": {}
+    },
+    {
+      "id": "idmtq1jq55rcfp",
+      "name": "2026-2027 4-A SINIFI",
+      "classId": "2e820364-8d60-4bec-841f-d9893435e661",
+      "classLevel": "4",
+      "branch": null,
+      "advisor": "",
+      "color": "#1E7FA8",
+      "students": [
+        {
+          "id": "idmtq1jq56b66c",
+          "systemId": "efc5208c-f5da-4c6b-b297-eb1335286e01",
+          "name": "Ayşe Serra Yağcı"
+        },
+        {
+          "id": "idmtq1jq56asbi",
+          "systemId": "8cb6043b-7183-41e5-90bb-b6efb1819d74",
+          "name": "Naile ÖĞRENENEFE"
+        },
+        {
+          "id": "idmtq1jq56qh8j",
+          "systemId": "838fb335-9077-4c70-8281-c7e945489ea5",
+          "name": "Zeynep hazal Kandemir"
+        }
+      ],
+      "schedule": {},
+      "periods": [
+        {
+          "time": "17:00–17:40",
+          "label": "1. Ders"
+        },
+        {
+          "time": "17:50–18:30",
+          "label": "2. Ders"
+        },
+        {
+          "time": "18:40–19:20",
+          "label": "3. Ders"
+        },
+        {
+          "time": "19:30–20:10",
+          "label": "4. Ders"
+        },
+        {
+          "time": "20:20–21:00",
+          "label": "5. Ders"
+        },
+        {
+          "time": "21:10–21:50",
+          "label": "6. Ders"
+        }
+      ],
+      "locked": false,
+      "curriculum": []
+    }
+  ],
+  "periods": [
+    {
+      "time": "17:00–17:40",
+      "label": "1. Ders"
+    },
+    {
+      "time": "17:50–18:30",
+      "label": "2. Ders"
+    },
+    {
+      "time": "18:40–19:20",
+      "label": "3. Ders"
+    },
+    {
+      "time": "19:30–20:10",
+      "label": "4. Ders"
+    },
+    {
+      "time": "20:20–21:00",
+      "label": "5. Ders"
+    },
+    {
+      "time": "21:10–21:50",
+      "label": "6. Ders"
+    }
+  ],
+  "teachers": [
+    {
+      "id": "02457178-95d9-4623-92c9-bb96eac7f94b",
+      "name": "Ahmet Dağüstü",
+      "email": "ahmetdagustu35@gmail.com",
+      "branches": [
+        "Matematik"
+      ]
+    },
+    {
+      "id": "c93d4093-cd44-46ab-86e4-dc4f27443f2f",
+      "name": "ALİ AKTAŞ",
+      "email": "alihocamfizik09@gmail.com",
+      "branches": [
+        "Fizik"
+      ]
+    },
+    {
+      "id": "57b3de8c-2590-46ad-bd84-566be618b448",
+      "name": "Büşra Öztürk",
+      "email": "busratus1626@gmail.com",
+      "branches": [
+        "Din Kültürü"
+      ]
+    },
+    {
+      "id": "ce3438d0-d2b2-4844-8786-e9f837552dbd",
+      "name": "CEYHUN ÖĞRENENEFE",
+      "email": "ceyhunogrenenefe@gmail.com",
+      "branches": [
+        "Fizik"
+      ]
+    },
+    {
+      "id": "b39225b7-5705-4d38-956f-ab1cc55dc5af",
+      "name": "DOĞAN AKTÜRK",
+      "email": "doganaktrk75@gmail.com",
+      "branches": [
+        "Matematik"
+      ]
+    },
+    {
+      "id": "7e101de5-19f6-4626-914f-1477118f04c6",
+      "name": "Elif Denk",
+      "email": "elifdenkk@gmail.com",
+      "branches": []
+    },
+    {
+      "id": "a429454b-3e02-40f5-b3fd-abbe1152338a",
+      "name": "Emre GÜL",
+      "email": "emregul080@hotmail.com",
+      "branches": []
+    },
+    {
+      "id": "86c8fc89-baf0-4369-867f-82929c785765",
+      "name": "EMRE KARABOYUN",
+      "email": "karaboyunemre79@gmail.com",
+      "branches": [
+        "Edebiyat"
+      ]
+    },
+    {
+      "id": "3e11fb9b-be46-430c-a540-214228448ed8",
+      "name": "Erdal Karadaş",
+      "email": "karadaser12@gmail.com",
+      "branches": [
+        "Matematik"
+      ]
+    },
+    {
+      "id": "04667952-b49e-4a03-ba4c-b79c199c2405",
+      "name": "GÖKHAN MUMCU",
+      "email": "gokhan@gmail.com",
+      "branches": [
+        "Geometri",
+        "Matematik"
+      ]
+    },
+    {
+      "id": "9dc21ded-b421-4841-abb4-e2c11e997713",
+      "name": "GÖNÜL ÇAVUŞOĞLU",
+      "email": "gonulcavusoglu1@icloud.com",
+      "branches": [
+        "Biyoloji"
+      ]
+    },
+    {
+      "id": "8669c559-b29e-4895-898c-b5088f49d2e0",
+      "name": "Hakan Karakaş",
+      "email": "hakan.krks.09@gmail.com",
+      "branches": [
+        "Fen Bilimleri"
+      ]
+    },
+    {
+      "id": "d46275d5-d21a-43f5-b0d9-6a7dd02d74ca",
+      "name": "HURİ  BALCI",
+      "email": "huri@gmail.com",
+      "branches": [
+        "Biyoloji",
+        "Kimya"
+      ]
+    },
+    {
+      "id": "91d3cfc9-ac39-47a3-a399-4f79fe74fac3",
+      "name": "Hüseyin Demir",
+      "email": "hsyndmra1@gmail.com",
+      "branches": []
+    },
+    {
+      "id": "b82a71e4-3e14-4e6a-b012-852ef19622d1",
+      "name": "İrem Şimşek",
+      "email": "ireemsimsk@gmail.com",
+      "branches": [
+        "Matematik"
+      ]
+    },
+    {
+      "id": "6b4b4320-c6b6-4e9b-918f-40717ae788f4",
+      "name": "İsmail TEK",
+      "email": "bismiltek20@gmail.com",
+      "branches": [
+        "Fen Bilimleri",
+        "Biyoloji"
+      ]
+    },
+    {
+      "id": "c6bd96f9-bf12-404c-8e3a-1591939e63c2",
+      "name": "Kamil ANGAY",
+      "email": "kamil.angay72@hotmail.com",
+      "branches": [
+        "Fen Bilimleri"
+      ]
+    },
+    {
+      "id": "6e37a6a6-af83-449d-a0f4-94ea9c5fec0e",
+      "name": "KİFAYET  ALLAHVERDİ",
+      "email": "kifayet@gmail.com",
+      "branches": [
+        "Geometri",
+        "Matematik"
+      ]
+    },
+    {
+      "id": "adb98117-f10d-4aa1-a59f-8db41afb26e8",
+      "name": "Kübra Kırmızıoğlu",
+      "email": "kbrkrmzz19@gmail.com",
+      "branches": []
+    },
+    {
+      "id": "dc55eacd-68d8-4412-874f-99d888eac4b3",
+      "name": "Latife KURAY",
+      "email": "latifekuray46@gmail.com",
+      "branches": [
+        "Edebiyat"
+      ]
+    },
+    {
+      "id": "e14a22fc-1da6-41a6-9ff3-735142744687",
+      "name": "MAHMUT ŞENKAL",
+      "email": "senkal@gmail.com",
+      "branches": [
+        "Geometri"
+      ]
+    },
+    {
+      "id": "b037ad33-70ad-4b4c-8cdd-47c42077e498",
+      "name": "Merve Yetkin",
+      "email": "merveyetkinn@hotmail.com",
+      "branches": [
+        "Türkçe"
+      ]
+    },
+    {
+      "id": "68153623-15aa-481e-89d2-016b04cba0b5",
+      "name": "Merve Yurdakul",
+      "email": "merveyurdakul22@gmail.com",
+      "branches": [
+        "Matematik"
+      ]
+    },
+    {
+      "id": "02a1e965-3796-445c-9dda-62e22a734cea",
+      "name": "Mustafa KOZAN",
+      "email": "kozanmustafa21@gmail.com",
+      "branches": [
+        "Tarih",
+        "İnkılap Tarihi",
+        "Sosyal Bilgiler"
+      ]
+    },
+    {
+      "id": "f7a8d19a-cd54-46a5-9a08-5b431e7e21cb",
+      "name": "MUSTAFA ÖZTÜRK",
+      "email": "mustafaoztrkk@gmail.com",
+      "branches": [
+        "İngilizce",
+        "Din Kültürü"
+      ]
+    },
+    {
+      "id": "db8395cf-eb36-436c-bdc0-9f9be5e3b066",
+      "name": "Muzaffer Ayaydın",
+      "email": "muzafferayaydin@gmail.com",
+      "branches": [
+        "Hayat Bilgisi",
+        "Türkçe",
+        "Matematik",
+        "Din Kültürü",
+        "Fen Bilimleri",
+        "Sosyal Bilgiler",
+        "İngilizce"
+      ]
+    },
+    {
+      "id": "0696c045-c341-4bfe-b65c-5fa93e93f968",
+      "name": "Nadide AKTÜRK",
+      "email": "nadideaktrk@gmail.com",
+      "branches": [
+        "Sosyal Bilgiler"
+      ]
+    },
+    {
+      "id": "17bc8392-cad2-493e-b1ab-3aef66d14f69",
+      "name": "NURULLAH VAROL",
+      "email": "nurullah@gmail.com",
+      "branches": [
+        "Geometri"
+      ]
+    },
+    {
+      "id": "350a2631-8c69-4199-bdd0-0d68d8bdb350",
+      "name": "Reha Apaydın",
+      "email": "apaydinreha06@gmail.com",
+      "branches": [
+        "Türkçe",
+        "Edebiyat"
+      ]
+    },
+    {
+      "id": "0e2ec6ea-0f42-4e20-9649-78bdc0974348",
+      "name": "SALİH ÖNGÜL",
+      "email": "salih@gmail.com",
+      "branches": [
+        "Fizik"
+      ]
+    },
+    {
+      "id": "83ec0cd2-e588-4414-9bb6-eb8ca962f511",
+      "name": "Sevinç Çevik",
+      "email": "skaya4015@gmail.com",
+      "branches": []
+    },
+    {
+      "id": "9f83f11c-6e6c-4695-9c61-8652302d30f0",
+      "name": "Seymanur Sireci",
+      "email": "seymanursireci42@gmail.com",
+      "branches": []
+    },
+    {
+      "id": "00fc081d-2223-4979-adbf-fb331fceedb4",
+      "name": "SİNAN ERCAN",
+      "email": "snnercan@gmail.com",
+      "branches": [
+        "Matematik"
+      ]
+    },
+    {
+      "id": "f9241cc1-89dc-4e19-b42f-8785ef6fa15a",
+      "name": "Sultan KURT",
+      "email": "brk.sltn_kurt1502@hotmail.com",
+      "branches": [
+        "Türkçe",
+        "Edebiyat"
+      ]
+    },
+    {
+      "id": "f1b44f0a-5c61-4b72-b45a-4bc0615f8be0",
+      "name": "TAYYİBE ÖĞRENENEFE",
+      "email": "tayyibeefe@gmail.com",
+      "branches": [
+        "Biyoloji"
+      ]
+    },
+    {
+      "id": "446a5487-c87c-48de-8955-9b04ba29bfe1",
+      "name": "Turan KURAY",
+      "email": "turankuray21468022@gmail.com",
+      "branches": [
+        "Matematik"
+      ]
+    },
+    {
+      "id": "c9c3d932-08f1-4c54-94b8-58d770f3eca6",
+      "name": "Veysel Olkan Yeşil",
+      "email": "veyselolkan56@gmail.com",
+      "branches": []
+    },
+    {
+      "id": "b2debf3b-5077-4d01-a3de-addaf9a1ef99",
+      "name": "Yasin Kandemir",
+      "email": "yasinkandemir27@gmail.com",
+      "branches": [
+        "Kimya"
+      ]
+    },
+    {
+      "id": "71da8c98-8af2-446c-93fd-97c12900eb9d",
+      "name": "YILMAZ IŞIK",
+      "email": "yilmaz0404@hotmail.com",
+      "branches": [
+        "Matematik"
+      ]
+    },
+    {
+      "id": "ee9f221f-b0d9-4ca7-8e7a-57e72f22e2c2",
+      "name": "ZEYNEP ÖZCAN",
+      "email": "zeynep@gmail.com",
+      "branches": [
+        "Matematik"
+      ]
+    }
+  ],
+  "lockedSlots": {},
+  "editGroupIds": null,
+  "periodsByDay": {},
+  "poolSubjects": [
+    "ALMANCA",
+    "AYT BİYOLOJİ",
+    "AYT COĞRAFYA",
+    "AYT COĞRAFYA (SÖZEL)",
+    "AYT DİN KÜLTÜRÜ",
+    "AYT EDEBİYAT",
+    "AYT EDEBİYAT (SÖZEL)",
+    "AYT FELSEFE",
+    "AYT FİZİK",
+    "AYT KİMYA",
+    "AYT MANTIK",
+    "AYT MATEMATİK",
+    "AYT PSİKOLOJİ",
+    "AYT SOSYOLOJİ",
+    "AYT TARİH",
+    "AYT TARİH (SÖZEL)",
+    "BİYOLOJİ",
+    "COĞRAFYA",
+    "DİL VE ANLATIM",
+    "DİN KÜLTÜRÜ",
+    "EDEBİYAT",
+    "Etüt",
+    "FELSEFE",
+    "FEN BİLİMLERİ",
+    "FİZİK",
+    "GEOMETRİ",
+    "HAYAT BİLGİSİ",
+    "İNGİLİZCE",
+    "İNKILAP TARİHİ",
+    "KİMYA",
+    "Kitap Okuma",
+    "Kitap Okuma Atölyesi",
+    "MATEMATİK",
+    "Paragraf Çözme",
+    "Problem Çözme",
+    "PSİKOLOJİ",
+    "Rehberlik",
+    "SOSYAL BİLİMLER",
+    "SOSYOLOJİ",
+    "TARİH",
+    "TÜRKÇE",
+    "TYT BİYOLOJİ",
+    "TYT COĞRAFYA",
+    "TYT DİN KÜLTÜRÜ",
+    "TYT FELSEFE",
+    "TYT FİZİK",
+    "TYT GEOMETRİ",
+    "TYT KİMYA",
+    "TYT MAARİF BİYOLOJİ",
+    "TYT MAARİF COĞRAFYA",
+    "TYT MAARİF FİZİK",
+    "TYT MAARİF GEOMETRİ",
+    "TYT MAARİF KİMYA",
+    "TYT MAARİF MATEMATİK",
+    "TYT MAARİF TARİH",
+    "TYT MAARİF TÜRKÇE",
+    "TYT MATEMATİK",
+    "TYT TARİH",
+    "TYT TÜRKÇE",
+    "YÖS GEOMETRİ",
+    "YÖS IQ",
+    "YÖS MATEMATİK"
+  ],
+  "systemClasses": [
+    {
+      "id": "d1d1d074-276c-426c-910a-819307ffcf44",
+      "name": "2026-2027 10 A SINIFI",
+      "class_level": "10",
+      "branch": null
+    },
+    {
+      "id": "7e6c5286-134f-459d-97cc-5f7aa3f2fe11",
+      "name": "2026-2027 11 A SINIFI",
+      "class_level": "11",
+      "branch": null
+    },
+    {
+      "id": "32bf809f-9802-4284-a203-a3a6dbd0d02c",
+      "name": "2026-2027 11 B SINIFI",
+      "class_level": "11",
+      "branch": null
+    },
+    {
+      "id": "1f5409b3-7cea-4902-8e04-31063218e760",
+      "name": "2026-2027 2-A SINIFI",
+      "class_level": "2",
+      "branch": "A"
+    },
+    {
+      "id": "2e820364-8d60-4bec-841f-d9893435e661",
+      "name": "2026-2027 4-A SINIFI",
+      "class_level": "4",
+      "branch": null
+    },
+    {
+      "id": "30efa130-0bd0-4b84-bcbe-b83ac029c610",
+      "name": "2026-2027 9 A SINIFI",
+      "class_level": "9",
+      "branch": null
+    },
+    {
+      "id": "fe83cf5b-41e1-4b5f-91de-d63333ba0f05",
+      "name": "2026-2027 YILDIZLAR YKS GRUBU",
+      "class_level": "YKS SAYISAL",
+      "branch": "A"
+    },
+    {
+      "id": "8a23c803-e3db-46b1-8e9d-722228600397",
+      "name": "5A 2026-2027 DÖMEM",
+      "class_level": "5",
+      "branch": null
+    },
+    {
+      "id": "c6d04176-a01c-4058-8dc7-6a7da8c90c22",
+      "name": "6A 2026-2027 DÖMEM",
+      "class_level": "6",
+      "branch": null
+    },
+    {
+      "id": "9fc5705e-ce8f-427c-938f-bbee6e370fd1",
+      "name": "6B  SINIFI",
+      "class_level": "6",
+      "branch": null
+    },
+    {
+      "id": "162c355d-9ea4-4248-bcbf-e10f9cec59ed",
+      "name": "7A 2026-2027 DÖMEM",
+      "class_level": "7",
+      "branch": null
+    },
+    {
+      "id": "f14b1b1d-be9d-416a-aa82-1899b1c9fc08",
+      "name": "8A 2026-2027 DÖMEM",
+      "class_level": "LGS",
+      "branch": null
+    },
+    {
+      "id": "a45cae1a-0ec3-420e-9bd1-280a06f4196c",
+      "name": "8B 2026-2027 DÖMEM",
+      "class_level": "LGS",
+      "branch": null
+    },
+    {
+      "id": "822f8c84-f6e7-4d04-9669-c54841a5f3fa",
+      "name": "8C SINIFI",
+      "class_level": "LGS",
+      "branch": null
+    },
+    {
+      "id": "132f7a34-08b9-4910-9034-2e40652a33ba",
+      "name": "8E YAZ KAMPI",
+      "class_level": "LGS",
+      "branch": null
+    },
+    {
+      "id": "7cc4e2e4-8c4f-478d-ae9c-a4554fe8ba11",
+      "name": "8F 2026-2027 DÖMEM",
+      "class_level": "LGS",
+      "branch": null
+    },
+    {
+      "id": "086447e1-7bdf-40e0-a58d-6588a2b7a7b6",
+      "name": "SAT",
+      "class_level": "AP",
+      "branch": "A"
+    },
+    {
+      "id": "46cff3f2-316e-4b91-9b2f-50722f6ceede",
+      "name": "YÖS 2026 EKİM YILDIZLAR",
+      "class_level": "YÖS",
+      "branch": null
+    }
+  ],
+  "eveningPeriods": [
+    {
+      "time": "17:00–17:40",
+      "label": "1. Ders"
+    },
+    {
+      "time": "17:50–18:30",
+      "label": "2. Ders"
+    },
+    {
+      "time": "18:40–19:20",
+      "label": "3. Ders"
+    },
+    {
+      "time": "19:30–20:10",
+      "label": "4. Ders"
+    },
+    {
+      "time": "20:30-21:10",
+      "label": "5. Ders"
+    },
+    {
+      "time": "21:20-22:00",
+      "label": "6. Ders"
+    }
+  ],
+  "systemStudents": [
+    {
+      "id": "85a36e75-6a42-426a-ba11-d7bcb0258447",
+      "name": "Abdullah Emir Güven",
+      "class_level": "LGS",
+      "email": "salihatrn2013@gmail.com",
+      "school": "B",
+      "class_ids": [
+        "a45cae1a-0ec3-420e-9bd1-280a06f4196c",
+        "f14b1b1d-be9d-416a-aa82-1899b1c9fc08",
+        "822f8c84-f6e7-4d04-9669-c54841a5f3fa",
+        "132f7a34-08b9-4910-9034-2e40652a33ba",
+        "7cc4e2e4-8c4f-478d-ae9c-a4554fe8ba11"
+      ]
+    },
+    {
+      "id": "53d66ebb-a1ac-42bd-a853-36f7b7c154ca",
+      "name": "Abdulsamet Olgun",
+      "class_level": "9",
+      "email": "nurettinolgun72@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "30efa130-0bd0-4b84-bcbe-b83ac029c610"
+      ]
+    },
+    {
+      "id": "e9d897ff-6444-4d7d-b001-7a60ef46cf2d",
+      "name": "Ada Kılıçarslan",
+      "class_level": "LGS",
+      "email": "akilicarslan2334@gmail.com",
+      "school": "E",
+      "class_ids": [
+        "f14b1b1d-be9d-416a-aa82-1899b1c9fc08",
+        "a45cae1a-0ec3-420e-9bd1-280a06f4196c",
+        "822f8c84-f6e7-4d04-9669-c54841a5f3fa",
+        "132f7a34-08b9-4910-9034-2e40652a33ba",
+        "7cc4e2e4-8c4f-478d-ae9c-a4554fe8ba11"
+      ]
+    },
+    {
+      "id": "dddc824a-1bac-4e35-aa97-fc101a6841b0",
+      "name": "Adil Demirtaş",
+      "class_level": "YKS-Sayısal",
+      "email": "adildemirtas71@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "fe83cf5b-41e1-4b5f-91de-d63333ba0f05"
+      ]
+    },
+    {
+      "id": "fe1d235b-038b-47cb-a8ef-8078a6bad77c",
+      "name": "Adil Eymen Yaşar",
+      "class_level": "LGS",
+      "email": "yasaradileymen@gmail.com",
+      "school": "B",
+      "class_ids": [
+        "a45cae1a-0ec3-420e-9bd1-280a06f4196c",
+        "f14b1b1d-be9d-416a-aa82-1899b1c9fc08",
+        "822f8c84-f6e7-4d04-9669-c54841a5f3fa",
+        "132f7a34-08b9-4910-9034-2e40652a33ba",
+        "7cc4e2e4-8c4f-478d-ae9c-a4554fe8ba11"
+      ]
+    },
+    {
+      "id": "2eb8582e-bbfc-4297-8826-1bd630f59268",
+      "name": "Ahmet Mithat Çetinkaya",
+      "class_level": "5",
+      "email": "a.mithatcetinkaya@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "8a23c803-e3db-46b1-8e9d-722228600397"
+      ]
+    },
+    {
+      "id": "847f58f2-26ba-4b1e-9280-576aa5f2dc88",
+      "name": "Ahmet Oğuz",
+      "class_level": "YKS-Sayısal",
+      "email": "aaoguz4242@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "fe83cf5b-41e1-4b5f-91de-d63333ba0f05"
+      ]
+    },
+    {
+      "id": "754066fd-a49d-4f9a-91c3-baa83b3fd7e9",
+      "name": "Ahmet Renas KORKUSUZ",
+      "class_level": "YKS-Sayısal",
+      "email": "worldtakeo@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "fe83cf5b-41e1-4b5f-91de-d63333ba0f05"
+      ]
+    },
+    {
+      "id": "61dbdfae-4b69-4a98-a2f7-d8633c6062cd",
+      "name": "Ajita Hashimi",
+      "class_level": "YKS-Sayısal",
+      "email": "ajitahashimi1@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "fe83cf5b-41e1-4b5f-91de-d63333ba0f05"
+      ]
+    },
+    {
+      "id": "c7afcf09-19e8-4e71-a148-4ae9f7f15a72",
+      "name": "Ali Aslan",
+      "class_level": "6",
+      "email": "metotdoviz@gmail.com",
+      "school": "B",
+      "class_ids": [
+        "9fc5705e-ce8f-427c-938f-bbee6e370fd1",
+        "c6d04176-a01c-4058-8dc7-6a7da8c90c22"
+      ]
+    },
+    {
+      "id": "38a31791-1f39-44c3-9df9-91c07cb614aa",
+      "name": "Ali ihsan Urhan",
+      "class_level": "11",
+      "email": "aliihsanurhan91@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "7e6c5286-134f-459d-97cc-5f7aa3f2fe11",
+        "32bf809f-9802-4284-a203-a3a6dbd0d02c"
+      ]
+    },
+    {
+      "id": "1e162833-b5b4-4472-8b7f-5f61abac58c1",
+      "name": "Arif Faruk Tüfekci",
+      "class_level": "YOS",
+      "email": "tufekckariffaruk@gmail.com",
+      "school": "",
+      "class_ids": [
+        "46cff3f2-316e-4b91-9b2f-50722f6ceede"
+      ]
+    },
+    {
+      "id": "c3fc97f9-e8db-41f4-b5e7-f02edebac6df",
+      "name": "ASUDE KÜLAHLI",
+      "class_level": "11",
+      "email": "asude10kulahli@gmail.com",
+      "school": "B",
+      "class_ids": [
+        "32bf809f-9802-4284-a203-a3a6dbd0d02c",
+        "7e6c5286-134f-459d-97cc-5f7aa3f2fe11"
+      ]
+    },
+    {
+      "id": "d4b8e5f2-55f8-491e-a975-7b8c9641d2f9",
+      "name": "Ayça Çetiner",
+      "class_level": "11",
+      "email": "cetinerayca0@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "7e6c5286-134f-459d-97cc-5f7aa3f2fe11",
+        "32bf809f-9802-4284-a203-a3a6dbd0d02c"
+      ]
+    },
+    {
+      "id": "e5e2c541-14b4-4d41-a622-844d5f9943c4",
+      "name": "Aylin Atalay",
+      "class_level": "9",
+      "email": "aylin.atalay420@gmail.com",
+      "school": "",
+      "class_ids": [
+        "30efa130-0bd0-4b84-bcbe-b83ac029c610"
+      ]
+    },
+    {
+      "id": "e2a7eccc-1665-414b-afdf-f5880b7994b2",
+      "name": "Ayse melike İyilik",
+      "class_level": "6",
+      "email": "iyilik@gmail.com",
+      "school": "B",
+      "class_ids": [
+        "9fc5705e-ce8f-427c-938f-bbee6e370fd1",
+        "c6d04176-a01c-4058-8dc7-6a7da8c90c22"
+      ]
+    },
+    {
+      "id": "2261eb6a-2c6c-4c58-94ff-1d0e4ced5451",
+      "name": "AYŞE NAZ BAŞARSLAN",
+      "class_level": "11",
+      "email": "aysenazbasarslan@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "7e6c5286-134f-459d-97cc-5f7aa3f2fe11",
+        "32bf809f-9802-4284-a203-a3a6dbd0d02c"
+      ]
+    },
+    {
+      "id": "a4edd331-4b2d-4eb0-ae9b-5727e7a22407",
+      "name": "Ayşe Sena Tuncer",
+      "class_level": "9",
+      "email": "tunceraysesena@gmail.com",
+      "school": "",
+      "class_ids": [
+        "30efa130-0bd0-4b84-bcbe-b83ac029c610"
+      ]
+    },
+    {
+      "id": "efc5208c-f5da-4c6b-b297-eb1335286e01",
+      "name": "Ayşe Serra Yağcı",
+      "class_level": "4",
+      "email": "esrayagci.ozsoy@gmail.com",
+      "school": "Emine ve Hasan Aytaçman İlkokulu",
+      "class_ids": [
+        "2e820364-8d60-4bec-841f-d9893435e661"
+      ]
+    },
+    {
+      "id": "72c7f6cd-1a36-47ed-b76f-2f521c04039e",
+      "name": "Ayşegül Şanlı",
+      "class_level": "LGS",
+      "email": "sanlifigen09@gmail.com",
+      "school": "B",
+      "class_ids": [
+        "a45cae1a-0ec3-420e-9bd1-280a06f4196c",
+        "f14b1b1d-be9d-416a-aa82-1899b1c9fc08",
+        "822f8c84-f6e7-4d04-9669-c54841a5f3fa",
+        "132f7a34-08b9-4910-9034-2e40652a33ba",
+        "7cc4e2e4-8c4f-478d-ae9c-a4554fe8ba11"
+      ]
+    },
+    {
+      "id": "7c8f0995-c268-4418-969e-ae2318c102f7",
+      "name": "Ayşegül Zeynep Yıldırım",
+      "class_level": "LGS",
+      "email": "evreninkalbi@gmail.com",
+      "school": "C",
+      "class_ids": [
+        "822f8c84-f6e7-4d04-9669-c54841a5f3fa",
+        "f14b1b1d-be9d-416a-aa82-1899b1c9fc08",
+        "a45cae1a-0ec3-420e-9bd1-280a06f4196c",
+        "132f7a34-08b9-4910-9034-2e40652a33ba",
+        "7cc4e2e4-8c4f-478d-ae9c-a4554fe8ba11"
+      ]
+    },
+    {
+      "id": "17e6a602-ce6b-44fd-b5d7-7c8e2aea0561",
+      "name": "Azra Avcı",
+      "class_level": "6",
+      "email": "aytekinavci1623@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "c6d04176-a01c-4058-8dc7-6a7da8c90c22",
+        "9fc5705e-ce8f-427c-938f-bbee6e370fd1"
+      ]
+    },
+    {
+      "id": "fcecd2c2-a793-4b51-bfa0-48f8e429e34b",
+      "name": "Azra Elif KARACA",
+      "class_level": "6",
+      "email": "rasitkrc@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "c6d04176-a01c-4058-8dc7-6a7da8c90c22",
+        "9fc5705e-ce8f-427c-938f-bbee6e370fd1"
+      ]
+    },
+    {
+      "id": "31fd9bfa-eafb-44bf-a2dd-bfca23b05af4",
+      "name": "Azra Güre",
+      "class_level": "7",
+      "email": "cgur3535@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "162c355d-9ea4-4248-bcbf-e10f9cec59ed"
+      ]
+    },
+    {
+      "id": "7bf62d49-70da-418a-a237-70ea3ac63dff",
+      "name": "Barbaros Çakıl",
+      "class_level": "7",
+      "email": "cakil@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "162c355d-9ea4-4248-bcbf-e10f9cec59ed"
+      ]
+    },
+    {
+      "id": "27b5f089-6f59-42f6-9fbe-deb14cc76cd8",
+      "name": "Bayram ömür Yıldırım",
+      "class_level": "11",
+      "email": "nuriyebozzkurt@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "7e6c5286-134f-459d-97cc-5f7aa3f2fe11",
+        "32bf809f-9802-4284-a203-a3a6dbd0d02c"
+      ]
+    },
+    {
+      "id": "2a70bc01-ebc8-49fd-b78f-a70eda6a7380",
+      "name": "BEGÜM TÜRKAN KEYİF",
+      "class_level": "11",
+      "email": "begumturkankeyif@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "7e6c5286-134f-459d-97cc-5f7aa3f2fe11",
+        "32bf809f-9802-4284-a203-a3a6dbd0d02c"
+      ]
+    },
+    {
+      "id": "89cc0123-47fd-4b5c-8761-317e5e369d2d",
+      "name": "BELEN RODOPLU",
+      "class_level": "TYT-Maarif",
+      "email": "25be5127@edesis.com",
+      "school": "A",
+      "class_ids": []
+    },
+    {
+      "id": "4ad3fe75-5f13-49d2-8943-e145a02e18e2",
+      "name": "belinay akar",
+      "class_level": "LGS",
+      "email": "didemakar481@gmail.com",
+      "school": "C",
+      "class_ids": [
+        "822f8c84-f6e7-4d04-9669-c54841a5f3fa",
+        "f14b1b1d-be9d-416a-aa82-1899b1c9fc08",
+        "a45cae1a-0ec3-420e-9bd1-280a06f4196c",
+        "132f7a34-08b9-4910-9034-2e40652a33ba",
+        "7cc4e2e4-8c4f-478d-ae9c-a4554fe8ba11"
+      ]
+    },
+    {
+      "id": "ef633a26-6271-465a-8d5b-4ab5d775ef8d",
+      "name": "BELİZ KIZILYÜCE",
+      "class_level": "10",
+      "email": "beliz@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "d1d1d074-276c-426c-910a-819307ffcf44"
+      ]
+    },
+    {
+      "id": "285d9452-0db8-4b80-9214-1e3580168ee4",
+      "name": "Bengisu Elif Ardıç",
+      "class_level": "11",
+      "email": "bengisuelifa@gmail.com",
+      "school": "C",
+      "class_ids": [
+        "7e6c5286-134f-459d-97cc-5f7aa3f2fe11",
+        "32bf809f-9802-4284-a203-a3a6dbd0d02c"
+      ]
+    },
+    {
+      "id": "47bf9207-e8ef-4956-90ed-0766960c15e0",
+      "name": "Beren Karaaslan",
+      "class_level": "5",
+      "email": "emriyekaraaslann@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "8a23c803-e3db-46b1-8e9d-722228600397"
+      ]
+    },
+    {
+      "id": "5f760223-e9e9-49fd-aff1-fd6ee8cd4b98",
+      "name": "BEREN SU  KAHRAMAN",
+      "class_level": "LGS",
+      "email": "beren@gmail.com",
+      "school": "C",
+      "class_ids": [
+        "822f8c84-f6e7-4d04-9669-c54841a5f3fa",
+        "f14b1b1d-be9d-416a-aa82-1899b1c9fc08",
+        "a45cae1a-0ec3-420e-9bd1-280a06f4196c",
+        "132f7a34-08b9-4910-9034-2e40652a33ba",
+        "7cc4e2e4-8c4f-478d-ae9c-a4554fe8ba11"
+      ]
+    },
+    {
+      "id": "5e1c77d2-74c6-41f2-9abd-bd26173f050a",
+      "name": "Berrak Ece Gümüştaş",
+      "class_level": "11",
+      "email": "berrakecegumustas@gmail.com",
+      "school": "B",
+      "class_ids": [
+        "32bf809f-9802-4284-a203-a3a6dbd0d02c",
+        "7e6c5286-134f-459d-97cc-5f7aa3f2fe11"
+      ]
+    },
+    {
+      "id": "aa8c0fda-2a9d-4cfd-89ec-56c8067dedff",
+      "name": "Betül Ateşci",
+      "class_level": "LGS",
+      "email": "betulatesci8@gmail.com",
+      "school": "B",
+      "class_ids": [
+        "a45cae1a-0ec3-420e-9bd1-280a06f4196c",
+        "f14b1b1d-be9d-416a-aa82-1899b1c9fc08",
+        "822f8c84-f6e7-4d04-9669-c54841a5f3fa",
+        "132f7a34-08b9-4910-9034-2e40652a33ba",
+        "7cc4e2e4-8c4f-478d-ae9c-a4554fe8ba11"
+      ]
+    },
+    {
+      "id": "ccccfd3c-7ea6-44c5-8fb2-c9b4be865b04",
+      "name": "BETÜL ERVA KAPLAN",
+      "class_level": "LGS",
+      "email": "ervakaplan@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "f14b1b1d-be9d-416a-aa82-1899b1c9fc08",
+        "a45cae1a-0ec3-420e-9bd1-280a06f4196c",
+        "822f8c84-f6e7-4d04-9669-c54841a5f3fa",
+        "132f7a34-08b9-4910-9034-2e40652a33ba",
+        "7cc4e2e4-8c4f-478d-ae9c-a4554fe8ba11"
+      ]
+    },
+    {
+      "id": "929d5b49-a8e1-4c89-b729-799c439c4f3f",
+      "name": "Betül Fatıma Özcan",
+      "class_level": "YKS-Sayısal",
+      "email": "ozcannbetull96@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "fe83cf5b-41e1-4b5f-91de-d63333ba0f05"
+      ]
+    },
+    {
+      "id": "550f24f2-6122-472c-bf44-41749106f331",
+      "name": "Beyda Gül Ertaş",
+      "class_level": "6",
+      "email": "egurbetertas@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "c6d04176-a01c-4058-8dc7-6a7da8c90c22",
+        "9fc5705e-ce8f-427c-938f-bbee6e370fd1"
+      ]
+    },
+    {
+      "id": "5222eff2-e885-4bc6-b889-9ea659878e81",
+      "name": "Beytullah tuna Çakan",
+      "class_level": "LGS",
+      "email": "fenerbahce55svda@gmail.com",
+      "school": "E",
+      "class_ids": [
+        "132f7a34-08b9-4910-9034-2e40652a33ba",
+        "f14b1b1d-be9d-416a-aa82-1899b1c9fc08",
+        "a45cae1a-0ec3-420e-9bd1-280a06f4196c",
+        "822f8c84-f6e7-4d04-9669-c54841a5f3fa",
+        "7cc4e2e4-8c4f-478d-ae9c-a4554fe8ba11"
+      ]
+    },
+    {
+      "id": "fcf3dd86-2307-4d55-879d-d7ae188350ed",
+      "name": "Beyza Ahsen Çakmak",
+      "class_level": "LGS",
+      "email": "osman__cakmak@hotmail.com",
+      "school": "B",
+      "class_ids": [
+        "a45cae1a-0ec3-420e-9bd1-280a06f4196c",
+        "f14b1b1d-be9d-416a-aa82-1899b1c9fc08",
+        "822f8c84-f6e7-4d04-9669-c54841a5f3fa",
+        "132f7a34-08b9-4910-9034-2e40652a33ba",
+        "7cc4e2e4-8c4f-478d-ae9c-a4554fe8ba11"
+      ]
+    },
+    {
+      "id": "82ad4740-7cd0-4608-bb92-5829520d8642",
+      "name": "BEYZA KURAY",
+      "class_level": "YOS",
+      "email": "25ii5154@edesis.com",
+      "school": "B",
+      "class_ids": [
+        "46cff3f2-316e-4b91-9b2f-50722f6ceede"
+      ]
+    },
+    {
+      "id": "8a50e00d-97a4-4e47-a7c6-10f7291ec0d5",
+      "name": "Boğaçhan Erken",
+      "class_level": "7",
+      "email": "bogachanerken@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "162c355d-9ea4-4248-bcbf-e10f9cec59ed"
+      ]
+    },
+    {
+      "id": "0b7e5226-f27b-4c82-960e-2892cfdbe74f",
+      "name": "Burçin Bayrak",
+      "class_level": "YKS-Sayısal",
+      "email": "burcinbayrak3@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "fe83cf5b-41e1-4b5f-91de-d63333ba0f05"
+      ]
+    },
+    {
+      "id": "a7a29828-0b45-4215-a467-8031635bbb56",
+      "name": "CANSU ILGIN AKÇA",
+      "class_level": "TYT-Maarif",
+      "email": "2450ww71@edesis.com",
+      "school": "B",
+      "class_ids": []
+    },
+    {
+      "id": "e39b2f64-a167-4716-abf0-2e78414d09eb",
+      "name": "Cemile YILDIZ",
+      "class_level": "YOS",
+      "email": "mevltyldz1@gmail.com",
+      "school": "",
+      "class_ids": [
+        "46cff3f2-316e-4b91-9b2f-50722f6ceede"
+      ]
+    },
+    {
+      "id": "cfeaf5d1-400c-4cf5-9126-e4369b134033",
+      "name": "CEMRE ÇELİK",
+      "class_level": "11",
+      "email": "cemre@gmail.com",
+      "school": "B",
+      "class_ids": [
+        "7e6c5286-134f-459d-97cc-5f7aa3f2fe11",
+        "32bf809f-9802-4284-a203-a3a6dbd0d02c"
+      ]
+    },
+    {
+      "id": "a2495e47-4813-4c61-8727-b6f630d47ed2",
+      "name": "Cemre Zülal KARAKIŞ",
+      "class_level": "LGS",
+      "email": "cemrezulal@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "f14b1b1d-be9d-416a-aa82-1899b1c9fc08",
+        "a45cae1a-0ec3-420e-9bd1-280a06f4196c",
+        "822f8c84-f6e7-4d04-9669-c54841a5f3fa",
+        "132f7a34-08b9-4910-9034-2e40652a33ba",
+        "7cc4e2e4-8c4f-478d-ae9c-a4554fe8ba11"
+      ]
+    },
+    {
+      "id": "6ec8b4a6-fb71-4524-96d3-466501f19907",
+      "name": "Ceren Coşkun",
+      "class_level": "LGS",
+      "email": "ccigdemcoskun06@gmail.com",
+      "school": "C",
+      "class_ids": [
+        "822f8c84-f6e7-4d04-9669-c54841a5f3fa",
+        "7cc4e2e4-8c4f-478d-ae9c-a4554fe8ba11",
+        "f14b1b1d-be9d-416a-aa82-1899b1c9fc08",
+        "a45cae1a-0ec3-420e-9bd1-280a06f4196c",
+        "132f7a34-08b9-4910-9034-2e40652a33ba"
+      ]
+    },
+    {
+      "id": "7baa9f8c-71a4-4ab4-9852-f3a2ad38fea8",
+      "name": "Ceylin Kesin",
+      "class_level": "YKS-Sayısal",
+      "email": "ceylinkesin7985@gmail.com",
+      "school": "",
+      "class_ids": []
+    },
+    {
+      "id": "3a8b7d8b-e19e-4f66-ab33-aad2b2bd9003",
+      "name": "Ceylin Okumus",
+      "class_level": "10",
+      "email": "ceyceyokumus@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "d1d1d074-276c-426c-910a-819307ffcf44"
+      ]
+    },
+    {
+      "id": "2a73a8ea-845e-4e71-9ebb-adca58a0f2c6",
+      "name": "Ceylin Somyürek",
+      "class_level": "10",
+      "email": "ceylinsomyurek@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "d1d1d074-276c-426c-910a-819307ffcf44"
+      ]
+    },
+    {
+      "id": "060038d6-6d2c-4b27-8786-813cecff58ab",
+      "name": "Cihangir Aslan",
+      "class_level": "LGS",
+      "email": "gamzeaslan2012@gmail.com",
+      "school": "B",
+      "class_ids": [
+        "a45cae1a-0ec3-420e-9bd1-280a06f4196c",
+        "f14b1b1d-be9d-416a-aa82-1899b1c9fc08",
+        "822f8c84-f6e7-4d04-9669-c54841a5f3fa",
+        "132f7a34-08b9-4910-9034-2e40652a33ba",
+        "7cc4e2e4-8c4f-478d-ae9c-a4554fe8ba11"
+      ]
+    },
+    {
+      "id": "1b58633d-9103-42fe-b6a8-b8664c828483",
+      "name": "Çınar Kısmetli",
+      "class_level": "6",
+      "email": "berrinsari@yahoo.com",
+      "school": "B",
+      "class_ids": [
+        "9fc5705e-ce8f-427c-938f-bbee6e370fd1",
+        "c6d04176-a01c-4058-8dc7-6a7da8c90c22"
+      ]
+    },
+    {
+      "id": "d1856168-6cec-421a-8540-e81884ae1d22",
+      "name": "Defne Asel YILDIRIM",
+      "class_level": "7",
+      "email": "yldrm.hknn@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "162c355d-9ea4-4248-bcbf-e10f9cec59ed"
+      ]
+    },
+    {
+      "id": "115bf51c-672a-4e95-a31b-66bb0976d28a",
+      "name": "Deniz Sadi Yüce",
+      "class_level": "LGS",
+      "email": "dsadiyuce@gmail.com",
+      "school": "F",
+      "class_ids": [
+        "7cc4e2e4-8c4f-478d-ae9c-a4554fe8ba11",
+        "f14b1b1d-be9d-416a-aa82-1899b1c9fc08",
+        "a45cae1a-0ec3-420e-9bd1-280a06f4196c",
+        "822f8c84-f6e7-4d04-9669-c54841a5f3fa",
+        "132f7a34-08b9-4910-9034-2e40652a33ba"
+      ]
+    },
+    {
+      "id": "cdc01a23-8b45-44e9-b41d-e4240b4369a8",
+      "name": "Dila Öztürk",
+      "class_level": "YKS-Sayısal",
+      "email": "yedibelahusnu08@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "fe83cf5b-41e1-4b5f-91de-d63333ba0f05"
+      ]
+    },
+    {
+      "id": "cdd97773-5c01-4551-9403-43e206fd453a",
+      "name": "Doruk Uzunoğlu",
+      "class_level": "10",
+      "email": "atilauzunoglu@hotmail.com",
+      "school": "A",
+      "class_ids": [
+        "d1d1d074-276c-426c-910a-819307ffcf44"
+      ]
+    },
+    {
+      "id": "9d2e9609-85f4-4389-b7df-be5c6c1f4089",
+      "name": "DURU YILMAZ",
+      "class_level": "7",
+      "email": "elcinbalta@yahoo.com",
+      "school": "A",
+      "class_ids": [
+        "162c355d-9ea4-4248-bcbf-e10f9cec59ed"
+      ]
+    },
+    {
+      "id": "e669c330-c36d-4659-adca-9e45236e8015",
+      "name": "Ecem Naz Sevimli",
+      "class_level": "10",
+      "email": "medinesvm44@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "d1d1d074-276c-426c-910a-819307ffcf44"
+      ]
+    },
+    {
+      "id": "6d9d2ee0-c3a9-47dc-b209-3d2968d74582",
+      "name": "ECRİN TAŞ",
+      "class_level": "11",
+      "email": "5515991918@edesis.com",
+      "school": "A",
+      "class_ids": [
+        "32bf809f-9802-4284-a203-a3a6dbd0d02c",
+        "7e6c5286-134f-459d-97cc-5f7aa3f2fe11"
+      ]
+    },
+    {
+      "id": "60a81cf6-bc46-41cc-a1b3-20bcb833ff29",
+      "name": "EFE ÇONKAR",
+      "class_level": "YKS-Sayısal",
+      "email": "efeconkar1@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "fe83cf5b-41e1-4b5f-91de-d63333ba0f05"
+      ]
+    },
+    {
+      "id": "aaa61d55-64c6-490f-8de8-73eb6481abbe",
+      "name": "Efe KARACA",
+      "class_level": "11",
+      "email": "hefekrc58@gmail.com",
+      "school": "B",
+      "class_ids": [
+        "32bf809f-9802-4284-a203-a3a6dbd0d02c",
+        "7e6c5286-134f-459d-97cc-5f7aa3f2fe11"
+      ]
+    },
+    {
+      "id": "d0c9efd5-251c-4909-8159-64fcf735d3ed",
+      "name": "Ekin Sevinç",
+      "class_level": "10",
+      "email": "ekinsevinc85@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "d1d1d074-276c-426c-910a-819307ffcf44"
+      ]
+    },
+    {
+      "id": "d55a9c21-075f-4c5f-b824-fa878f1a90f3",
+      "name": "ELA  AKGÜN",
+      "class_level": "LGS",
+      "email": "elaakgun@gmail.com",
+      "school": "F",
+      "class_ids": [
+        "7cc4e2e4-8c4f-478d-ae9c-a4554fe8ba11",
+        "f14b1b1d-be9d-416a-aa82-1899b1c9fc08",
+        "a45cae1a-0ec3-420e-9bd1-280a06f4196c",
+        "822f8c84-f6e7-4d04-9669-c54841a5f3fa",
+        "132f7a34-08b9-4910-9034-2e40652a33ba"
+      ]
+    },
+    {
+      "id": "b4ea0608-05b6-4941-ac33-093208bd701e",
+      "name": "ela nur ayer",
+      "class_level": "10",
+      "email": "e4470995@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "d1d1d074-276c-426c-910a-819307ffcf44"
+      ]
+    },
+    {
+      "id": "bc8aad79-b22c-4822-bfc6-43ec5c9ec96c",
+      "name": "Elif Beril Tığlı",
+      "class_level": "LGS",
+      "email": "elifberil2605@gmail.com",
+      "school": "B",
+      "class_ids": [
+        "a45cae1a-0ec3-420e-9bd1-280a06f4196c",
+        "f14b1b1d-be9d-416a-aa82-1899b1c9fc08",
+        "822f8c84-f6e7-4d04-9669-c54841a5f3fa",
+        "132f7a34-08b9-4910-9034-2e40652a33ba",
+        "7cc4e2e4-8c4f-478d-ae9c-a4554fe8ba11"
+      ]
+    },
+    {
+      "id": "be580ecc-6cc2-4a98-95a0-0464d69fc051",
+      "name": "Elif Elmaoğlu",
+      "class_level": "10",
+      "email": "feyzaelmaoglu@gmail.com",
+      "school": "",
+      "class_ids": [
+        "d1d1d074-276c-426c-910a-819307ffcf44"
+      ]
+    },
+    {
+      "id": "a3c929c0-de04-4cb0-9861-f57bb3eddaaf",
+      "name": "Elif sena Çomak",
+      "class_level": "6",
+      "email": "elifsena1311@gmail.com",
+      "school": "Umurlu şehit rıfat tunçbilek ortaokulu",
+      "class_ids": [
+        "c6d04176-a01c-4058-8dc7-6a7da8c90c22",
+        "9fc5705e-ce8f-427c-938f-bbee6e370fd1"
+      ]
+    },
+    {
+      "id": "55a8ca8e-e65c-4ab0-8606-58f7a5ab06da",
+      "name": "Emir aras Uzun",
+      "class_level": "5",
+      "email": "efsunuzun90@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "8a23c803-e3db-46b1-8e9d-722228600397"
+      ]
+    },
+    {
+      "id": "d14cb040-cc25-41b3-82d5-05f95b072a21",
+      "name": "Emir Yalçın",
+      "class_level": "9",
+      "email": "mhmmtt50@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "30efa130-0bd0-4b84-bcbe-b83ac029c610"
+      ]
+    },
+    {
+      "id": "01782847-ecdd-4ccc-b801-a85967af158d",
+      "name": "EREN BERK ŞUEKİNCİ",
+      "class_level": "TYT-Maarif",
+      "email": "magicfroggel123@gmail.com",
+      "school": "A",
+      "class_ids": []
+    },
+    {
+      "id": "e1cec720-d152-4caf-bbed-3b31d17dfc08",
+      "name": "ERVA  KARACA",
+      "class_level": "11",
+      "email": "macidekrc@gmail.com",
+      "school": "B",
+      "class_ids": [
+        "32bf809f-9802-4284-a203-a3a6dbd0d02c",
+        "7e6c5286-134f-459d-97cc-5f7aa3f2fe11"
+      ]
+    },
+    {
+      "id": "3daa11ab-ec0b-487c-aaa6-59b480159c5b",
+      "name": "Erva İşci",
+      "class_level": "LGS",
+      "email": "ervaisci@gmail.com",
+      "school": "F",
+      "class_ids": [
+        "7cc4e2e4-8c4f-478d-ae9c-a4554fe8ba11",
+        "f14b1b1d-be9d-416a-aa82-1899b1c9fc08",
+        "a45cae1a-0ec3-420e-9bd1-280a06f4196c",
+        "822f8c84-f6e7-4d04-9669-c54841a5f3fa",
+        "132f7a34-08b9-4910-9034-2e40652a33ba"
+      ]
+    },
+    {
+      "id": "5f409cf4-3c43-4934-8084-f42c0c82565a",
+      "name": "Erva Odabaş",
+      "class_level": "5",
+      "email": "srhtodabas@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "8a23c803-e3db-46b1-8e9d-722228600397"
+      ]
+    },
+    {
+      "id": "4951b4b9-6fd9-4d7f-b730-45c1580aa3fd",
+      "name": "Esila Erten",
+      "class_level": "LGS",
+      "email": "serkanerten8179@gmail.com",
+      "school": "C",
+      "class_ids": [
+        "822f8c84-f6e7-4d04-9669-c54841a5f3fa",
+        "f14b1b1d-be9d-416a-aa82-1899b1c9fc08",
+        "a45cae1a-0ec3-420e-9bd1-280a06f4196c",
+        "132f7a34-08b9-4910-9034-2e40652a33ba",
+        "7cc4e2e4-8c4f-478d-ae9c-a4554fe8ba11"
+      ]
+    },
+    {
+      "id": "6424c763-efb5-466b-8aa5-ce2e3591c900",
+      "name": "Eylül Karlatlı",
+      "class_level": "LGS",
+      "email": "eylulkarlatli@gmail.com",
+      "school": "C",
+      "class_ids": [
+        "822f8c84-f6e7-4d04-9669-c54841a5f3fa",
+        "f14b1b1d-be9d-416a-aa82-1899b1c9fc08",
+        "a45cae1a-0ec3-420e-9bd1-280a06f4196c",
+        "132f7a34-08b9-4910-9034-2e40652a33ba",
+        "7cc4e2e4-8c4f-478d-ae9c-a4554fe8ba11"
+      ]
+    },
+    {
+      "id": "8b024130-7432-446d-a8ff-4ec1fe19bfc7",
+      "name": "Eylül Nisa YILDIRIM",
+      "class_level": "11",
+      "email": "oznr006yldrm@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "7e6c5286-134f-459d-97cc-5f7aa3f2fe11",
+        "32bf809f-9802-4284-a203-a3a6dbd0d02c"
+      ]
+    },
+    {
+      "id": "6d079939-c31f-4810-b411-a9d20ba8f0a6",
+      "name": "Filiz Köroğlu",
+      "class_level": "YOS",
+      "email": "k.filiz7788@gmail.com",
+      "school": "B",
+      "class_ids": [
+        "46cff3f2-316e-4b91-9b2f-50722f6ceede"
+      ]
+    },
+    {
+      "id": "90d5775c-e822-49d1-96d7-e3655726ea8b",
+      "name": "firdevs gebel",
+      "class_level": "YOS",
+      "email": "firdevsgebel2746@gmail.com",
+      "school": "",
+      "class_ids": [
+        "46cff3f2-316e-4b91-9b2f-50722f6ceede"
+      ]
+    },
+    {
+      "id": "6b7bd868-22a8-4a87-904d-8c8800d0e319",
+      "name": "FURKAN AKTÜRK",
+      "class_level": "6",
+      "email": "furkan123@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "c6d04176-a01c-4058-8dc7-6a7da8c90c22",
+        "9fc5705e-ce8f-427c-938f-bbee6e370fd1"
+      ]
+    },
+    {
+      "id": "bb98dd38-0f03-4ff3-994d-1422e11e435b",
+      "name": "Gökdeniz Ayran",
+      "class_level": "YOS",
+      "email": "skysea050595@gmail.com",
+      "school": "YÖS",
+      "class_ids": [
+        "46cff3f2-316e-4b91-9b2f-50722f6ceede"
+      ]
+    },
+    {
+      "id": "936e348e-7c5a-40bf-86b7-ec2b4b348286",
+      "name": "Göktan çelik",
+      "class_level": "LGS",
+      "email": "goktan4040@gmail.com",
+      "school": "F",
+      "class_ids": [
+        "7cc4e2e4-8c4f-478d-ae9c-a4554fe8ba11",
+        "f14b1b1d-be9d-416a-aa82-1899b1c9fc08",
+        "a45cae1a-0ec3-420e-9bd1-280a06f4196c",
+        "822f8c84-f6e7-4d04-9669-c54841a5f3fa",
+        "132f7a34-08b9-4910-9034-2e40652a33ba"
+      ]
+    },
+    {
+      "id": "44b1be47-c565-4db1-926d-f624f3edf70c",
+      "name": "Gülsüm Elif Ekşioğlu",
+      "class_level": "10",
+      "email": "gelifeksioglu@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "d1d1d074-276c-426c-910a-819307ffcf44"
+      ]
+    },
+    {
+      "id": "03c889da-5edf-4fb4-8677-c71844ec3af2",
+      "name": "Hakan Emin İnaltekin",
+      "class_level": "LGS",
+      "email": "kaan.inaltekin@gmail.com",
+      "school": "C",
+      "class_ids": [
+        "822f8c84-f6e7-4d04-9669-c54841a5f3fa",
+        "f14b1b1d-be9d-416a-aa82-1899b1c9fc08",
+        "a45cae1a-0ec3-420e-9bd1-280a06f4196c",
+        "132f7a34-08b9-4910-9034-2e40652a33ba",
+        "7cc4e2e4-8c4f-478d-ae9c-a4554fe8ba11"
+      ]
+    },
+    {
+      "id": "21a620ee-b6f4-43dc-a9da-90405d30e11b",
+      "name": "Haktan Saç",
+      "class_level": "7",
+      "email": "busrrasac0@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "162c355d-9ea4-4248-bcbf-e10f9cec59ed"
+      ]
+    },
+    {
+      "id": "7f21126f-2c6c-47cd-affd-b0af95a11e08",
+      "name": "Halil Arda Gültekin",
+      "class_level": "7",
+      "email": "dursunardagultekin@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "162c355d-9ea4-4248-bcbf-e10f9cec59ed"
+      ]
+    },
+    {
+      "id": "a6e4d263-e40f-41af-aa44-e15b655c2bcc",
+      "name": "Halil İbrahim Aktaş",
+      "class_level": "10",
+      "email": "alevhasanaktas@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "d1d1d074-276c-426c-910a-819307ffcf44"
+      ]
+    },
+    {
+      "id": "b646d1bb-1bc0-4251-bad4-34bd910c8b1c",
+      "name": "Hamza SAKA",
+      "class_level": "11",
+      "email": "hamzasaka171@gmail.com",
+      "school": "B",
+      "class_ids": [
+        "32bf809f-9802-4284-a203-a3a6dbd0d02c",
+        "7e6c5286-134f-459d-97cc-5f7aa3f2fe11"
+      ]
+    },
+    {
+      "id": "a969b526-e946-4848-9117-205c1e30c4b6",
+      "name": "Hansa Yağmur Ayçiçek",
+      "class_level": "YOS",
+      "email": "hansaaycicekk@gmail.com",
+      "school": "",
+      "class_ids": [
+        "46cff3f2-316e-4b91-9b2f-50722f6ceede"
+      ]
+    },
+    {
+      "id": "224da257-2c46-4601-8911-6509af969cf9",
+      "name": "Hatice Yaren Açıkgöz",
+      "class_level": "YKS-Sayısal",
+      "email": "acikgozhaticeyaren489@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "fe83cf5b-41e1-4b5f-91de-d63333ba0f05"
+      ]
+    },
+    {
+      "id": "5161b2c6-79b2-472c-af82-ab2b770369f5",
+      "name": "Hatice Yaren Açıkgöz",
+      "class_level": "YKS",
+      "email": "yarenacikgozhatice2009@gmail.com",
+      "school": "",
+      "class_ids": []
+    },
+    {
+      "id": "60e67d14-ef88-4932-971e-9ff8fb96f712",
+      "name": "Hifa İşci",
+      "class_level": "6",
+      "email": "serifeisci0@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "c6d04176-a01c-4058-8dc7-6a7da8c90c22",
+        "9fc5705e-ce8f-427c-938f-bbee6e370fd1"
+      ]
+    },
+    {
+      "id": "36900315-dbf1-4f43-95f4-804c0e5f259c",
+      "name": "Irmak can Dilekçi",
+      "class_level": "LGS",
+      "email": "g14098089@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "f14b1b1d-be9d-416a-aa82-1899b1c9fc08",
+        "a45cae1a-0ec3-420e-9bd1-280a06f4196c",
+        "822f8c84-f6e7-4d04-9669-c54841a5f3fa",
+        "132f7a34-08b9-4910-9034-2e40652a33ba",
+        "7cc4e2e4-8c4f-478d-ae9c-a4554fe8ba11"
+      ]
+    },
+    {
+      "id": "46082b67-a9d3-48c2-9e07-538814a0ad5f",
+      "name": "Işıl Ecesu  ÇALIŞKAN",
+      "class_level": "LGS",
+      "email": "ece@gmail.com",
+      "school": "C",
+      "class_ids": [
+        "822f8c84-f6e7-4d04-9669-c54841a5f3fa",
+        "f14b1b1d-be9d-416a-aa82-1899b1c9fc08",
+        "a45cae1a-0ec3-420e-9bd1-280a06f4196c",
+        "132f7a34-08b9-4910-9034-2e40652a33ba",
+        "7cc4e2e4-8c4f-478d-ae9c-a4554fe8ba11"
+      ]
+    },
+    {
+      "id": "6fede419-4cb0-48f8-99d2-2352345916f0",
+      "name": "İkra Saç",
+      "class_level": "5",
+      "email": "ikrasac2016@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "8a23c803-e3db-46b1-8e9d-722228600397"
+      ]
+    },
+    {
+      "id": "77806ecd-ec83-4eb5-b0e1-6e52decbd715",
+      "name": "Kaan Ata Türkaydın",
+      "class_level": "7",
+      "email": "kaanata@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "162c355d-9ea4-4248-bcbf-e10f9cec59ed"
+      ]
+    },
+    {
+      "id": "328b0797-d5be-490c-8131-dd6caf6f63c0",
+      "name": "KAĞAN KARAHAN",
+      "class_level": "YKS-Sayısal",
+      "email": "kagancankarahan8@gmail.com",
+      "school": "A",
+      "class_ids": []
+    },
+    {
+      "id": "b5c9a44f-3901-4d12-97be-f93e1bcded8f",
+      "name": "Kağan Mert Bayram",
+      "class_level": "11",
+      "email": "kaganmertbayram@gmail.com",
+      "school": "F",
+      "class_ids": [
+        "7e6c5286-134f-459d-97cc-5f7aa3f2fe11",
+        "32bf809f-9802-4284-a203-a3a6dbd0d02c"
+      ]
+    },
+    {
+      "id": "c8b98d01-19d7-4502-abbc-233b32b6b129",
+      "name": "Kerem Akbunar",
+      "class_level": "6",
+      "email": "gulayakbunar43@gmail.com",
+      "school": "B",
+      "class_ids": [
+        "9fc5705e-ce8f-427c-938f-bbee6e370fd1",
+        "c6d04176-a01c-4058-8dc7-6a7da8c90c22"
+      ]
+    },
+    {
+      "id": "2c73f6aa-516c-4fc6-ab1c-544d114e4b48",
+      "name": "Kerem Demir",
+      "class_level": "9",
+      "email": "nizam855@hotmail.com",
+      "school": "",
+      "class_ids": [
+        "30efa130-0bd0-4b84-bcbe-b83ac029c610"
+      ]
+    },
+    {
+      "id": "d589a378-c688-43c3-a612-c1f79373cd55",
+      "name": "Mahir Demirbaş",
+      "class_level": "LGS",
+      "email": "mahirdemirbas11@icloud.com",
+      "school": "B",
+      "class_ids": [
+        "a45cae1a-0ec3-420e-9bd1-280a06f4196c",
+        "f14b1b1d-be9d-416a-aa82-1899b1c9fc08",
+        "822f8c84-f6e7-4d04-9669-c54841a5f3fa",
+        "132f7a34-08b9-4910-9034-2e40652a33ba",
+        "7cc4e2e4-8c4f-478d-ae9c-a4554fe8ba11"
+      ]
+    },
+    {
+      "id": "ae143af5-39db-4e65-ae8c-b1b9d180947e",
+      "name": "Mehmet Baran Öğrenenefe",
+      "class_level": "7",
+      "email": "baran04sth@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "162c355d-9ea4-4248-bcbf-e10f9cec59ed"
+      ]
+    },
+    {
+      "id": "2c4e624b-3232-4369-a9cf-e25fda20f33d",
+      "name": "MEHMET EMİN ATEŞ",
+      "class_level": "YKS-Sayısal",
+      "email": "atsmhmtmn@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "fe83cf5b-41e1-4b5f-91de-d63333ba0f05"
+      ]
+    },
+    {
+      "id": "3f2b52d4-81e7-4edd-8cff-83c3b2cfc6d9",
+      "name": "Mehmet Emin Celenk",
+      "class_level": "YOS",
+      "email": "mehmetemin5261.celenk@gmail.com",
+      "school": "",
+      "class_ids": [
+        "46cff3f2-316e-4b91-9b2f-50722f6ceede"
+      ]
+    },
+    {
+      "id": "99d11a7b-3cf9-4925-be92-c3c62681abd2",
+      "name": "mehmet emre baykara",
+      "class_level": "10",
+      "email": "baykaraemre327@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "d1d1d074-276c-426c-910a-819307ffcf44"
+      ]
+    },
+    {
+      "id": "4254d577-f2d7-4b56-a47b-998113b54838",
+      "name": "Mehmet Işık",
+      "class_level": "LGS",
+      "email": "mkmssi86@gmail.com",
+      "school": "F",
+      "class_ids": [
+        "7cc4e2e4-8c4f-478d-ae9c-a4554fe8ba11",
+        "f14b1b1d-be9d-416a-aa82-1899b1c9fc08",
+        "a45cae1a-0ec3-420e-9bd1-280a06f4196c",
+        "822f8c84-f6e7-4d04-9669-c54841a5f3fa",
+        "132f7a34-08b9-4910-9034-2e40652a33ba"
+      ]
+    },
+    {
+      "id": "9af76dd1-b4c4-44e2-86dd-7f9e637d81f4",
+      "name": "Mehmet Orhun Geçimli",
+      "class_level": "YKS-Sayısal",
+      "email": "mehmetorhungecimli@gmail.com",
+      "school": "A",
+      "class_ids": []
+    },
+    {
+      "id": "54c05148-0a9d-4b0b-a594-573ccb0d43cf",
+      "name": "mehmet yaman gültekin",
+      "class_level": "10",
+      "email": "mehmetyamangultekin@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "d1d1d074-276c-426c-910a-819307ffcf44"
+      ]
+    },
+    {
+      "id": "df2fea8b-56ab-4055-aaa5-a6dfc0d38ad1",
+      "name": "Melike Önder",
+      "class_level": "7",
+      "email": "ggokcekkose@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "162c355d-9ea4-4248-bcbf-e10f9cec59ed"
+      ]
+    },
+    {
+      "id": "ddec0db1-fa3b-45db-b694-9ebe5a6062c1",
+      "name": "Melis Okuturlar",
+      "class_level": "TYT-Maarif",
+      "email": "melisokuturlar@gmail.com",
+      "school": "B",
+      "class_ids": []
+    },
+    {
+      "id": "f9e24186-3f08-443b-bc63-45ececb8294f",
+      "name": "Meltem Acar",
+      "class_level": "11",
+      "email": "mltm00acr@gmail.com",
+      "school": "B",
+      "class_ids": [
+        "7e6c5286-134f-459d-97cc-5f7aa3f2fe11",
+        "32bf809f-9802-4284-a203-a3a6dbd0d02c"
+      ]
+    },
+    {
+      "id": "fe3ab47c-4ff4-4dc7-9c56-47e75372647d",
+      "name": "Mert Aslan Yıldız",
+      "class_level": "10",
+      "email": "mertaslanyildiz17@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "d1d1d074-276c-426c-910a-819307ffcf44"
+      ]
+    },
+    {
+      "id": "e2a91750-fff2-41d3-8219-0a8a71bbfad1",
+      "name": "MERVE BURCU KÖSE",
+      "class_level": "10",
+      "email": "merveburcu007@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "d1d1d074-276c-426c-910a-819307ffcf44"
+      ]
+    },
+    {
+      "id": "8254c2fb-2be9-47a3-9a19-79ea11c92621",
+      "name": "Mesude Yavuz",
+      "class_level": "9",
+      "email": "fatimayavuz184@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "30efa130-0bd0-4b84-bcbe-b83ac029c610"
+      ]
+    },
+    {
+      "id": "477633c5-d236-4769-bf61-27e1f9be01c1",
+      "name": "Muhammed Furkan Bilen",
+      "class_level": "11",
+      "email": "bilenmfurkan32@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "7e6c5286-134f-459d-97cc-5f7aa3f2fe11",
+        "32bf809f-9802-4284-a203-a3a6dbd0d02c"
+      ]
+    },
+    {
+      "id": "844b03ca-05be-4c57-a942-6179c3fda535",
+      "name": "Muhammed kağan Kaplan",
+      "class_level": "LGS",
+      "email": "h.kaplan_@hotmail.com",
+      "school": "A",
+      "class_ids": [
+        "f14b1b1d-be9d-416a-aa82-1899b1c9fc08",
+        "a45cae1a-0ec3-420e-9bd1-280a06f4196c",
+        "822f8c84-f6e7-4d04-9669-c54841a5f3fa",
+        "132f7a34-08b9-4910-9034-2e40652a33ba",
+        "7cc4e2e4-8c4f-478d-ae9c-a4554fe8ba11"
+      ]
+    },
+    {
+      "id": "7ce5de76-b652-4162-a0bb-7f146890139d",
+      "name": "Muhammed Salih Özkaya",
+      "class_level": "LGS",
+      "email": "zahide_ozkaya@hotmail.com",
+      "school": "B",
+      "class_ids": [
+        "a45cae1a-0ec3-420e-9bd1-280a06f4196c",
+        "f14b1b1d-be9d-416a-aa82-1899b1c9fc08",
+        "822f8c84-f6e7-4d04-9669-c54841a5f3fa",
+        "132f7a34-08b9-4910-9034-2e40652a33ba",
+        "7cc4e2e4-8c4f-478d-ae9c-a4554fe8ba11"
+      ]
+    },
+    {
+      "id": "bd9496d1-8683-415d-a926-bae6348b8269",
+      "name": "Muhammed Talha Cevik",
+      "class_level": "LGS",
+      "email": "talhaderyavahap@gmail.com",
+      "school": "C",
+      "class_ids": [
+        "822f8c84-f6e7-4d04-9669-c54841a5f3fa",
+        "f14b1b1d-be9d-416a-aa82-1899b1c9fc08",
+        "a45cae1a-0ec3-420e-9bd1-280a06f4196c",
+        "132f7a34-08b9-4910-9034-2e40652a33ba",
+        "7cc4e2e4-8c4f-478d-ae9c-a4554fe8ba11"
+      ]
+    },
+    {
+      "id": "21adb8fa-b4e6-4781-af06-52f2e6962b24",
+      "name": "Mustafa Efe Yıldırım",
+      "class_level": "10",
+      "email": "efeyildirim0305@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "d1d1d074-276c-426c-910a-819307ffcf44"
+      ]
+    },
+    {
+      "id": "13a1777e-51a5-4903-aa99-1aca2c827372",
+      "name": "MUSTAFA TAHA ACAR",
+      "class_level": "YKS-Sayısal",
+      "email": "mustafatahacar@gmail.com",
+      "school": "",
+      "class_ids": []
+    },
+    {
+      "id": "8cb6043b-7183-41e5-90bb-b6efb1819d74",
+      "name": "Naile ÖĞRENENEFE",
+      "class_level": "4",
+      "email": "naile@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "2e820364-8d60-4bec-841f-d9893435e661"
+      ]
+    },
+    {
+      "id": "fdb6ad6a-819c-4b64-b7e3-bd5a292a31b2",
+      "name": "Nesibe Esmanur Yavuz",
+      "class_level": "YKS-Sayısal",
+      "email": "nesyvz8813@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "fe83cf5b-41e1-4b5f-91de-d63333ba0f05"
+      ]
+    },
+    {
+      "id": "be80c5e3-f542-475f-bc65-3f2905157ffc",
+      "name": "Neslihan Kılıç",
+      "class_level": "YKS",
+      "email": "neslihan.2327@outlook.com",
+      "school": "",
+      "class_ids": []
+    },
+    {
+      "id": "877776d6-26df-4fa9-a7cd-1a6f5517a7a3",
+      "name": "Nilsu Zeynep Yıldız",
+      "class_level": "LGS",
+      "email": "lazralli@gmail.com",
+      "school": "F",
+      "class_ids": [
+        "7cc4e2e4-8c4f-478d-ae9c-a4554fe8ba11",
+        "f14b1b1d-be9d-416a-aa82-1899b1c9fc08",
+        "a45cae1a-0ec3-420e-9bd1-280a06f4196c",
+        "822f8c84-f6e7-4d04-9669-c54841a5f3fa",
+        "132f7a34-08b9-4910-9034-2e40652a33ba"
+      ]
+    },
+    {
+      "id": "d452d830-1ccd-4807-8ca9-8b5275c882bd",
+      "name": "Nilüfer Peker",
+      "class_level": "LGS",
+      "email": "nili.pkr@gmail.com",
+      "school": "F",
+      "class_ids": [
+        "7cc4e2e4-8c4f-478d-ae9c-a4554fe8ba11",
+        "f14b1b1d-be9d-416a-aa82-1899b1c9fc08",
+        "a45cae1a-0ec3-420e-9bd1-280a06f4196c",
+        "822f8c84-f6e7-4d04-9669-c54841a5f3fa",
+        "132f7a34-08b9-4910-9034-2e40652a33ba"
+      ]
+    },
+    {
+      "id": "bd80c443-34c8-4022-ad3c-8471802d6044",
+      "name": "Nira Mersin",
+      "class_level": "6",
+      "email": "nidamersin@hotmail.com",
+      "school": "B",
+      "class_ids": [
+        "9fc5705e-ce8f-427c-938f-bbee6e370fd1",
+        "c6d04176-a01c-4058-8dc7-6a7da8c90c22"
+      ]
+    },
+    {
+      "id": "85d96332-fbe7-4a95-ba7a-1a0301fcac15",
+      "name": "Nisan Özen",
+      "class_level": "LGS",
+      "email": "ozenbirnur@gmail.com",
+      "school": "F",
+      "class_ids": [
+        "7cc4e2e4-8c4f-478d-ae9c-a4554fe8ba11",
+        "f14b1b1d-be9d-416a-aa82-1899b1c9fc08",
+        "a45cae1a-0ec3-420e-9bd1-280a06f4196c",
+        "822f8c84-f6e7-4d04-9669-c54841a5f3fa",
+        "132f7a34-08b9-4910-9034-2e40652a33ba"
+      ]
+    },
+    {
+      "id": "521e0897-c9e4-44da-b37c-d3eea0cded8b",
+      "name": "Nisanur İpek Hadikoğlu",
+      "class_level": "YKS-Sayısal",
+      "email": "naktas983@gmail.com",
+      "school": "A",
+      "class_ids": []
+    },
+    {
+      "id": "f793ea80-dac0-4778-80cc-f22d36b8b809",
+      "name": "Nurseren Filiz Akar",
+      "class_level": "YOS",
+      "email": "filizakar482@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "46cff3f2-316e-4b91-9b2f-50722f6ceede"
+      ]
+    },
+    {
+      "id": "5e678dd0-d997-4125-8bc1-f53990c214b9",
+      "name": "Nusret Orhan KUŞ",
+      "class_level": "LGS",
+      "email": "nusretorhan@gmail.com",
+      "school": "B",
+      "class_ids": [
+        "a45cae1a-0ec3-420e-9bd1-280a06f4196c",
+        "f14b1b1d-be9d-416a-aa82-1899b1c9fc08",
+        "822f8c84-f6e7-4d04-9669-c54841a5f3fa",
+        "132f7a34-08b9-4910-9034-2e40652a33ba",
+        "7cc4e2e4-8c4f-478d-ae9c-a4554fe8ba11"
+      ]
+    },
+    {
+      "id": "520687e5-0ce4-4374-9aac-4a9393e14055",
+      "name": "ömer arslan",
+      "class_level": "6",
+      "email": "omer.ars006@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "c6d04176-a01c-4058-8dc7-6a7da8c90c22",
+        "9fc5705e-ce8f-427c-938f-bbee6e370fd1"
+      ]
+    },
+    {
+      "id": "9baf1c4d-c8c0-45a8-8d19-829a357ea9dc",
+      "name": "Ömer Selim Emek",
+      "class_level": "LGS",
+      "email": "mustafaemekedr@gmail.com",
+      "school": "F",
+      "class_ids": [
+        "7cc4e2e4-8c4f-478d-ae9c-a4554fe8ba11",
+        "f14b1b1d-be9d-416a-aa82-1899b1c9fc08",
+        "a45cae1a-0ec3-420e-9bd1-280a06f4196c",
+        "822f8c84-f6e7-4d04-9669-c54841a5f3fa",
+        "132f7a34-08b9-4910-9034-2e40652a33ba"
+      ]
+    },
+    {
+      "id": "6def51d0-7dc4-4fa9-861b-71893252c4c0",
+      "name": "Ömer Zafer Avan",
+      "class_level": "YOS",
+      "email": "omerzaferavan@gmail.com",
+      "school": "Ekim",
+      "class_ids": [
+        "46cff3f2-316e-4b91-9b2f-50722f6ceede"
+      ]
+    },
+    {
+      "id": "75440629-db76-4de6-9643-fead48eb972e",
+      "name": "Pelin Rodoplu",
+      "class_level": "7",
+      "email": "sezenaksurodoplu932@gmail.com",
+      "school": "",
+      "class_ids": [
+        "162c355d-9ea4-4248-bcbf-e10f9cec59ed"
+      ]
+    },
+    {
+      "id": "886781ed-7be1-4c98-a48a-bab426add55f",
+      "name": "Poyraz Tüylü",
+      "class_level": "LGS",
+      "email": "emelduyses@outlook.com",
+      "school": "C",
+      "class_ids": [
+        "822f8c84-f6e7-4d04-9669-c54841a5f3fa",
+        "f14b1b1d-be9d-416a-aa82-1899b1c9fc08",
+        "a45cae1a-0ec3-420e-9bd1-280a06f4196c",
+        "132f7a34-08b9-4910-9034-2e40652a33ba",
+        "7cc4e2e4-8c4f-478d-ae9c-a4554fe8ba11"
+      ]
+    },
+    {
+      "id": "d42efa7e-9f20-4d91-bdc6-87200203a96b",
+      "name": "Ravza Bahar Baydaroğlu",
+      "class_level": "YKS-Sayısal",
+      "email": "ravzabahar13@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "fe83cf5b-41e1-4b5f-91de-d63333ba0f05"
+      ]
+    },
+    {
+      "id": "b7654003-b6de-40d3-b071-90cb47b98aec",
+      "name": "RENAS KORKUSUZ",
+      "class_level": "YKS-Sayısal",
+      "email": "245072@edesis.com",
+      "school": "A",
+      "class_ids": []
+    },
+    {
+      "id": "cad26903-fa71-4524-9a9b-cb3c9b661451",
+      "name": "Reyyan Mergen",
+      "class_level": "LGS",
+      "email": "fatma.reyyan2013@gmail.com",
+      "school": "E",
+      "class_ids": [
+        "132f7a34-08b9-4910-9034-2e40652a33ba",
+        "f14b1b1d-be9d-416a-aa82-1899b1c9fc08",
+        "a45cae1a-0ec3-420e-9bd1-280a06f4196c",
+        "822f8c84-f6e7-4d04-9669-c54841a5f3fa",
+        "7cc4e2e4-8c4f-478d-ae9c-a4554fe8ba11"
+      ]
+    },
+    {
+      "id": "f77e9020-2725-495f-8bcd-3ef144238f35",
+      "name": "Rukiye Ekşioğlu",
+      "class_level": "6",
+      "email": "eksioglu@gmail.com",
+      "school": "B",
+      "class_ids": [
+        "9fc5705e-ce8f-427c-938f-bbee6e370fd1",
+        "c6d04176-a01c-4058-8dc7-6a7da8c90c22"
+      ]
+    },
+    {
+      "id": "00214d42-0366-4eaf-b4ba-ea4d7d8e5c2c",
+      "name": "saffet deveci",
+      "class_level": "LGS",
+      "email": "nazmi.deveci38@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "f14b1b1d-be9d-416a-aa82-1899b1c9fc08",
+        "a45cae1a-0ec3-420e-9bd1-280a06f4196c",
+        "822f8c84-f6e7-4d04-9669-c54841a5f3fa",
+        "132f7a34-08b9-4910-9034-2e40652a33ba",
+        "7cc4e2e4-8c4f-478d-ae9c-a4554fe8ba11"
+      ]
+    },
+    {
+      "id": "12b61ed4-63b7-4503-acc0-444aa275aa1c",
+      "name": "SAFİYE ÖĞRENENEFE",
+      "class_level": "LGS",
+      "email": "safiye@gmail.com",
+      "school": "F",
+      "class_ids": [
+        "7cc4e2e4-8c4f-478d-ae9c-a4554fe8ba11",
+        "f14b1b1d-be9d-416a-aa82-1899b1c9fc08",
+        "a45cae1a-0ec3-420e-9bd1-280a06f4196c",
+        "822f8c84-f6e7-4d04-9669-c54841a5f3fa",
+        "132f7a34-08b9-4910-9034-2e40652a33ba"
+      ]
+    },
+    {
+      "id": "55f42940-790a-4436-bf79-8f302b2eaf56",
+      "name": "Salih Kerem Ekici",
+      "class_level": "TYT-Maarif",
+      "email": "zeynepekici038@gmail.com",
+      "school": "A",
+      "class_ids": []
+    },
+    {
+      "id": "66175d1c-98d5-4fe9-aec3-86943ef8514f",
+      "name": "Serap mira Ozyanık",
+      "class_level": "6",
+      "email": "hasanozyanikk@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "c6d04176-a01c-4058-8dc7-6a7da8c90c22",
+        "9fc5705e-ce8f-427c-938f-bbee6e370fd1"
+      ]
+    },
+    {
+      "id": "ad868d7d-b6e5-4017-8196-f6fec61d9050",
+      "name": "Sevim Nisa Soydemir",
+      "class_level": "LGS",
+      "email": "sevimnisa07@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "f14b1b1d-be9d-416a-aa82-1899b1c9fc08",
+        "a45cae1a-0ec3-420e-9bd1-280a06f4196c",
+        "822f8c84-f6e7-4d04-9669-c54841a5f3fa",
+        "132f7a34-08b9-4910-9034-2e40652a33ba",
+        "7cc4e2e4-8c4f-478d-ae9c-a4554fe8ba11"
+      ]
+    },
+    {
+      "id": "c5ccc827-6cb5-4b48-93d3-2f970f8facbc",
+      "name": "Sinemnur Güneş",
+      "class_level": "10",
+      "email": "sinemnurgunes578@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "d1d1d074-276c-426c-910a-819307ffcf44"
+      ]
+    },
+    {
+      "id": "c6b4b987-532d-4a3d-9c56-ab2b2a151803",
+      "name": "Şamil Kaptan",
+      "class_level": "6",
+      "email": "ilhanmirik42@gmail.com",
+      "school": "Gultepe ortaokulu",
+      "class_ids": [
+        "c6d04176-a01c-4058-8dc7-6a7da8c90c22",
+        "9fc5705e-ce8f-427c-938f-bbee6e370fd1"
+      ]
+    },
+    {
+      "id": "50d1da65-a2b9-47c3-a7ba-32710bc1f587",
+      "name": "ŞEYMA TURAN",
+      "class_level": "LGS",
+      "email": "seyma@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "f14b1b1d-be9d-416a-aa82-1899b1c9fc08",
+        "a45cae1a-0ec3-420e-9bd1-280a06f4196c",
+        "822f8c84-f6e7-4d04-9669-c54841a5f3fa",
+        "132f7a34-08b9-4910-9034-2e40652a33ba",
+        "7cc4e2e4-8c4f-478d-ae9c-a4554fe8ba11"
+      ]
+    },
+    {
+      "id": "7c06d8dc-7e5b-4ae0-a2ec-6f4c26286cd2",
+      "name": "Şeyma Uslu",
+      "class_level": "LGS",
+      "email": "seymauslu@gmail.com",
+      "school": "E",
+      "class_ids": [
+        "132f7a34-08b9-4910-9034-2e40652a33ba",
+        "f14b1b1d-be9d-416a-aa82-1899b1c9fc08",
+        "a45cae1a-0ec3-420e-9bd1-280a06f4196c",
+        "822f8c84-f6e7-4d04-9669-c54841a5f3fa",
+        "7cc4e2e4-8c4f-478d-ae9c-a4554fe8ba11"
+      ]
+    },
+    {
+      "id": "c92e9b15-63a8-45fd-a21c-88b761f94799",
+      "name": "Talha ayaydın",
+      "class_level": "6",
+      "email": "gulsenakgunayaydin56@gmail.com",
+      "school": "B",
+      "class_ids": [
+        "9fc5705e-ce8f-427c-938f-bbee6e370fd1",
+        "c6d04176-a01c-4058-8dc7-6a7da8c90c22"
+      ]
+    },
+    {
+      "id": "5a8633ed-6ecd-4be2-a086-201f382b4bce",
+      "name": "TEBESSÜM AKTÜRK",
+      "class_level": "LGS",
+      "email": "elif.shn.41@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "f14b1b1d-be9d-416a-aa82-1899b1c9fc08",
+        "a45cae1a-0ec3-420e-9bd1-280a06f4196c",
+        "822f8c84-f6e7-4d04-9669-c54841a5f3fa",
+        "132f7a34-08b9-4910-9034-2e40652a33ba",
+        "7cc4e2e4-8c4f-478d-ae9c-a4554fe8ba11"
+      ]
+    },
+    {
+      "id": "6d86dc3d-355f-4d18-aab7-c650d60c3543",
+      "name": "TEST TESY",
+      "class_level": "TYT-Maarif",
+      "email": "test@gmail.com",
+      "school": "",
+      "class_ids": []
+    },
+    {
+      "id": "a2fa3cd4-4718-4a77-b9c9-98a1cabfec1a",
+      "name": "Tuana Elif Yıldız",
+      "class_level": "10",
+      "email": "yidizyagmur44@icloud.com",
+      "school": "A",
+      "class_ids": [
+        "d1d1d074-276c-426c-910a-819307ffcf44"
+      ]
+    },
+    {
+      "id": "46bff4c9-c875-4c9a-8a89-14c45225cc61",
+      "name": "TUANA EYLÜL BOZKURT",
+      "class_level": "YKS-Sayısal",
+      "email": "245ww072@edesis.com",
+      "school": "A",
+      "class_ids": []
+    },
+    {
+      "id": "81630ddc-cce3-4d83-b99c-7d667b0c087a",
+      "name": "Tuğhan Kalaycı",
+      "class_level": "LGS",
+      "email": "adnantughan@gmail.com",
+      "school": "C",
+      "class_ids": [
+        "822f8c84-f6e7-4d04-9669-c54841a5f3fa",
+        "f14b1b1d-be9d-416a-aa82-1899b1c9fc08",
+        "a45cae1a-0ec3-420e-9bd1-280a06f4196c",
+        "132f7a34-08b9-4910-9034-2e40652a33ba",
+        "7cc4e2e4-8c4f-478d-ae9c-a4554fe8ba11"
+      ]
+    },
+    {
+      "id": "e42ff457-5e21-4a22-9a5d-43bf1fb33c2e",
+      "name": "Tuna abdullah Şancı",
+      "class_level": "5",
+      "email": "seviltunis@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "8a23c803-e3db-46b1-8e9d-722228600397"
+      ]
+    },
+    {
+      "id": "f30dbba9-635f-4cb6-819a-259bf694a65e",
+      "name": "Umay Karadağ",
+      "class_level": "LGS",
+      "email": "umaykaradag34@gmail.com",
+      "school": "F",
+      "class_ids": [
+        "7cc4e2e4-8c4f-478d-ae9c-a4554fe8ba11",
+        "f14b1b1d-be9d-416a-aa82-1899b1c9fc08",
+        "a45cae1a-0ec3-420e-9bd1-280a06f4196c",
+        "822f8c84-f6e7-4d04-9669-c54841a5f3fa",
+        "132f7a34-08b9-4910-9034-2e40652a33ba"
+      ]
+    },
+    {
+      "id": "85d1b20a-35df-4e36-a7bf-91f93369e57b",
+      "name": "Vedat Pehlivan",
+      "class_level": "YKS-Sayısal",
+      "email": "pehllivanvedat65@gmal.com",
+      "school": "A",
+      "class_ids": [
+        "fe83cf5b-41e1-4b5f-91de-d63333ba0f05"
+      ]
+    },
+    {
+      "id": "8024f561-98d9-4b6c-b2d0-4777439b3b1d",
+      "name": "Vehbi Hocaoğlu",
+      "class_level": "YOS",
+      "email": "vehbi0347@gmail.com",
+      "school": "-",
+      "class_ids": [
+        "46cff3f2-316e-4b91-9b2f-50722f6ceede"
+      ]
+    },
+    {
+      "id": "66ecafde-a90c-4db7-8bf4-a13a2b2e902a",
+      "name": "VİLDAN KÖPRÜLÜ",
+      "class_level": "YKS-Sayısal",
+      "email": "245065@edesis.com",
+      "school": "A",
+      "class_ids": []
+    },
+    {
+      "id": "c5d62d9f-bd46-4465-84fe-d69c9391e72f",
+      "name": "Yağız Mehmet Türker",
+      "class_level": "9",
+      "email": "ygztrk2011@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "30efa130-0bd0-4b84-bcbe-b83ac029c610"
+      ]
+    },
+    {
+      "id": "12a3e59f-00c1-4dd9-9f71-f80669a76f8c",
+      "name": "Yağmur Tuğ",
+      "class_level": "11",
+      "email": "yagmuryaren1976@gmail.com",
+      "school": "B",
+      "class_ids": [
+        "32bf809f-9802-4284-a203-a3a6dbd0d02c",
+        "7e6c5286-134f-459d-97cc-5f7aa3f2fe11"
+      ]
+    },
+    {
+      "id": "3e07c8bb-bcd0-4862-afd2-237ab83e7aa1",
+      "name": "Yasir Tavlar",
+      "class_level": "LGS",
+      "email": "tahayasir28@gmail.com",
+      "school": "E",
+      "class_ids": [
+        "132f7a34-08b9-4910-9034-2e40652a33ba",
+        "f14b1b1d-be9d-416a-aa82-1899b1c9fc08",
+        "a45cae1a-0ec3-420e-9bd1-280a06f4196c",
+        "822f8c84-f6e7-4d04-9669-c54841a5f3fa",
+        "7cc4e2e4-8c4f-478d-ae9c-a4554fe8ba11"
+      ]
+    },
+    {
+      "id": "965e9bd3-5243-49d2-b570-124714dbf49e",
+      "name": "Yavuz",
+      "class_level": "LGS",
+      "email": "gazirmx35@gmail.com",
+      "school": "E",
+      "class_ids": [
+        "132f7a34-08b9-4910-9034-2e40652a33ba",
+        "f14b1b1d-be9d-416a-aa82-1899b1c9fc08",
+        "a45cae1a-0ec3-420e-9bd1-280a06f4196c",
+        "822f8c84-f6e7-4d04-9669-c54841a5f3fa",
+        "7cc4e2e4-8c4f-478d-ae9c-a4554fe8ba11"
+      ]
+    },
+    {
+      "id": "3c622793-ee22-4e1a-a152-28417c18cb5b",
+      "name": "Yavuz Selim Dos",
+      "class_level": "YOS",
+      "email": "selimdos43@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "46cff3f2-316e-4b91-9b2f-50722f6ceede"
+      ]
+    },
+    {
+      "id": "c273a3fc-11c6-48c6-8cfe-ef529aa9b46c",
+      "name": "YUNUS EYMEN ÇITIR",
+      "class_level": "7",
+      "email": "safranca78@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "162c355d-9ea4-4248-bcbf-e10f9cec59ed"
+      ]
+    },
+    {
+      "id": "7f0958d4-9298-4857-859a-c7547ba05094",
+      "name": "Yusuf Furkan Durna",
+      "class_level": "YOS",
+      "email": "yusuffurkandurna@hotmail.com",
+      "school": "",
+      "class_ids": [
+        "46cff3f2-316e-4b91-9b2f-50722f6ceede"
+      ]
+    },
+    {
+      "id": "a398142d-04a1-4006-8ee2-6fe4a8605afb",
+      "name": "Yusuf poyraz Cihangir",
+      "class_level": "LGS",
+      "email": "adil_sami_cihangir@hotmail.com",
+      "school": "C",
+      "class_ids": [
+        "822f8c84-f6e7-4d04-9669-c54841a5f3fa",
+        "132f7a34-08b9-4910-9034-2e40652a33ba",
+        "f14b1b1d-be9d-416a-aa82-1899b1c9fc08",
+        "a45cae1a-0ec3-420e-9bd1-280a06f4196c",
+        "7cc4e2e4-8c4f-478d-ae9c-a4554fe8ba11"
+      ]
+    },
+    {
+      "id": "4307aebe-7419-4c75-8260-0301bf110471",
+      "name": "Zahide Sena AKTÜRK",
+      "class_level": "6",
+      "email": "zahidesena@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "c6d04176-a01c-4058-8dc7-6a7da8c90c22",
+        "9fc5705e-ce8f-427c-938f-bbee6e370fd1"
+      ]
+    },
+    {
+      "id": "23d4a48e-e229-4a2d-9e33-cd2df23dd39a",
+      "name": "Zehra AK",
+      "class_level": "LGS",
+      "email": "akzehrazeynep@gmail.com",
+      "school": "B",
+      "class_ids": [
+        "a45cae1a-0ec3-420e-9bd1-280a06f4196c",
+        "f14b1b1d-be9d-416a-aa82-1899b1c9fc08",
+        "822f8c84-f6e7-4d04-9669-c54841a5f3fa",
+        "132f7a34-08b9-4910-9034-2e40652a33ba",
+        "7cc4e2e4-8c4f-478d-ae9c-a4554fe8ba11"
+      ]
+    },
+    {
+      "id": "928fd12d-126c-42ba-8005-ab64d508054b",
+      "name": "ZEHRA BAŞARAN",
+      "class_level": "7",
+      "email": "zehra345@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "162c355d-9ea4-4248-bcbf-e10f9cec59ed"
+      ]
+    },
+    {
+      "id": "e4a5b218-70ca-4c72-8843-eb848605a9e1",
+      "name": "zehra ülker",
+      "class_level": "YOS",
+      "email": "zehraulker01@gmail.com",
+      "school": "yös",
+      "class_ids": [
+        "46cff3f2-316e-4b91-9b2f-50722f6ceede"
+      ]
+    },
+    {
+      "id": "baf66c47-9bb5-4465-a34d-ef8991e6be65",
+      "name": "Zeynep   GÜMÜŞ",
+      "class_level": "LGS",
+      "email": "gumus@gmail.com",
+      "school": "E",
+      "class_ids": [
+        "132f7a34-08b9-4910-9034-2e40652a33ba",
+        "f14b1b1d-be9d-416a-aa82-1899b1c9fc08",
+        "a45cae1a-0ec3-420e-9bd1-280a06f4196c",
+        "822f8c84-f6e7-4d04-9669-c54841a5f3fa",
+        "7cc4e2e4-8c4f-478d-ae9c-a4554fe8ba11"
+      ]
+    },
+    {
+      "id": "879d7c33-31ca-41eb-8f0a-54479f571386",
+      "name": "Zeynep Aslanhan",
+      "class_level": "11",
+      "email": "m49532530@gmail.com",
+      "school": "B",
+      "class_ids": [
+        "32bf809f-9802-4284-a203-a3a6dbd0d02c",
+        "7e6c5286-134f-459d-97cc-5f7aa3f2fe11"
+      ]
+    },
+    {
+      "id": "6958b589-b280-4837-a448-97c31f8a2586",
+      "name": "Zeynep Berra GÖKÇE",
+      "class_level": "TYT-Maarif",
+      "email": "zeynepberragokce45@gmail.com",
+      "school": "B",
+      "class_ids": []
+    },
+    {
+      "id": "9b50fdf0-1c3c-4557-a4c6-bd9b34d21752",
+      "name": "zeynep betül tığlı",
+      "class_level": "YKS-Sayısal",
+      "email": "zeynepbetul946@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "fe83cf5b-41e1-4b5f-91de-d63333ba0f05"
+      ]
+    },
+    {
+      "id": "fb21c6ce-bd90-4f47-9383-538ef7ccc597",
+      "name": "Zeynep ÇAKMAK",
+      "class_level": "LGS",
+      "email": "zynp.cakmak29@gmail.com",
+      "school": "E",
+      "class_ids": [
+        "132f7a34-08b9-4910-9034-2e40652a33ba",
+        "f14b1b1d-be9d-416a-aa82-1899b1c9fc08",
+        "a45cae1a-0ec3-420e-9bd1-280a06f4196c",
+        "822f8c84-f6e7-4d04-9669-c54841a5f3fa",
+        "7cc4e2e4-8c4f-478d-ae9c-a4554fe8ba11"
+      ]
+    },
+    {
+      "id": "294d8286-d2a9-481d-9ab0-73cef795d607",
+      "name": "Zeynep Duru SAĞMEN",
+      "class_level": "7",
+      "email": "musagmen@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "162c355d-9ea4-4248-bcbf-e10f9cec59ed"
+      ]
+    },
+    {
+      "id": "2485b3fb-a558-47c9-9ec6-98bb7ada8422",
+      "name": "Zeynep Erdoğan",
+      "class_level": "7",
+      "email": "bademli12345@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "162c355d-9ea4-4248-bcbf-e10f9cec59ed"
+      ]
+    },
+    {
+      "id": "0d5a343a-cdb1-4ae3-b5d3-8ef7373aae79",
+      "name": "ZEYNEP ESLEM BOZKURT",
+      "class_level": "11",
+      "email": "zeynepeslem.bozkurt6728@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "7e6c5286-134f-459d-97cc-5f7aa3f2fe11",
+        "32bf809f-9802-4284-a203-a3a6dbd0d02c"
+      ]
+    },
+    {
+      "id": "838fb335-9077-4c70-8281-c7e945489ea5",
+      "name": "Zeynep hazal Kandemir",
+      "class_level": "4. Sinif",
+      "email": "gulbaharyagci.kndmr@gmail.com",
+      "school": "Şehit Er Yıldıray Biroğlu ilkokulu",
+      "class_ids": [
+        "2e820364-8d60-4bec-841f-d9893435e661"
+      ]
+    },
+    {
+      "id": "5bba6d79-29e9-49e3-ad49-7c3de3ef61d7",
+      "name": "ZEYNEP İNCE",
+      "class_level": "LGS",
+      "email": "zeynepince@gmail.com",
+      "school": "A",
+      "class_ids": [
+        "f14b1b1d-be9d-416a-aa82-1899b1c9fc08",
+        "a45cae1a-0ec3-420e-9bd1-280a06f4196c",
+        "822f8c84-f6e7-4d04-9669-c54841a5f3fa",
+        "132f7a34-08b9-4910-9034-2e40652a33ba",
+        "7cc4e2e4-8c4f-478d-ae9c-a4554fe8ba11"
+      ]
+    },
+    {
+      "id": "9826ad51-7240-489a-859d-d925e12e02ce",
+      "name": "Zeynep Tanem",
+      "class_level": "LGS",
+      "email": "cimenerdogan33@gmail.com",
+      "school": "C",
+      "class_ids": [
+        "822f8c84-f6e7-4d04-9669-c54841a5f3fa",
+        "f14b1b1d-be9d-416a-aa82-1899b1c9fc08",
+        "a45cae1a-0ec3-420e-9bd1-280a06f4196c",
+        "132f7a34-08b9-4910-9034-2e40652a33ba",
+        "7cc4e2e4-8c4f-478d-ae9c-a4554fe8ba11"
+      ]
+    },
+    {
+      "id": "2d359307-ac12-4adf-91cf-57a722066e23",
+      "name": "Zübeyde Bade Mersin",
+      "class_level": "TYT-Maarif",
+      "email": "zubeydebademersin@gmail.com",
+      "school": "A",
+      "class_ids": []
+    }
+  ],
+  "autoConsecutive": true,
+  "curriculumPresets": {
+    "LGS": [
+      {
+        "subject": "MATEMATİK",
+        "hours": 3
+      },
+      {
+        "subject": "FEN BİLİMLERİ",
+        "hours": 2
+      },
+      {
+        "subject": "İNGİLİZCE",
+        "hours": 2
+      },
+      {
+        "subject": "TÜRKÇE",
+        "hours": 2
+      },
+      {
+        "subject": "İNKILAP TARİHİ",
+        "hours": 1
+      },
+      {
+        "subject": "DİN KÜLTÜRÜ",
+        "hours": 1
+      }
+    ],
+    "5-6-7 Yaz Kampı": [
+      {
+        "subject": "MATEMATİK",
+        "hours": 2
+      },
+      {
+        "subject": "FEN BİLİMLERİ",
+        "hours": 2
+      },
+      {
+        "subject": "Kitap Okuma Atölyesi",
+        "hours": 8
+      },
+      {
+        "subject": "REHBERLİK",
+        "hours": 1
+      }
+    ]
+  }
+}
