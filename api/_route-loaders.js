@@ -44,6 +44,7 @@ export const routeLoaders = {
   meetings: () => import('../handlers/meetings.js'),
   'meta/whatsapp': () => import('../handlers/meta-whatsapp.js'),
   'meta/webhook': () => import('../handlers/meta-whatsapp-webhook.js'),
+  'registration-inbound-gateway': () => import('../handlers/registration-inbound-gateway.js'),
   'whatsapp/send': () => import('../handlers/whatsapp-send.js'),
   'whatsapp/template-test': () => import('../handlers/whatsapp-template-test.js'),
   'message-templates': () => import('../handlers/message-templates.js'),

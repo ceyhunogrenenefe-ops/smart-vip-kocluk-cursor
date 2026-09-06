@@ -16,6 +16,7 @@ import makeWASocket, {
   makeCacheableSignalKeyStore,
 } from '@whiskeysockets/baileys';
 import { createMessageStore, createMsgRetryCounterCache } from './message-store.js';
+import { forwardInboundToRegistration } from './registration-inbound-forward.js';
 
 const SILENCE_SIGNAL_SESSION_LOGS = String(process.env.SILENCE_SIGNAL_SESSION_LOGS || '1') !== '0';
 /** libsignal / baileys gürültüsü — process stdout spam + oturum dump */
@@ -1189,6 +1190,10 @@ async function setupSession(coachId, { allowDiskAuth = true } = {}) {
         for (const m of messages) {
           if (m?.key?.id) {
             await messageStore.put(m, { coachId });
+          }
+          // Kayıt Takibi: gelen (!fromMe) mesaj → panel lead
+          if (!m?.key?.fromMe) {
+            void forwardInboundToRegistration({ msg: m, coachId, logger }).catch(() => {});
           }
         }
       } catch (err) {
