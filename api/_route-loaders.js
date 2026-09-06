@@ -1,6 +1,14 @@
 /** Ortak: `[[...segments]].js` ve çok segment rewrite (`deep-api.js`) aynı haritayı kullanır. */
 
 export const routeLoaders = {
+  'reviews/student': () => import('../handlers/reviews-student.js'),
+  'reviews-student': () => import('../handlers/reviews-student.js'),
+  'reviews/parent': () => import('../handlers/reviews-parent.js'),
+  'reviews-parent': () => import('../handlers/reviews-parent.js'),
+  'reviews/admin': () => import('../handlers/reviews-admin.js'),
+  'reviews-admin': () => import('../handlers/reviews-admin.js'),
+  'cron/teacher-review-invites': () => import('../handlers/cron-teacher-review-invites.js'),
+
   'bbb-guest-join': () => import('../handlers/bbb-guest-join.js'),
   'guest-join-preview': () => import('../handlers/guest-join-preview.js'),
   'guest-join-resolve': () => import('../handlers/guest-join-resolve.js'),

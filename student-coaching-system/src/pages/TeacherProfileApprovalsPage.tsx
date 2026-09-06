@@ -1,3 +1,4 @@
+import AdminTeacherReviewsPanel from '../components/teacher/AdminTeacherReviewsPanel';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Ban,
@@ -441,6 +442,8 @@ export default function TeacherProfileApprovalsPage() {
       </div>
 
       <div className="flex flex-wrap gap-2">
+      <AdminTeacherReviewsPanel />
+
         {FILTERS.map((f) => (
           <button
             key={f || 'all'}
