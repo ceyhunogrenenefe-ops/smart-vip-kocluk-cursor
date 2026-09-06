@@ -19,6 +19,70 @@ function verifyToken() {
   return String(process.env.META_WEBHOOK_VERIFY_TOKEN || process.env.META_VERIFY_TOKEN || '').trim();
 }
 
+/** Meta gerçekten POST atıyor mu? (Supabase meta_webhook_hits — SQL migration gerekir) */
+async function logWebhookHit(body) {
+  try {
+    const objectType = String(body?.object || '').toLowerCase() || null;
+    const entries = Array.isArray(body?.entry) ? body.entry : [];
+    let messageCount = 0;
+    let statusCount = 0;
+    let field = null;
+    let phoneNumberId = null;
+    let displayPhone = null;
+    let waFrom = null;
+    let sample = null;
+
+    for (const entry of entries) {
+      for (const change of Array.isArray(entry?.changes) ? entry.changes : []) {
+        field = field || (change?.field != null ? String(change.field) : null);
+        const value = change?.value && typeof change.value === 'object' ? change.value : {};
+        const msgs = Array.isArray(value.messages) ? value.messages : [];
+        const statuses = Array.isArray(value.statuses) ? value.statuses : [];
+        messageCount += msgs.length;
+        statusCount += statuses.length;
+        phoneNumberId =
+          phoneNumberId || value?.metadata?.phone_number_id || value?.metadata?.phone_number_id || null;
+        displayPhone =
+          displayPhone ||
+          value?.metadata?.display_phone_number ||
+          value?.metadata?.display_phone_number ||
+          null;
+        if (!waFrom && msgs[0]?.from) waFrom = String(msgs[0].from);
+        if (!sample && (msgs.length || statuses.length)) {
+          sample = {
+            field: change?.field,
+            message_types: msgs.map((m) => m?.type).filter(Boolean).slice(0, 5),
+            status_types: statuses.map((s) => s?.status).filter(Boolean).slice(0, 5),
+            first_text: msgs[0]?.text?.body != null ? String(msgs[0].text.body).slice(0, 120) : null
+          };
+        }
+      }
+      // Instagram-style messaging[]
+      const messaging = Array.isArray(entry?.messaging) ? entry.messaging : [];
+      if (messaging.length) {
+        messageCount += messaging.filter((m) => m?.message && !m?.message?.is_echo).length;
+        if (!sample) sample = { field: 'messaging', count: messaging.length };
+      }
+    }
+
+    const { error } = await supabaseAdmin.from('meta_webhook_hits').insert({
+      object_type: objectType,
+      field,
+      message_count: messageCount,
+      status_count: statusCount,
+      phone_number_id: phoneNumberId != null ? String(phoneNumberId) : null,
+      display_phone: displayPhone != null ? String(displayPhone) : null,
+      wa_from: waFrom,
+      sample
+    });
+    if (error && !/meta_webhook_hits|schema cache|does not exist/i.test(error.message || '')) {
+      console.warn('[meta-webhook] hit log:', error.message);
+    }
+  } catch (e) {
+    console.warn('[meta-webhook] hit log failed:', e instanceof Error ? e.message : e);
+  }
+}
+
 /** hub.mode / hub.verify_token / hub.challenge — Vercel query noktalı anahtarları */
 function hubQuery(req) {
   const q = req.query && typeof req.query === 'object' ? req.query : {};
@@ -142,6 +206,9 @@ export default async function handler(req, res) {
     }
   }
   if (!body || typeof body !== 'object') body = {};
+
+  // Teşhis kaydı (tablo yoksa sessizce atlanır)
+  void logWebhookHit(body);
 
   const objectType = String(body.object || '').toLowerCase();
   const entries = Array.isArray(body.entry) ? body.entry : [];
