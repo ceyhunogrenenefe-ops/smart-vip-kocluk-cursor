@@ -10,6 +10,7 @@ import { errorMessage } from '../api/_lib/error-msg.js';
 import { resolveStudentRowForUser } from '../api/_lib/resolve-student-id.js';
 import {
   clampRating,
+  formatPublicReviewerName,
   mapReviewToApi,
   refreshTeacherReviewStats,
   snippetComment
@@ -202,18 +203,20 @@ export default async function handler(req, res) {
       insertLessonId = lessonId;
     }
 
-    let reviewerName = String(body.reviewer_name || body.reviewerName || '').trim();
-    if (!reviewerName) {
-      const { data: stud } = await supabaseAdmin
-        .from('students')
-        .select('full_name, name, first_name, last_name')
-        .eq('id', studentId)
-        .maybeSingle();
-      reviewerName =
-        String(stud?.full_name || stud?.name || '').trim() ||
-        [stud?.first_name, stud?.last_name].filter(Boolean).join(' ').trim() ||
-        'Öğrenci';
-    }
+    const { data: stud } = await supabaseAdmin
+      .from('students')
+      .select('full_name, name, first_name, last_name')
+      .eq('id', studentId)
+      .maybeSingle();
+    const reviewerName = formatPublicReviewerName(
+      {
+        full_name: stud?.full_name,
+        name: stud?.name,
+        first_name: stud?.first_name,
+        last_name: stud?.last_name
+      },
+      'Öğrenci'
+    );
 
     const insertRow = {
       teacher_id: teacherId,
