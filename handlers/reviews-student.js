@@ -11,6 +11,7 @@ import { resolveStudentRowForUser } from '../api/_lib/resolve-student-id.js';
 import {
   clampRating,
   formatPublicReviewerName,
+  loadStudentPublicName,
   mapReviewToApi,
   refreshTeacherReviewStats,
   snippetComment
@@ -203,20 +204,16 @@ export default async function handler(req, res) {
       insertLessonId = lessonId;
     }
 
-    const { data: stud } = await supabaseAdmin
-      .from('students')
-      .select('full_name, name, first_name, last_name')
-      .eq('id', studentId)
-      .maybeSingle();
-    const reviewerName = formatPublicReviewerName(
-      {
-        full_name: stud?.full_name,
-        name: stud?.name,
-        first_name: stud?.first_name,
-        last_name: stud?.last_name
-      },
-      'Öğrenci'
-    );
+    let reviewerName = await loadStudentPublicName(studentId, 'Öğrenci');
+    if (/^(öğrenci|ogrenci)$/i.test(reviewerName)) {
+      const actorName = String(actor.name || actor.full_name || '').trim();
+      if (actorName) {
+        reviewerName = formatPublicReviewerName(
+          { name: actorName, full_name: actorName },
+          'Öğrenci'
+        );
+      }
+    }
 
     const insertRow = {
       teacher_id: teacherId,

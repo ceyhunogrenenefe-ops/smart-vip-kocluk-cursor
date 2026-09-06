@@ -43,6 +43,119 @@ export function formatPublicReviewerName(parts = {}, fallback = 'Öğrenci') {
 }
 
 
+function isGenericReviewerLabel(value) {
+  return /^(öğrenci|ogrenci|veli)$/i.test(String(value || '').trim());
+}
+
+async function enrichGenericReviewerNames(mapped) {
+  const list = Array.isArray(mapped) ? mapped : [];
+  const need = list.filter(
+    (m) => m && m.student_id && isGenericReviewerLabel(m.reviewer_name)
+  );
+  if (!need.length) return list;
+
+  const ids = [...new Set(need.map((m) => String(m.student_id)))];
+  const nameById = new Map();
+  const { data: studs } = await supabaseAdmin
+    .from('students')
+    .select('id, name')
+    .in('id', ids);
+  for (const s of studs || []) {
+    const raw = String(s.name || '').trim();
+    if (!raw || isGenericReviewerLabel(raw)) continue;
+    nameById.set(
+      String(s.id),
+      formatPublicReviewerName({ name: raw, full_name: raw }, 'Öğrenci')
+    );
+  }
+  for (const m of list) {
+    if (!m || !isGenericReviewerLabel(m.reviewer_name)) continue;
+    const fixed = nameById.get(String(m.student_id || ''));
+    if (fixed) m.reviewer_name = fixed;
+  }
+  return list;
+}
+
+/**
+ * students tablosunda asıl alan genelde `name`.
+ * full_name / first_name / last_name olmayabilir — kolon hatasında sessizce name'e düş.
+ * Önemli: olmayan kolonları aynı select'te istemek tüm sorguyu düşürür → "Öğrenci" fallback.
+ */
+export async function loadStudentPublicName(studentId, fallback = 'Öğrenci') {
+  const sid = String(studentId || '').trim();
+  if (!sid) return fallback;
+
+  let name = '';
+  let userId = null;
+
+  // 1) En güvenli: yalnızca `name`
+  {
+    const { data, error } = await supabaseAdmin
+      .from('students')
+      .select('name')
+      .eq('id', sid)
+      .maybeSingle();
+    if (!error && data) {
+      name = String(data.name || '').trim();
+    }
+  }
+  if (isGenericReviewerLabel(name)) name = '';
+
+  // 2) Opsiyonel zengin kolonlar (yoksa hata yutulur)
+  if (!name) {
+    for (const cols of ['full_name, first_name, last_name', 'full_name']) {
+      const { data, error } = await supabaseAdmin
+        .from('students')
+        .select(cols)
+        .eq('id', sid)
+        .maybeSingle();
+      if (error || !data) continue;
+      name =
+        String(data.full_name || '').trim() ||
+        [data.first_name, data.last_name].filter(Boolean).join(' ').trim();
+      if (name && !isGenericReviewerLabel(name)) {
+        return formatPublicReviewerName(
+          {
+            full_name: data.full_name,
+            first_name: data.first_name,
+            last_name: data.last_name,
+            name
+          },
+          fallback
+        );
+      }
+      name = '';
+    }
+  }
+
+  // 3) users.name yedek — user_id / platform_user_id ayrı denemeler
+  if (!name) {
+    for (const cols of ['user_id, platform_user_id', 'user_id']) {
+      const { data, error } = await supabaseAdmin
+        .from('students')
+        .select(cols)
+        .eq('id', sid)
+        .maybeSingle();
+      if (error || !data) continue;
+      userId = data.user_id || data.platform_user_id || null;
+      if (userId) break;
+    }
+    if (userId) {
+      const { data: user } = await supabaseAdmin
+        .from('users')
+        .select('name')
+        .eq('id', String(userId))
+        .maybeSingle();
+      name = String(user?.name || '').trim();
+      if (isGenericReviewerLabel(name)) name = '';
+    }
+  }
+
+  return formatPublicReviewerName({ name, full_name: name }, fallback);
+}
+
+
+
 function isApprovedPublicFilter() {
   // PostgREST: is_public + (approved OR legacy null status)
   return {
@@ -187,17 +300,19 @@ export async function listPublicTeacherReviews(teacherId, { limit = 50 } = {}) {
         if (/teacher_reviews|schema cache|does not exist/i.test(legacy.error.message || '')) return [];
         throw legacy.error;
       }
-      return (legacy.data || []).map(mapReviewToApi);
+      return await enrichGenericReviewerNames((legacy.data || []).map(mapReviewToApi));
     }
     if (/teacher_reviews|schema cache|does not exist/i.test(error.message || '')) return [];
     throw error;
   }
-  return (data || [])
+  const mapped = (data || [])
     .filter((r) => {
       const st = String(r.moderation_status || 'approved').toLowerCase();
       return st === 'approved';
     })
     .map(mapReviewToApi);
+
+  return enrichGenericReviewerNames(mapped);
 }
 
 export async function listPendingTeacherReviews({ limit = 100 } = {}) {
@@ -215,7 +330,7 @@ export async function listPendingTeacherReviews({ limit = 100 } = {}) {
   const out = [];
   for (const row of rows) {
     const mapped = mapReviewToApi(row);
-    const generic = /^(öğrenci|ogrenci|veli)$/i.test(String(mapped?.reviewer_name || '').trim());
+    const generic = isGenericReviewerLabel(mapped?.reviewer_name);
     if (mapped && (generic || String(row.reviewer_type || '').toUpperCase() === 'STUDENT')) {
       mapped.reviewer_name = await resolveDisplayNameForReview(row);
     }
@@ -228,36 +343,23 @@ async function resolveDisplayNameForReview(row) {
   if (row.reviewer_type === 'PARENT' && row.student_id) {
     const { data: stud } = await supabaseAdmin
       .from('students')
-      .select('parent_name, name, full_name')
+      .select('parent_name, name')
       .eq('id', row.student_id)
       .maybeSingle();
     const parent = String(stud?.parent_name || '').trim();
     if (parent) return parent.slice(0, 120);
   }
   if (row.student_id) {
-    const { data: stud } = await supabaseAdmin
-      .from('students')
-      .select('full_name, name, first_name, last_name')
-      .eq('id', row.student_id)
-      .maybeSingle();
-    if (stud) {
-      return formatPublicReviewerName(
-        {
-          full_name: stud.full_name,
-          name: stud.name,
-          first_name: stud.first_name,
-          last_name: stud.last_name
-        },
-        row.reviewer_type === 'PARENT' ? 'Veli' : 'Öğrenci'
-      );
-    }
+    return loadStudentPublicName(
+      row.student_id,
+      row.reviewer_type === 'PARENT' ? 'Veli' : 'Öğrenci'
+    );
   }
   const current = String(row.reviewer_name || '').trim();
-  const generic = /^(öğrenci|ogrenci|veli)$/i.test(current);
+  const generic = isGenericReviewerLabel(current);
   if (current && !generic) {
-    // Öğrenci yorumlarında gizlilik: soyadı baş harfe indir
     if (String(row.reviewer_type || '').toUpperCase() === 'STUDENT') {
-      return formatPublicReviewerName({ full_name: current }, 'Öğrenci');
+      return formatPublicReviewerName({ full_name: current, name: current }, 'Öğrenci');
     }
     return current.slice(0, 120);
   }
