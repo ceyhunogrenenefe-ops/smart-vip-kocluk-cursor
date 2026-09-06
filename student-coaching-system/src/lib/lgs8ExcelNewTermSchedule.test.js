@@ -5,6 +5,8 @@ import {
   LGS8_WEEKDAY_PERIODS,
   buildLgs8ExcelNewTermPlannerState,
   countLgs8ExcelLessons,
+  countPlannerLessonCells,
+  plannerNeedsLgs8ExcelSeed,
 } from './lgs8ExcelNewTermSchedule.ts';
 
 describe('lgs8ExcelNewTermSchedule', () => {
@@ -45,5 +47,12 @@ describe('lgs8ExcelNewTermSchedule', () => {
       teacher: 'Erdal Karadaş',
     });
     expect(byName['8C'].schedule['5_4']?.subject).toBe('İNGİLİZCE');
+  });
+
+  it('detects empty plans that need Excel seed', () => {
+    expect(plannerNeedsLgs8ExcelSeed({ groups: [] })).toBe(true);
+    expect(plannerNeedsLgs8ExcelSeed({ groups: [{ name: '8A', schedule: {} }] })).toBe(true);
+    expect(plannerNeedsLgs8ExcelSeed(buildLgs8ExcelNewTermPlannerState())).toBe(false);
+    expect(countPlannerLessonCells(buildLgs8ExcelNewTermPlannerState())).toBeGreaterThan(100);
   });
 });

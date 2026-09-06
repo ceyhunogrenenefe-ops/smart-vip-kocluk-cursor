@@ -256,3 +256,47 @@ export function buildLgs8ExcelNewTermPlannerState() {
 export function countLgs8ExcelLessons(state = buildLgs8ExcelNewTermPlannerState()): number {
   return state.groups.reduce((n, g) => n + Object.keys(g.schedule || {}).length, 0);
 }
+
+/** Kayıtlı planner_json içinde dolu ders hücresi sayısı (boş taslak tespiti). */
+export function countPlannerLessonCells(plannerJson: unknown): number {
+  const groups = (plannerJson as { groups?: Array<{ schedule?: Record<string, unknown> }> })?.groups;
+  if (!Array.isArray(groups)) return 0;
+  let n = 0;
+  for (const g of groups) {
+    const schedule = g?.schedule;
+    if (!schedule || typeof schedule !== 'object') continue;
+    for (const cell of Object.values(schedule)) {
+      if (!cell || typeof cell !== 'object') continue;
+      const c = cell as { subject?: string; teacher?: string };
+      if (String(c.subject || '').trim() || String(c.teacher || '').trim()) n += 1;
+    }
+  }
+  return n;
+}
+
+/** 8A/8B/8C/8F Excel programı eksikse true (boş veya bu sınıflar yok). */
+export function plannerNeedsLgs8ExcelSeed(plannerJson: unknown): boolean {
+  if (countPlannerLessonCells(plannerJson) === 0) return true;
+  const groups = (plannerJson as { groups?: Array<{ name?: string; schedule?: Record<string, unknown> }> })
+    ?.groups;
+  if (!Array.isArray(groups) || !groups.length) return true;
+  const wanted = ['8a', '8b', '8c', '8f'];
+  const found = new Set<string>();
+  for (const g of groups) {
+    const name = String(g?.name || '')
+      .trim()
+      .toLocaleLowerCase('tr-TR')
+      .replace(/\s+/g, '');
+    const hit = wanted.find((w) => name === w || name.includes(w));
+    if (!hit) continue;
+    const schedule = g?.schedule;
+    if (!schedule || typeof schedule !== 'object') continue;
+    const hasLesson = Object.values(schedule).some((cell) => {
+      if (!cell || typeof cell !== 'object') return false;
+      const c = cell as { subject?: string; teacher?: string };
+      return !!(String(c.subject || '').trim() || String(c.teacher || '').trim());
+    });
+    if (hasLesson) found.add(hit);
+  }
+  return found.size < wanted.length;
+}
