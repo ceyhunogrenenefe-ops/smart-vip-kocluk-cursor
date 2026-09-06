@@ -21,6 +21,9 @@ function isoFromWebhookTs(ts) {
   return new Date(ms).toISOString();
 }
 
+/** Panelde kullanılan ana kurum (Online Vip Dershane Ders ve Koçluk) */
+const PRIMARY_REGISTRATION_INSTITUTION_ID = '73323d75-eea1-4552-8bba-d50555423589';
+
 async function resolveDefaultInstitutionId() {
   const envId = String(
     process.env.REGISTRATION_INBOUND_INSTITUTION_ID ||
@@ -30,7 +33,31 @@ async function resolveDefaultInstitutionId() {
   ).trim();
   if (envId) return envId;
 
-  // created_at yoksa / sıralama patlarsa yine kurum bul
+  // Env yoksa: önce bilinen Online VIP kurumunu doğrula (yanlış kuruma lead yazmasın)
+  try {
+    const { data: primary } = await supabaseAdmin
+      .from('institutions')
+      .select('id')
+      .eq('id', PRIMARY_REGISTRATION_INSTITUTION_ID)
+      .maybeSingle();
+    if (primary?.id) return primary.id;
+  } catch {
+    /* fallback */
+  }
+
+  try {
+    const { data: byName } = await supabaseAdmin
+      .from('institutions')
+      .select('id, name')
+      .ilike('name', '%Online Vip%')
+      .limit(5);
+    const preferred = (byName || []).find((r) => /dershane/i.test(String(r.name || ''))) || byName?.[0];
+    if (preferred?.id) return preferred.id;
+  } catch {
+    /* fallback */
+  }
+
+  // Son çare: herhangi bir kurum (created_at yoksa / sıralama patlarsa)
   const attempts = [
     () => supabaseAdmin.from('institutions').select('id').order('created_at', { ascending: true }).limit(1),
     () => supabaseAdmin.from('institutions').select('id').eq('is_active', true).limit(1),
