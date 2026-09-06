@@ -31,6 +31,8 @@ import {
   NEW_TERM_PLANNER_PATH,
   NEW_TERM_START,
   blankNewTermPlannerState,
+  buildLgs8ExcelNewTermPlannerState,
+  countLgs8ExcelLessons,
   pickNewTermPlan,
 } from '../lib/newTermSchedulePlanner';
 
@@ -558,18 +560,22 @@ export default function SchedulePlannerPage({ mode = 'default' }: { mode?: 'defa
           toast.success('2026-2027 dönem taslağı yüklendi.');
           return;
         }
-        await postPlannerMessage(iframeRef.current, 'SET_STATE', blankNewTermPlannerState());
-        planBootstrappedRef.current = true;
+        const seeded = buildLgs8ExcelNewTermPlannerState();
+        // Önce bağlam (öğretmen/havuz); freshBlank kullanma — Excel seed silinmesin.
         await pushPlannerContext({
           serverPlanActive: true,
-          autoSyncClasses: true,
-          nameOverride: NEW_TERM_PLAN_NAME,
-          freshBlank: true
+          autoSyncClasses: false,
+          nameOverride: NEW_TERM_PLAN_NAME
         });
+        if (planTouchedRef.current || gen !== planLoadGenRef.current) return;
+        await postPlannerMessage(iframeRef.current, 'SET_STATE', seeded);
+        planBootstrappedRef.current = true;
         await refreshPlannerGroups();
         setSelectedPlanId('');
         setPlanName(NEW_TERM_PLAN_NAME);
-        toast.message('Yeni dönem boş program açıldı. Dersleri yerleştirip Kaydet deyin.');
+        toast.message(
+          `Excel 8A/8B/8C/8F programı yüklendi (${countLgs8ExcelLessons(seeded)} hücre). Kaydet ile saklayın.`
+        );
       } catch (e) {
         const msg = String((e as Error).message || e);
         setLoadError(`Yeni dönem programı açılamadı: ${msg}`);
@@ -708,6 +714,39 @@ export default function SchedulePlannerPage({ mode = 'default' }: { mode?: 'defa
       setSelectedPlanId('');
       setPlanName(NEW_TERM_PLAN_NAME);
       toast.success('Boş 2026-2027 programı açıldı.');
+    } catch (e) {
+      toast.error(String((e as Error).message || e));
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const handleLoadLgs8ExcelSchedule = async () => {
+    if (!iframeReady) return;
+    if (
+      !confirm(
+        'Excel’deki 8A / 8B / 8C / 8F programı (öğretmenlerle) yeni dönem planlayıcısına yüklensin mi? Mevcut grid içeriğinin üzerine yazılır.'
+      )
+    ) {
+      return;
+    }
+    planTouchedRef.current = true;
+    planLoadGenRef.current += 1;
+    setBusy('excel');
+    try {
+      const seeded = buildLgs8ExcelNewTermPlannerState();
+      await pushPlannerContext({
+        serverPlanActive: true,
+        autoSyncClasses: false,
+        nameOverride: NEW_TERM_PLAN_NAME
+      });
+      await postPlannerMessage(iframeRef.current, 'SET_STATE', seeded);
+      planBootstrappedRef.current = true;
+      await refreshPlannerGroups();
+      setPlanName(NEW_TERM_PLAN_NAME);
+      toast.success(
+        `Excel programı aktarıldı: 8A–8F, ${countLgs8ExcelLessons(seeded)} ders hücresi. Kaydet ile saklayın.`
+      );
     } catch (e) {
       toast.error(String((e as Error).message || e));
     } finally {
@@ -1037,6 +1076,15 @@ export default function SchedulePlannerPage({ mode = 'default' }: { mode?: 'defa
               >
                 Eski / yaz taslağı
               </Link>
+              <button
+                type="button"
+                onClick={() => void handleLoadLgs8ExcelSchedule()}
+                disabled={!!busy || !iframeReady}
+                className="inline-flex items-center gap-1 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-sm text-emerald-900 hover:bg-emerald-100 disabled:opacity-50"
+              >
+                {busy === 'excel' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                Excel 8. sınıf programı
+              </button>
               <button
                 type="button"
                 onClick={() => void handleStartBlankNewTerm()}
