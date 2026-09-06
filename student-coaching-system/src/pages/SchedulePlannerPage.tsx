@@ -38,6 +38,8 @@ import {
   countPrimaryExcelLessons,
   mergeFullNewTermIntoPlannerState,
   mergePrimaryExcelIntoPlannerState,
+  mergeYazBackupIntoPlannerState,
+  countYazBackupLessons,
   pickNewTermPlan,
   upsertPlannerGroups,
 } from '../lib/newTermSchedulePlanner';
@@ -941,7 +943,53 @@ export default function SchedulePlannerPage({ mode = 'default' }: { mode?: 'defa
       setBusy('');
     }
   };
-;
+
+
+  /** Yaz yedek (16): mevcut programı silmeden grup/ders ekler. */
+  const handleLoadYazBackupPreserve = async () => {
+    if (!iframeReady) return;
+    if (
+      !confirm(
+        'yaz-donemi-yedek (16).json mevcut ders programına eklensin mi?\n\nDolu sınıflar (ör. 8A–8F) korunur; yalnızca eksik gruplar ve boş programlar doldurulur.'
+      )
+    ) {
+      return;
+    }
+    planTouchedRef.current = true;
+    planLoadGenRef.current += 1;
+    setBusy('yaz-yedek');
+    try {
+      if (!institutionId) throw new Error('Kurum seçili değil.');
+      const current = await getPlannerState().catch(() => null);
+      const beforeGroups = Array.isArray((current as { groups?: unknown } | null)?.groups)
+        ? ((current as { groups: unknown[] }).groups as unknown[]).length
+        : 0;
+      const beforeLessons = countPlannerLessonCells(current);
+      const seeded = mergeYazBackupIntoPlannerState(
+        (current as Record<string, unknown> | null) || null
+      );
+      await pushPlannerContext({
+        serverPlanActive: true,
+        autoSyncClasses: false,
+        nameOverride: isNewTerm ? NEW_TERM_PLAN_NAME : planName || NEW_TERM_PLAN_NAME
+      });
+      await postPlannerMessage(iframeRef.current, 'SET_STATE', seeded);
+      planBootstrappedRef.current = true;
+      await refreshPlannerGroups();
+      if (isNewTerm) setPlanName(NEW_TERM_PLAN_NAME);
+      await persistPlannerJson(seeded as Record<string, unknown>);
+      const afterLessons = countPlannerLessonCells(seeded);
+      const afterGroups = Array.isArray(seeded.groups) ? seeded.groups.length : 0;
+      toast.success(
+        `Yaz yedek aktarıldı (mevcut korundu). Grup ${beforeGroups}→${afterGroups}, ders ${beforeLessons}→${afterLessons}.`
+      );
+    } catch (e) {
+      toast.error(String((e as Error).message || e));
+    } finally {
+      setBusy('');
+    }
+  };
+
 
   const openExport = async () => {
     setExportOpen(true);
@@ -1296,6 +1344,16 @@ export default function SchedulePlannerPage({ mode = 'default' }: { mode?: 'defa
               </button>
               <button
                 type="button"
+                onClick={() => void handleLoadYazBackupPreserve()}
+                disabled={!!busy || !iframeReady}
+                className="inline-flex items-center gap-1 rounded-lg border border-teal-300 bg-teal-50 px-3 py-1.5 text-sm text-teal-950 hover:bg-teal-100 disabled:opacity-50"
+                title="yaz-donemi-yedek (16).json — dolu programları silmeden aktar"
+              >
+                {busy === 'yaz-yedek' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                Yaz yedek aktar (koru)
+              </button>
+              <button
+                type="button"
                 onClick={() => void handleStartBlankNewTerm()}
                 disabled={!!busy || !iframeReady}
                 className="inline-flex items-center gap-1 rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-sm text-amber-900 hover:bg-amber-100 disabled:opacity-50"
@@ -1304,12 +1362,24 @@ export default function SchedulePlannerPage({ mode = 'default' }: { mode?: 'defa
               </button>
             </>
           ) : (
-            <Link
-              to={NEW_TERM_PLANNER_PATH}
-              className="inline-flex items-center gap-1 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-sm font-medium text-indigo-800 hover:bg-indigo-100"
-            >
-              Yeni dönem programı
-            </Link>
+            <>
+              <button
+                type="button"
+                onClick={() => void handleLoadYazBackupPreserve()}
+                disabled={!!busy || !iframeReady}
+                className="inline-flex items-center gap-1 rounded-lg border border-teal-300 bg-teal-50 px-3 py-1.5 text-sm text-teal-950 hover:bg-teal-100 disabled:opacity-50"
+                title="yaz-donemi-yedek (16).json — dolu programları silmeden aktar"
+              >
+                {busy === 'yaz-yedek' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                Yaz yedek aktar (koru)
+              </button>
+              <Link
+                to={NEW_TERM_PLANNER_PATH}
+                className="inline-flex items-center gap-1 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-sm font-medium text-indigo-800 hover:bg-indigo-100"
+              >
+                Yeni dönem programı
+              </Link>
+            </>
           )}
           {isNewTerm ? null : (
           <button
