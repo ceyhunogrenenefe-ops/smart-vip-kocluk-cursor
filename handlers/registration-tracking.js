@@ -21,6 +21,10 @@ import {
   GRADE_PROGRAMS
 } from '../api/_lib/registration-tracking-utils.js';
 import { ensureExcelBoardLeads } from '../api/_lib/registration-tracking-excel-seed.js';
+import {
+  diagnoseRegistrationInbound,
+  simulateRegistrationInbound
+} from '../api/_lib/registration-channel-ingest.js';
 
 const PLATFORM_PRIMARY_INSTITUTION_ID = '73323d75-eea1-4552-8bba-d50555423589';
 
@@ -1393,7 +1397,24 @@ export default async function handler(req, res) {
       return res.status(200).json({ data });
     }
 
+    if (op === 'inbound-health') {
+      if (!isManager(tags) && role !== 'super_admin') return res.status(403).json({ error: 'forbidden' });
+      const data = await diagnoseRegistrationInbound(institutionId);
+      return res.status(200).json({ data });
+    }
+
     if (req.method === 'POST') {
+      if (op === 'test-inbound') {
+        if (!isManager(tags) && role !== 'super_admin') return res.status(403).json({ error: 'forbidden' });
+        const data = await simulateRegistrationInbound({
+          institutionId,
+          phone: body.phone,
+          body: body.body || body.message,
+          contactName: body.contact_name || body.full_name,
+          channel: body.channel || 'whatsapp'
+        });
+        return res.status(data.ok ? 200 : 400).json(data);
+      }
       if (op === 'seed-excel') {
         if (!isManager(tags)) return res.status(403).json({ error: 'forbidden' });
         const data = await ensureExcelBoardLeads(supabaseAdmin, institutionId);

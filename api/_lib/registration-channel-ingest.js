@@ -29,15 +29,30 @@ async function resolveDefaultInstitutionId() {
       ''
   ).trim();
   if (envId) return envId;
-  try {
-    const { data } = await supabaseAdmin.from('institutions').select('id').order('created_at', { ascending: true }).limit(1);
-    return data?.[0]?.id || null;
-  } catch {
-    return null;
+
+  // created_at yoksa / sıralama patlarsa yine kurum bul
+  const attempts = [
+    () => supabaseAdmin.from('institutions').select('id').order('created_at', { ascending: true }).limit(1),
+    () => supabaseAdmin.from('institutions').select('id').eq('is_active', true).limit(1),
+    () => supabaseAdmin.from('institutions').select('id').limit(1)
+  ];
+  for (const run of attempts) {
+    try {
+      const { data, error } = await run();
+      if (error) continue;
+      const id = data?.[0]?.id || null;
+      if (id) return id;
+    } catch {
+      /* sonraki fallback */
+    }
   }
+  console.warn(
+    '[channel-ingest] institution çözülemedi — Vercel env REGISTRATION_INBOUND_INSTITUTION_ID ayarlayın'
+  );
+  return null;
 }
 
-async function findLeadByPhone(normalizedPhone, institutionId) {
+async function findLeadByPhone(normalizedPhone, institutionId, { includeAlternate = true } = {}) {
   if (!normalizedPhone) return null;
   const variants = phoneLookupVariants(normalizedPhone);
   if (!variants.length) return null;
@@ -45,7 +60,7 @@ async function findLeadByPhone(normalizedPhone, institutionId) {
   const orParts = [];
   for (const v of variants) {
     orParts.push(`normalized_phone.eq.${v}`);
-    orParts.push(`normalized_alternate_phone.eq.${v}`);
+    if (includeAlternate) orParts.push(`normalized_alternate_phone.eq.${v}`);
     orParts.push(`phone.eq.${v}`);
   }
 
@@ -59,9 +74,15 @@ async function findLeadByPhone(normalizedPhone, institutionId) {
   if (institutionId) q = q.eq('institution_id', institutionId);
 
   const { data, error } = await q;
-  if (error) throw error;
+  if (error) {
+    // Eski şemada alternate kolonu yoksa sorgunun tamamı düşmesin
+    if (includeAlternate && /normalized_alternate_phone|column/i.test(error.message || '')) {
+      return findLeadByPhone(normalizedPhone, institutionId, { includeAlternate: false });
+    }
+    throw error;
+  }
   if (!data?.length) {
-    if (institutionId) return findLeadByPhone(normalizedPhone, null);
+    if (institutionId) return findLeadByPhone(normalizedPhone, null, { includeAlternate });
     return null;
   }
   const tracking = data.find((l) => l.primary_status === 'tracking');
@@ -177,21 +198,31 @@ export async function ingestRegistrationChannelMessage(msg) {
     }
   }
 
-  let lead =
-    channel === 'whatsapp'
-      ? await findLeadByPhone(normalizedPhone, institutionId)
-      : await findLeadByInstagramId(externalContactId, institutionId);
+  let lead = null;
+  try {
+    lead =
+      channel === 'whatsapp'
+        ? await findLeadByPhone(normalizedPhone, institutionId)
+        : await findLeadByInstagramId(externalContactId, institutionId);
 
-  if (!lead && direction === 'inbound') {
-    lead = await createLeadFromInbound({
-      institutionId,
-      channel,
-      phone: phoneRaw,
-      normalizedPhone,
-      contactName,
-      instagramScopedId: channel === 'instagram' ? externalContactId : null,
-      firstMessage: body
-    });
+    if (!lead && direction === 'inbound') {
+      if (!institutionId) {
+        console.warn('[channel-ingest] auto-lead atlandı — institution_id yok');
+      } else {
+        lead = await createLeadFromInbound({
+          institutionId,
+          channel,
+          phone: phoneRaw,
+          normalizedPhone,
+          contactName,
+          instagramScopedId: channel === 'instagram' ? externalContactId : null,
+          firstMessage: body
+        });
+      }
+    }
+  } catch (e) {
+    // Lead eşleme/oluşturma patlasa bile mesaj satırını yazmayı dene (teşhis için)
+    console.warn('[channel-ingest] lead resolve/create:', e instanceof Error ? e.message : e);
   }
 
   if (lead?.institution_id) institutionId = lead.institution_id;
@@ -352,4 +383,119 @@ export async function ingestInstagramMessagingEvents(messagingEvents) {
     processed += 1;
   }
   return { processed };
+}
+
+/** Yönetici teşhis: tablo / kurum / son mesajlar */
+export async function diagnoseRegistrationInbound(institutionId) {
+  const resolvedInstitutionId = institutionId || (await resolveDefaultInstitutionId());
+  const autoLead =
+    String(process.env.REGISTRATION_INBOUND_AUTO_LEAD || '1').trim() !== '0' &&
+    String(process.env.REGISTRATION_INBOUND_AUTO_LEAD || '1').toLowerCase() !== 'false';
+
+  let tableOk = false;
+  let tableError = null;
+  let recentMessages = [];
+  let messageCount = null;
+  try {
+    const { count, error: countErr } = await supabaseAdmin
+      .from('registration_channel_messages')
+      .select('id', { count: 'exact', head: true });
+    if (countErr) throw countErr;
+    tableOk = true;
+    messageCount = count;
+
+    let q = supabaseAdmin
+      .from('registration_channel_messages')
+      .select('id, lead_id, channel, direction, phone, body, occurred_at, created_at, institution_id')
+      .order('created_at', { ascending: false })
+      .limit(10);
+    if (resolvedInstitutionId) q = q.eq('institution_id', resolvedInstitutionId);
+    const { data, error } = await q;
+    if (error) throw error;
+    recentMessages = data || [];
+  } catch (e) {
+    tableError = e instanceof Error ? e.message : String(e);
+    if (/registration_channel_messages|does not exist|schema cache/i.test(tableError || '')) {
+      tableOk = false;
+    }
+  }
+
+  let recentInboundLeads = [];
+  try {
+    let q = supabaseAdmin
+      .from('registration_leads')
+      .select('id, full_name, stage, source, phone, last_inbound_snippet, last_inbound_at, institution_id')
+      .is('deleted_at', null)
+      .or('source.ilike.%whatsapp%,source.ilike.%instagram%,last_inbound_at.not.is.null')
+      .order('created_at', { ascending: false })
+      .limit(10);
+    if (resolvedInstitutionId) q = q.eq('institution_id', resolvedInstitutionId);
+    const { data } = await q;
+    recentInboundLeads = data || [];
+  } catch {
+    /* kolon yoksa sessiz */
+  }
+
+  return {
+    table_ok: tableOk,
+    table_error: tableError,
+    message_count: messageCount,
+    institution_id: resolvedInstitutionId,
+    institution_from_env: Boolean(
+      String(
+        process.env.REGISTRATION_INBOUND_INSTITUTION_ID ||
+          process.env.META_WHATSAPP_DEFAULT_INSTITUTION_ID ||
+          process.env.DEFAULT_INSTITUTION_ID ||
+          ''
+      ).trim()
+    ),
+    auto_lead_enabled: autoLead,
+    recent_messages: recentMessages,
+    recent_inbound_leads: recentInboundLeads,
+    hints: [
+      !tableOk
+        ? 'SQL migration eksik veya tablo adı uyuşmuyor — 2026-09-05-registration-channel-messages.sql çalıştırın.'
+        : null,
+      !resolvedInstitutionId
+        ? 'Kurum bulunamadı — Vercel REGISTRATION_INBOUND_INSTITUTION_ID = paneldeki institutions.id'
+        : null,
+      tableOk && messageCount === 0
+        ? 'Tablo boş: Meta webhook messages aboneliği / Cloud API numarasına yazılan mesaj gelmiyor olabilir (QR gateway ayrı kanal).'
+        : null,
+      tableOk && (recentMessages || []).some((m) => !m.lead_id)
+        ? 'lead_id boş mesajlar var — auto-lead / institution_id kontrol edin.'
+        : null
+    ].filter(Boolean)
+  };
+}
+
+/** Yönetici: Meta beklemeden sahte inbound (Gelen leadler smoke test) */
+export async function simulateRegistrationInbound({
+  institutionId,
+  phone,
+  body,
+  contactName,
+  channel = 'whatsapp'
+} = {}) {
+  const inst = institutionId || (await resolveDefaultInstitutionId());
+  if (!inst) {
+    return { ok: false, error: 'institution_missing', hint: 'REGISTRATION_INBOUND_INSTITUTION_ID veya institutions satırı gerekli' };
+  }
+  const digits = String(phone || '905559990042').replace(/\D/g, '') || '905559990042';
+  const text = body || `Panel test inbound ${new Date().toISOString()}`;
+  const externalMessageId = `wamid.PANEL_TEST_${Date.now()}`;
+  const result = await ingestRegistrationChannelMessage({
+    channel: channel === 'instagram' ? 'instagram' : 'whatsapp',
+    direction: 'inbound',
+    phone: digits,
+    externalContactId: channel === 'instagram' ? `ig_test_${Date.now()}` : digits,
+    contactName: contactName || 'Panel Test Lead',
+    body: text,
+    messageType: 'text',
+    externalMessageId,
+    timestamp: Math.floor(Date.now() / 1000),
+    institutionId: inst,
+    payload: { source: 'panel_simulate' }
+  });
+  return { ok: true, institution_id: inst, result };
 }
