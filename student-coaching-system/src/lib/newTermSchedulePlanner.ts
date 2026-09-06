@@ -53,3 +53,19 @@ export {
   countPlannerLessonCells,
   plannerNeedsLgs8ExcelSeed,
 } from './lgs8ExcelNewTermSchedule';
+
+export {
+  buildPrimaryExcelNewTermPlannerState,
+  countPrimaryExcelLessons,
+  mergePrimaryExcelIntoPlannerState,
+  plannerNeedsPrimaryExcelSeed,
+  upsertPlannerGroups,
+} from './primaryExcelNewTermSchedule';
+
+import { buildLgs8ExcelNewTermPlannerState } from './lgs8ExcelNewTermSchedule';
+import { mergePrimaryExcelIntoPlannerState } from './primaryExcelNewTermSchedule';
+
+/** 8A–8F + 2A/4A/5A/6A/7A Excel programlarını birleştirir. */
+export function buildCombinedExcelNewTermPlannerState() {
+  return mergePrimaryExcelIntoPlannerState(buildLgs8ExcelNewTermPlannerState());
+}
