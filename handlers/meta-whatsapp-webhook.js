@@ -148,6 +148,33 @@ export default async function handler(req, res) {
   let waIngested = 0;
   let igIngested = 0;
   let statusesApplied = 0;
+  let inboundMessageCount = 0;
+  let statusOnly = true;
+
+  // Teşhis: Meta gerçekten messages mi yolluyor, yoksa sadece statuses mı?
+  try {
+    for (const entry of entries) {
+      for (const change of Array.isArray(entry?.changes) ? entry.changes : []) {
+        const value = change?.value && typeof change.value === 'object' ? change.value : {};
+        const msgN = Array.isArray(value.messages) ? value.messages.length : 0;
+        const stN = Array.isArray(value.statuses) ? value.statuses.length : 0;
+        inboundMessageCount += msgN;
+        if (msgN > 0) statusOnly = false;
+        if (msgN || stN) {
+          console.info('[meta-webhook] change', {
+            object: objectType,
+            field: change?.field,
+            messages: msgN,
+            statuses: stN,
+            phone_number_id: value?.metadata?.phone_number_id || null,
+            display_phone: value?.metadata?.display_phone_number || null
+          });
+        }
+      }
+    }
+  } catch {
+    /* ignore probe errors */
+  }
 
   try {
     // Instagram Messaging (object: instagram)
@@ -218,11 +245,18 @@ export default async function handler(req, res) {
     // Meta'ya her zaman 200 dön — aksi halde retry storm
   }
 
+  if (statusOnly && statusesApplied > 0 && waIngested === 0) {
+    console.info(
+      '[meta-webhook] yalnızca teslimat statuses geldi (inbound message yok). Müşteri mesajı yoksa Meta Development Mode / messages aboneliği / yanlış WABA numarası kontrol edin.'
+    );
+  }
+
   return res.status(200).json({
     ok: true,
     received: getIstanbulDateString(),
     wa_ingested: waIngested,
     ig_ingested: igIngested,
-    statuses: statusesApplied
+    statuses: statusesApplied,
+    inbound_messages_seen: inboundMessageCount
   });
 }
