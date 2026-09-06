@@ -39,6 +39,7 @@ import {
   mergeFullNewTermIntoPlannerState,
   mergePrimaryExcelIntoPlannerState,
   mergeYazBackupIntoPlannerState,
+  writeYazBackupJsonIntoPlanner,
   countYazBackupLessons,
   pickNewTermPlan,
   upsertPlannerGroups,
@@ -950,7 +951,7 @@ export default function SchedulePlannerPage({ mode = 'default' }: { mode?: 'defa
     if (!iframeReady) return;
     if (
       !confirm(
-        'yaz-donemi-yedek (16).json mevcut ders programına eklensin mi?\n\nDolu sınıflar (ör. 8A–8F) korunur; yalnızca eksik gruplar ve boş programlar doldurulur.'
+        'Yedek JSON (16+17) mevcut ders programına yazılsın mı?\n\nProgramın yapısı (gün/saat dilimleri) bozulmaz. Dolu sınıflar korunur; eksik gruplar ve boş hücreler yedekten doldurulur.'
       )
     ) {
       return;
@@ -965,7 +966,7 @@ export default function SchedulePlannerPage({ mode = 'default' }: { mode?: 'defa
         ? ((current as { groups: unknown[] }).groups as unknown[]).length
         : 0;
       const beforeLessons = countPlannerLessonCells(current);
-      const seeded = mergeYazBackupIntoPlannerState(
+      const seeded = writeYazBackupJsonIntoPlanner(
         (current as Record<string, unknown> | null) || null
       );
       await pushPlannerContext({
@@ -981,7 +982,7 @@ export default function SchedulePlannerPage({ mode = 'default' }: { mode?: 'defa
       const afterLessons = countPlannerLessonCells(seeded);
       const afterGroups = Array.isArray(seeded.groups) ? seeded.groups.length : 0;
       toast.success(
-        `Yaz yedek aktarıldı (mevcut korundu). Grup ${beforeGroups}→${afterGroups}, ders ${beforeLessons}→${afterLessons}.`
+        `Yedek JSON yazıldı (yapı korundu). Grup ${beforeGroups}→${afterGroups}, ders ${beforeLessons}→${afterLessons}.`
       );
     } catch (e) {
       toast.error(String((e as Error).message || e));
@@ -1350,7 +1351,7 @@ export default function SchedulePlannerPage({ mode = 'default' }: { mode?: 'defa
                 title="yaz-donemi-yedek (16).json — dolu programları silmeden aktar"
               >
                 {busy === 'yaz-yedek' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-                Yaz yedek aktar (koru)
+                Yedek JSON yaz (yapıyı koru)
               </button>
               <button
                 type="button"
@@ -1371,7 +1372,7 @@ export default function SchedulePlannerPage({ mode = 'default' }: { mode?: 'defa
                 title="yaz-donemi-yedek (16).json — dolu programları silmeden aktar"
               >
                 {busy === 'yaz-yedek' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-                Yaz yedek aktar (koru)
+                Yedek JSON yaz (yapıyı koru)
               </button>
               <Link
                 to={NEW_TERM_PLANNER_PATH}
