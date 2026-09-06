@@ -61,7 +61,7 @@ export const NAV_OZEL_DERS_TALEPLERI: FlatNavItem = {
 export const NAV_TEACHER_PROFILE_APPROVALS: FlatNavItem = {
   path: '/ogretmen-profil-onaylari',
   icon: FileCheck,
-  label: 'Öğretmen profil onayları'
+  label: 'Öğretmen profil & yorum onayları'
 };
 
 /** Öğretmen — özel ders vitrin profili */

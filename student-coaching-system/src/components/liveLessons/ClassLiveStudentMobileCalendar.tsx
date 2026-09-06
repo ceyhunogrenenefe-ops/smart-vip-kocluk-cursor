@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ClipboardList, Copy, PlayCircle } from 'lucide-react';
+import { ClipboardList, Copy, PlayCircle, Star } from 'lucide-react';
 import { liveSubjectAccent } from './liveSubjectAccent';
 import { hasClassSessionRecordingAccess } from '../../lib/liveLessonUtils';
 import { cn } from '../../lib/utils';
@@ -50,6 +50,9 @@ export type ClassLiveStudentMobileCalendarProps = {
   onCopyGuestLink?: (s: SessionRow) => void;
   /** Öğretmen/koç: manuel yoklama */
   onOpenAttendance?: (s: SessionRow) => void;
+  /** Öğrenci: tamamlanan grup dersi öğretmen değerlendirmesi */
+  onReviewTeacher?: (s: SessionRow) => void;
+  reviewedSessionIds?: Set<string>;
   studentAppointmentDefaults?: { name?: string; class_level?: string };
 };
 
@@ -66,6 +69,8 @@ export function ClassLiveStudentMobileCalendar({
   onWatchSession,
   onCopyGuestLink,
   onOpenAttendance,
+  onReviewTeacher,
+  reviewedSessionIds,
   studentAppointmentDefaults
 }: ClassLiveStudentMobileCalendarProps) {
   const [dayIdx, setDayIdx] = useState(() => {
@@ -244,6 +249,26 @@ export function ClassLiveStudentMobileCalendar({
                     >
                       Katıl
                     </button>
+                  ) : null}
+                  {isRealSession &&
+                  s.status === 'completed' &&
+                  s.teacher_id &&
+                  onReviewTeacher &&
+                  !(reviewedSessionIds && reviewedSessionIds.has(s.id)) ? (
+                    <button
+                      type="button"
+                      onClick={() => onReviewTeacher(s)}
+                      className="inline-flex items-center gap-1 rounded-lg bg-amber-500 px-2.5 py-1.5 text-xs font-semibold text-white touch-manipulation hover:bg-amber-600"
+                    >
+                      <Star className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                      Değerlendir
+                    </button>
+                  ) : isRealSession &&
+                    s.status === 'completed' &&
+                    reviewedSessionIds?.has(s.id) ? (
+                    <span className="rounded-lg bg-emerald-50 px-2.5 py-1.5 text-xs font-semibold text-emerald-700">
+                      Değerlendirildi
+                    </span>
                   ) : null}
                   {canWatch ? (
                     <button

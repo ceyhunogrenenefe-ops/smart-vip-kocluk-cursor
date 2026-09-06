@@ -5,6 +5,7 @@ import { useApp } from '../context/AppContext';
 import { apiFetch } from '../lib/session';
 import { resolveStudentRecordId } from '../lib/coachResolve';
 import StudentLiveLessonsPanel from '../components/liveLessons/StudentLiveLessonsPanel';
+import TeacherReviewModal from '../components/teacher/TeacherReviewModal';
 import { WeeklyLiveGridShell } from '../components/liveLessons/WeeklyLiveGridShell';
 import { ClassLiveStudentMobileCalendar } from '../components/liveLessons/ClassLiveStudentMobileCalendar';
 import { liveSubjectAccent } from '../components/liveLessons/liveSubjectAccent';
@@ -12,7 +13,7 @@ import { userHasAnyRole, userRoleTags } from '../config/rolePermissions';
 import { useStudentMobileShell } from '../hooks/useStudentMobileShell';
 import { isUuid } from '../utils/uuid';
 import { resolveStudentInList } from '../lib/classLiveBranchUtils';
-import { GripVertical, KeyRound, Loader2, Pencil, PlayCircle, Trash2, FileDown, Bell, MapPin } from 'lucide-react';
+import { GripVertical, KeyRound, Loader2, Pencil, PlayCircle, Trash2, FileDown, Bell, MapPin, Star } from 'lucide-react';
 import BbbAutoLinkFieldHint from '../components/liveLessons/BbbAutoLinkFieldHint';
 import { isBbbJoinUrl, canShowSessionGuestInvite, hasClassSessionRecordingAccess, isBbbPlaybackUrl, needsBbbJoinFlow, displayMeetingLinkForRow, meetingLinkForSave, shouldSkipClassLessonReminder, shouldUsePanelBbbJoin, isExternalMeetingPlatform, lessonJoinUrl } from '../lib/liveLessonUtils';
 import { openBbbJoin, openBbbRecording } from '../lib/bbbJoin';
@@ -251,6 +252,8 @@ export default function ClassLiveLessons() {
     return mondayIsoContaining();
   });
   const [weekSessions, setWeekSessions] = useState<SessionRow[]>([]);
+  const [reviewSession, setReviewSession] = useState<SessionRow | null>(null);
+  const [reviewedClassSessionIds, setReviewedClassSessionIds] = useState<Set<string>>(() => new Set());
   const [batchSessionsPool, setBatchSessionsPool] = useState<SessionRow[]>([]);
   const [calendarLoading, setCalendarLoading] = useState(false);
   const [checkpointsBySession, setCheckpointsBySession] = useState<Record<string, ClassLessonTopicCheckpoint>>({});
@@ -353,6 +356,26 @@ export default function ClassLiveLessons() {
   }, []);
 
   const canMarkAttendance = canManageSlots && !isStudentView && Boolean(selectedClassId);
+
+  useEffect(() => {
+    if (!isStudentView || !resolvedStudentId) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await apiFetch('/api/reviews/student');
+        const j = await res.json().catch(() => ({}));
+        if (!res.ok || cancelled) return;
+        const ids = Array.isArray(j.class_session_ids) ? j.class_session_ids.map(String) : [];
+        setReviewedClassSessionIds(new Set(ids));
+      } catch {
+        /* ignore */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isStudentView, resolvedStudentId]);
+
   const canSendLessonReminder = canMarkAttendance;
   const canManageTopicCheckpoint = canManageSlots && !isStudentView;
 
@@ -2197,6 +2220,26 @@ export default function ClassLiveLessons() {
                                       Katıl
                                     </button>
                                   ) : null}
+                                  {isStudentView &&
+                                  s.status === 'completed' &&
+                                  s.teacher_id &&
+                                  !String(s.id).startsWith('slot-') &&
+                                  !reviewedClassSessionIds.has(s.id) ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => setReviewSession(s)}
+                                      className="inline-flex items-center gap-1 rounded-lg bg-amber-500 px-2 py-1 text-[10px] font-semibold text-white hover:bg-amber-600"
+                                    >
+                                      <Star className="h-3 w-3" />
+                                      Değerlendir
+                                    </button>
+                                  ) : isStudentView &&
+                                    s.status === 'completed' &&
+                                    reviewedClassSessionIds.has(s.id) ? (
+                                    <span className="rounded-lg bg-emerald-50 px-2 py-1 text-[10px] font-semibold text-emerald-700">
+                                      Değerlendirildi
+                                    </span>
+                                  ) : null}
                                   {canWatchRecording ? (
                                     <button
                                       type="button"
@@ -2342,12 +2385,40 @@ export default function ClassLiveLessons() {
             onWatchSession={(s) => void watchClassSessionRecording(s)}
             onCopyGuestLink={canShareGuestInvite ? (s) => void copySessionGuestLink(s) : undefined}
             onOpenAttendance={canMarkAttendance ? (s) => void openAttendanceForSession(s) : undefined}
+            onReviewTeacher={
+              isStudentView
+                ? (s) => {
+                    if (s.status === 'completed' && s.teacher_id && !reviewedClassSessionIds.has(s.id)) {
+                      setReviewSession(s);
+                    }
+                  }
+                : undefined
+            }
+            reviewedSessionIds={isStudentView ? reviewedClassSessionIds : undefined}
             studentAppointmentDefaults={studentAppointmentDefaults}
           />
         )}
       </WeeklyLiveGridShell>
       </div>
       </div>
+
+      
+      <TeacherReviewModal
+        open={Boolean(reviewSession)}
+        classSessionId={reviewSession?.id || ''}
+        teacherName={
+          teacherCandidates.find((x) => x.id === reviewSession?.teacher_id)?.name ||
+          reviewSession?.teacher_name ||
+          undefined
+        }
+        lessonTitle={reviewSession?.subject}
+        onClose={() => setReviewSession(null)}
+        onSubmitted={() => {
+          if (reviewSession?.id) {
+            setReviewedClassSessionIds((prev) => new Set(prev).add(reviewSession.id));
+          }
+        }}
+      />
 
       {pendingDeleteSession ? (
         <AppModal
