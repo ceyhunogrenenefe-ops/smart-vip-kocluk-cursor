@@ -1,0 +1,1417 @@
+{
+  "term": {
+    "start": "2026-09-01",
+    "end": "2027-06-19"
+  },
+  "days": [
+    "Pazartesi",
+    "Salı",
+    "Çarşamba",
+    "Perşembe",
+    "Cuma",
+    "Cumartesi",
+    "Pazar"
+  ],
+  "periods": [
+    {
+      "label": "1. Ders",
+      "time": "17:00–17:40"
+    },
+    {
+      "label": "2. Ders",
+      "time": "17:50–18:30"
+    },
+    {
+      "label": "3. Ders",
+      "time": "19:00–19:40"
+    },
+    {
+      "label": "4. Ders",
+      "time": "19:50–20:30"
+    },
+    {
+      "label": "5. Ders",
+      "time": "20:40–21:20"
+    }
+  ],
+  "periodsByDay": {
+    "0": [
+      {
+        "label": "1. Ders",
+        "time": "17:00–17:40"
+      },
+      {
+        "label": "2. Ders",
+        "time": "17:50–18:30"
+      },
+      {
+        "label": "3. Ders",
+        "time": "19:00–19:40"
+      },
+      {
+        "label": "4. Ders",
+        "time": "19:50–20:30"
+      },
+      {
+        "label": "5. Ders",
+        "time": "20:40–21:20"
+      }
+    ],
+    "1": [
+      {
+        "label": "1. Ders",
+        "time": "17:00–17:40"
+      },
+      {
+        "label": "2. Ders",
+        "time": "17:50–18:30"
+      },
+      {
+        "label": "3. Ders",
+        "time": "19:00–19:40"
+      },
+      {
+        "label": "4. Ders",
+        "time": "19:50–20:30"
+      },
+      {
+        "label": "5. Ders",
+        "time": "20:40–21:20"
+      }
+    ],
+    "2": [
+      {
+        "label": "1. Ders",
+        "time": "17:00–17:40"
+      },
+      {
+        "label": "2. Ders",
+        "time": "17:50–18:30"
+      },
+      {
+        "label": "3. Ders",
+        "time": "19:00–19:40"
+      },
+      {
+        "label": "4. Ders",
+        "time": "19:50–20:30"
+      },
+      {
+        "label": "5. Ders",
+        "time": "20:40–21:20"
+      }
+    ],
+    "3": [
+      {
+        "label": "1. Ders",
+        "time": "17:00–17:40"
+      },
+      {
+        "label": "2. Ders",
+        "time": "17:50–18:30"
+      },
+      {
+        "label": "3. Ders",
+        "time": "19:00–19:40"
+      },
+      {
+        "label": "4. Ders",
+        "time": "19:50–20:30"
+      },
+      {
+        "label": "5. Ders",
+        "time": "20:40–21:20"
+      }
+    ],
+    "4": [
+      {
+        "label": "1. Ders",
+        "time": "17:00–17:40"
+      },
+      {
+        "label": "2. Ders",
+        "time": "17:50–18:30"
+      },
+      {
+        "label": "3. Ders",
+        "time": "19:00–19:40"
+      },
+      {
+        "label": "4. Ders",
+        "time": "19:50–20:30"
+      },
+      {
+        "label": "5. Ders",
+        "time": "20:40–21:20"
+      }
+    ],
+    "5": [
+      {
+        "label": "1. Ders",
+        "time": "10:00–11:15"
+      },
+      {
+        "label": "2. Ders",
+        "time": "11:30–12:50"
+      },
+      {
+        "label": "3. Ders",
+        "time": "16:00–16:40"
+      },
+      {
+        "label": "4. Ders",
+        "time": "16:50–17:30"
+      },
+      {
+        "label": "5. Ders",
+        "time": "18:00–18:40"
+      },
+      {
+        "label": "6. Ders",
+        "time": "18:50–19:30"
+      }
+    ],
+    "6": [
+      {
+        "label": "1. Ders",
+        "time": "10:00–11:15"
+      },
+      {
+        "label": "2. Ders",
+        "time": "11:30–12:50"
+      }
+    ]
+  },
+  "groups": [
+    {
+      "id": "lgs8-2026-8A",
+      "name": "8A",
+      "advisor": "",
+      "color": "#B4541E",
+      "students": [],
+      "schedule": {
+        "0_0": {
+          "subject": "ETÜT",
+          "teacher": "Doğan Aktürk"
+        },
+        "0_1": {
+          "subject": "ETÜT",
+          "teacher": "Doğan Aktürk"
+        },
+        "0_2": {
+          "subject": "REHBERLİK",
+          "teacher": "Kamil Angay"
+        },
+        "0_3": {
+          "subject": "İNGİLİZCE",
+          "teacher": "Mustafa Öztürk"
+        },
+        "0_4": {
+          "subject": "İNGİLİZCE",
+          "teacher": "Mustafa Öztürk"
+        },
+        "1_0": {
+          "subject": "ETÜT",
+          "teacher": "Doğan Aktürk"
+        },
+        "1_1": {
+          "subject": "ETÜT",
+          "teacher": "Doğan Aktürk"
+        },
+        "1_2": {
+          "subject": "ETÜT",
+          "teacher": "Doğan Aktürk"
+        },
+        "2_0": {
+          "subject": "ETÜT",
+          "teacher": "Doğan Aktürk"
+        },
+        "2_1": {
+          "subject": "ETÜT",
+          "teacher": "Doğan Aktürk"
+        },
+        "2_2": {
+          "subject": "ETÜT",
+          "teacher": "Doğan Aktürk"
+        },
+        "3_0": {
+          "subject": "ETÜT",
+          "teacher": "Doğan Aktürk"
+        },
+        "3_1": {
+          "subject": "ETÜT",
+          "teacher": "Doğan Aktürk"
+        },
+        "3_2": {
+          "subject": "MATEMATİK",
+          "teacher": "Ahmet Dağüstü"
+        },
+        "3_3": {
+          "subject": "DİN KÜLTÜRÜ",
+          "teacher": "Büşra Öztürk"
+        },
+        "3_4": {
+          "subject": "İNKILAP TARİHİ",
+          "teacher": "Mustafa Kozan"
+        },
+        "4_0": {
+          "subject": "ETÜT",
+          "teacher": "Doğan Aktürk"
+        },
+        "4_1": {
+          "subject": "ETÜT",
+          "teacher": "Doğan Aktürk"
+        },
+        "4_2": {
+          "subject": "ETÜT",
+          "teacher": "Doğan Aktürk"
+        },
+        "4_3": {
+          "subject": "TÜRKÇE",
+          "teacher": "Reha Apaydın"
+        },
+        "4_4": {
+          "subject": "TÜRKÇE",
+          "teacher": "Reha Apaydın"
+        },
+        "5_0": {
+          "subject": "DENEME SINAVI SÖZEL",
+          "teacher": ""
+        },
+        "5_1": {
+          "subject": "DENEME SINAVI SAYISAL",
+          "teacher": ""
+        },
+        "5_2": {
+          "subject": "FEN BİLGİSİ",
+          "teacher": "Kamil Angay"
+        },
+        "5_3": {
+          "subject": "FEN BİLGİSİ",
+          "teacher": "Kamil Angay"
+        },
+        "5_4": {
+          "subject": "MATEMATİK",
+          "teacher": "Ahmet Dağüstü"
+        },
+        "5_5": {
+          "subject": "MATEMATİK",
+          "teacher": "Ahmet Dağüstü"
+        },
+        "6_0": {
+          "subject": "DENEME SINAVI TEKRAR",
+          "teacher": ""
+        },
+        "6_1": {
+          "subject": "DENEME SINAVI TEKRAR",
+          "teacher": ""
+        }
+      },
+      "periods": [
+        {
+          "label": "1. Ders",
+          "time": "17:00–17:40"
+        },
+        {
+          "label": "2. Ders",
+          "time": "17:50–18:30"
+        },
+        {
+          "label": "3. Ders",
+          "time": "19:00–19:40"
+        },
+        {
+          "label": "4. Ders",
+          "time": "19:50–20:30"
+        },
+        {
+          "label": "5. Ders",
+          "time": "20:40–21:20"
+        }
+      ],
+      "periodsByDay": {
+        "0": [
+          {
+            "label": "1. Ders",
+            "time": "17:00–17:40"
+          },
+          {
+            "label": "2. Ders",
+            "time": "17:50–18:30"
+          },
+          {
+            "label": "3. Ders",
+            "time": "19:00–19:40"
+          },
+          {
+            "label": "4. Ders",
+            "time": "19:50–20:30"
+          },
+          {
+            "label": "5. Ders",
+            "time": "20:40–21:20"
+          }
+        ],
+        "1": [
+          {
+            "label": "1. Ders",
+            "time": "17:00–17:40"
+          },
+          {
+            "label": "2. Ders",
+            "time": "17:50–18:30"
+          },
+          {
+            "label": "3. Ders",
+            "time": "19:00–19:40"
+          },
+          {
+            "label": "4. Ders",
+            "time": "19:50–20:30"
+          },
+          {
+            "label": "5. Ders",
+            "time": "20:40–21:20"
+          }
+        ],
+        "2": [
+          {
+            "label": "1. Ders",
+            "time": "17:00–17:40"
+          },
+          {
+            "label": "2. Ders",
+            "time": "17:50–18:30"
+          },
+          {
+            "label": "3. Ders",
+            "time": "19:00–19:40"
+          },
+          {
+            "label": "4. Ders",
+            "time": "19:50–20:30"
+          },
+          {
+            "label": "5. Ders",
+            "time": "20:40–21:20"
+          }
+        ],
+        "3": [
+          {
+            "label": "1. Ders",
+            "time": "17:00–17:40"
+          },
+          {
+            "label": "2. Ders",
+            "time": "17:50–18:30"
+          },
+          {
+            "label": "3. Ders",
+            "time": "19:00–19:40"
+          },
+          {
+            "label": "4. Ders",
+            "time": "19:50–20:30"
+          },
+          {
+            "label": "5. Ders",
+            "time": "20:40–21:20"
+          }
+        ],
+        "4": [
+          {
+            "label": "1. Ders",
+            "time": "17:00–17:40"
+          },
+          {
+            "label": "2. Ders",
+            "time": "17:50–18:30"
+          },
+          {
+            "label": "3. Ders",
+            "time": "19:00–19:40"
+          },
+          {
+            "label": "4. Ders",
+            "time": "19:50–20:30"
+          },
+          {
+            "label": "5. Ders",
+            "time": "20:40–21:20"
+          }
+        ],
+        "5": [
+          {
+            "label": "1. Ders",
+            "time": "10:00–11:15"
+          },
+          {
+            "label": "2. Ders",
+            "time": "11:30–12:50"
+          },
+          {
+            "label": "3. Ders",
+            "time": "16:00–16:40"
+          },
+          {
+            "label": "4. Ders",
+            "time": "16:50–17:30"
+          },
+          {
+            "label": "5. Ders",
+            "time": "18:00–18:40"
+          },
+          {
+            "label": "6. Ders",
+            "time": "18:50–19:30"
+          }
+        ],
+        "6": [
+          {
+            "label": "1. Ders",
+            "time": "10:00–11:15"
+          },
+          {
+            "label": "2. Ders",
+            "time": "11:30–12:50"
+          }
+        ]
+      },
+      "locked": false,
+      "classId": null,
+      "classLevel": "8",
+      "branch": null,
+      "curriculum": []
+    },
+    {
+      "id": "lgs8-2026-8B",
+      "name": "8B",
+      "advisor": "",
+      "color": "#0E8A6B",
+      "students": [],
+      "schedule": {
+        "0_0": {
+          "subject": "ETÜT",
+          "teacher": "Doğan Aktürk"
+        },
+        "0_1": {
+          "subject": "ETÜT",
+          "teacher": "Doğan Aktürk"
+        },
+        "0_2": {
+          "subject": "ETÜT",
+          "teacher": "Doğan Aktürk"
+        },
+        "0_3": {
+          "subject": "REHBERLİK",
+          "teacher": "Merve Yurdakul"
+        },
+        "1_0": {
+          "subject": "ETÜT",
+          "teacher": "Doğan Aktürk"
+        },
+        "1_1": {
+          "subject": "ETÜT",
+          "teacher": "Doğan Aktürk"
+        },
+        "1_2": {
+          "subject": "ETÜT",
+          "teacher": "Doğan Aktürk"
+        },
+        "1_3": {
+          "subject": "İNGİLİZCE",
+          "teacher": "Mustafa Öztürk"
+        },
+        "1_4": {
+          "subject": "İNGİLİZCE",
+          "teacher": "Mustafa Öztürk"
+        },
+        "2_0": {
+          "subject": "ETÜT",
+          "teacher": "Doğan Aktürk"
+        },
+        "2_1": {
+          "subject": "ETÜT",
+          "teacher": "Doğan Aktürk"
+        },
+        "2_2": {
+          "subject": "ETÜT",
+          "teacher": "Doğan Aktürk"
+        },
+        "2_3": {
+          "subject": "TÜRKÇE",
+          "teacher": "Reha Apaydın"
+        },
+        "2_4": {
+          "subject": "TÜRKÇE",
+          "teacher": "Reha Apaydın"
+        },
+        "3_0": {
+          "subject": "ETÜT",
+          "teacher": "Doğan Aktürk"
+        },
+        "3_1": {
+          "subject": "ETÜT",
+          "teacher": "Doğan Aktürk"
+        },
+        "3_2": {
+          "subject": "ETÜT",
+          "teacher": "Doğan Aktürk"
+        },
+        "4_0": {
+          "subject": "ETÜT",
+          "teacher": "Doğan Aktürk"
+        },
+        "4_1": {
+          "subject": "ETÜT",
+          "teacher": "Doğan Aktürk"
+        },
+        "4_2": {
+          "subject": "MATEMATİK",
+          "teacher": "Merve Yurdakul"
+        },
+        "4_3": {
+          "subject": "İNKILAP TARİHİ",
+          "teacher": "Mustafa Kozan"
+        },
+        "4_4": {
+          "subject": "DİN KÜLTÜRÜ",
+          "teacher": "Büşra Öztürk"
+        },
+        "5_0": {
+          "subject": "DENEME SINAVI SÖZEL",
+          "teacher": ""
+        },
+        "5_1": {
+          "subject": "DENEME SINAVI SAYISAL",
+          "teacher": ""
+        },
+        "5_2": {
+          "subject": "MATEMATİK",
+          "teacher": "Merve Yurdakul"
+        },
+        "5_3": {
+          "subject": "MATEMATİK",
+          "teacher": "Merve Yurdakul"
+        },
+        "5_4": {
+          "subject": "FEN BİLGİSİ",
+          "teacher": "Tayyibe Öğrenenefe"
+        },
+        "5_5": {
+          "subject": "FEN BİLGİSİ",
+          "teacher": "Tayyibe Öğrenenefe"
+        },
+        "6_0": {
+          "subject": "DENEME SINAVI TEKRAR",
+          "teacher": ""
+        },
+        "6_1": {
+          "subject": "DENEME SINAVI TEKRAR",
+          "teacher": ""
+        }
+      },
+      "periods": [
+        {
+          "label": "1. Ders",
+          "time": "17:00–17:40"
+        },
+        {
+          "label": "2. Ders",
+          "time": "17:50–18:30"
+        },
+        {
+          "label": "3. Ders",
+          "time": "19:00–19:40"
+        },
+        {
+          "label": "4. Ders",
+          "time": "19:50–20:30"
+        },
+        {
+          "label": "5. Ders",
+          "time": "20:40–21:20"
+        }
+      ],
+      "periodsByDay": {
+        "0": [
+          {
+            "label": "1. Ders",
+            "time": "17:00–17:40"
+          },
+          {
+            "label": "2. Ders",
+            "time": "17:50–18:30"
+          },
+          {
+            "label": "3. Ders",
+            "time": "19:00–19:40"
+          },
+          {
+            "label": "4. Ders",
+            "time": "19:50–20:30"
+          },
+          {
+            "label": "5. Ders",
+            "time": "20:40–21:20"
+          }
+        ],
+        "1": [
+          {
+            "label": "1. Ders",
+            "time": "17:00–17:40"
+          },
+          {
+            "label": "2. Ders",
+            "time": "17:50–18:30"
+          },
+          {
+            "label": "3. Ders",
+            "time": "19:00–19:40"
+          },
+          {
+            "label": "4. Ders",
+            "time": "19:50–20:30"
+          },
+          {
+            "label": "5. Ders",
+            "time": "20:40–21:20"
+          }
+        ],
+        "2": [
+          {
+            "label": "1. Ders",
+            "time": "17:00–17:40"
+          },
+          {
+            "label": "2. Ders",
+            "time": "17:50–18:30"
+          },
+          {
+            "label": "3. Ders",
+            "time": "19:00–19:40"
+          },
+          {
+            "label": "4. Ders",
+            "time": "19:50–20:30"
+          },
+          {
+            "label": "5. Ders",
+            "time": "20:40–21:20"
+          }
+        ],
+        "3": [
+          {
+            "label": "1. Ders",
+            "time": "17:00–17:40"
+          },
+          {
+            "label": "2. Ders",
+            "time": "17:50–18:30"
+          },
+          {
+            "label": "3. Ders",
+            "time": "19:00–19:40"
+          },
+          {
+            "label": "4. Ders",
+            "time": "19:50–20:30"
+          },
+          {
+            "label": "5. Ders",
+            "time": "20:40–21:20"
+          }
+        ],
+        "4": [
+          {
+            "label": "1. Ders",
+            "time": "17:00–17:40"
+          },
+          {
+            "label": "2. Ders",
+            "time": "17:50–18:30"
+          },
+          {
+            "label": "3. Ders",
+            "time": "19:00–19:40"
+          },
+          {
+            "label": "4. Ders",
+            "time": "19:50–20:30"
+          },
+          {
+            "label": "5. Ders",
+            "time": "20:40–21:20"
+          }
+        ],
+        "5": [
+          {
+            "label": "1. Ders",
+            "time": "10:00–11:15"
+          },
+          {
+            "label": "2. Ders",
+            "time": "11:30–12:50"
+          },
+          {
+            "label": "3. Ders",
+            "time": "16:00–16:40"
+          },
+          {
+            "label": "4. Ders",
+            "time": "16:50–17:30"
+          },
+          {
+            "label": "5. Ders",
+            "time": "18:00–18:40"
+          },
+          {
+            "label": "6. Ders",
+            "time": "18:50–19:30"
+          }
+        ],
+        "6": [
+          {
+            "label": "1. Ders",
+            "time": "10:00–11:15"
+          },
+          {
+            "label": "2. Ders",
+            "time": "11:30–12:50"
+          }
+        ]
+      },
+      "locked": false,
+      "classId": null,
+      "classLevel": "8",
+      "branch": null,
+      "curriculum": []
+    },
+    {
+      "id": "lgs8-2026-8C",
+      "name": "8C",
+      "advisor": "",
+      "color": "#7A3FA0",
+      "students": [],
+      "schedule": {
+        "0_0": {
+          "subject": "ETÜT",
+          "teacher": "Doğan Aktürk"
+        },
+        "0_1": {
+          "subject": "ETÜT",
+          "teacher": "Doğan Aktürk"
+        },
+        "0_2": {
+          "subject": "REHBERLİK",
+          "teacher": "Reha Apaydın"
+        },
+        "0_3": {
+          "subject": "FEN BİLGİSİ",
+          "teacher": "Kamil Angay"
+        },
+        "0_4": {
+          "subject": "FEN BİLGİSİ",
+          "teacher": "Kamil Angay"
+        },
+        "1_0": {
+          "subject": "ETÜT",
+          "teacher": "Doğan Aktürk"
+        },
+        "1_1": {
+          "subject": "ETÜT",
+          "teacher": "Doğan Aktürk"
+        },
+        "1_2": {
+          "subject": "ETÜT",
+          "teacher": "Doğan Aktürk"
+        },
+        "1_3": {
+          "subject": "TÜRKÇE",
+          "teacher": "Reha Apaydın"
+        },
+        "1_4": {
+          "subject": "TÜRKÇE",
+          "teacher": "Reha Apaydın"
+        },
+        "2_0": {
+          "subject": "ETÜT",
+          "teacher": "Doğan Aktürk"
+        },
+        "2_1": {
+          "subject": "ETÜT",
+          "teacher": "Doğan Aktürk"
+        },
+        "2_2": {
+          "subject": "ETÜT",
+          "teacher": "Doğan Aktürk"
+        },
+        "3_0": {
+          "subject": "ETÜT",
+          "teacher": "Doğan Aktürk"
+        },
+        "3_1": {
+          "subject": "ETÜT",
+          "teacher": "Doğan Aktürk"
+        },
+        "3_2": {
+          "subject": "İNKILAP TARİHİ",
+          "teacher": "Mustafa Kozan"
+        },
+        "3_3": {
+          "subject": "DİN KÜLTÜRÜ",
+          "teacher": "Büşra Öztürk"
+        },
+        "3_4": {
+          "subject": "MATEMATİK",
+          "teacher": "Erdal Karadaş"
+        },
+        "4_0": {
+          "subject": "ETÜT",
+          "teacher": "Doğan Aktürk"
+        },
+        "4_1": {
+          "subject": "ETÜT",
+          "teacher": "Doğan Aktürk"
+        },
+        "4_2": {
+          "subject": "ETÜT",
+          "teacher": "Doğan Aktürk"
+        },
+        "5_0": {
+          "subject": "DENEME SINAVI SÖZEL",
+          "teacher": ""
+        },
+        "5_1": {
+          "subject": "DENEME SINAVI SAYISAL",
+          "teacher": ""
+        },
+        "5_2": {
+          "subject": "MATEMATİK",
+          "teacher": "Erdal Karadaş"
+        },
+        "5_3": {
+          "subject": "MATEMATİK",
+          "teacher": "Erdal Karadaş"
+        },
+        "5_4": {
+          "subject": "İNGİLİZCE",
+          "teacher": "Mustafa Öztürk"
+        },
+        "5_5": {
+          "subject": "İNGİLİZCE",
+          "teacher": "Mustafa Öztürk"
+        },
+        "6_0": {
+          "subject": "DENEME SINAVI TEKRAR",
+          "teacher": ""
+        },
+        "6_1": {
+          "subject": "DENEME SINAVI TEKRAR",
+          "teacher": ""
+        }
+      },
+      "periods": [
+        {
+          "label": "1. Ders",
+          "time": "17:00–17:40"
+        },
+        {
+          "label": "2. Ders",
+          "time": "17:50–18:30"
+        },
+        {
+          "label": "3. Ders",
+          "time": "19:00–19:40"
+        },
+        {
+          "label": "4. Ders",
+          "time": "19:50–20:30"
+        },
+        {
+          "label": "5. Ders",
+          "time": "20:40–21:20"
+        }
+      ],
+      "periodsByDay": {
+        "0": [
+          {
+            "label": "1. Ders",
+            "time": "17:00–17:40"
+          },
+          {
+            "label": "2. Ders",
+            "time": "17:50–18:30"
+          },
+          {
+            "label": "3. Ders",
+            "time": "19:00–19:40"
+          },
+          {
+            "label": "4. Ders",
+            "time": "19:50–20:30"
+          },
+          {
+            "label": "5. Ders",
+            "time": "20:40–21:20"
+          }
+        ],
+        "1": [
+          {
+            "label": "1. Ders",
+            "time": "17:00–17:40"
+          },
+          {
+            "label": "2. Ders",
+            "time": "17:50–18:30"
+          },
+          {
+            "label": "3. Ders",
+            "time": "19:00–19:40"
+          },
+          {
+            "label": "4. Ders",
+            "time": "19:50–20:30"
+          },
+          {
+            "label": "5. Ders",
+            "time": "20:40–21:20"
+          }
+        ],
+        "2": [
+          {
+            "label": "1. Ders",
+            "time": "17:00–17:40"
+          },
+          {
+            "label": "2. Ders",
+            "time": "17:50–18:30"
+          },
+          {
+            "label": "3. Ders",
+            "time": "19:00–19:40"
+          },
+          {
+            "label": "4. Ders",
+            "time": "19:50–20:30"
+          },
+          {
+            "label": "5. Ders",
+            "time": "20:40–21:20"
+          }
+        ],
+        "3": [
+          {
+            "label": "1. Ders",
+            "time": "17:00–17:40"
+          },
+          {
+            "label": "2. Ders",
+            "time": "17:50–18:30"
+          },
+          {
+            "label": "3. Ders",
+            "time": "19:00–19:40"
+          },
+          {
+            "label": "4. Ders",
+            "time": "19:50–20:30"
+          },
+          {
+            "label": "5. Ders",
+            "time": "20:40–21:20"
+          }
+        ],
+        "4": [
+          {
+            "label": "1. Ders",
+            "time": "17:00–17:40"
+          },
+          {
+            "label": "2. Ders",
+            "time": "17:50–18:30"
+          },
+          {
+            "label": "3. Ders",
+            "time": "19:00–19:40"
+          },
+          {
+            "label": "4. Ders",
+            "time": "19:50–20:30"
+          },
+          {
+            "label": "5. Ders",
+            "time": "20:40–21:20"
+          }
+        ],
+        "5": [
+          {
+            "label": "1. Ders",
+            "time": "10:00–11:15"
+          },
+          {
+            "label": "2. Ders",
+            "time": "11:30–12:50"
+          },
+          {
+            "label": "3. Ders",
+            "time": "16:00–16:40"
+          },
+          {
+            "label": "4. Ders",
+            "time": "16:50–17:30"
+          },
+          {
+            "label": "5. Ders",
+            "time": "18:00–18:40"
+          },
+          {
+            "label": "6. Ders",
+            "time": "18:50–19:30"
+          }
+        ],
+        "6": [
+          {
+            "label": "1. Ders",
+            "time": "10:00–11:15"
+          },
+          {
+            "label": "2. Ders",
+            "time": "11:30–12:50"
+          }
+        ]
+      },
+      "locked": false,
+      "classId": null,
+      "classLevel": "8",
+      "branch": null,
+      "curriculum": []
+    },
+    {
+      "id": "lgs8-2026-8F",
+      "name": "8F",
+      "advisor": "",
+      "color": "#2E4C8C",
+      "students": [],
+      "schedule": {
+        "0_0": {
+          "subject": "ETÜT",
+          "teacher": "Doğan Aktürk"
+        },
+        "0_1": {
+          "subject": "ETÜT",
+          "teacher": "Doğan Aktürk"
+        },
+        "0_2": {
+          "subject": "REHBERLİK",
+          "teacher": "Doğan Aktürk"
+        },
+        "0_3": {
+          "subject": "TÜRKÇE",
+          "teacher": "Reha Apaydın"
+        },
+        "0_4": {
+          "subject": "TÜRKÇE",
+          "teacher": "Reha Apaydın"
+        },
+        "1_0": {
+          "subject": "ETÜT",
+          "teacher": "Doğan Aktürk"
+        },
+        "1_1": {
+          "subject": "ETÜT",
+          "teacher": "Doğan Aktürk"
+        },
+        "1_2": {
+          "subject": "ETÜT",
+          "teacher": "Doğan Aktürk"
+        },
+        "2_0": {
+          "subject": "ETÜT",
+          "teacher": "Doğan Aktürk"
+        },
+        "2_1": {
+          "subject": "ETÜT",
+          "teacher": "Doğan Aktürk"
+        },
+        "2_2": {
+          "subject": "ETÜT",
+          "teacher": "Doğan Aktürk"
+        },
+        "2_3": {
+          "subject": "İNGİLİZCE",
+          "teacher": "Mustafa Öztürk"
+        },
+        "2_4": {
+          "subject": "İNGİLİZCE",
+          "teacher": "Mustafa Öztürk"
+        },
+        "3_0": {
+          "subject": "ETÜT",
+          "teacher": "Doğan Aktürk"
+        },
+        "3_1": {
+          "subject": "ETÜT",
+          "teacher": "Doğan Aktürk"
+        },
+        "3_2": {
+          "subject": "ETÜT",
+          "teacher": "Doğan Aktürk"
+        },
+        "4_0": {
+          "subject": "ETÜT",
+          "teacher": "Doğan Aktürk"
+        },
+        "4_1": {
+          "subject": "ETÜT",
+          "teacher": "Doğan Aktürk"
+        },
+        "4_2": {
+          "subject": "İNKILAP TARİHİ",
+          "teacher": "Mustafa Kozan"
+        },
+        "4_3": {
+          "subject": "MATEMATİK",
+          "teacher": "Doğan Aktürk"
+        },
+        "4_4": {
+          "subject": "DİN KÜLTÜRÜ",
+          "teacher": "Büşra Öztürk"
+        },
+        "5_0": {
+          "subject": "DENEME SINAVI SÖZEL",
+          "teacher": ""
+        },
+        "5_1": {
+          "subject": "DENEME SINAVI SAYISAL",
+          "teacher": ""
+        },
+        "5_2": {
+          "subject": "MATEMATİK",
+          "teacher": "Doğan Aktürk"
+        },
+        "5_3": {
+          "subject": "MATEMATİK",
+          "teacher": "Doğan Aktürk"
+        },
+        "5_4": {
+          "subject": "FEN BİLGİSİ",
+          "teacher": "Kamil Angay"
+        },
+        "5_5": {
+          "subject": "FEN BİLGİSİ",
+          "teacher": "Kamil Angay"
+        },
+        "6_0": {
+          "subject": "DENEME SINAVI TEKRAR",
+          "teacher": ""
+        },
+        "6_1": {
+          "subject": "DENEME SINAVI TEKRAR",
+          "teacher": ""
+        }
+      },
+      "periods": [
+        {
+          "label": "1. Ders",
+          "time": "17:00–17:40"
+        },
+        {
+          "label": "2. Ders",
+          "time": "17:50–18:30"
+        },
+        {
+          "label": "3. Ders",
+          "time": "19:00–19:40"
+        },
+        {
+          "label": "4. Ders",
+          "time": "19:50–20:30"
+        },
+        {
+          "label": "5. Ders",
+          "time": "20:40–21:20"
+        }
+      ],
+      "periodsByDay": {
+        "0": [
+          {
+            "label": "1. Ders",
+            "time": "17:00–17:40"
+          },
+          {
+            "label": "2. Ders",
+            "time": "17:50–18:30"
+          },
+          {
+            "label": "3. Ders",
+            "time": "19:00–19:40"
+          },
+          {
+            "label": "4. Ders",
+            "time": "19:50–20:30"
+          },
+          {
+            "label": "5. Ders",
+            "time": "20:40–21:20"
+          }
+        ],
+        "1": [
+          {
+            "label": "1. Ders",
+            "time": "17:00–17:40"
+          },
+          {
+            "label": "2. Ders",
+            "time": "17:50–18:30"
+          },
+          {
+            "label": "3. Ders",
+            "time": "19:00–19:40"
+          },
+          {
+            "label": "4. Ders",
+            "time": "19:50–20:30"
+          },
+          {
+            "label": "5. Ders",
+            "time": "20:40–21:20"
+          }
+        ],
+        "2": [
+          {
+            "label": "1. Ders",
+            "time": "17:00–17:40"
+          },
+          {
+            "label": "2. Ders",
+            "time": "17:50–18:30"
+          },
+          {
+            "label": "3. Ders",
+            "time": "19:00–19:40"
+          },
+          {
+            "label": "4. Ders",
+            "time": "19:50–20:30"
+          },
+          {
+            "label": "5. Ders",
+            "time": "20:40–21:20"
+          }
+        ],
+        "3": [
+          {
+            "label": "1. Ders",
+            "time": "17:00–17:40"
+          },
+          {
+            "label": "2. Ders",
+            "time": "17:50–18:30"
+          },
+          {
+            "label": "3. Ders",
+            "time": "19:00–19:40"
+          },
+          {
+            "label": "4. Ders",
+            "time": "19:50–20:30"
+          },
+          {
+            "label": "5. Ders",
+            "time": "20:40–21:20"
+          }
+        ],
+        "4": [
+          {
+            "label": "1. Ders",
+            "time": "17:00–17:40"
+          },
+          {
+            "label": "2. Ders",
+            "time": "17:50–18:30"
+          },
+          {
+            "label": "3. Ders",
+            "time": "19:00–19:40"
+          },
+          {
+            "label": "4. Ders",
+            "time": "19:50–20:30"
+          },
+          {
+            "label": "5. Ders",
+            "time": "20:40–21:20"
+          }
+        ],
+        "5": [
+          {
+            "label": "1. Ders",
+            "time": "10:00–11:15"
+          },
+          {
+            "label": "2. Ders",
+            "time": "11:30–12:50"
+          },
+          {
+            "label": "3. Ders",
+            "time": "16:00–16:40"
+          },
+          {
+            "label": "4. Ders",
+            "time": "16:50–17:30"
+          },
+          {
+            "label": "5. Ders",
+            "time": "18:00–18:40"
+          },
+          {
+            "label": "6. Ders",
+            "time": "18:50–19:30"
+          }
+        ],
+        "6": [
+          {
+            "label": "1. Ders",
+            "time": "10:00–11:15"
+          },
+          {
+            "label": "2. Ders",
+            "time": "11:30–12:50"
+          }
+        ]
+      },
+      "locked": false,
+      "classId": null,
+      "classLevel": "8",
+      "branch": null,
+      "curriculum": []
+    }
+  ],
+  "lockedSlots": {},
+  "eveningPeriods": [
+    {
+      "label": "1. Ders",
+      "time": "17:00–17:45"
+    },
+    {
+      "label": "2. Ders",
+      "time": "18:00–18:45"
+    },
+    {
+      "label": "3. Ders",
+      "time": "19:00–19:45"
+    },
+    {
+      "label": "4. Ders",
+      "time": "20:00–20:45"
+    }
+  ],
+  "teachers": [],
+  "systemClasses": [],
+  "systemStudents": [],
+  "poolSubjects": [],
+  "curriculumPresets": {},
+  "editGroupIds": null,
+  "autoConsecutive": true
+}

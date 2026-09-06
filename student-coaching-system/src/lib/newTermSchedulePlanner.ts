@@ -48,21 +48,6 @@ export function blankNewTermPlannerState() {
 }
 
 export {
-  buildLgs8ExcelNewTermPlannerState,
-  countLgs8ExcelLessons,
-  countPlannerLessonCells,
-  plannerNeedsLgs8ExcelSeed,
-} from './lgs8ExcelNewTermSchedule';
-
-export {
-  buildPrimaryExcelNewTermPlannerState,
-  countPrimaryExcelLessons,
-  mergePrimaryExcelIntoPlannerState,
-  plannerNeedsPrimaryExcelSeed,
-  upsertPlannerGroups,
-} from './primaryExcelNewTermSchedule';
-
-export {
   buildFullNewTermPlannerState,
   buildYazBackupNewTermPlannerState,
   canonicalizePlannerGroupName,
@@ -70,6 +55,7 @@ export {
   mergeFullNewTermIntoPlannerState,
   mergeYazBackupIntoPlannerState,
   plannerNeedsFullNewTermSeed,
+  writeYazBackupJsonIntoPlanner,
 } from './yazDonemiYedekNewTermSchedule';
 
 import { buildFullNewTermPlannerState } from './yazDonemiYedekNewTermSchedule';

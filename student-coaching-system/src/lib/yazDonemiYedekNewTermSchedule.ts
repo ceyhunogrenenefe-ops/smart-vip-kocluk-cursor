@@ -1,6 +1,7 @@
 /**
- * Yaz dönemi yedek (16).json → 2026-2027 yeni dönem planlayıcısı.
- * 2–12. sınıf + YÖS / YKS / SAT gruplarını Excel seed’leriyle tek programda birleştirir.
+ * Yaz dönemi yedek JSON → ders programı planlayıcısı.
+ * Kural: yedekteki dersleri yaz, mevcut programın yapısını (days/periods) bozma.
+ * Kaynaklar: yaz-donemi-yedek-16.json + yaz-donemi-yedek-17-8sinif.json
  */
 
 import type { PlannerCell, PlannerGroup, PlannerPeriod } from './lgs8ExcelNewTermSchedule';
@@ -9,7 +10,8 @@ import {
   mergePrimaryExcelIntoPlannerState,
   upsertPlannerGroups,
 } from './primaryExcelNewTermSchedule';
-import yazBackup from './data/yaz-donemi-yedek-16.json';
+import yazBackup16 from './data/yaz-donemi-yedek-16.json';
+import yazBackup17 from './data/yaz-donemi-yedek-17-8sinif.json';
 
 const TERM_START = '2026-09-01';
 const TERM_END = '2027-06-19';
@@ -41,18 +43,25 @@ type YazBackupFile = {
   teachers?: Array<{ id?: string; name?: string; email?: string; branches?: string[] }>;
   poolSubjects?: string[];
   curriculumPresets?: Record<string, unknown>;
-  systemClasses?: unknown[];
-  systemStudents?: unknown[];
 };
 
-const backup = yazBackup as YazBackupFile;
+const backup16 = yazBackup16 as YazBackupFile;
+const backup17 = yazBackup17 as YazBackupFile;
 
-/** "8A YAZ KAMPI" / "2026-2027 11-B SINIFI" / "YÖS …" → kanonik kısa ad */
+function eveningPeriodsOf(file: YazBackupFile): YazPeriod[] {
+  const evening =
+    (file as { eveningPeriods?: YazPeriod[] }).eveningPeriods ||
+    file.eveningPeriods ||
+    [];
+  if (Array.isArray(evening) && evening.length) return evening;
+  return Array.isArray(file.periods) ? file.periods : [];
+}
+
+/** "8A YAZ KAMPI" / "2026-2027 11-B SINIFI" / "YÖS …" → kısa kanonik ad */
 export function canonicalizePlannerGroupName(name: unknown): string {
   const raw = String(name || '').trim();
   if (!raw) return '';
   const up = raw.toLocaleUpperCase('tr-TR');
-
   if (up.includes('YÖS') || /\bYOS\b/.test(up)) return 'YÖS';
   if (up.includes('YKS') || up.includes('YILDIZLAR YKS')) return 'YKS';
   if (up === 'SAT' || /(^|\s)SAT(\s|$)/.test(up)) return 'SAT';
@@ -67,9 +76,7 @@ export function canonicalizePlannerGroupName(name: unknown): string {
     .trim();
 
   const m = stripped.match(/(?:^|[^\d])([2-9]|1[0-2])\s*[-_]?\s*([A-Za-zÇĞİÖŞÜçğıöşü])/u);
-  if (m) {
-    return `${m[1]}${m[2].toLocaleUpperCase('tr-TR')}`;
-  }
+  if (m) return `${m[1]}${m[2].toLocaleUpperCase('tr-TR')}`;
   return stripped.replace(/\s+/g, ' ').trim() || raw;
 }
 
@@ -113,8 +120,8 @@ function countLessons(schedule: Record<string, PlannerCell> | undefined): number
   return Object.keys(schedule || {}).length;
 }
 
-function toPlannerGroup(g: YazGroup): PlannerGroup {
-  const periods = clonePeriods(g.periods?.length ? g.periods : backup.eveningPeriods || backup.periods);
+function toPlannerGroup(g: YazGroup, fallbackPeriods: YazPeriod[]): PlannerGroup {
+  const periods = clonePeriods(g.periods?.length ? g.periods : fallbackPeriods);
   const schedule = cloneSchedule(g.schedule);
   const name = canonicalizePlannerGroupName(g.name) || String(g.name || 'Grup');
   return {
@@ -134,22 +141,21 @@ function toPlannerGroup(g: YazGroup): PlannerGroup {
   };
 }
 
-/** Yedekteki tüm gruplar (kanonik adlarla). */
+/** Yedek 16 + 17 → kanonik grup listesi (aynı ad: daha dolu kazanır). */
 export function buildYazBackupGroups(): PlannerGroup[] {
-  const groups = Array.isArray(backup.groups) ? backup.groups : [];
-  // Aynı kanonik ada düşenlerde dolu programı tercih et
   const byName = new Map<string, PlannerGroup>();
-  for (const raw of groups) {
-    const g = toPlannerGroup(raw);
-    const key = g.name.toLocaleLowerCase('tr-TR');
-    const prev = byName.get(key);
-    if (!prev || countLessons(g.schedule) >= countLessons(prev.schedule)) {
-      byName.set(key, g);
+  const ingest = (file: YazBackupFile) => {
+    const fb = eveningPeriodsOf(file);
+    for (const raw of file.groups || []) {
+      const g = toPlannerGroup(raw, fb);
+      const key = g.name.toLocaleLowerCase('tr-TR');
+      const prev = byName.get(key);
+      if (!prev || countLessons(g.schedule) > countLessons(prev.schedule)) byName.set(key, g);
     }
-  }
-  return [...byName.values()].sort((a, b) =>
-    a.name.localeCompare(b.name, 'tr', { numeric: true })
-  );
+  };
+  ingest(backup16);
+  ingest(backup17);
+  return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name, 'tr', { numeric: true }));
 }
 
 export function countYazBackupLessons(groups = buildYazBackupGroups()): number {
@@ -157,38 +163,136 @@ export function countYazBackupLessons(groups = buildYazBackupGroups()): number {
 }
 
 export function buildYazBackupNewTermPlannerState() {
-  const periods = clonePeriods(backup.eveningPeriods?.length ? backup.eveningPeriods : backup.periods);
-  const groups = buildYazBackupGroups();
+  const periods = clonePeriods(eveningPeriodsOf(backup16));
   return {
     term: {
-      start: String(backup.term?.start || TERM_START).slice(0, 10),
-      end: String(backup.term?.end || TERM_END).slice(0, 10),
+      start: String(backup16.term?.start || TERM_START).slice(0, 10),
+      end: String(backup16.term?.end || TERM_END).slice(0, 10),
     },
-    days: Array.isArray(backup.days) && backup.days.length
-      ? backup.days.map(String)
-      : ['Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi', 'Pazar'],
+    days:
+      Array.isArray(backup16.days) && backup16.days.length
+        ? backup16.days.map(String)
+        : ['Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi', 'Pazar'],
     periods,
     periodsByDay: Object.fromEntries(
       [0, 1, 2, 3, 4, 5, 6].map((di) => [String(di), clonePeriods(periods)])
     ) as Record<string, PlannerPeriod[]>,
-    groups,
-    teachers: Array.isArray(backup.teachers)
-      ? backup.teachers.map((t) => ({
+    groups: buildYazBackupGroups(),
+    teachers: Array.isArray(backup16.teachers)
+      ? backup16.teachers.map((t) => ({
           id: String(t.id || ''),
           name: String(t.name || ''),
           email: t.email ? String(t.email) : undefined,
           branches: Array.isArray(t.branches) ? t.branches.map(String) : [],
         }))
       : [],
-    poolSubjects: Array.isArray(backup.poolSubjects) ? backup.poolSubjects.map(String) : [],
-    curriculumPresets: backup.curriculumPresets || {},
+    poolSubjects: Array.isArray((backup16 as { poolSubjects?: string[] }).poolSubjects)
+      ? (backup16 as { poolSubjects: string[] }).poolSubjects.map(String)
+      : Array.isArray(backup16.poolSubjects)
+        ? backup16.poolSubjects.map(String)
+        : [],
+    curriculumPresets: backup16.curriculumPresets || {},
   };
 }
 
+function mergeGroupsPreserveStructure(
+  baseGroups: PlannerGroup[],
+  incomingGroups: PlannerGroup[]
+): PlannerGroup[] {
+  const normedBase = baseGroups.map((g) => ({
+    ...g,
+    name: canonicalizePlannerGroupName(g.name) || g.name,
+  }));
+  const baseBy = new Map(normedBase.map((g) => [g.name.toLocaleLowerCase('tr-TR'), g] as const));
+  const toUpsert: PlannerGroup[] = [];
+
+  for (const raw of incomingGroups) {
+    const g = { ...raw, name: canonicalizePlannerGroupName(raw.name) || raw.name };
+    const key = g.name.toLocaleLowerCase('tr-TR');
+    const prev = baseBy.get(key);
+    if (!prev) {
+      // Yeni grup: kendi periods/schedule ile ekle
+      toUpsert.push(g);
+      continue;
+    }
+    const prevN = countLessons(prev.schedule);
+    const nextN = countLessons(g.schedule);
+    if (prevN === 0 && nextN > 0) {
+      // Boş kabuk → yedekteki dolu program (kendi dilimleriyle)
+      toUpsert.push({ ...g, id: prev.id || g.id, name: prev.name || g.name });
+      continue;
+    }
+    if (prevN > 0 && nextN > 0) {
+      // Mevcut dilim yapısını koru; yalnızca boş hücreleri doldur
+      toUpsert.push({
+        ...prev,
+        schedule: { ...(g.schedule || {}), ...(prev.schedule || {}) },
+        periods: prev.periods?.length ? prev.periods : g.periods,
+        periodsByDay:
+          prev.periodsByDay && Object.keys(prev.periodsByDay).length
+            ? prev.periodsByDay
+            : g.periodsByDay,
+      });
+    }
+    // prev dolu, incoming boş/az → dokunma (yapı + ders korunur)
+  }
+
+  return upsertPlannerGroups(normedBase, toUpsert);
+}
+
 /**
- * İki planı birleştirir: önce base, sonra overlay (aynı ad → overlay kazanır).
- * Overlay boşsa base’teki dolu program korunur.
+ * Yedek JSON’u programa yazar — days/periods/term yapısı bozulmaz.
+ * Mevcut dolu sınıflar korunur; eksik gruplar / boş hücreler doldurulur.
  */
+export function writeYazBackupJsonIntoPlanner(
+  current: Record<string, unknown> | null | undefined
+) {
+  const yaz = buildYazBackupNewTermPlannerState();
+  const hasCurrent =
+    !!current &&
+    typeof current === 'object' &&
+    (Array.isArray((current as { groups?: unknown }).groups) ||
+      Array.isArray((current as { periods?: unknown }).periods));
+
+  if (!hasCurrent) return yaz;
+
+  const b = current as Record<string, unknown>;
+  const baseGroups = Array.isArray(b.groups) ? (b.groups as PlannerGroup[]) : [];
+  const teachers = [
+    ...((Array.isArray(b.teachers) ? b.teachers : []) as unknown[]),
+    ...((yaz.teachers || []) as unknown[]),
+  ];
+  const poolSubjects = [
+    ...new Set([
+      ...((Array.isArray(b.poolSubjects) ? b.poolSubjects : []) as string[]),
+      ...((yaz.poolSubjects || []) as string[]),
+    ]),
+  ];
+
+  return {
+    ...b,
+    term: b.term || yaz.term,
+    days: Array.isArray(b.days) && (b.days as string[]).length ? b.days : yaz.days,
+    periods:
+      Array.isArray(b.periods) && (b.periods as PlannerPeriod[]).length ? b.periods : yaz.periods,
+    periodsByDay: b.periodsByDay || yaz.periodsByDay,
+    groups: mergeGroupsPreserveStructure(baseGroups, yaz.groups as PlannerGroup[]),
+    teachers,
+    poolSubjects,
+    curriculumPresets: {
+      ...((b.curriculumPresets as object) || {}),
+      ...(yaz.curriculumPresets || {}),
+    },
+  };
+}
+
+/** @deprecated alias — yapıyı koruyan yazma */
+export function mergeYazBackupIntoPlannerState(
+  current: Record<string, unknown> | null | undefined
+) {
+  return writeYazBackupJsonIntoPlanner(current);
+}
+
 export function mergePlannerStatesPreferFilled(
   base: Record<string, unknown> | null | undefined,
   overlay: Record<string, unknown> | null | undefined
@@ -201,52 +305,6 @@ export function mergePlannerStatesPreferFilled(
   const overlayGroups = Array.isArray((o as { groups?: unknown }).groups)
     ? ((o as { groups: PlannerGroup[] }).groups as PlannerGroup[])
     : [];
-
-  // Kanonik ada normalize et
-  const normedBase = baseGroups.map((g) => ({
-    ...g,
-    name: canonicalizePlannerGroupName(g.name) || g.name,
-  }));
-  const normedOverlay = overlayGroups.map((g) => ({
-    ...g,
-    name: canonicalizePlannerGroupName(g.name) || g.name,
-  }));
-
-  // Eski dolu programı bozma: overlay yalnızca yeni grup ekler veya
-  // base boşken / overlay daha doluysa günceller. Hücre bazında base korunur.
-  const smartOverlay: PlannerGroup[] = [];
-  const baseBy = new Map(
-    normedBase.map((g) => [g.name.toLocaleLowerCase('tr-TR'), g] as const)
-  );
-  for (const g of normedOverlay) {
-    const key = g.name.toLocaleLowerCase('tr-TR');
-    const prev = baseBy.get(key);
-    if (!prev) {
-      smartOverlay.push(g);
-      continue;
-    }
-    const prevCount = countLessons(prev.schedule);
-    const nextCount = countLessons(g.schedule);
-    if (prevCount === 0 && nextCount > 0) {
-      smartOverlay.push(g);
-      continue;
-    }
-    if (nextCount > prevCount) {
-      // Dolu hücreleri koru, yalnızca boşlara overlay yaz
-      smartOverlay.push({
-        ...prev,
-        ...g,
-        id: prev.id || g.id,
-        name: prev.name || g.name,
-        schedule: { ...(g.schedule || {}), ...(prev.schedule || {}) },
-        periods: prev.periods?.length ? prev.periods : g.periods,
-        periodsByDay:
-          prev.periodsByDay && Object.keys(prev.periodsByDay).length
-            ? prev.periodsByDay
-            : g.periodsByDay,
-      });
-    }
-  }
 
   const teachers = [
     ...((Array.isArray((b as { teachers?: unknown }).teachers)
@@ -267,18 +325,18 @@ export function mergePlannerStatesPreferFilled(
     ]),
   ];
 
+  // Üst yapı her zaman base’ten (program iskeleti bozulmaz)
   return {
     ...b,
-    ...o,
-    term: (o as { term?: unknown }).term || (b as { term?: unknown }).term || {
+    term: (b as { term?: unknown }).term || (o as { term?: unknown }).term || {
       start: TERM_START,
       end: TERM_END,
     },
     days:
-      (Array.isArray((o as { days?: unknown }).days) && (o as { days: string[] }).days.length
-        ? (o as { days: string[] }).days
+      (Array.isArray((b as { days?: unknown }).days) && (b as { days: string[] }).days.length
+        ? (b as { days: string[] }).days
         : null) ||
-      (Array.isArray((b as { days?: unknown }).days) ? (b as { days: string[] }).days : null) || [
+      (Array.isArray((o as { days?: unknown }).days) ? (o as { days: string[] }).days : null) || [
         'Pazartesi',
         'Salı',
         'Çarşamba',
@@ -299,7 +357,7 @@ export function mergePlannerStatesPreferFilled(
       (b as { periodsByDay?: unknown }).periodsByDay ||
       (o as { periodsByDay?: unknown }).periodsByDay ||
       {},
-    groups: upsertPlannerGroups(normedBase, smartOverlay),
+    groups: mergeGroupsPreserveStructure(baseGroups, overlayGroups),
     teachers,
     poolSubjects,
     curriculumPresets: {
@@ -309,21 +367,17 @@ export function mergePlannerStatesPreferFilled(
   };
 }
 
-/**
- * Tek program: yaz yedek (2–12 + YÖS/YKS/SAT) + Excel 2A–7A + Excel 8A–8F.
- * Excel dolu hücreleri yaz kampı kabuklarının üzerine yazılır.
- */
 export function buildFullNewTermPlannerState() {
   const yaz = buildYazBackupNewTermPlannerState();
   const excel = mergePrimaryExcelIntoPlannerState(buildLgs8ExcelNewTermPlannerState());
+  // Excel’i yaz üzerine: yapı yaz/excel karışımında periods base=yaz sonra excel periods tercih?
+  // Yapıyı bozmamak için: önce yaz iskeleti, excel grupları koruyarak eklenir.
   return mergePlannerStatesPreferFilled(yaz, excel as Record<string, unknown>);
 }
 
-export function mergeYazBackupIntoPlannerState(current: Record<string, unknown> | null | undefined) {
-  return mergePlannerStatesPreferFilled(current, buildYazBackupNewTermPlannerState());
-}
-
-export function mergeFullNewTermIntoPlannerState(current: Record<string, unknown> | null | undefined) {
+export function mergeFullNewTermIntoPlannerState(
+  current: Record<string, unknown> | null | undefined
+) {
   return mergePlannerStatesPreferFilled(current, buildFullNewTermPlannerState());
 }
 
@@ -347,7 +401,6 @@ export function plannerNeedsFullNewTermSeed(plannerJson: unknown): boolean {
     });
     if (hasLesson) found.add(hit);
   }
-  // En azından ortaokul Excel + bir lise/YÖS grubu dolu olsun
   const hasPrimary = ['2a', '4a', '5a', '6a', '7a'].some((k) => found.has(k));
   const hasLgs = ['8a', '8b', '8c', '8f'].some((k) => found.has(k));
   const hasHs = ['9a', '10a', '11a', 'yös', 'yks'].some((k) => found.has(k));
