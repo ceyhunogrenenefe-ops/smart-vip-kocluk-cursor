@@ -30,12 +30,21 @@ describe('commerce-store-kinds', () => {
       isbn: '978-625-12345-1-7',
     })).toBe(true);
     expect(isVipEgitimComponentBook({
+      title: 'VIP Yayınları 7. Sınıf Matematik Eğitim Seti',
+      slug: 'vip-yayinlari-7-sinif-matematik-egitim-seti',
+      isbn: '978-625-12347-1-3',
+    })).toBe(true);
+    expect(isVipEgitimComponentBook({
       title: '5.SINIF VİP YAYINLARI EĞİTİM SETİ 5 LI',
       slug: '5sinif-vip-yayinlari-eitim-seti-5-li-1788012241806',
     })).toBe(false);
     expect(isVipEgitimComponentBook({
       title: '8.SINIF VİP YAYINLARI EĞİTİM SETİ 6 LI',
       slug: 'vip-lgs-8-kitap-seti',
+    })).toBe(false);
+    expect(isVipEgitimComponentBook({
+      title: '7.SINIF VİP YAYINLARI EĞİTİM SETİ 6 LI',
+      slug: '7sinif-vip-yayinlari-egitim-seti-6-li',
     })).toBe(false);
   });
 });

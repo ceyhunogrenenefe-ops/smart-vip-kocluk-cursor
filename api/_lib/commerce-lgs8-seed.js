@@ -15,6 +15,7 @@ import {
   offerStatusForPrice,
   yankiVendorDefaults,
 } from './commerce-lgs8-catalog.js';
+import { VIP7_BOOKS, VIP7_SET } from './commerce-vip7-catalog.js';
 import { canonicalBookSeries } from './commerce-store-browse.js';
 import { isbnDigits, isUniqueViolation, retiredBookSlug, selectBookMatch } from './commerce-lgs8-seed-keys.js';
 
@@ -527,6 +528,46 @@ async function seedYankiSingleProduct(product, { actorSub, price_kurus = 0, stoc
 
 export async function seedLgs8VipSet(opts = {}) {
   return seedYankiSingleProduct(VIP_LGS8_SET, opts);
+}
+
+/** 7. sınıf VIP 6’lı eğitim seti (tek vitrin ürünü). */
+export async function seedVip7Set(opts = {}) {
+  return seedYankiSingleProduct(VIP7_SET, opts);
+}
+
+/** 7. sınıf VIP branş kitapları + set (bileşenler vitrinde gizli). */
+export async function seedVip7Catalog({ actorSub, prices = {}, contact_phone } = {}) {
+  const { vendor, created } = await ensureYankiVendor({ actorSub, contact_phone });
+  const books = VIP7_BOOKS.map((b) => {
+    const override = prices[b.isbn] || prices[b.slug] || {};
+    return {
+      ...b,
+      price_kurus: Number(override.price_kurus) || 0,
+      stock_quantity: Number(override.stock_quantity) || 100,
+      shipping_days: 3,
+    };
+  });
+  const upserted = await bulkUpsertBooks({ books, actorSub, vendorId: vendor.id, approveIfPriced: true });
+  const setOut = await seedYankiSingleProduct(VIP7_SET, {
+    actorSub,
+    price_kurus: Number(prices?.set?.price_kurus) || 0,
+    stock_quantity: Number(prices?.set?.stock_quantity) || 100,
+    contact_phone,
+  });
+  return {
+    vendor,
+    vendor_created: created,
+    books: upserted.results.map((r) => ({
+      id: r.book.id,
+      title: r.book.title,
+      isbn: r.book.isbn,
+      offer_id: r.offer?.id,
+      price_kurus: r.offer?.price_kurus,
+      status: r.offer?.status,
+    })),
+    set: setOut.book,
+    deployMarker: 'vip7-kitap-seed-2026-09-07',
+  };
 }
 
 export async function seedLgs8ParafIqSet(opts = {}) {
