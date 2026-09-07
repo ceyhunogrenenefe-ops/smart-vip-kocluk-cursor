@@ -46,6 +46,14 @@ function orderIdFromToken(prefix = 'OVD') {
   return `${prefix}${t}${r}`.slice(0, 36);
 }
 
+function asUuidOrNull(v) {
+  const s = String(v || '').trim();
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(s)) {
+    return null;
+  }
+  return s;
+}
+
 function extraPath(req) {
   const segs = Array.isArray(req.apiExtraSegments) ? req.apiExtraSegments.map(String) : [];
   return segs.join('/');
@@ -139,8 +147,8 @@ async function handleAdminCreate(req, res, actor, roleSet) {
   const row = {
     order_id: orderId,
     public_token: publicToken,
-    institution_id: institutionId,
-    student_payment_record_id: studentPaymentRecordId,
+    institution_id: asUuidOrNull(institutionId),
+    student_payment_record_id: asUuidOrNull(studentPaymentRecordId),
     title,
     amount_kurus: amountKurus,
     currency: 'TRY',
@@ -149,7 +157,7 @@ async function handleAdminCreate(req, res, actor, roleSet) {
     customer_email: customerEmail,
     customer_phone: customerPhone,
     status: 'pending',
-    created_by: actor.sub || null,
+    created_by: asUuidOrNull(actor.sub),
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString()
   };
