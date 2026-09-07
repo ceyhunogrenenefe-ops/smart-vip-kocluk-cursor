@@ -33,7 +33,11 @@ export async function createGarantiPaymentLink(body: {
     body: JSON.stringify(body)
   });
   const json = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(json.error || 'garanti_create_failed');
+  if (!res.ok) {
+    const missing = Array.isArray(json.missing) ? json.missing.join(', ') : '';
+    const err = String(json.error || 'garanti_create_failed');
+    throw new Error(missing ? `${err}: ${missing}` : err);
+  }
   return json as { data: GarantiPaymentOrder; pay_url: string };
 }
 
@@ -51,7 +55,12 @@ export async function startGarantiPayment(token: string, installment_count = 0) 
     body: JSON.stringify({ token, installment_count })
   });
   const json = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(json.error || 'start_failed');
+  if (!res.ok) {
+    const missing = Array.isArray(json.missing) ? ` Eksik: ${json.missing.join(', ')}.` : '';
+    const siteErr = json.site_error ? ` Site: ${json.site_error}` : '';
+    const hint = json.hint ? ` ${json.hint}` : '';
+    throw new Error(`${json.error || 'start_failed'}.${missing}${siteErr}${hint}`.trim());
+  }
   return json as {
     gateway_url: string;
     fields: Record<string, string>;

@@ -615,10 +615,15 @@ export default function StudentPaymentTrackerPanel() {
       window.prompt('Garanti ödeme linki (kopyalayın):', pay_url);
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'link_failed';
-      if (msg === 'garanti_not_configured') {
-        toast.error('Garanti POS env değişkenleri eksik (Vercel)');
-      } else if (msg === 'garanti_payment_orders_sql_missing') {
+      if (msg.includes('garanti_not_configured')) {
+        toast.error(
+          'Garanti POS: panel Vercel’e GARANTI_* ekleyin (PROVOOS + 3D_OOS_PAY). Site env yetmez.',
+          { duration: 8000 }
+        );
+      } else if (msg.includes('garanti_payment_orders_sql_missing')) {
         toast.error('SQL migration çalıştırın: 2026-08-08-garanti-payment-orders.sql');
+      } else if (msg.includes('forbidden')) {
+        toast.error('Yetki hatası — sayfayı yenileyip tekrar deneyin');
       } else {
         toast.error(msg);
       }
