@@ -22,6 +22,7 @@ import {
   backfillClassSessionInstitutionId
 } from '../api/_lib/class-sessions-from-slots.js';
 import { syncPlannerGroupStudentSubjects, syncInstitutionStudentSubjectsFromPlans } from '../api/_lib/class-student-subjects.js';
+import { normalizePhoneToE164 } from '../api/_lib/phone-whatsapp.js';
 
 function parseBody(req) {
   const b = req.body;
@@ -485,6 +486,72 @@ export default async function handler(req, res) {
         }
         const preview = await previewTeacherMatches(plannerJson, groupId, institutionId);
         return res.status(200).json(preview);
+      }
+
+      if (op === 'resolve-teacher-phones') {
+        const namesRaw = Array.isArray(body.names) ? body.names : Array.isArray(body.teachers) ? body.teachers : [];
+        const names = [
+          ...new Set(
+            namesRaw
+              .map((n) => (typeof n === 'string' ? n : n?.name))
+              .map((n) => String(n || '').trim())
+              .filter(Boolean)
+          )
+        ];
+        if (!names.length) return res.status(400).json({ error: 'names_required' });
+
+        const teachers = await loadInstitutionTeachers(institutionId);
+        const ids = teachers.map((t) => String(t.id)).filter(Boolean);
+        const phoneById = new Map();
+        if (ids.length) {
+          for (let i = 0; i < ids.length; i += 80) {
+            const chunk = ids.slice(i, i + 80);
+            const { data: rows, error: pErr } = await supabaseAdmin
+              .from('users')
+              .select('id,phone')
+              .in('id', chunk);
+            if (pErr) throw pErr;
+            for (const r of rows || []) {
+              phoneById.set(String(r.id), String(r.phone || '').trim());
+            }
+          }
+        }
+
+        const matched = [];
+        const unmatched = [];
+        for (const name of names) {
+          const teacherId = matchTeacherId(name, teachers);
+          if (!teacherId) {
+            unmatched.push({ name, reason: 'teacher_not_matched' });
+            continue;
+          }
+          const t = teachers.find((x) => String(x.id) === String(teacherId));
+          const rawPhone = phoneById.get(String(teacherId)) || '';
+          const e164 = normalizePhoneToE164(rawPhone);
+          if (!e164) {
+            unmatched.push({
+              name,
+              teacher_id: teacherId,
+              teacher_db_name: t?.name || null,
+              reason: 'phone_missing'
+            });
+            continue;
+          }
+          matched.push({
+            name,
+            teacher_id: teacherId,
+            teacher_db_name: t?.name || name,
+            phone: e164,
+            phone_raw: rawPhone
+          });
+        }
+        return res.status(200).json({
+          ok: true,
+          matched,
+          unmatched,
+          matched_count: matched.length,
+          unmatched_count: unmatched.length
+        });
       }
 
       if (op === 'export' || op === 'export-direct') {

@@ -12,7 +12,8 @@ import {
   Save,
   Trash2,
   Upload,
-  Download
+  Download,
+  MessageCircle
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '../context/AuthContext';
@@ -22,6 +23,13 @@ import { apiFetch } from '../lib/session';
 import { resolveInstitutionIdForActor } from '../lib/activeInstitutionScope';
 import { mergeClassSlotsIntoPlanner, type PlannerState as FullPlannerState } from '../lib/classSlotsToPlanner';
 import { PLANNER_CURRICULUM_PRESETS, PLANNER_POOL_SUBJECTS } from '../lib/plannerTopicPool';
+import {
+  resolveTeacherPhones,
+  sendTeacherSchedulePngsViaGateway,
+  type TeacherPhoneMatch,
+  type TeacherPhoneUnmatched,
+  type TeacherPngItem
+} from '../lib/plannerTeacherScheduleWa';
 import {
   NEW_TERM_END,
   NEW_TERM_KEY,
@@ -170,7 +178,8 @@ function postPlannerMessage<T>(
   iframe: HTMLIFrameElement | null,
   type: string,
   payload?: unknown,
-  timeoutMs = 8000
+  timeoutMs = 8000,
+  expectType?: string
 ): Promise<T> {
   return new Promise((resolve, reject) => {
     if (!iframe?.contentWindow) {
@@ -182,9 +191,21 @@ function postPlannerMessage<T>(
       const msg = ev.data;
       if (!msg || msg.requestId !== requestId) return;
       window.removeEventListener('message', onMessage);
+      if (expectType && msg.type === expectType) {
+        resolve((msg.payload ?? msg) as T);
+        return;
+      }
+      if (String(msg.type || '').endsWith('_ERROR')) {
+        reject(new Error(String(msg.error || msg.type || 'planner_error')));
+        return;
+      }
       if (type === 'GET_STATE' && msg.type === 'STATE') resolve(msg.payload as T);
       else if (type === 'SET_STATE' && msg.type === 'SET_OK') resolve(msg as T);
       else if (type === 'SET_CONTEXT' && msg.type === 'SET_CONTEXT_OK') resolve(msg as T);
+      else if (type === 'LIST_TEACHERS' && msg.type === 'TEACHER_LIST') resolve(msg.payload as T);
+      else if (type === 'EXPORT_TEACHER_PNGS' && msg.type === 'TEACHER_PNGS') resolve(msg.payload as T);
+      else if (type === 'EXPORT_COMBINED_TEACHER_PNG' && msg.type === 'COMBINED_TEACHER_PNG')
+        resolve(msg.payload as T);
       else reject(new Error(String(msg.type || 'unexpected_response')));
     };
     window.addEventListener('message', onMessage);
@@ -249,10 +270,16 @@ export default function SchedulePlannerPage({ mode = 'default' }: { mode?: 'defa
   const [importClassId, setImportClassId] = useState('');
   const [systemTeachers, setSystemTeachers] = useState<PlannerTeacher[]>([]);
   const [systemStudents, setSystemStudents] = useState<PlannerStudent[]>([]);
+  const [waOpen, setWaOpen] = useState(false);
+  const [waMatched, setWaMatched] = useState<TeacherPhoneMatch[]>([]);
+  const [waUnmatched, setWaUnmatched] = useState<TeacherPhoneUnmatched[]>([]);
+  const [waTeachers, setWaTeachers] = useState<string[]>([]);
+  const [waProgress, setWaProgress] = useState('');
   const autoPlanLoadedFor = useRef('');
   const planTouchedRef = useRef(false);
   const planLoadGenRef = useRef(0);
   const planBootstrappedRef = useRef(false);
+  const openTeacherWaPreviewRef = useRef<(names?: string[]) => Promise<void>>(async () => {});
   const [apiHint, setApiHint] = useState('');
   const [plansReady, setPlansReady] = useState(false);
   const iframeSrc = isNewTerm ? `${IFRAME_SRC}?term=${encodeURIComponent(NEW_TERM_KEY)}` : IFRAME_SRC;
@@ -356,6 +383,12 @@ export default function SchedulePlannerPage({ mode = 'default' }: { mode?: 'defa
       if (ev.data?.source === 'scs-planner-embed' && ev.data?.type === 'PLAN_USER_EDIT') {
         planTouchedRef.current = true;
         planLoadGenRef.current += 1;
+      }
+      if (ev.data?.source === 'scs-planner-embed' && ev.data?.type === 'TEACHER_WA_SEND_REQUEST') {
+        const teachers = Array.isArray(ev.data?.payload?.teachers)
+          ? ev.data.payload.teachers.map((t: unknown) => String(t || '').trim()).filter(Boolean)
+          : [];
+        void openTeacherWaPreviewRef.current(teachers);
       }
     };
     window.addEventListener('message', onMessage);
@@ -787,7 +820,107 @@ export default function SchedulePlannerPage({ mode = 'default' }: { mode?: 'defa
     }
   };
 
-  /** Canlı 5A–8F haftalık program + gelecek oturumları boşalt; öğrenci/öğretmen kalır */
+  const openTeacherWaPreview = async (teacherNames?: string[]) => {
+    if (!institutionId) {
+      toast.error('Kurum seçili değil.');
+      return;
+    }
+    if (!iframeReady) {
+      toast.error('Planlayıcı henüz hazır değil.');
+      return;
+    }
+    setBusy('wa-preview');
+    setWaProgress('Öğretmen listesi ve telefonlar hazırlanıyor…');
+    try {
+      let names = (teacherNames || []).map((t) => String(t || '').trim()).filter(Boolean);
+      if (!names.length) {
+        const listed = await postPlannerMessage<{ teachers: string[] }>(
+          iframeRef.current,
+          'LIST_TEACHERS',
+          undefined,
+          8000
+        );
+        names = Array.isArray(listed?.teachers) ? listed.teachers : [];
+      }
+      if (!names.length) throw new Error('Programda öğretmen atanmış ders yok.');
+      const { matched, unmatched } = await resolveTeacherPhones({ institutionId, names });
+      setWaTeachers(names);
+      setWaMatched(matched);
+      setWaUnmatched(unmatched);
+      setWaOpen(true);
+      setWaProgress('');
+    } catch (e) {
+      toast.error(String((e as Error).message || e));
+      setWaProgress('');
+    } finally {
+      setBusy('');
+    }
+  };
+
+  openTeacherWaPreviewRef.current = openTeacherWaPreview;
+
+  const handleSendTeacherSchedulesWa = async () => {
+    if (!waMatched.length) {
+      toast.error('Telefonu bulunan öğretmen yok.');
+      return;
+    }
+    if (
+      !confirm(
+        `${waMatched.length} öğretmene haftalık program PNG olarak WhatsApp gateway ile gönderilsin mi?` +
+          (waUnmatched.length ? `\n(${waUnmatched.length} öğretmen atlanacak — telefon/eşleşme yok)` : '')
+      )
+    ) {
+      return;
+    }
+    setBusy('wa-send');
+    setWaProgress('PNG’ler oluşturuluyor…');
+    try {
+      const names = waMatched.map((m) => m.name);
+      const exported = await postPlannerMessage<{ items: TeacherPngItem[] }>(
+        iframeRef.current,
+        'EXPORT_TEACHER_PNGS',
+        { teachers: names },
+        Math.max(20000, names.length * 8000)
+      );
+      const items = Array.isArray(exported?.items) ? exported.items : [];
+      if (!items.length) throw new Error('PNG üretilemedi.');
+
+      const phonesByName = new Map<string, string>();
+      for (const m of waMatched) {
+        phonesByName.set(m.name, m.phone);
+        phonesByName.set(m.name.toLocaleUpperCase('tr-TR'), m.phone);
+      }
+
+      setWaProgress(`Gönderiliyor 0/${items.length}…`);
+      const result = await sendTeacherSchedulePngsViaGateway({
+        coachUserId: effectiveUser?.id,
+        planLabel: planName || (isNewTerm ? NEW_TERM_PLAN_NAME : 'Ders programı'),
+        items,
+        phonesByName,
+        onProgress: ({ index, total, teacherName, ok, error }) => {
+          setWaProgress(
+            `${ok ? '✓' : '✗'} ${teacherName} (${index}/${total})${error ? ` — ${error}` : ''}`
+          );
+        }
+      });
+      toast.success(
+        `WhatsApp: ${result.sent} gönderildi` +
+          (result.failed ? `, ${result.failed} hata` : '') +
+          (result.skipped ? `, ${result.skipped} atlandı` : '')
+      );
+      if (result.errors.length) {
+        console.warn('teacher_wa_errors', result.errors);
+      }
+      setWaOpen(false);
+    } catch (e) {
+      toast.error(String((e as Error).message || e));
+    } finally {
+      setBusy('');
+      setWaProgress('');
+    }
+  };
+
+    /** Canlı 5A–8F haftalık program + gelecek oturumları boşalt; öğrenci/öğretmen kalır */
   const handleClearLiveTargetSchedules = async () => {
     if (
       !confirm(
@@ -1342,6 +1475,20 @@ export default function SchedulePlannerPage({ mode = 'default' }: { mode?: 'defa
             <ArrowRightLeft className="h-4 w-4" />
             Canlı Grup Dersi
           </Link>
+          <button
+            type="button"
+            onClick={() => void openTeacherWaPreview()}
+            disabled={!!busy || !iframeReady || !(isAdmin || isSuper)}
+            className="inline-flex items-center gap-1 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-sm text-emerald-950 hover:bg-emerald-100 disabled:opacity-50"
+            title="Öğretmen programlarını WhatsApp gateway ile toplu gönder"
+          >
+            {busy === 'wa-preview' || busy === 'wa-send' ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <MessageCircle className="h-4 w-4" />
+            )}
+            Öğretmen WA
+          </button>
           {isNewTerm ? (
             <>
               <Link
@@ -1577,6 +1724,86 @@ export default function SchedulePlannerPage({ mode = 'default' }: { mode?: 'defa
         title="Ders programı planlayıcı"
         className="min-h-0 flex-1 w-full rounded-xl border border-slate-200 bg-white dark:border-slate-700"
       />
+
+      {waOpen ? (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/40 p-4">
+          <div className="max-h-[90vh] w-full max-w-lg overflow-auto rounded-2xl border border-slate-200 bg-white p-5 shadow-xl dark:border-slate-700 dark:bg-slate-900">
+            <div className="mb-3 flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Öğretmen programı → WhatsApp</h2>
+                <p className="mt-1 text-xs text-slate-500">
+                  Her öğretmene kendi haftalık program PNG’si gateway ile gönderilir. Önce QR ile WhatsApp merkezinden bağlanın.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setWaOpen(false)}
+                className="rounded p-1 text-slate-500 hover:bg-slate-100"
+                aria-label="Kapat"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            {waProgress ? (
+              <div className="mb-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                {waProgress}
+              </div>
+            ) : null}
+            <div className="mb-3 text-sm text-slate-700 dark:text-slate-200">
+              Seçili: <strong>{waTeachers.length}</strong> öğretmen · Gönderilebilir:{' '}
+              <strong className="text-emerald-700">{waMatched.length}</strong> · Atlanan:{' '}
+              <strong className="text-amber-700">{waUnmatched.length}</strong>
+            </div>
+            {waMatched.length ? (
+              <div className="mb-3">
+                <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Gönderilecek</div>
+                <ul className="max-h-40 space-y-1 overflow-auto rounded-lg border border-emerald-100 bg-emerald-50/60 p-2 text-sm">
+                  {waMatched.map((m) => (
+                    <li key={m.teacher_id + m.name} className="flex justify-between gap-2">
+                      <span>{m.name}</span>
+                      <span className="text-xs text-slate-500">{m.phone}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            {waUnmatched.length ? (
+              <div className="mb-3">
+                <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-amber-700">Atlanan</div>
+                <ul className="max-h-32 space-y-1 overflow-auto rounded-lg border border-amber-100 bg-amber-50/70 p-2 text-sm text-amber-950">
+                  {waUnmatched.map((u) => (
+                    <li key={u.name + (u.reason || '')}>
+                      {u.name}
+                      <span className="text-xs text-amber-700">
+                        {' '}
+                        — {u.reason === 'phone_missing' ? 'telefon yok' : 'eşleşmedi'}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            <div className="flex flex-wrap justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setWaOpen(false)}
+                className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm hover:bg-slate-50"
+              >
+                Vazgeç
+              </button>
+              <button
+                type="button"
+                disabled={!!busy || !waMatched.length}
+                onClick={() => void handleSendTeacherSchedulesWa()}
+                className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm text-white hover:bg-emerald-700 disabled:opacity-50"
+              >
+                {busy === 'wa-send' ? <Loader2 className="h-4 w-4 animate-spin" /> : <MessageCircle className="h-4 w-4" />}
+                Gateway ile gönder
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {exportOpen ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
