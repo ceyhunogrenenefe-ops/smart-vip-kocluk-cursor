@@ -7,6 +7,8 @@
  */
 const API = String(process.env.APP_PUBLIC_URL || 'https://www.dersonlinevipkocluk.com').replace(/\/$/, '');
 const DRY_RUN = process.env.DRY_RUN !== '0' && process.env.DRY_RUN !== 'false';
+/** FORCE=1 (varsayılan): Zoom zaten yazılmış görünse bile PATCH et — skip yarışı / geri alma riskini önler. */
+const FORCE = process.env.FORCE !== '0' && process.env.FORCE !== 'false';
 const INST = process.env.INSTITUTION_ID || '73323d75-eea1-4552-8bba-d50555423589';
 const EMAIL = process.env.ADMIN_EMAIL || 'admin@smartkocluk.com';
 const PASSWORD = process.env.ADMIN_PASSWORD || 'Admin123!';
@@ -16,6 +18,12 @@ const GRADES = String(process.env.GRADES || '')
   .split(/[,\s]+/)
   .map((g) => g.trim())
   .filter(Boolean);
+
+function hasExactZoom(row) {
+  const m = String(row?.meeting_link || '').trim();
+  const j = String(row?.join_link || '').trim();
+  return m === ZOOM && (j === ZOOM || j === '' || j === m);
+}
 
 function ymd(d) {
   return d.toISOString().slice(0, 10);
@@ -93,7 +101,7 @@ async function mapPool(items, concurrency, fn) {
 const CONCURRENCY = Math.max(1, Math.min(12, Number(process.env.CONCURRENCY || 8)));
 
 async function main() {
-  console.log(`API=${API} DRY_RUN=${DRY_RUN} GRADES=${GRADES.join(',')} ZOOM=${ZOOM}`);
+  console.log(`API=${API} DRY_RUN=${DRY_RUN} FORCE=${FORCE} GRADES=${GRADES.join(',')} ZOOM=${ZOOM}`);
   if (!GRADES.length) {
     console.error('GRADES required, e.g. GRADES=7,8');
     process.exit(1);
@@ -154,7 +162,7 @@ async function main() {
     let slotsFailed = 0;
     let slotsSkipped = 0;
     const slotResults = await mapPool(etutSlots, CONCURRENCY, async (slot) => {
-      if (String(slot.meeting_link || '').trim() === ZOOM) return 'skip';
+      if (!FORCE && hasExactZoom(slot)) return 'skip';
       if (DRY_RUN) return 'ok';
       const { status, json } = await api('PATCH', '/api/class-live-lessons', token, {
         kind: 'slot',
@@ -187,7 +195,7 @@ async function main() {
     let sessionsFailed = 0;
     let sessionsSkipped = 0;
     const sessResults = await mapPool(etutSessions, CONCURRENCY, async (sess) => {
-      if (String(sess.meeting_link || '').trim() === ZOOM) return 'skip';
+      if (!FORCE && hasExactZoom(sess)) return 'skip';
       if (DRY_RUN) return 'ok';
       const { status, json } = await api('PATCH', '/api/class-live-lessons', token, {
         id: sess.id,
