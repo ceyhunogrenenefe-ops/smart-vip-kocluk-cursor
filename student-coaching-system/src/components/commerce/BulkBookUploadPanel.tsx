@@ -21,12 +21,15 @@ import {
   createEmptyBulkRow,
   fileToBulkRow,
   submitBulkBooks,
+  submitVendorBulkBooks,
   validateBulkRows,
   type BulkBookRow,
 } from '../../lib/commerce/bulkBookUpload';
 import { compressCoverImage, formatBytes } from '../../lib/commerce/compressCoverImage';
 
 type Props = {
+  /** admin = Kitap Pazaryeri; vendor = satıcı paneli */
+  mode?: 'admin' | 'vendor';
   publishers?: string[];
   onClose: () => void;
   onDone: () => void;
@@ -38,7 +41,8 @@ function uniqueSorted(values: string[]): string[] {
   );
 }
 
-export default function BulkBookUploadPanel({ publishers = [], onClose, onDone }: Props) {
+export default function BulkBookUploadPanel({ mode = 'admin', publishers = [], onClose, onDone }: Props) {
+  const isVendor = mode === 'vendor';
   const [rows, setRows] = useState<BulkBookRow[]>([]);
   const [dragOver, setDragOver] = useState(false);
   const [preparing, setPreparing] = useState(false);
@@ -49,6 +53,7 @@ export default function BulkBookUploadPanel({ publishers = [], onClose, onDone }
   const [applySubject, setApplySubject] = useState('');
   const [applySeries, setApplySeries] = useState('');
   const [applyStock, setApplyStock] = useState('');
+  const [submitForApproval, setSubmitForApproval] = useState(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -108,12 +113,15 @@ export default function BulkBookUploadPanel({ publishers = [], onClose, onDone }
       }
     }
     if (added.length) {
-      setRows((prev) => [...prev, ...added]);
+      const normalized = isVendor
+        ? added.map((r) => ({ ...r, stock: r.stock || '10', classLevels: r.classLevels.length ? r.classLevels : [] }))
+        : added;
+      setRows((prev) => [...prev, ...normalized]);
       toast.success(`${added.length} kapak eklendi`);
     }
     if (failures.length) toast.error(failures.slice(0, 3).join(' · '));
     setPreparing(false);
-  }, []);
+  }, [isVendor]);
 
   const onPaste = useCallback(
     async (e: ClipboardEvent) => {
@@ -193,21 +201,28 @@ export default function BulkBookUploadPanel({ publishers = [], onClose, onDone }
     const { ok, errors } = validateBulkRows(pending);
     if (!ok) {
       setFieldErrors(errors);
-      toast.error('Zorunlu alanları doldurun (ad, fiyat, kapak)');
+      toast.error('Zorunlu alanları doldurun (başlık, fiyat, kapak)');
       return;
     }
     setSubmitting(true);
     setProgress({ done: 0, total: pending.length });
     try {
-      const result = await submitBulkBooks(pending, {
-        concurrency: 1,
-        onProgress: (p) => setProgress({ done: p.done, total: p.total }),
-        onRowUpdate: (row) => {
+      const progressCb = {
+        concurrency: 1 as const,
+        onProgress: (p: { done: number; total: number }) => setProgress({ done: p.done, total: p.total }),
+        onRowUpdate: (row: BulkBookRow) => {
           setRows((prev) => prev.map((r) => (r.localId === row.localId ? row : r)));
         },
-      });
+      };
+      const result = isVendor
+        ? await submitVendorBulkBooks(pending, { ...progressCb, submitForApproval })
+        : await submitBulkBooks(pending, progressCb);
       if (result.failed === 0) {
-        toast.success(`${result.ok} kitap mağazaya yüklendi`);
+        toast.success(
+          isVendor
+            ? `${result.ok} kitap yüklendi` + (submitForApproval ? ' ve onaya gönderildi' : ' (taslak teklif)')
+            : `${result.ok} kitap mağazaya yüklendi`
+        );
         onDone();
       } else {
         toast.error(`${result.ok} başarılı, ${result.failed} hata — hatalı satırları düzeltip tekrar deneyin`);
@@ -232,9 +247,13 @@ export default function BulkBookUploadPanel({ publishers = [], onClose, onDone }
       <div className="flex w-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-white shadow-xl">
         <div className="flex items-start justify-between gap-3 border-b px-4 py-3 sm:px-5">
           <div>
-            <h2 className="text-base font-semibold text-gray-900">Toplu Kitap Ekleme</h2>
+            <h2 className="text-base font-semibold text-gray-900">
+              {isVendor ? 'Toplu Kitap Yükle' : 'Toplu Kitap Ekleme'}
+            </h2>
             <p className="mt-0.5 text-xs text-gray-500">
-              Kapakları sürükleyin, dosya seçin veya Ctrl+V ile yapıştırın. Satırları doldurup «Hepsini Yükle» deyin.
+              {isVendor
+                ? 'Fotoğrafları seçin; her kapak yanında başlık, fiyat ve açıklama girin. Hepsini tek seferde yükleyin.'
+                : 'Kapakları sürükleyin, dosya seçin veya Ctrl+V ile yapıştırın. Satırları doldurup «Hepsini Yükle» deyin.'}
             </p>
           </div>
           <button
@@ -305,6 +324,7 @@ export default function BulkBookUploadPanel({ publishers = [], onClose, onDone }
 
           {rows.length > 0 ? (
             <>
+              {!isVendor ? (
               <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3">
                 <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                   <p className="text-xs font-medium text-slate-700">
@@ -396,7 +416,147 @@ export default function BulkBookUploadPanel({ publishers = [], onClose, onDone }
                   </div>
                 </div>
               </div>
+              ) : null}
 
+              {isVendor ? (
+              <div className="grid gap-3 sm:grid-cols-1 lg:grid-cols-2">
+                {rows.map((row) => {
+                  const err = fieldErrors[row.localId] || row.error;
+                  const locked = row.status === 'success' || submitting;
+                  return (
+                    <div
+                      key={row.localId}
+                      className={`flex gap-3 rounded-2xl border p-3 ${
+                        err ? 'border-rose-300 bg-rose-50/40' : row.status === 'success' ? 'border-emerald-300 bg-emerald-50/40' : 'border-gray-200 bg-white'
+                      }`}
+                    >
+                      <div className="shrink-0">
+                        <div className="relative h-28 w-20 overflow-hidden rounded-lg border bg-gray-50">
+                          {row.coverPreview ? (
+                            <img src={row.coverPreview} alt="" className="h-full w-full object-cover" />
+                          ) : (
+                            <div className="flex h-full items-center justify-center text-[10px] text-gray-400">Kapak</div>
+                          )}
+                        </div>
+                        {!locked ? (
+                          <label className="mt-1 block cursor-pointer text-center text-[10px] text-indigo-700 hover:underline">
+                            Değiştir
+                            <input
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              onChange={(e) => {
+                                const f = e.target.files?.[0];
+                                e.target.value = '';
+                                void replaceCover(row.localId, f);
+                              }}
+                            />
+                          </label>
+                        ) : null}
+                      </div>
+                      <div className="min-w-0 flex-1 space-y-2">
+                        <div className="flex items-start justify-between gap-2">
+                          <input
+                            className="w-full rounded-lg border px-2.5 py-1.5 text-sm font-medium disabled:bg-gray-50"
+                            value={row.title}
+                            disabled={locked}
+                            onChange={(e) => patchRow(row.localId, { title: e.target.value })}
+                            placeholder="Kitap başlığı *"
+                          />
+                          <button
+                            type="button"
+                            disabled={locked}
+                            onClick={() => removeRow(row.localId)}
+                            className="shrink-0 rounded p-1 text-gray-400 hover:bg-rose-50 hover:text-rose-600 disabled:opacity-40"
+                            aria-label="Kaldır"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
+                        <div className="flex gap-2">
+                          <div className="w-28 shrink-0">
+                            <label className="mb-0.5 block text-[10px] font-medium uppercase tracking-wide text-gray-500">Fiyat ₺ *</label>
+                            <input
+                              type="number"
+                              min={0}
+                              step="0.01"
+                              className="w-full rounded-lg border px-2 py-1.5 text-sm disabled:bg-gray-50"
+                              value={row.priceLira}
+                              disabled={locked}
+                              onChange={(e) => patchRow(row.localId, { priceLira: e.target.value })}
+                              placeholder="0"
+                            />
+                          </div>
+                          <div className="w-20 shrink-0">
+                            <label className="mb-0.5 block text-[10px] font-medium uppercase tracking-wide text-gray-500">Stok</label>
+                            <input
+                              type="number"
+                              min={0}
+                              className="w-full rounded-lg border px-2 py-1.5 text-sm disabled:bg-gray-50"
+                              value={row.stock}
+                              disabled={locked}
+                              onChange={(e) => patchRow(row.localId, { stock: e.target.value })}
+                            />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <label className="mb-0.5 block text-[10px] font-medium uppercase tracking-wide text-gray-500">Yayınevi</label>
+                            <input
+                              className="w-full rounded-lg border px-2 py-1.5 text-sm disabled:bg-gray-50"
+                              value={row.publisher}
+                              disabled={locked}
+                              onChange={(e) => patchRow(row.localId, { publisher: e.target.value })}
+                              placeholder="Opsiyonel"
+                            />
+                          </div>
+                        </div>
+                        <div>
+                          <label className="mb-0.5 block text-[10px] font-medium uppercase tracking-wide text-gray-500">Açıklama</label>
+                          <textarea
+                            rows={2}
+                            className="w-full resize-y rounded-lg border px-2.5 py-1.5 text-sm disabled:bg-gray-50"
+                            value={row.description}
+                            disabled={locked}
+                            onChange={(e) => patchRow(row.localId, { description: e.target.value })}
+                            placeholder="Kısa açıklama (öğrenci/veli görür)"
+                          />
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          {BULK_BOOK_CLASS_LEVELS.slice(0, 10).map((lv) => {
+                            const on = row.classLevels.includes(lv);
+                            return (
+                              <button
+                                key={lv}
+                                type="button"
+                                disabled={locked}
+                                onClick={() =>
+                                  patchRow(row.localId, {
+                                    classLevels: on
+                                      ? row.classLevels.filter((x) => x !== lv)
+                                      : [...row.classLevels, lv],
+                                  })
+                                }
+                                className={`rounded px-1.5 py-0.5 text-[10px] ${
+                                  on ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-600'
+                                } disabled:opacity-50`}
+                              >
+                                {lv}
+                              </button>
+                            );
+                          })}
+                          <span className="ml-auto text-xs text-gray-500">
+                            {row.status === 'uploading' ? 'Yükleniyor…' : null}
+                            {row.status === 'success' ? 'Tamam' : null}
+                            {row.status === 'error' ? 'Hata' : null}
+                            {row.status === 'draft' ? 'Hazır' : null}
+                          </span>
+                        </div>
+                        {err ? <p className="text-[11px] text-rose-600">{err}</p> : null}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              ) : (
               <div className="overflow-x-auto rounded-xl border">
                 <table className="w-full min-w-[960px] text-left text-sm">
                   <thead className="bg-gray-50 text-xs text-gray-600">
@@ -603,6 +763,7 @@ export default function BulkBookUploadPanel({ publishers = [], onClose, onDone }
                   </tbody>
                 </table>
               </div>
+              )}
               <datalist id="bulk-publisher-options">
                 {publisherOptions.map((p) => (
                   <option key={p} value={p} />
@@ -639,7 +800,18 @@ export default function BulkBookUploadPanel({ publishers = [], onClose, onDone }
               {successCount ? ` · ${successCount} başarılı` : ''}
               {errorCount ? ` · ${errorCount} hatalı` : ''}
             </p>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap items-center gap-3">
+              {isVendor ? (
+                <label className="mr-auto flex items-center gap-2 text-xs text-gray-600">
+                  <input
+                    type="checkbox"
+                    checked={submitForApproval}
+                    onChange={(e) => setSubmitForApproval(e.target.checked)}
+                    disabled={submitting}
+                  />
+                  Yükledikten sonra onaya gönder
+                </label>
+              ) : null}
               <button
                 type="button"
                 onClick={onClose}
@@ -655,7 +827,7 @@ export default function BulkBookUploadPanel({ publishers = [], onClose, onDone }
                 className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
               >
                 {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-                Hepsini Yükle
+                {isVendor ? 'Hepsini Toplu Yükle' : 'Hepsini Yükle'}
               </button>
             </div>
           </div>

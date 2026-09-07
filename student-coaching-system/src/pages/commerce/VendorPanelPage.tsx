@@ -32,6 +32,7 @@ import {
   XCircle,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import BulkBookUploadPanel from '../../components/commerce/BulkBookUploadPanel';
 import {
   cvAcceptOrder,
   cvCreateBook,
@@ -718,6 +719,7 @@ function Tekliflerim() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState<string | null>(null);
   const [modalOffer, setModalOffer] = useState<CommerceVendorOffer | null | 'new'>(null);
+  const [showBulk, setShowBulk] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -743,10 +745,17 @@ function Tekliflerim() {
 
   return (
     <div>
-      <div className="flex justify-between items-center mb-4">
+      <div className="flex flex-wrap justify-between items-center gap-2 mb-4">
         <h2 className="text-lg font-semibold">Tekliflerim ({offers.length})</h2>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <button onClick={load} className="text-gray-400 hover:text-gray-600"><RefreshCw className="w-4 h-4" /></button>
+          <button
+            type="button"
+            onClick={() => setShowBulk(true)}
+            className="flex items-center gap-1 text-sm border border-indigo-200 bg-indigo-50 text-indigo-800 px-3 py-1.5 rounded-lg hover:bg-indigo-100"
+          >
+            <Image className="w-4 h-4" /> Görsellerle toplu yükle
+          </button>
           <button
             onClick={() => setModalOffer('new')}
             className="flex items-center gap-1 text-sm bg-indigo-600 text-white px-3 py-1.5 rounded-lg hover:bg-indigo-700"
@@ -848,6 +857,16 @@ function Tekliflerim() {
           onSave={load}
         />
       )}
+      {showBulk ? (
+        <BulkBookUploadPanel
+          mode="vendor"
+          onClose={() => setShowBulk(false)}
+          onDone={() => {
+            setShowBulk(false);
+            void load();
+          }}
+        />
+      ) : null}
     </div>
   );
 }
@@ -1614,13 +1633,130 @@ function Hakedislerim() {
   );
 }
 
-// ── Kitaplarım (placeholder) ──────────────────────────────────────────
+// ── Kitaplarım ────────────────────────────────────────────────────────
 function Kitaplarim() {
+  const [books, setBooks] = useState<(CommerceBook & { my_offer: CommerceVendorOffer | null })[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showBulk, setShowBulk] = useState(false);
+  const [search, setSearch] = useState('');
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const r = await cvListBooks({ search: search.trim() || undefined, limit: 100 });
+      setBooks(r.books || []);
+    } catch (e: unknown) {
+      toast.error((e as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }, [search]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
   return (
-    <div className="flex flex-col items-center justify-center py-16 text-gray-400">
-      <BookOpen className="w-10 h-10 mb-3 opacity-40" />
-      <p className="text-sm mb-2">Katalogdan kitap seçerek teklif oluşturabilirsiniz</p>
-      <p className="text-xs text-gray-400">Tekliflerim sekmesinden <strong>Yeni Teklif</strong> butonuna tıklayın</p>
+    <div>
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h2 className="text-lg font-semibold text-gray-900">Kitaplarım</h2>
+          <p className="text-xs text-gray-500">
+            Kapak fotoğraflarını seçin; her birinin yanında başlık, fiyat ve açıklama girip toplu yükleyin.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setShowBulk(true)}
+          className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700"
+        >
+          <Image className="h-4 w-4" />
+          Görsellerle toplu yükle
+        </button>
+      </div>
+
+      <div className="mb-4 flex gap-2">
+        <div className="relative flex-1">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+          <input
+            className="w-full rounded-lg border border-gray-200 py-2 pl-9 pr-3 text-sm"
+            placeholder="Kitap ara…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
+        <button
+          type="button"
+          onClick={() => void load()}
+          className="rounded-lg border border-gray-200 px-3 text-gray-500 hover:bg-gray-50"
+          aria-label="Yenile"
+        >
+          <RefreshCw className="h-4 w-4" />
+        </button>
+      </div>
+
+      {loading ? (
+        <div className="flex justify-center p-10">
+          <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
+        </div>
+      ) : books.length === 0 ? (
+        <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-indigo-200 bg-indigo-50/40 px-6 py-14 text-center">
+          <Image className="mb-3 h-10 w-10 text-indigo-400" />
+          <p className="text-sm font-medium text-gray-800">Henüz kitap yok</p>
+          <p className="mt-1 max-w-sm text-xs text-gray-500">
+            Birden fazla kapak fotoğrafı seçin; her satırda başlık, fiyat ve açıklama doldurup hepsini tek seferde yükleyin.
+          </p>
+          <button
+            type="button"
+            onClick={() => setShowBulk(true)}
+            className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
+          >
+            <Plus className="h-4 w-4" />
+            Fotoğraflarla başla
+          </button>
+        </div>
+      ) : (
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {books.map((b) => (
+            <div key={b.id} className="flex gap-3 rounded-xl border border-gray-200 bg-white p-3">
+              <div className="h-20 w-14 shrink-0 overflow-hidden rounded-lg bg-slate-100">
+                {b.cover_image_url ? (
+                  <img src={b.cover_image_url} alt="" className="h-full w-full object-cover" />
+                ) : (
+                  <div className="flex h-full items-center justify-center">
+                    <BookOpen className="h-5 w-5 text-gray-300" />
+                  </div>
+                )}
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm font-semibold text-gray-900">{b.title}</div>
+                {b.publisher ? <div className="truncate text-xs text-gray-500">{b.publisher}</div> : null}
+                {b.description ? (
+                  <p className="mt-1 line-clamp-2 text-[11px] text-gray-500">{b.description}</p>
+                ) : null}
+                {b.my_offer ? (
+                  <div className="mt-1 text-xs font-medium text-indigo-700">
+                    {(b.my_offer.price_kurus / 100).toLocaleString('tr-TR')} ₺ · {b.my_offer.status}
+                  </div>
+                ) : (
+                  <div className="mt-1 text-xs text-amber-700">Teklif yok</div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {showBulk ? (
+        <BulkBookUploadPanel
+          mode="vendor"
+          onClose={() => setShowBulk(false)}
+          onDone={() => {
+            setShowBulk(false);
+            void load();
+          }}
+        />
+      ) : null}
     </div>
   );
 }
