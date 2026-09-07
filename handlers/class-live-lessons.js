@@ -26,6 +26,11 @@ import {
 } from '../api/_lib/attendance-notice-templates.js';
 import { isUuid } from '../api/_lib/uuid.js';
 import { randomUUID } from 'crypto';
+import {
+  clearClassWeeklySchedule,
+  clearTargetGroupClassSchedules
+} from '../api/_lib/clear-class-weekly-schedule.js';
+import { CLEAR_SCHEDULE_CLASS_KEYS } from '../api/_lib/clear-group-class-targets.js';
 
 function resolveScopedInstitutionId(queryInstitutionId, actorInstitutionId) {
   const scoped = String(queryInstitutionId || '').trim();
@@ -1507,6 +1512,82 @@ export default async function handler(req, res) {
         message: `${result.updated} öğrenci kaydı güncellendi (${result.classes_touched} sınıf).`,
         ...result
       });
+    }
+
+    if (op === 'clear-weekly-schedule') {
+      if (!isAdminRole(role)) return res.status(403).json({ error: 'forbidden' });
+      const classId = String(body.class_id || '').trim();
+      const fromDate = String(body.from || body.date_from || body.cancel_from || '').trim().slice(0, 10);
+      const dryRun = body.dry_run === true || body.dryRun === true;
+      const keysRaw = body.class_keys ?? body.keys ?? body.target_keys;
+      const keys = Array.isArray(keysRaw)
+        ? keysRaw.map((k) => String(k || '').trim()).filter(Boolean)
+        : typeof keysRaw === 'string' && keysRaw.trim()
+          ? keysRaw.split(/[,;\s]+/).map((k) => k.trim()).filter(Boolean)
+          : [];
+
+      // Tek sınıf
+      if (classId && !keys.length) {
+        const details = await getClassDetails(classId);
+        if (!details.class) return res.status(404).json({ error: 'class_not_found' });
+        if (dryRun) {
+          const { count: slots } = await supabaseAdmin
+            .from('class_weekly_slots')
+            .select('id', { count: 'exact', head: true })
+            .eq('class_id', classId);
+          return res.status(200).json({
+            ok: true,
+            dry_run: true,
+            class_id: classId,
+            name: details.class.name,
+            slots: slots ?? 0,
+            members_untouched: true
+          });
+        }
+        const out = await clearClassWeeklySchedule({
+          classId,
+          fromDate: /^\d{4}-\d{2}-\d{2}$/.test(fromDate) ? fromDate : undefined,
+          cancelFutureSessions: body.cancel_future_sessions !== false
+        });
+        if (!out.ok) return res.status(500).json(out);
+        return res.status(200).json({
+          ...out,
+          name: details.class.name,
+          teacher_count: (details.teacher_ids || []).length,
+          student_count: (details.student_ids || []).length
+        });
+      }
+
+      // Hedef grup listesi (varsayılan: 5A 6A 6B 7A 8A 8B 8E 8F)
+      const inst =
+        resolveScopedInstitutionId(
+          body.institution_id || institutionId || req.query.institution_id,
+          actor.institution_id
+        ) || null;
+      let classQ = supabaseAdmin.from('classes').select('id,name,institution_id').order('name');
+      if (inst) classQ = classQ.eq('institution_id', inst);
+      const { data: classRows, error: cErr } = await classQ;
+      if (cErr) return res.status(500).json({ error: cErr.message });
+
+      const withTeachers = [];
+      for (const row of classRows || []) {
+        const { data: trows } = await supabaseAdmin
+          .from('class_teachers')
+          .select('teacher_id')
+          .eq('class_id', row.id);
+        withTeachers.push({
+          ...row,
+          teacher_ids: (trows || []).map((t) => t.teacher_id)
+        });
+      }
+
+      const out = await clearTargetGroupClassSchedules({
+        classes: withTeachers,
+        keys: keys.length ? keys : CLEAR_SCHEDULE_CLASS_KEYS,
+        fromDate: /^\d{4}-\d{2}-\d{2}$/.test(fromDate) ? fromDate : undefined,
+        dryRun
+      });
+      return res.status(200).json(out);
     }
 
     if (op === 'ensure-sessions-range') {
