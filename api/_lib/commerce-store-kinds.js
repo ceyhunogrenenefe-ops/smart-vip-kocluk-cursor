@@ -5,6 +5,7 @@
 
 import { VIP_LGS8_BOOKS } from './commerce-lgs8-catalog.js';
 import { VIP7_BOOKS } from './commerce-vip7-catalog.js';
+import { VIP5_BOOKS } from './commerce-vip5-catalog.js';
 
 export const STORE_KIND_EGITIM = 'egitim-setleri';
 export const STORE_KIND_SORU = 'soru-bankalari';
@@ -84,7 +85,7 @@ export function isVipEgitimComponentBook(book) {
   if (!book) return false;
   const slug = String(book.slug || '').toLowerCase();
   const isbn = digitsIsbn(book.isbn);
-  for (const row of [...VIP_LGS8_BOOKS, ...VIP7_BOOKS]) {
+  for (const row of [...VIP_LGS8_BOOKS, ...VIP7_BOOKS, ...VIP5_BOOKS]) {
     if (slug && (slug === row.slug || slug.startsWith(`${row.slug}-`))) return true;
     if (isbn && isbn === digitsIsbn(row.isbn)) return true;
   }
@@ -93,6 +94,9 @@ export function isVipEgitimComponentBook(book) {
     return true;
   }
   if (/VIP Yayınları 7\. Sınıf .+ Eğitim Seti/i.test(title) && !/\d\s*l[iıü]/i.test(title)) {
+    return true;
+  }
+  if (/VIP Yayınları 5\. Sınıf .+ Eğitim Seti/i.test(title) && !/\d\s*l[iıü]/i.test(title)) {
     return true;
   }
   return false;

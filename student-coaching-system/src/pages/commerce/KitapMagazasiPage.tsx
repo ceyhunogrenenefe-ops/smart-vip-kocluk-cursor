@@ -48,6 +48,7 @@ import {
 import type { CommerceBookPackage, CommerceSettings, CommerceStudentBookAssignment, StoreBrowseClass } from '../../types/commerce.types';
 import { formatCommerceTry } from '../../types/commerce.types';
 import { useAuth } from '../../context/AuthContext';
+import BookCoverImage from '../../components/commerce/BookCoverImage';
 
 type Tab = 'tum-kitaplar' | 'onerilen' | 'paketler' | 'atanmis';
 
@@ -131,11 +132,7 @@ function BookCard({
     >
       <div className="relative">
         <div className="aspect-[3/4] bg-gray-100 flex items-center justify-center overflow-hidden">
-          {book.cover_image_url ? (
-            <img src={book.cover_image_url} alt={book.title} className="w-full h-full object-cover" />
-          ) : (
-            <BookOpen className="w-12 h-12 text-gray-300" />
-          )}
+          <BookCoverImage src={book.cover_image_url} alt={book.title} className="w-full h-full" fit="cover" />
         </div>
         <DiscountBadge original={offer.compare_at_price_kurus} current={offer.price_kurus} />
         {offer.teacher_recommended && (
@@ -278,11 +275,7 @@ function CollectionBookCard({ book }: { book: StoreCollectionBook }) {
       onClick={() => navigate(`/kitap-magazasi/${book.slug}`)}
     >
       <div className="aspect-[3/4] bg-gray-100 flex items-center justify-center overflow-hidden">
-        {book.cover_image_url ? (
-          <img src={book.cover_image_url} alt={book.title} className="w-full h-full object-cover" />
-        ) : (
-          <BookOpen className="w-12 h-12 text-gray-300" />
-        )}
+        <BookCoverImage src={book.cover_image_url} alt={book.title} className="w-full h-full" fit="cover" />
       </div>
       <div className="p-3">
         <div className="font-semibold text-sm leading-tight line-clamp-2 min-h-[2.5rem]">{book.title}</div>
@@ -440,7 +433,17 @@ function PackageCoverStrip({
       <div className="absolute inset-0 flex">
         {covers.map((c, i) => (
           <div key={`${c.url}-${i}`} className="relative min-w-0 flex-1 h-full border-r border-white/10 last:border-r-0">
-            <img src={c.url} alt={c.title} className="w-full h-full object-cover" />
+            <img
+              src={c.url}
+              alt={c.title}
+              className="w-full h-full object-cover"
+              loading="lazy"
+              decoding="async"
+              referrerPolicy="no-referrer"
+              onError={(e) => {
+                (e.currentTarget as HTMLImageElement).style.visibility = 'hidden';
+              }}
+            />
           </div>
         ))}
       </div>
@@ -798,11 +801,13 @@ function AtanmisTab() {
               className="w-12 h-16 bg-gray-100 rounded overflow-hidden flex-shrink-0 cursor-pointer"
               onClick={() => book?.slug && navigate(`/kitap-magazasi/${book.slug}`)}
             >
-              {book?.cover_image_url ? (
-                <img src={book.cover_image_url} alt={book?.title} className="w-full h-full object-cover" />
-              ) : (
-                <BookOpen className="w-full h-full p-2 text-gray-300" />
-              )}
+              <BookCoverImage
+                src={book?.cover_image_url}
+                alt={book?.title}
+                className="w-full h-full"
+                fit="cover"
+                placeholderClassName="w-full h-full p-2 text-gray-300"
+              />
             </div>
             <div className="flex-1 min-w-0">
               <div className="font-medium text-sm truncate">{book?.title ?? '—'}</div>

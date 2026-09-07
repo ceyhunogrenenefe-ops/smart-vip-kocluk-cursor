@@ -7,7 +7,7 @@
  *  vendors.list | vendors.get | vendors.create | vendors.update | vendors.delete
  *  vendor_users.list | vendor_users.add | vendor_users.remove
  *  books.list | books.get | books.create | books.update | books.delete | books.save | books.request_correction
- *  books.bulk_upsert | books.seed_lgs8_vip | books.seed_lgs8_vip_set | books.seed_lgs8_paraf_iq | books.seed_lgs8_deneme_kulubu | books.seed_vip7 | books.seed_vip7_set
+ *  books.bulk_upsert | books.seed_lgs8_vip | books.seed_lgs8_vip_set | books.seed_lgs8_paraf_iq | books.seed_lgs8_deneme_kulubu | books.seed_vip5 | books.seed_vip5_set | books.seed_vip7 | books.seed_vip7_set
  *  offers.list | offers.get | offers.approve | offers.reject | offers.request_correction | offers.inactive | offers.update
  *  packages.list | packages.get | packages.create | packages.update | packages.delete | packages.items.set
  *  vendors.ensure_yanki
@@ -27,7 +27,7 @@
 import { requireAuth } from '../api/_lib/auth.js';
 import { actorRoleSet, roleSetHasSuperAdmin, roleSetHasAdmin } from '../api/_lib/actor-roles.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
-import { bulkUpsertBooks, ensureYankiVendor, seedLgs8DenemeKulubu, seedLgs8ParafIqSet, seedLgs8VipCatalog, seedLgs8VipSet, seedVip7Catalog, seedVip7Set, upsertYankiOfferForExistingBook } from '../api/_lib/commerce-lgs8-seed.js';
+import { bulkUpsertBooks, ensureYankiVendor, seedLgs8DenemeKulubu, seedLgs8ParafIqSet, seedLgs8VipCatalog, seedLgs8VipSet, seedVip5Catalog, seedVip5Set, seedVip7Catalog, seedVip7Set, upsertYankiOfferForExistingBook } from '../api/_lib/commerce-lgs8-seed.js';
 import { defaultStoreBrowse, normalizeStoreBrowse, withInferredSeriesMetadata } from '../api/_lib/commerce-store-browse.js';
 import { decorateOrderWithIbanReceipt } from '../api/_lib/commerce-iban.js';
 import { activateBookOrderMetaTemplate } from '../api/_lib/book-order-meta-send.js';
@@ -611,6 +611,41 @@ async function handleBooks(op, body, actor) {
       actor_user_id: actor.sub,
       vendor_id: out.vendor.id,
       new_value: { book_count: out.books.length, set_isbn: out.set?.isbn },
+    });
+    return { ok: true, ...out };
+  }
+
+  if (op === 'books.seed_vip5') {
+    const out = await seedVip5Catalog({
+      actorSub: actor.sub,
+      prices: body.prices && typeof body.prices === 'object' ? body.prices : {},
+      contact_phone: sanitizeText(body.contact_phone),
+    });
+    await logAudit({
+      entity_type: 'commerce_book',
+      entity_id: out.vendor.id,
+      action: 'seed_vip5',
+      actor_user_id: actor.sub,
+      vendor_id: out.vendor.id,
+      new_value: { book_count: out.books.length, set_isbn: out.set?.isbn },
+    });
+    return { ok: true, ...out };
+  }
+
+  if (op === 'books.seed_vip5_set') {
+    const out = await seedVip5Set({
+      actorSub: actor.sub,
+      price_kurus: sanitizeInt(body.price_kurus) || 0,
+      stock_quantity: sanitizeInt(body.stock_quantity) || 100,
+      contact_phone: sanitizeText(body.contact_phone),
+    });
+    await logAudit({
+      entity_type: 'commerce_book',
+      entity_id: out.book.id,
+      action: 'seed_vip5_set',
+      actor_user_id: actor.sub,
+      vendor_id: out.vendor.id,
+      new_value: { isbn: out.book.isbn, status: out.book.status },
     });
     return { ok: true, ...out };
   }
