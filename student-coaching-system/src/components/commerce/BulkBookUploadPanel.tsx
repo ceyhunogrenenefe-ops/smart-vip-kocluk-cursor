@@ -25,7 +25,7 @@ import {
   validateBulkRows,
   type BulkBookRow,
 } from '../../lib/commerce/bulkBookUpload';
-import { compressCoverImage, formatBytes } from '../../lib/commerce/compressCoverImage';
+import { compressCoverImage, formatBytes, isLikelyImageFile } from '../../lib/commerce/compressCoverImage';
 
 type Props = {
   /** admin = Kitap Pazaryeri; vendor = satıcı paneli */
@@ -94,33 +94,53 @@ export default function BulkBookUploadPanel({ mode = 'admin', publishers = [], o
     });
   }, []);
 
-  const ingestFiles = useCallback(async (files: FileList | File[]) => {
-    const list = Array.from(files || []).filter(
-      (f) => f.type.startsWith('image/') || /\.(jpe?g|png|webp|heic|gif)$/i.test(f.name)
-    );
+  const ingestFiles = useCallback(async (files: FileList | File[] | null | undefined) => {
+    const raw = Array.from(files || []);
+    if (!raw.length) {
+      toast.error('Dosya seçilmedi');
+      return;
+    }
+    const list = raw.filter((f) => isLikelyImageFile(f));
     if (!list.length) {
-      toast.error('Görsel dosyası seçin (JPEG, PNG, WebP)');
+      toast.error(
+        `Görsel bulunamadı (${raw.length} dosya). JPEG / PNG / WebP seçin. iPhone HEIC ise «En Uyumlu» formatına geçin.`
+      );
       return;
     }
     setPreparing(true);
-    const added: BulkBookRow[] = [];
+    let addedCount = 0;
     const failures: string[] = [];
-    for (const file of list) {
-      try {
-        added.push(await fileToBulkRow(file));
-      } catch (e) {
-        failures.push(e instanceof Error ? e.message : file.name);
+    try {
+      // Sırayla işle; her başarılı kapak hemen listede görünsün (mobilde “yüklenmiyor” hissini keser)
+      for (const file of list) {
+        try {
+          const row = await fileToBulkRow(file);
+          const normalized = isVendor
+            ? {
+                ...row,
+                stock: row.stock || '10',
+                classLevels: row.classLevels.length ? row.classLevels : ['LGS'],
+              }
+            : row;
+          setRows((prev) => [...prev, normalized]);
+          addedCount += 1;
+        } catch (e) {
+          failures.push(e instanceof Error ? e.message : `${file.name || 'foto'}: işlenemedi`);
+        }
       }
+      if (addedCount) {
+        toast.success(`${addedCount} kapak eklendi — başlık, fiyat ve açıklamayı doldurun`);
+      } else if (failures.length) {
+        toast.error(failures.slice(0, 4).join(' · '), { duration: 9000 });
+      }
+      if (addedCount && failures.length) {
+        toast.error(`${failures.length} görsel atlandı: ${failures.slice(0, 3).join(' · ')}`, {
+          duration: 9000,
+        });
+      }
+    } finally {
+      setPreparing(false);
     }
-    if (added.length) {
-      const normalized = isVendor
-        ? added.map((r) => ({ ...r, stock: r.stock || '10', classLevels: r.classLevels.length ? r.classLevels : [] }))
-        : added;
-      setRows((prev) => [...prev, ...normalized]);
-      toast.success(`${added.length} kapak eklendi`);
-    }
-    if (failures.length) toast.error(failures.slice(0, 3).join(' · '));
-    setPreparing(false);
   }, [isVendor]);
 
   const onPaste = useCallback(
@@ -271,15 +291,21 @@ export default function BulkBookUploadPanel({ mode = 'admin', publishers = [], o
           <div
             onDragEnter={(e) => {
               e.preventDefault();
+              e.stopPropagation();
               setDragOver(true);
             }}
             onDragOver={(e) => {
               e.preventDefault();
+              e.stopPropagation();
               setDragOver(true);
             }}
-            onDragLeave={() => setDragOver(false)}
+            onDragLeave={(e) => {
+              e.preventDefault();
+              setDragOver(false);
+            }}
             onDrop={(e) => {
               e.preventDefault();
+              e.stopPropagation();
               setDragOver(false);
               void ingestFiles(e.dataTransfer.files);
             }}
@@ -289,35 +315,39 @@ export default function BulkBookUploadPanel({ mode = 'admin', publishers = [], o
           >
             <ImagePlus className="mx-auto h-8 w-8 text-indigo-500" />
             <p className="mt-2 text-sm font-medium text-gray-800">Kapak görsellerini buraya bırakın</p>
-            <p className="mt-1 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-xs text-gray-500">
-              <span className="inline-flex items-center gap-1">
-                <ClipboardPaste className="h-3.5 w-3.5" /> Ctrl+V yapıştır
-              </span>
-              <span>veya</span>
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={preparing || submitting}
-                className="font-medium text-indigo-700 underline-offset-2 hover:underline disabled:opacity-50"
+            <p className="mt-1 text-xs text-gray-500">JPEG / PNG / WebP · birden fazla seçebilirsiniz · Ctrl+V yapıştır</p>
+            <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+              <label
+                className={`inline-flex cursor-pointer items-center gap-1.5 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 ${
+                  preparing || submitting ? 'pointer-events-none opacity-50' : ''
+                }`}
               >
-                dosya seç
-              </button>
-            </p>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/jpeg,image/png,image/webp,image/*"
-              multiple
-              className="hidden"
-              onChange={(e) => {
-                const files = e.target.files;
-                e.target.value = '';
-                if (files?.length) void ingestFiles(files);
-              }}
-            />
+                <Upload className="h-4 w-4" />
+                Fotoğraf seç
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.heic,.heif"
+                  multiple
+                  className="sr-only"
+                  disabled={preparing || submitting}
+                  onChange={(e) => {
+                    const files = e.target.files;
+                    // Aynı dosyayı tekrar seçebilsin
+                    const list = files ? Array.from(files) : [];
+                    e.target.value = '';
+                    if (list.length) void ingestFiles(list);
+                    else toast.error('Dosya seçilmedi');
+                  }}
+                />
+              </label>
+              <span className="inline-flex items-center gap-1 text-xs text-gray-500">
+                <ClipboardPaste className="h-3.5 w-3.5" /> veya panodan yapıştır
+              </span>
+            </div>
             {preparing ? (
               <p className="mt-3 inline-flex items-center gap-2 text-xs text-indigo-700">
-                <Loader2 className="h-3.5 w-3.5 animate-spin" /> Görseller hazırlanıyor…
+                <Loader2 className="h-3.5 w-3.5 animate-spin" /> Görseller hazırlanıyor… (birkaç saniye sürebilir)
               </p>
             ) : null}
           </div>
