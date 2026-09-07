@@ -211,10 +211,17 @@ async function startLocalGaranti(req, actor, customer, payload) {
     ? `Kitap Mağazası — ${first.title}${payload.items.length > 1 ? ` +${payload.items.length - 1}` : ''}`
     : 'Kitap Mağazası Siparişi';
 
+  const asUuid = (v) => {
+    const s = String(v || '').trim();
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(s)
+      ? s
+      : null;
+  };
+
   const row = {
     order_id: orderId,
     public_token: publicToken,
-    institution_id: actor.institution_id || null,
+    institution_id: asUuid(actor.institution_id),
     student_payment_record_id: null,
     title: String(title).slice(0, 200),
     amount_kurus: amountKurus,
@@ -224,7 +231,7 @@ async function startLocalGaranti(req, actor, customer, payload) {
     customer_email: customer.email,
     customer_phone: customer.phone,
     status: 'pending',
-    created_by: actor.sub || null,
+    created_by: asUuid(actor.sub),
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   };
