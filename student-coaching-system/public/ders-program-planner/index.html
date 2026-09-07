@@ -264,6 +264,11 @@
   .png-sheet .tch-class{display:block; font-size:12px; color:#5C6B86; font-weight:500; margin-top:2px}
   .png-sheet .tch-sep{border:none; border-top:1px dashed #B9C4DA; margin:6px 0}
   .png-sheet .cellh{height:54px}
+  .png-sheet .tch-block{margin-top:28px; page-break-inside:avoid}
+  .png-sheet .tch-block:first-of-type{margin-top:8px}
+  .png-sheet .tch-block-head{display:flex; align-items:baseline; justify-content:space-between; gap:12px; margin-bottom:10px; padding-bottom:8px; border-bottom:2px solid var(--brand-navy)}
+  .png-sheet .tch-block-head .nm{font-family:"Fraunces",serif; font-size:22px; font-weight:600; color:var(--brand-navy)}
+  .png-sheet .tch-block-head .meta{font-size:13px; color:#5C6B86; font-weight:500}
 
   /* dedicated print sheet (hidden on screen) */
   #printSheet{display:none}
@@ -2120,12 +2125,20 @@ function renderOgretmen(){
       <div class="gpills">${pills}</div>
     </div>
     <div class="prog-tools" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px">
-      <div class="tiny">Her satır bir başlangıç saati; hücrede sınıf adı ve ders görünür. Üstteki <b>Yazdır / PDF</b> veya PNG ile çıktı alın.</div>
+      <div class="tiny">${showAll
+        ? `<b>Tümü</b> — ${list.length} öğretmen tek görünümde. <b>Tek PNG</b> hepsini bir dosyada indirir; <b>WhatsApp</b> her öğretmene kendi programını gateway ile gönderir.`
+        : `Her satır bir başlangıç saati; hücrede sınıf adı ve ders görünür. PNG / Yazdır / WhatsApp ile paylaşın.`}</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button class="btn sm" data-act="export-png">PNG indir${showAll?' (tümü)':''}</button>
+        <button class="btn sm" data-act="export-png">${showAll?'Tek PNG (tümü)':'PNG indir'}</button>
+        ${showAll?`<button class="btn sm" data-act="export-png-separate">PNG ayrı ayrı</button>`:''}
         <button class="btn sm primary" data-act="print">Yazdır / PDF${showAll?' (tümü)':''}</button>
+        <button class="btn sm" data-act="wa-teachers" title="WhatsApp gateway ile öğretmen programı gönder">WhatsApp gönder</button>
       </div>
     </div>
+    ${showAll?`<div class="card" style="margin-bottom:14px;padding:12px 14px;border:1px solid var(--line);background:var(--surface-2)">
+      <div style="font-weight:600;color:var(--brand-navy);margin-bottom:4px">Toplu öğretmen programı</div>
+      <div class="tiny">Aşağıda tüm öğretmenler aynı formatta alt alta. Tek PNG / Yazdır çıktısı da bu düzeni kullanır.</div>
+    </div>`:''}
     ${blocks}`;
 }
 
@@ -2634,6 +2647,8 @@ document.addEventListener('click',e=>{
     case 'import-trigger': $('#importFile').click(); break;
     case 'print': buildPrintSheet(); setTimeout(()=>window.print(),60); break;
     case 'export-png': exportPNG(); break;
+    case 'export-png-separate': exportTeacherPNGsSeparate(); break;
+    case 'wa-teachers': requestTeacherWaSend(); break;
     case 'reset-all':
       if(confirm('TÜM veriler silinip varsayılana dönülecek. Emin misiniz?')){ state=defaultState(); activeGroupId=state.groups[0].id; undoStack=[]; saveState(); render(); }
       break;
@@ -2950,58 +2965,114 @@ function buildPrintSheet(){
   $('#printSheet').innerHTML = g ? pageForGroup(g) : '';
 }
 /* ---------------- PNG export ---------------- */
-async function exportTeacherPNG(teacherName){
-  if(!window.html2canvas){ alert('PNG aracı yüklenemedi (internet bağlantısı gerekiyor).'); return; }
-  const logo=document.querySelector('.logo'); const logoSrc=logo?logo.getAttribute('src'):'';
+function teacherPngSafeName(teacherName){
+  return ((teacherName||'ogretmen').replace(/[\\/:*?"<>|]+/g,' ').trim())||'ogretmen';
+}
+function teacherTableBodyHTML(teacherName){
   const items=collectTeacherLessons(teacherName);
   const rowsMeta=teacherTimetableRowMeta(items);
-  let tableBody='';
   if(!rowsMeta.length){
-    tableBody=`<tr><td colspan="${1+state.days.length}" style="padding:16px;color:#697086;font-style:italic">Bu öğretmenin programda atanmış dersi yok.</td></tr>`;
-  } else {
-    tableBody=rowsMeta.map(row=>{
-      const cells=state.days.map((d,di)=>{
-        const cellItems=items.filter(it=>it.di===di&&matchesTeacherRow(it,row));
-        if(!cellItems.length) return `<td class="cellh"></td>`;
-        return `<td class="cellh">${teacherCellInnerHTML(cellItems)}</td>`;
-      }).join('');
-      const sub=row.times.size===1?[...row.times][0]:'';
-      return `<tr>
-        <td class="pcol"><div class="pl">${esc(row.startLabel)}</div>${sub&&sub!==row.startLabel?`<div class="pt tiny">${esc(sub)}</div>`:''}</td>
-        ${cells}
-      </tr>`;
-    }).join('');
+    return `<tr><td colspan="${1+state.days.length}" style="padding:16px;color:#697086;font-style:italic">Bu öğretmenin programda atanmış dersi yok.</td></tr>`;
   }
+  return rowsMeta.map(row=>{
+    const cells=state.days.map((d,di)=>{
+      const cellItems=items.filter(it=>it.di===di&&matchesTeacherRow(it,row));
+      if(!cellItems.length) return `<td class="cellh"></td>`;
+      return `<td class="cellh">${teacherCellInnerHTML(cellItems)}</td>`;
+    }).join('');
+    const sub=row.times.size===1?[...row.times][0]:'';
+    return `<tr>
+      <td class="pcol"><div class="pl">${esc(row.startLabel)}</div>${sub&&sub!==row.startLabel?`<div class="pt tiny">${esc(sub)}</div>`:''}</td>
+      ${cells}
+    </tr>`;
+  }).join('');
+}
+function downloadDataUrl(dataUrl, filename){
+  const a=document.createElement('a');
+  a.href=dataUrl;
+  a.download=filename;
+  a.click();
+}
+async function capturePngSheet(innerHTML){
+  if(!window.html2canvas) throw new Error('PNG aracı yüklenemedi (internet bağlantısı gerekiyor).');
   const stage=document.createElement('div'); stage.className='png-stage';
-  stage.innerHTML=`<div class="png-sheet">
-    <div class="ph">${logoSrc?`<img src="${logoSrc}" alt="">`:''}<div class="tt">${esc(teacherName)}</div><div class="sb">Öğretmen Haftalık Programı</div></div>
-    <table><thead><tr><th class="pcol">Saat</th>${state.days.map(d=>`<th>${esc(d)}</th>`).join('')}</tr></thead><tbody>${tableBody}</tbody></table>
-  </div>`;
+  stage.innerHTML=`<div class="png-sheet">${innerHTML}</div>`;
   document.body.appendChild(stage);
   try{
     const img=stage.querySelector('img');
     if(img && !img.complete) await new Promise(r=>{img.onload=r; img.onerror=r;});
     const canvas=await html2canvas(stage.querySelector('.png-sheet'),{scale:2, backgroundColor:'#ffffff', useCORS:true, logging:false});
-    const url=canvas.toDataURL('image/png');
-    const a=document.createElement('a');
-    a.href=url;
-    a.download=((teacherName||'ogretmen').replace(/[\\/:*?"<>|]+/g,' ').trim())+' - ogretmen programi.png';
-    a.click();
-  }catch(e){ alert('PNG oluşturulamadı: '+(e.message||e)); }
-  finally{ stage.remove(); }
+    return canvas.toDataURL('image/png');
+  } finally {
+    stage.remove();
+  }
+}
+async function exportTeacherPNG(teacherName, opts={}){
+  const download=opts.download!==false;
+  const logo=document.querySelector('.logo'); const logoSrc=logo?logo.getAttribute('src'):'';
+  const tableBody=teacherTableBodyHTML(teacherName);
+  const dataUrl=await capturePngSheet(`
+    <div class="ph">${logoSrc?`<img src="${logoSrc}" alt="">`:''}<div class="tt">${esc(teacherName)}</div><div class="sb">Öğretmen Haftalık Programı</div></div>
+    <table><thead><tr><th class="pcol">Saat</th>${state.days.map(d=>`<th>${esc(d)}</th>`).join('')}</tr></thead><tbody>${tableBody}</tbody></table>
+  `);
+  const filename=teacherPngSafeName(teacherName)+' - ogretmen programi.png';
+  if(download) downloadDataUrl(dataUrl, filename);
+  return { teacherName, filename, dataUrl, lessonCount:collectTeacherLessons(teacherName).length };
+}
+async function exportCombinedTeachersPNG(opts={}){
+  const download=opts.download!==false;
+  const teachers=Array.isArray(opts.teachers)&&opts.teachers.length?opts.teachers:teachersInSchedule();
+  if(!teachers.length) throw new Error('İndirilecek öğretmen programı yok.');
+  const logo=document.querySelector('.logo'); const logoSrc=logo?logo.getAttribute('src'):'';
+  const blocks=teachers.map(t=>{
+    const n=collectTeacherLessons(t).length;
+    return `<div class="tch-block">
+      <div class="tch-block-head"><div class="nm">${esc(t)}</div><div class="meta">${n} ders</div></div>
+      <table><thead><tr><th class="pcol">Saat</th>${state.days.map(d=>`<th>${esc(d)}</th>`).join('')}</tr></thead><tbody>${teacherTableBodyHTML(t)}</tbody></table>
+    </div>`;
+  }).join('');
+  const dataUrl=await capturePngSheet(`
+    <div class="ph">${logoSrc?`<img src="${logoSrc}" alt="">`:''}<div class="tt">Tüm Öğretmen Programları</div><div class="sb">${teachers.length} öğretmen · Haftalık Program</div></div>
+    ${blocks}
+  `);
+  const filename='Tum ogretmen programlari.png';
+  if(download) downloadDataUrl(dataUrl, filename);
+  return { filename, dataUrl, teachers: teachers.map(t=>({ name:t, lessonCount:collectTeacherLessons(t).length })) };
+}
+async function exportTeacherPNGsSeparate(){
+  const teachers=teachersInSchedule();
+  if(!teachers.length){ alert('İndirilecek öğretmen programı yok.'); return; }
+  for(const t of teachers){
+    await exportTeacherPNG(t, {download:true});
+    if(teachers.length>1) await new Promise(r=>setTimeout(r,350));
+  }
+}
+function requestTeacherWaSend(){
+  const teachers=teachersForExport();
+  try{
+    window.parent.postMessage({
+      source:'scs-planner-embed',
+      type:'TEACHER_WA_SEND_REQUEST',
+      payload:{ teachers, mode: activeTeacherName==='__all__'?'all':'one' }
+    }, '*');
+  }catch(e){
+    alert('WhatsApp gönderimi için planlayıcıyı uygulama içinden açın.');
+  }
 }
 async function exportPNG(){
   if(tab==='ogretmen'){
     const teachers=teachersForExport();
     if(!teachers.length){ alert('İndirilecek öğretmen programı yok.'); return; }
-    for(const t of teachers){
-      await exportTeacherPNG(t);
-      if(teachers.length>1) await new Promise(r=>setTimeout(r,350));
-    }
+    try{
+      if(activeTeacherName==='__all__' || teachers.length>1){
+        await exportCombinedTeachersPNG({ teachers, download:true });
+      } else {
+        await exportTeacherPNG(teachers[0], {download:true});
+      }
+    }catch(e){ alert('PNG oluşturulamadı: '+(e.message||e)); }
     return;
   }
   const g=group(activeGroupId); if(!g) return;
-  if(!window.html2canvas){ alert('PNG aracı yüklenemedi (internet bağlantısı gerekiyor).'); return; }
   const logo=document.querySelector('.logo'); const logoSrc=logo?logo.getAttribute('src'):'';
   const maxP=maxPeriodsAcrossDays(g);
   const rows=Array.from({length:maxP},(_,pi)=>`<tr>
@@ -3017,23 +3088,13 @@ async function exportPNG(){
       return `<td class="cellh">${inner}</td>`;
     }).join('')}
   </tr>`).join('');
-  const stage=document.createElement('div'); stage.className='png-stage';
-  stage.innerHTML=`<div class="png-sheet">
-    <div class="ph">${logoSrc?`<img src="${logoSrc}" alt="">`:''}<div class="tt">${esc(g.name)}</div><div class="sb">Haftalık Ders Programı</div></div>
-    <table><thead><tr><th class="pcol">Saat</th>${state.days.map(d=>`<th>${esc(d)}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table>
-  </div>`;
-  document.body.appendChild(stage);
   try{
-    const img=stage.querySelector('img');
-    if(img && !img.complete) await new Promise(r=>{img.onload=r; img.onerror=r;});
-    const canvas=await html2canvas(stage.querySelector('.png-sheet'),{scale:2, backgroundColor:'#ffffff', useCORS:true, logging:false});
-    const url=canvas.toDataURL('image/png');
-    const a=document.createElement('a');
-    a.href=url;
-    a.download=((g.name||'ders-programi').replace(/[\\/:*?"<>|]+/g,' ').trim())+' - ders programi.png';
-    a.click();
+    const dataUrl=await capturePngSheet(`
+      <div class="ph">${logoSrc?`<img src="${logoSrc}" alt="">`:''}<div class="tt">${esc(g.name)}</div><div class="sb">Haftalık Ders Programı</div></div>
+      <table><thead><tr><th class="pcol">Saat</th>${state.days.map(d=>`<th>${esc(d)}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table>
+    `);
+    downloadDataUrl(dataUrl, ((g.name||'ders-programi').replace(/[\\/:*?"<>|]+/g,' ').trim())+' - ders programi.png');
   }catch(e){ alert('PNG oluşturulamadı: '+(e.message||e)); }
-  finally{ stage.remove(); }
 }
 /* CSV parser (delimiter auto: , ; tab; quote-aware) */
 function parseCSV(text){
@@ -3212,6 +3273,35 @@ window.addEventListener('message', (ev)=>{
     reply({type:'SET_CONTEXT_OK', ok:true, institutionChanged:instChanged, groups:state.groups.length});
   }
   else if(msg.type==='PING') reply({type:'PONG'});
+  else if(msg.type==='LIST_TEACHERS'){
+    reply({type:'TEACHER_LIST', payload:{ teachers: teachersInSchedule() }});
+  }
+  else if(msg.type==='EXPORT_TEACHER_PNGS'){
+    (async()=>{
+      try{
+        const want=Array.isArray(msg.payload?.teachers)?msg.payload.teachers:null;
+        const teachers=want&&want.length?want:teachersInSchedule();
+        const items=[];
+        for(const t of teachers){
+          const one=await exportTeacherPNG(t,{download:false});
+          items.push(one);
+        }
+        reply({type:'TEACHER_PNGS', payload:{ items }});
+      }catch(e){
+        reply({type:'TEACHER_PNGS_ERROR', error:String(e&&e.message||e)});
+      }
+    })();
+  }
+  else if(msg.type==='EXPORT_COMBINED_TEACHER_PNG'){
+    (async()=>{
+      try{
+        const out=await exportCombinedTeachersPNG({download:false, teachers:msg.payload?.teachers});
+        reply({type:'COMBINED_TEACHER_PNG', payload:out});
+      }catch(e){
+        reply({type:'COMBINED_TEACHER_PNG_ERROR', error:String(e&&e.message||e)});
+      }
+    })();
+  }
 });
 if(window.parent!==window){ try{ window.parent.postMessage({source:'scs-planner-embed', type:'READY'}, '*'); }catch(e){} }
 
