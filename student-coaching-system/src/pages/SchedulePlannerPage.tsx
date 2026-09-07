@@ -787,6 +787,42 @@ export default function SchedulePlannerPage({ mode = 'default' }: { mode?: 'defa
     }
   };
 
+  /** Canlı 5A–8F haftalık program + gelecek oturumları boşalt; öğrenci/öğretmen kalır */
+  const handleClearLiveTargetSchedules = async () => {
+    if (
+      !confirm(
+        '5A, 6A, 6B, 7A, 8A, 8B, 8E, 8F canlı ders programları boşaltılsın mı?\n\nHaftalık slotlar ve gelecek oturumlar silinir/iptal edilir.\nÖğrenciler ve öğretmenler sınıfta kalır — planlayıcıdan yeni saatlerle Aktar güvenli olur.'
+      )
+    ) {
+      return;
+    }
+    setBusy('clear-live');
+    try {
+      const res = await apiFetch('/api/class-live-lessons?op=clear-weekly-schedule', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          institution_id: institutionId || undefined,
+          class_keys: ['5A', '6A', '6B', '7A', '8A', '8B', '8E', '8F']
+        })
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j.error || j.message || 'clear_failed');
+      const results = Array.isArray(j.results) ? j.results : [];
+      const cleared = results.filter((r: { ok?: boolean; slots_deleted?: number }) => r.ok && (r.slots_deleted ?? 0) >= 0);
+      const missing = results.filter((r: { error?: string }) => r.error === 'class_not_found');
+      toast.success(
+        `${cleared.length} sınıf programı boşaltıldı` +
+          (missing.length ? ` (${missing.length} sınıf bulunamadı)` : '') +
+          '. Üyelikler korundu.'
+      );
+    } catch (e) {
+      toast.error(String((e as Error).message || e));
+    } finally {
+      setBusy('');
+    }
+  };
+
   const persistPlannerJson = async (planner_json: Record<string, unknown>) => {
     if (selectedPlanId) {
       const res = await apiFetch('/api/class-schedule-plans', {
@@ -1352,6 +1388,16 @@ export default function SchedulePlannerPage({ mode = 'default' }: { mode?: 'defa
               >
                 {busy === 'yaz-yedek' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
                 Yedek JSON yaz (yapıyı koru)
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleClearLiveTargetSchedules()}
+                disabled={!!busy || !(isAdmin || isSuper)}
+                className="inline-flex items-center gap-1 rounded-lg border border-rose-300 bg-rose-50 px-3 py-1.5 text-sm text-rose-950 hover:bg-rose-100 disabled:opacity-50"
+                title="5A–8F canlı haftalık program + gelecek oturumları boşalt; öğrenci/öğretmen kalır"
+              >
+                {busy === 'clear-live' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                Canlı 5A–8F programı boşalt
               </button>
               <button
                 type="button"
