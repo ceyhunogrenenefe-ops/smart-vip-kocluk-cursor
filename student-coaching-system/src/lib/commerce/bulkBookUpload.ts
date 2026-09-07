@@ -127,7 +127,7 @@ export async function fileToBulkRow(file: File): Promise<BulkBookRow> {
   return createEmptyBulkRow({
     coverDataUrl: compressed.dataUrl,
     coverPreview: compressed.dataUrl,
-    coverMeta: `${compressed.width}×${compressed.height}`,
+    coverMeta: `${compressed.width}×${compressed.height} · ${Math.round(compressed.bytesApprox / 1024)} KB`,
     title: titleFromFileName(file.name),
   });
 }
