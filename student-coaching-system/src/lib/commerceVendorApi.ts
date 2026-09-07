@@ -40,8 +40,14 @@ export const cvListOffers = (vendor_id?: string) =>
   post<{ offers: CommerceVendorOffer[] }>('offers.list', vendor_id ? { vendor_id } : {});
 export const cvGetOffer = (id: string, vendor_id?: string) =>
   post<{ offer: CommerceVendorOffer }>('offers.get', { id, ...(vendor_id ? { vendor_id } : {}) });
-export const cvCreateOffer = (fields: { book_id: string; price_kurus: number; stock_quantity?: number; shipping_days?: number; vendor_id?: string }) =>
-  post<{ offer: CommerceVendorOffer }>('offers.create', fields);
+export const cvCreateOffer = (fields: {
+  book_id: string;
+  price_kurus: number;
+  compare_at_price_kurus?: number | null;
+  stock_quantity?: number;
+  shipping_days?: number;
+  vendor_id?: string;
+}) => post<{ offer: CommerceVendorOffer }>('offers.create', fields);
 export const cvUpdateOffer = (id: string, fields: Partial<CommerceVendorOffer> & { vendor_id?: string }) =>
   post<{ offer: CommerceVendorOffer }>('offers.update', { id, ...fields });
 export const cvSubmitOffer = (id: string, vendor_id?: string) =>

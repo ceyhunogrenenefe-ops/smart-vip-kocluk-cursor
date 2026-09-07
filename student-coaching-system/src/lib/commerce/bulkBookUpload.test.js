@@ -23,6 +23,14 @@ describe('bulkBookUpload helpers', () => {
       priceLira: '199.90',
     });
     expect(validateBulkRow(withCover)).toBeNull();
+
+    const zeroPrice = createEmptyBulkRow({
+      coverDataUrl: 'data:image/jpeg;base64,xxx',
+      coverPreview: 'data:image/jpeg;base64,xxx',
+      title: 'Deneme',
+      priceLira: '0',
+    });
+    expect(validateBulkRow(zeroPrice)).toMatch(/büyük/i);
   });
 
   it('validateBulkRows maps errors by localId', () => {

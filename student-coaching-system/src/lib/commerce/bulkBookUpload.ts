@@ -2,7 +2,9 @@
  * Toplu kitap ekleme — istemci doğrulama + kaydet/kapak yükleme orkestrasyonu.
  * Kapaklar mevcut /api/commerce-upload (Supabase Storage) üzerinden gider.
  */
+import { apiFetch } from '../session';
 import { caSaveBook, caUploadBookCover, type SaveBookInput } from '../commerceAdminApi';
+import { cvCreateBook, cvCreateOffer, cvSubmitOffer } from '../commerceVendorApi';
 import { compressCoverImage } from './compressCoverImage';
 
 export type BulkBookRowStatus = 'draft' | 'uploading' | 'success' | 'error';
@@ -26,6 +28,7 @@ export type BulkBookRow = {
   status: BulkBookRowStatus;
   error: string | null;
   savedBookId: string | null;
+  savedOfferId?: string | null;
 };
 
 export type BulkBookSubmitResult = {
@@ -111,6 +114,7 @@ export function createEmptyBulkRow(partial?: Partial<BulkBookRow>): BulkBookRow 
     status: 'draft',
     error: null,
     savedBookId: null,
+    savedOfferId: null,
     ...partial,
   };
 }
@@ -134,6 +138,7 @@ export function validateBulkRow(row: BulkBookRow): string | null {
   const price = Number(String(row.priceLira).replace(',', '.'));
   if (row.priceLira !== '' && (!Number.isFinite(price) || price < 0)) return 'Fiyat geçersiz';
   if (row.priceLira === '' || !Number.isFinite(price)) return 'Fiyat gerekli';
+  if (price <= 0) return 'Fiyat 0’dan büyük olmalı';
   const stock = Number(row.stock);
   if (row.stock !== '' && (!Number.isFinite(stock) || stock < 0)) return 'Stok geçersiz';
   return null;
@@ -165,6 +170,25 @@ function toSaveInput(row: BulkBookRow): SaveBookInput {
   };
 }
 
+function priceKurusFromRow(row: BulkBookRow): number {
+  return Math.round(Number(String(row.priceLira).replace(',', '.')) * 100);
+}
+
+async function uploadVendorBookCover(bookId: string, dataUrl: string): Promise<void> {
+  const res = await apiFetch('/api/commerce-upload', {
+    method: 'POST',
+    body: JSON.stringify({
+      op: 'book_cover',
+      file_base64: dataUrl,
+      mime_type: 'image/jpeg',
+      book_id: bookId,
+      save_to_db: true,
+    }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.ok) throw new Error(data.error ?? 'Kapak yüklenemedi');
+}
+
 export type BulkSubmitProgress = {
   index: number;
   total: number;
@@ -172,17 +196,16 @@ export type BulkSubmitProgress = {
   done: number;
 };
 
-/**
- * Satır satır: books.save → kapak upload (Supabase).
- * concurrency=1 varsayılan — Vercel gövde limiti / rate için güvenli.
- */
-export async function submitBulkBooks(
+type SubmitOpts = {
+  concurrency?: number;
+  onProgress?: (p: BulkSubmitProgress) => void;
+  onRowUpdate?: (row: BulkBookRow) => void;
+};
+
+async function runBulkQueue(
   rows: BulkBookRow[],
-  opts?: {
-    concurrency?: number;
-    onProgress?: (p: BulkSubmitProgress) => void;
-    onRowUpdate?: (row: BulkBookRow) => void;
-  }
+  opts: SubmitOpts | undefined,
+  runOneBody: (row: BulkBookRow, index: number, working: BulkBookRow[]) => Promise<void>
 ): Promise<BulkBookSubmitResult> {
   const concurrency = Math.max(1, Math.min(3, opts?.concurrency ?? 1));
   const working = rows.map((r) => ({ ...r }));
@@ -208,17 +231,7 @@ export async function submitBulkBooks(
     opts?.onProgress?.({ index, total: working.length, row: working[index], done });
 
     try {
-      if (!row.coverDataUrl) throw new Error('Kapak görseli yok');
-      const saved = await caSaveBook(toSaveInput(row));
-      const bookId = saved.book?.id;
-      if (!bookId) throw new Error('Kitap kaydı oluşmadı');
-      await caUploadBookCover(bookId, row.coverDataUrl);
-      working[index] = {
-        ...working[index],
-        status: 'success',
-        error: null,
-        savedBookId: bookId,
-      };
+      await runOneBody(row, index, working);
       ok += 1;
     } catch (e) {
       working[index] = {
@@ -243,4 +256,68 @@ export async function submitBulkBooks(
   await Promise.all(workers);
 
   return { ok, failed, rows: working };
+}
+
+/**
+ * Admin: books.save → kapak upload (Yankı teklifi otomatik).
+ */
+export async function submitBulkBooks(
+  rows: BulkBookRow[],
+  opts?: SubmitOpts
+): Promise<BulkBookSubmitResult> {
+  return runBulkQueue(rows, opts, async (row, index, working) => {
+    if (!row.coverDataUrl) throw new Error('Kapak görseli yok');
+    const saved = await caSaveBook(toSaveInput(row));
+    const bookId = saved.book?.id;
+    if (!bookId) throw new Error('Kitap kaydı oluşmadı');
+    await caUploadBookCover(bookId, row.coverDataUrl);
+    working[index] = {
+      ...working[index],
+      status: 'success',
+      error: null,
+      savedBookId: bookId,
+    };
+  });
+}
+
+/**
+ * Satıcı: books.create → kapak → offers.create → (opsiyonel) offers.submit
+ */
+export async function submitVendorBulkBooks(
+  rows: BulkBookRow[],
+  opts?: SubmitOpts & { submitForApproval?: boolean }
+): Promise<BulkBookSubmitResult> {
+  const submitForApproval = opts?.submitForApproval !== false;
+  return runBulkQueue(rows, opts, async (row, index, working) => {
+    if (!row.coverDataUrl) throw new Error('Kapak görseli yok');
+    const levels = row.classLevels.length ? row.classLevels : [];
+    const bookRes = await cvCreateBook({
+      title: row.title.trim(),
+      isbn: row.isbn.trim() || undefined,
+      publisher: row.publisher.trim() || undefined,
+      subject: row.subject.trim() || undefined,
+      description: row.description.trim() || undefined,
+      class_levels: levels,
+    });
+    const bookId = bookRes.book?.id;
+    if (!bookId) throw new Error('Kitap kaydı oluşmadı');
+    await uploadVendorBookCover(bookId, row.coverDataUrl);
+    const offerRes = await cvCreateOffer({
+      book_id: bookId,
+      price_kurus: priceKurusFromRow(row),
+      stock_quantity: row.stock === '' ? 10 : Number(row.stock),
+      shipping_days: 3,
+    });
+    const offerId = offerRes.offer?.id;
+    if (submitForApproval && offerId) {
+      await cvSubmitOffer(offerId);
+    }
+    working[index] = {
+      ...working[index],
+      status: 'success',
+      error: null,
+      savedBookId: bookId,
+      savedOfferId: offerId || null,
+    };
+  });
 }
