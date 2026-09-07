@@ -28,7 +28,8 @@ function garantiConfig() {
   const terminalId = readEnv('GARANTI_TERMINAL_ID');
   const storeKey = readEnv('GARANTI_STORE_KEY');
   const provisionPassword = readEnv('GARANTI_PROVISION_PASSWORD');
-  const provisionUser = readEnv('GARANTI_PROVISION_USER') || 'PROVAUT';
+  // Bonus POS ortak ödeme — canlıda PROVOOS + 3D_OOS_PAY
+  const provisionUser = readEnv('GARANTI_PROVISION_USER') || 'PROVOOS';
   if (!merchantId || !terminalId || !storeKey || !provisionPassword) return null;
   const mode = readEnv('GARANTI_MODE').toLowerCase() === 'test' ? 'TEST' : 'PROD';
   return {
@@ -39,6 +40,7 @@ function garantiConfig() {
     provisionUser,
     terminalUserId: readEnv('GARANTI_TERMINAL_USER_ID') || provisionUser,
     companyName: readEnv('GARANTI_COMPANY_NAME') || 'Online VIP Dershane',
+    securityLevel: (readEnv('GARANTI_SECURITY_LEVEL') || '3D_OOS_PAY').toUpperCase(),
     mode,
     apiVersion: readEnv('GARANTI_API_VERSION') || '512',
     currencyCode: '949',
@@ -113,8 +115,8 @@ function buildCommonPaymentFormFields({
   const installment =
     installmentCount && Number(installmentCount) > 1
       ? String(Math.round(Number(installmentCount)))
-      : '';
-  const installmentForHash = installment ? Number(installment) : 0;
+      : '0';
+  const installmentForHash = Number(installment) > 1 ? Number(installment) : 0;
   const secure3dhash = buildSecure3dHash({
     provisionPassword: cfg.provisionPassword,
     terminalId: cfg.terminalId,
@@ -127,6 +129,7 @@ function buildCommonPaymentFormFields({
     installmentCount: installmentForHash,
     storeKey: cfg.storeKey,
   });
+  const ts = String(Math.floor(Date.now() / 1000));
 
   return {
     mode: cfg.mode,
@@ -144,12 +147,20 @@ function buildCommonPaymentFormFields({
     txninstallmentcount: installment,
     successurl: successUrl,
     errorurl: errorUrl,
-    secure3dsecuritylevel: '3D_PAY',
+    secure3dsecuritylevel: String(cfg.securityLevel || '3D_OOS_PAY').toUpperCase(),
     secure3dhash,
     lang: 'tr',
+    txntimestamp: ts,
+    refreshtime: '5',
     companyname: String(cfg.companyName).slice(0, 40),
     ...(cardholderName ? { cardholdername: String(cardholderName).slice(0, 64) } : {}),
   };
+}
+
+/** Alias — commerce-checkout.js */
+function buildCommonPaymentForm(opts) {
+  const fields = buildCommonPaymentFormFields(opts);
+  return { action: opts.cfg.gatewayUrl, fields };
 }
 
 function verifyCallbackHash(params, storeKey) {
@@ -210,6 +221,7 @@ module.exports = {
   garantiEnvCheck,
   garantiConfig,
   buildCommonPaymentFormFields,
+  buildCommonPaymentForm,
   verifyCallbackHash,
   isGarantiPaymentApproved,
   makeGarantiOrderId,

@@ -16,19 +16,28 @@ PayTR checkout `onlinevipdershane1` reposunda. Bu klasördeki dosyaları o repoy
 | `odeme.html` | `odeme.html` (üzerine yaz) |
 | `odeme-kitap.html` | `odeme-kitap.html` (üzerine yaz — `/odeme/kitap` kupon kutusu) |
 
-## 2) Vercel env — **onlinevipdershane1** projesi
+## 2) Vercel env — **iki proje**
 
-⚠️ Panel (`smart-kocluk-ceyhu`) değil; site projesi:
+### Site (`onlinevipdershane1`)
 
 | Key | Value |
 |---|---|
 | `GARANTI_MERCHANT_ID` | `3267918` |
 | `GARANTI_TERMINAL_ID` | `10410839` |
-| `GARANTI_PROVISION_USER` | `PROVAUT` |
-| `GARANTI_PROVISION_PASSWORD` | (şifren) |
-| `GARANTI_STORE_KEY` | (store key) |
+| `GARANTI_PROVISION_USER` | `PROVOOS` |
+| `GARANTI_PROVISION_PASSWORD` | (PROVOOS şifren) |
+| `GARANTI_STORE_KEY` | (store key / 3D key) |
+| `GARANTI_SECURITY_LEVEL` | `3D_OOS_PAY` |
 | `GARANTI_MODE` | `prod` |
 | `SITE_URL` | `https://onlinevipdershane.com` |
+
+### Koçluk paneli (`smart-kocluk-ceyhu`) — **aynı değerler zorunlu**
+
+Siteye eklemek yetmez. Panelde muhasebe linki / kitap ödemesi için aynı `GARANTI_*`
+değişkenlerini panel Vercel projesine de ekleyip **Redeploy** edin.
+`APP_PUBLIC_URL=https://www.dersonlinevipkocluk.com`
+
+⚠️ `PROVAUT` + `3D_PAY` kullanmayın; canlı Bonus POS **PROVOOS** + **3D_OOS_PAY**.
 
 PayTR değişkenleri olduğu gibi kalsın.
 

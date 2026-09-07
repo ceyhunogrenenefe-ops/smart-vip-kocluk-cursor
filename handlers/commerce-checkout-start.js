@@ -109,21 +109,32 @@ async function trySitePaytr(customer, amountKurus) {
   }
 }
 
-async function trySiteGaranti(customer, amountKurus) {
+async function trySiteGaranti(customer, amountKurus, opts = {}) {
   try {
     const res = await fetch(SITE_GARANTI_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        items: [{ id: 'kitapMagaza', qty: 1, amountKurus }],
+        mode: 'raw_amount',
+        amountKurus,
+        orderId: opts.orderId || undefined,
+        successUrl: opts.successUrl || undefined,
+        errorUrl: opts.errorUrl || undefined,
         customer,
+        // Eski katalog yolu (site güncellenmemişse): kitapMagaza + amountKurus
+        items: [{ id: 'kitapMagaza', qty: 1, amountKurus }],
       }),
     });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok || !data.action || !data.fields) {
+    if (!res.ok || !(data.action || data.gateway_url) || !data.fields) {
       return { ok: false, error: data.error || `site_garanti_${res.status}` };
     }
-    return { ok: true, gateway_url: data.action, fields: data.fields, orderId: data.orderId };
+    return {
+      ok: true,
+      gateway_url: data.action || data.gateway_url,
+      fields: data.fields,
+      orderId: data.orderId,
+    };
   } catch (e) {
     return { ok: false, error: e?.message || 'site_garanti_failed' };
   }

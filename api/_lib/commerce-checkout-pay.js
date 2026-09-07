@@ -65,15 +65,17 @@ async function trySiteGaranti(customer, amountKurus) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        items: [{ id: 'kitapMagaza', qty: 1, amountKurus }],
+        mode: 'raw_amount',
+        amountKurus,
         customer,
+        items: [{ id: 'kitapMagaza', qty: 1, amountKurus }],
       }),
     });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok || !data.action || !data.fields) {
+    if (!res.ok || !(data.action || data.gateway_url) || !data.fields) {
       return { ok: false, error: data.error || `site_garanti_${res.status}` };
     }
-    return { ok: true, action: data.action, fields: data.fields };
+    return { ok: true, action: data.action || data.gateway_url, fields: data.fields };
   } catch (e) {
     return { ok: false, error: e?.message || 'site_garanti_failed' };
   }

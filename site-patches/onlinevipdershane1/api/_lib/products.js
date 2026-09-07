@@ -42,7 +42,6 @@ function resolveLineItems(items) {
     } else if (product.id === 'kitapMagaza') {
       throw new Error('Kitap mağazası tutarı eksik.');
     } else {
-      // Mevcut katalog: price TL cinsinden → kuruş
       unitAmount = Math.round(product.price * 100);
     }
 

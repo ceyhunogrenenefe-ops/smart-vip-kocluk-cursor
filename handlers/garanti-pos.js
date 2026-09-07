@@ -20,6 +20,8 @@ import {
   clientIpFromReq,
   publicAppBaseUrl,
   buildCommonPaymentFormFields,
+  buildGarantiFormViaSite,
+  siteGarantiInitUrl,
   verifyCallbackHash,
   isGarantiPaymentApproved,
   parseFormBody,
@@ -88,10 +90,8 @@ async function markLinkedPaymentPaid(order) {
 }
 
 async function handleAdminCreate(req, res, actor, roleSet) {
+  // Yerel GARANTI_* yoksa bile sipariş kaydı oluşturulabilir; /start site proxy ile form üretir.
   const cfg = getGarantiConfig();
-  if (!cfg.configured) {
-    return jsonError(res, 503, 'garanti_not_configured', { missing: cfg.missing });
-  }
 
   const body = parseJsonBody(req);
   const amountTry = Number(body.amount_try ?? body.amount);
@@ -166,7 +166,12 @@ async function handleAdminCreate(req, res, actor, roleSet) {
 
   const base = publicAppBaseUrl(req);
   const payUrl = `${base}/odeme/${publicToken}`;
-  return res.status(201).json({ data, pay_url: payUrl });
+  return res.status(201).json({
+    data,
+    pay_url: payUrl,
+    gateway_ready: cfg.configured,
+    gateway_via: cfg.configured ? 'local' : 'site_proxy',
+  });
 }
 
 async function handleAdminList(req, res, actor, roleSet) {
@@ -212,17 +217,15 @@ async function handlePublicGet(req, res) {
     data: {
       ...data,
       amount_try: kurusToTry(data.amount_kurus),
-      gateway_ready: cfg.configured
+      // Yerel env yoksa site proxy ile yine de ödenebilir
+      gateway_ready: true,
+      gateway_local: cfg.configured,
     }
   });
 }
 
 async function handleStart(req, res) {
   const cfg = getGarantiConfig();
-  if (!cfg.configured) {
-    return jsonError(res, 503, 'garanti_not_configured', { missing: cfg.missing });
-  }
-
   const body = parseJsonBody(req);
   const token = String(body.token || req.query?.token || '').trim();
   if (!token) return jsonError(res, 400, 'token_required');
@@ -250,17 +253,45 @@ async function handleStart(req, res) {
   const base = publicAppBaseUrl(req);
   const successUrl = `${base}/api/garanti-pos/callback?result=ok`;
   const errorUrl = `${base}/api/garanti-pos/callback?result=fail`;
-  const fields = buildCommonPaymentFormFields({
-    cfg,
-    orderId: order.order_id,
-    amountKurus: order.amount_kurus,
-    successUrl,
-    errorUrl,
-    customerEmail: order.customer_email || body.customer_email,
-    customerIp: clientIpFromReq(req),
-    installmentCount: installment,
-    cardholderName: order.customer_name || body.customer_name || ''
-  });
+
+  let gatewayUrl = cfg.gatewayUrl;
+  let fields;
+
+  if (cfg.configured) {
+    fields = buildCommonPaymentFormFields({
+      cfg,
+      orderId: order.order_id,
+      amountKurus: order.amount_kurus,
+      successUrl,
+      errorUrl,
+      customerEmail: order.customer_email || body.customer_email,
+      customerIp: clientIpFromReq(req),
+      installmentCount: installment,
+      cardholderName: order.customer_name || body.customer_name || ''
+    });
+  } else {
+    // Panel Vercel'de GARANTI_* yoksa site (onlinevipdershane.com) üzerinden form üret
+    const proxied = await buildGarantiFormViaSite({
+      orderId: order.order_id,
+      amountKurus: order.amount_kurus,
+      successUrl,
+      errorUrl,
+      customerEmail: order.customer_email || body.customer_email,
+      customerIp: clientIpFromReq(req),
+      cardholderName: order.customer_name || body.customer_name || '',
+      customerPhone: order.customer_phone || body.customer_phone || '',
+    });
+    if (!proxied.ok) {
+      return jsonError(res, 503, 'garanti_not_configured', {
+        missing: cfg.missing,
+        site_error: proxied.error,
+        hint:
+          'Koçluk paneli Vercel projesine GARANTI_* ekleyin veya onlinevipdershane1 sitesinde garanti-init (raw_amount) deploy edin.',
+      });
+    }
+    gatewayUrl = proxied.gateway_url;
+    fields = proxied.fields;
+  }
 
   await supabaseAdmin
     .from('garanti_payment_orders')
@@ -272,7 +303,7 @@ async function handleStart(req, res) {
     .eq('id', order.id);
 
   return res.status(200).json({
-    gateway_url: cfg.gatewayUrl,
+    gateway_url: gatewayUrl,
     fields,
     order_id: order.order_id,
     amount_try: kurusToTry(order.amount_kurus)
@@ -380,9 +411,12 @@ async function handleStatus(req, res, actor) {
     configured: cfg.configured,
     missing: cfg.missing,
     mode: cfg.mode,
+    security_level: cfg.securityLevel,
+    provision_user: cfg.provisionUser,
     merchant_id_set: Boolean(cfg.merchantId),
     terminal_id_set: Boolean(cfg.terminalId),
     company_name: cfg.companyName,
+    site_proxy: siteGarantiInitUrl(),
     actor: actor?.sub || null
   });
 }
@@ -410,7 +444,7 @@ export default async function handler(req, res) {
 
     const actor = await requireAuthenticatedActor(req, res);
     if (!actor) return;
-    const roleSet = actorRoleSet(actor);
+    const roleSet = await actorRoleSet(actor);
     if (!roleSetHasAdmin(roleSet) && !roleSetHasSuperAdmin(roleSet)) {
       return jsonError(res, 403, 'forbidden');
     }
