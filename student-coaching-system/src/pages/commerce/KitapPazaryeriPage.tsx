@@ -2,7 +2,7 @@
  * Süper Admin — Kitap Pazaryeri yönetim paneli
  * Sekmeler: Satıcılar | Onay Bekleyenler | Kitaplar | Teklifler | Siparişler | Hakedişler | Kuponlar | Raporlar | Ayarlar
  */
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   AlertCircle,
@@ -12,6 +12,7 @@ import {
   Copy,
   Eye,
   EyeOff,
+  ImagePlus,
   LogIn,
   Tag,
   KeyRound,
@@ -36,6 +37,7 @@ import {
   XCircle,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import BulkBookUploadPanel from '../../components/commerce/BulkBookUploadPanel';
 import {
   caApproveOffer,
   caCreateCoupon,
@@ -1122,6 +1124,15 @@ function KitaplarTab() {
   const [corrTarget, setCorrTarget] = useState<CatalogBook | null>(null);
   const [corrNotes, setCorrNotes] = useState('');
   const [corrSaving, setCorrSaving] = useState(false);
+  const [showBulkVisual, setShowBulkVisual] = useState(false);
+
+  const publisherHints = useMemo(
+    () =>
+      [...new Set(books.map((b) => String(b.publisher || '').trim()).filter(Boolean))].sort((a, b) =>
+        a.localeCompare(b, 'tr')
+      ),
+    [books]
+  );
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1285,6 +1296,13 @@ function KitaplarTab() {
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
+        <button
+          onClick={() => setShowBulkVisual(true)}
+          className="flex items-center gap-1 text-sm border border-emerald-200 text-emerald-800 px-3 py-1.5 rounded-lg hover:bg-emerald-50"
+          title="Birden fazla kapak görseli ile kitap satırı oluştur"
+        >
+          <ImagePlus className="w-4 h-4" /> Görsellerle toplu ekle
+        </button>
         <button
           onClick={() => setShowBulk((v) => !v)}
           className="flex items-center gap-1 text-sm border border-indigo-200 text-indigo-700 px-3 py-1.5 rounded-lg hover:bg-indigo-50"
@@ -1499,6 +1517,17 @@ function KitaplarTab() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {showBulkVisual && (
+        <BulkBookUploadPanel
+          publishers={publisherHints}
+          onClose={() => setShowBulkVisual(false)}
+          onDone={() => {
+            setShowBulkVisual(false);
+            void load();
+          }}
+        />
       )}
 
       {editor && (
