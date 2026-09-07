@@ -4,7 +4,6 @@ const {
   isGarantiPaymentApproved,
   normalizeCallbackParams,
 } = require('./_lib/garanti');
-const { createKommoLead } = require('./_lib/kommo');
 
 function parseBody(req) {
   const b = req.body;
@@ -20,64 +19,6 @@ function getOrigin(req) {
   const proto = req.headers['x-forwarded-proto'] || 'https';
   const host = req.headers['x-forwarded-host'] || req.headers.host;
   return `${proto}://${host}`;
-}
-
-async function notifyPanelPaid({ merchantOid, totalAmount }) {
-  const url = process.env.KOCLUK_PANEL_URL;
-  const secret = process.env.OZEL_DERS_WEBHOOK_SECRET;
-  if (!url || !secret) return;
-  await fetch(`${url.replace(/\/$/, '')}/api/ozel-ders-talepleri?op=webhook`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-webhook-secret': secret },
-    body: JSON.stringify({
-      event: 'order_paid',
-      merchant_oid: merchantOid,
-      amount_kurus: Number(totalAmount) || null,
-      provider: 'garanti',
-      source: 'onlinevipdershane.com',
-    }),
-  });
-}
-
-const FORMSPREE_ID = process.env.FORMSPREE_FORM_ID || 'mpqnjdwd';
-
-async function notifyPaidOrder({ merchantOid, totalAmount }) {
-  const amountTl = (Number(totalAmount) / 100).toLocaleString('tr-TR') + ' ₺';
-  const note = `Garanti POS ödeme başarılı · Sipariş ${merchantOid} · ${amountTl}`;
-
-  try {
-    await fetch(`https://formspree.io/f/${FORMSPREE_ID}`, {
-      method: 'POST',
-      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        form: 'garanti-odeme',
-        merchant_oid: merchantOid,
-        total: amountTl,
-        _subject: `Yeni Garanti Ödemesi — ${merchantOid}`,
-        program: 'Premium / Site Ödemesi',
-        not: note,
-      }),
-    });
-  } catch (err) {
-    console.error('garanti-callback email', err);
-  }
-
-  try {
-    await createKommoLead(
-      {
-        ad: 'Garanti',
-        soyad: 'Ödeme',
-        email: '',
-        telefon: '',
-        sinif: 'Ödeme',
-        program: `Online Ödeme ${amountTl}`,
-        not: note,
-      },
-      { tag: 'Garanti Ödeme' }
-    );
-  } catch (err) {
-    console.error('garanti-callback kommo', err);
-  }
 }
 
 function htmlRedirect(url, title, message) {
@@ -97,10 +38,16 @@ module.exports = async function handler(req, res) {
     ...normalizeCallbackParams(req.query || {}),
   };
   const orderId = String(raw.orderid || raw.oid || '').trim();
-  const amount = String(raw.txnamount || '').trim();
+  const source = String(req.query?.source || raw.source || '').trim();
 
-  const failUrl = `${origin}/odeme-iptal.html${orderId ? `?order=${encodeURIComponent(orderId)}` : ''}`;
-  const okUrl = `${origin}/odeme-tamamlandi.html${orderId ? `?order=${encodeURIComponent(orderId)}` : ''}`;
+  const failUrl =
+    source === 'kitap'
+      ? `${origin}/odeme-iptal.html?source=kitap${orderId ? `&order=${encodeURIComponent(orderId)}` : ''}`
+      : `${origin}/odeme-iptal.html${orderId ? `?order=${encodeURIComponent(orderId)}` : ''}`;
+  const okUrl =
+    source === 'kitap'
+      ? `${origin}/odeme-tamamlandi.html?source=kitap${orderId ? `&order=${encodeURIComponent(orderId)}` : ''}`
+      : `${origin}/odeme-tamamlandi.html${orderId ? `?order=${encodeURIComponent(orderId)}` : ''}`;
 
   if (!cfg || !orderId) {
     res.status(200).setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -117,14 +64,7 @@ module.exports = async function handler(req, res) {
     return res.end(htmlRedirect(failUrl, 'Ödeme başarısız', 'Yönlendiriliyorsunuz…'));
   }
 
-  console.log('garanti-callback: success', orderId, amount);
-  notifyPaidOrder({ merchantOid: orderId, totalAmount: amount }).catch((err) =>
-    console.error('garanti-callback notify', err)
-  );
-  notifyPanelPaid({ merchantOid: orderId, totalAmount: amount }).catch((err) =>
-    console.warn('garanti-callback panel notify', err)
-  );
-
+  console.log('garanti-callback: success', orderId);
   res.status(200).setHeader('Content-Type', 'text/html; charset=utf-8');
   return res.end(htmlRedirect(okUrl, 'Ödeme başarılı', 'Yönlendiriliyorsunuz…'));
 };

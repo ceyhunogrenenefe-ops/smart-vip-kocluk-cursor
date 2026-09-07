@@ -2,39 +2,34 @@
 
 Kart bilgisi sitede tutulmaz; veli Garanti ortak ödeme / 3D Secure sayfasında öder.
 
-## Kurulum
+## Önemli (canlı Bonus POS)
 
-1. Supabase SQL Editor’de çalıştırın:
-   `student-coaching-system/sql/2026-08-08-garanti-payment-orders.sql`
-2. Vercel → Environment Variables (Production + Preview):
+Terminal **PROVOOS** + `3D_OOS_PAY` kullanır (PROVAUT / 3D_PAY değil).
+
+## Kurulum — iki Vercel projesi
+
+### A) Site (`onlinevipdershane1` → onlinevipdershane.com)
+Zaten `GARANTI_*` tanımlı olmalı. Ek olarak `site-patches/onlinevipdershane1/api/` altındaki
+`garanti-init.js`, `_lib/garanti.js`, `_lib/products.js` dosyalarını site reposuna kopyalayıp
+deploy edin (`mode=raw_amount` + `kitapMagaza` için).
+
+### B) Koçluk paneli (`smart-kocluk-ceyhu` → dersonlinevipkocluk.com)
+Aynı `GARANTI_*` değerlerini **bu projeye de** ekleyin (Production + Preview), sonra Redeploy:
 
 ```text
 GARANTI_MERCHANT_ID=...
 GARANTI_TERMINAL_ID=...
-GARANTI_PROVISION_USER=PROVAUT
-GARANTI_PROVISION_PASSWORD=...
+GARANTI_PROVISION_USER=PROVOOS
+GARANTI_PROVISION_PASSWORD=...   # PROVOOS şifresi
 GARANTI_STORE_KEY=...
+GARANTI_SECURITY_LEVEL=3D_OOS_PAY
 GARANTI_MODE=prod
 GARANTI_COMPANY_NAME=Online VIP Dershane
-APP_PUBLIC_URL=https://www.onlinevipdershane.com
+APP_PUBLIC_URL=https://www.dersonlinevipkocluk.com
 ```
 
-3. Deploy sonrası Muhasebe → Öğrenci ödeme takip satırında link ikonundan ödeme linki üretin.
-4. Link formatı: `https://www.onlinevipdershane.com/odeme/{token}`
+1. Supabase SQL: `student-coaching-system/sql/2026-08-08-garanti-payment-orders.sql`
+2. Muhasebe → ödeme linki veya `/kitap-odeme`
 
-## API
-
-| Method | Path | Açıklama |
-|--------|------|----------|
-| POST | `/api/garanti-pos` | Admin: link oluştur |
-| GET | `/api/garanti-pos` | Admin: son siparişler |
-| GET | `/api/garanti-pos/public?token=` | Kamu özet |
-| POST | `/api/garanti-pos/start` | Form alanları + gateway URL |
-| POST | `/api/garanti-pos/callback` | Banka dönüşü |
-
-Başarılı ödemede bağlı `student_payment_records` satırı otomatik tahsil edilir.
-
-## Güvenlik
-
-- Store Key / Provision Password yalnızca sunucu env’de.
-- Chat veya commit’e yapıştırılmışsa bankadan yenileyin.
+Panelde env yoksa form üretimi site `garanti-init` (raw_amount) üzerinden denenir;
+site patch deploy edilmemişse yine hata alırsınız — panel env kopyası en güvenli yoldur.

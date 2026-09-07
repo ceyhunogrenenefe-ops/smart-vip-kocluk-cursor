@@ -14,7 +14,8 @@ module.exports = async function handler(req, res) {
   const paytrCheck = paytrEnvCheck();
   const garantiCheck = garantiEnvCheck();
   const paytrOk = Boolean(paytrConfig());
-  const garantiOk = Boolean(garantiConfig());
+  const cfg = garantiConfig();
+  const garantiOk = Boolean(cfg);
 
   const providers = [];
   if (paytrOk) providers.push('paytr');
@@ -31,11 +32,18 @@ module.exports = async function handler(req, res) {
       configured: paytrOk,
       missingEnv: paytrCheck.missing,
       testMode: paytrCheck.testMode,
+      callbackUrl: paytrCheck.siteUrl
+        ? `${paytrCheck.siteUrl.replace(/\/$/, '')}/api/paytr-callback`
+        : null,
     },
     garanti: {
       configured: garantiOk,
       missingEnv: garantiCheck.missing,
       mode: garantiCheck.mode,
+      testMode: garantiCheck.mode === 'TEST',
+      securityLevel: cfg?.securityLevel || null,
+      provUserId: cfg?.provisionUser || null,
+      label: 'Garanti Bonus POS (ortak ödeme)',
     },
     hint:
       providers.length === 0

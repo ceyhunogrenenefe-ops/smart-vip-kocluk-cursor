@@ -28,10 +28,16 @@ export function getGarantiConfig() {
   const merchantId = String(process.env.GARANTI_MERCHANT_ID || '').trim();
   const terminalId = String(process.env.GARANTI_TERMINAL_ID || '').trim();
   const storeKey = String(process.env.GARANTI_STORE_KEY || '').trim();
-  const provisionUser = String(process.env.GARANTI_PROVISION_USER || 'PROVAUT').trim();
+  // Canlı Bonus POS ortak ödeme: PROVOOS + 3D_OOS_PAY (PROVAUT/3D_PAY de env ile seçilebilir)
+  const provisionUser = String(process.env.GARANTI_PROVISION_USER || 'PROVOOS').trim();
   const provisionPassword = String(process.env.GARANTI_PROVISION_PASSWORD || '').trim();
   const terminalUserId = String(process.env.GARANTI_TERMINAL_USER_ID || provisionUser).trim();
   const companyName = String(process.env.GARANTI_COMPANY_NAME || 'Online VIP Dershane').trim();
+  const securityLevel = String(
+    process.env.GARANTI_SECURITY_LEVEL || '3D_OOS_PAY'
+  )
+    .trim()
+    .toUpperCase() || '3D_OOS_PAY';
   const missing = [];
   if (!merchantId) missing.push('GARANTI_MERCHANT_ID');
   if (!terminalId) missing.push('GARANTI_TERMINAL_ID');
@@ -45,12 +51,68 @@ export function getGarantiConfig() {
     provisionPassword,
     terminalUserId,
     companyName,
+    securityLevel,
     mode: garantiMode(),
     apiVersion: String(process.env.GARANTI_API_VERSION || '512').trim() || '512',
     currencyCode: TRY,
     gatewayUrl: garantiGatewayUrl(),
     missing,
     configured: missing.length === 0
+  };
+}
+
+/** Site (onlinevipdershane.com) üzerinde yapılandırılmış Garanti — panelde env yoksa form üretimi için. */
+export function siteGarantiInitUrl() {
+  return (
+    String(process.env.SITE_GARANTI_INIT_URL || '').trim() ||
+    'https://onlinevipdershane.com/api/garanti-init'
+  );
+}
+
+/**
+ * Site Garanti proxy — serbest tutar (kitap / muhasebe linki).
+ * Site `mode: raw_amount` desteklemeli.
+ */
+export async function buildGarantiFormViaSite({
+  orderId,
+  amountKurus,
+  successUrl,
+  errorUrl,
+  customerEmail,
+  customerIp,
+  cardholderName = '',
+  customerPhone = '05000000000',
+}) {
+  const url = siteGarantiInitUrl();
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      mode: 'raw_amount',
+      amountKurus: Number(amountKurus),
+      orderId: String(orderId || '').slice(0, 36),
+      successUrl,
+      errorUrl,
+      customerIp: String(customerIp || '127.0.0.1').slice(0, 45),
+      customer: {
+        parentName: String(cardholderName || 'Online VIP').slice(0, 64),
+        email: String(customerEmail || 'odeme@onlinevipdershane.com').slice(0, 64),
+        phone: String(customerPhone || '05000000000').replace(/\D/g, '').slice(0, 20) || '05000000000',
+      },
+    }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !(data.action || data.gateway_url) || !data.fields) {
+    return {
+      ok: false,
+      error: data.error || `site_garanti_${res.status}`,
+    };
+  }
+  return {
+    ok: true,
+    gateway_url: data.action || data.gateway_url,
+    fields: data.fields,
+    orderId: data.orderId || orderId,
   };
 }
 
@@ -150,7 +212,7 @@ export function publicAppBaseUrl(req) {
 
 /**
  * Ortak ödeme (kart Garanti sayfasında) form alanları.
- * secure3dsecuritylevel: 3D_PAY
+ * Varsayılan: 3D_OOS_PAY (Bonus POS ortak ödeme) — canlı site ile uyumlu.
  */
 export function buildCommonPaymentFormFields({
   cfg,
@@ -164,8 +226,10 @@ export function buildCommonPaymentFormFields({
   cardholderName = ''
 }) {
   const installment =
-    installmentCount && Number(installmentCount) > 1 ? String(Math.round(Number(installmentCount))) : '';
-  const installmentForHash = installment ? Number(installment) : 0;
+    installmentCount && Number(installmentCount) > 1
+      ? String(Math.round(Number(installmentCount)))
+      : '0';
+  const installmentForHash = Number(installment) > 1 ? Number(installment) : 0;
   const secure3dhash = buildSecure3dHash({
     provisionPassword: cfg.provisionPassword,
     terminalId: cfg.terminalId,
@@ -178,6 +242,8 @@ export function buildCommonPaymentFormFields({
     installmentCount: installmentForHash,
     storeKey: cfg.storeKey
   });
+  const securityLevel = String(cfg.securityLevel || '3D_OOS_PAY').toUpperCase();
+  const ts = String(Math.floor(Date.now() / 1000));
 
   return {
     mode: cfg.mode,
@@ -195,9 +261,11 @@ export function buildCommonPaymentFormFields({
     txninstallmentcount: installment,
     successurl: successUrl,
     errorurl: errorUrl,
-    secure3dsecuritylevel: '3D_PAY',
+    secure3dsecuritylevel: securityLevel,
     secure3dhash,
     lang: 'tr',
+    txntimestamp: ts,
+    refreshtime: '5',
     companyname: cfg.companyName.slice(0, 40),
     ...(cardholderName ? { cardholdername: String(cardholderName).slice(0, 64) } : {})
   };
