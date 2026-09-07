@@ -66,6 +66,7 @@ import {
   caSeedLgs8DenemeKulubu,
   caSeedLgs8ParafIq,
   caSeedLgs8Vip,
+  caSeedVip5,
   caSeedVip7,
   caBulkUpsertBooks,
   caEnsureYankiVendor,
@@ -1186,6 +1187,32 @@ function KitaplarTab() {
     }
   };
 
+  const handleSeedVip5 = async () => {
+    setSeeding(true);
+    try {
+      if (yankiPhone.trim()) await caEnsureYankiVendor({ contact_phone: yankiPhone.trim() });
+      const r = await caSeedVip5({ contact_phone: yankiPhone.trim() || undefined });
+      const rows = [
+        ...r.books,
+        ...(r.set
+          ? [{ title: r.set.title, isbn: r.set.isbn, price_kurus: r.set.price_kurus, status: r.set.status }]
+          : []),
+      ];
+      setSeedResult(rows);
+      const draft: Record<string, string> = {};
+      rows.forEach((b) => {
+        if (b.isbn) draft[b.isbn] = b.price_kurus ? String(b.price_kurus / 100) : '';
+      });
+      setPriceDraft(draft);
+      toast.success(`VIP 5. sınıf: ${r.books.length} branş + 5’li set Yankı kataloğuna işlendi`);
+      await load();
+    } catch (e: unknown) {
+      toast.error((e as Error).message);
+    } finally {
+      setSeeding(false);
+    }
+  };
+
   const handleSeedParaf = async () => {
     setSeeding(true);
     try {
@@ -1377,6 +1404,14 @@ function KitaplarTab() {
             >
               {seeding ? <Loader2 className="w-4 h-4 animate-spin" /> : <Package className="w-4 h-4" />}
               VIP 7. Sınıf 6’lı seti yükle
+            </button>
+            <button
+              onClick={() => void handleSeedVip5()}
+              disabled={seeding}
+              className="flex items-center gap-1.5 bg-fuchsia-700 text-white text-sm px-4 py-2 rounded-lg hover:bg-fuchsia-800 disabled:opacity-50"
+            >
+              {seeding ? <Loader2 className="w-4 h-4 animate-spin" /> : <Package className="w-4 h-4" />}
+              VIP 5. Sınıf 5’li seti yükle
             </button>
             <button
               onClick={handleSeedParaf}

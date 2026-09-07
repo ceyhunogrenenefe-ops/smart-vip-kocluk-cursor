@@ -127,6 +127,14 @@ export const caSeedVip7 = (fields?: { contact_phone?: string; prices?: Record<st
     set: { id: string; title: string; isbn: string | null; slug: string; offer_id: string; price_kurus: number; status: string };
   }>('books.seed_vip7', fields ?? {});
 
+export const caSeedVip5 = (fields?: { contact_phone?: string; prices?: Record<string, { price_kurus?: number; stock_quantity?: number }> }) =>
+  post<{
+    vendor: CommerceVendor;
+    vendor_created: boolean;
+    books: { id: string; title: string; isbn: string | null; offer_id: string; price_kurus: number; status: string }[];
+    set: { id: string; title: string; isbn: string | null; slug: string; offer_id: string; price_kurus: number; status: string };
+  }>('books.seed_vip5', fields ?? {});
+
 export const caSeedVip7Set = (fields?: { contact_phone?: string; price_kurus?: number; stock_quantity?: number }) =>
   post<{
     vendor: CommerceVendor;

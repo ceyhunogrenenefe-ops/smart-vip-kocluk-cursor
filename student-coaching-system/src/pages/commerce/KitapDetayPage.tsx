@@ -19,6 +19,7 @@ import { csAddToCart, csGetBook, csMarkOwned } from '../../lib/commerceStoreApi'
 import type { CommerceBook, CommerceVendorOffer } from '../../types/commerce.types';
 import { formatCommerceTry } from '../../types/commerce.types';
 import { useAuth } from '../../context/AuthContext';
+import BookCoverImage from '../../components/commerce/BookCoverImage';
 
 export default function KitapDetayPage() {
   const { slug } = useParams<{ slug: string }>();
@@ -98,13 +99,13 @@ export default function KitapDetayPage() {
         {/* Sol — Kitap kapağı */}
         <div className="md:col-span-1">
           <div className="aspect-[3/4] bg-gray-100 rounded-2xl overflow-hidden shadow-md">
-            {book.cover_image_url ? (
-              <img src={book.cover_image_url} alt={book.title} className="w-full h-full object-contain bg-slate-50" />
-            ) : (
-              <div className="w-full h-full flex items-center justify-center">
-                <BookOpen className="w-16 h-16 text-gray-300" />
-              </div>
-            )}
+            <BookCoverImage
+              src={book.cover_image_url}
+              alt={book.title}
+              className="w-full h-full bg-slate-50"
+              fit="contain"
+              placeholderClassName="w-16 h-16 text-gray-300"
+            />
           </div>
           {book.page_count && (
             <div className="mt-3 text-center text-sm text-gray-500">{book.page_count} sayfa</div>
