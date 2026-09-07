@@ -108,6 +108,9 @@ export const caBulkUpsertBooks = (books: BulkBookInput[], vendor_id?: string) =>
     books: { id: string; title: string; isbn: string | null; offer_id: string; price_kurus: number; status: string; created: boolean }[];
   }>('books.bulk_upsert', { books, vendor_id, approve_if_priced: true });
 
+/** Görsellerle satır satır kayıt — BulkBookUploadPanel submitBulkBooks kullanır. */
+export { submitBulkBooks } from './commerce/bulkBookUpload';
+
 export const caSeedLgs8Vip = (fields?: { contact_phone?: string; package_price_kurus?: number; prices?: Record<string, { price_kurus?: number; stock_quantity?: number }> }) =>
   post<{
     vendor: CommerceVendor;
