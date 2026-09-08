@@ -364,7 +364,14 @@ export async function updateParentSignContract(body: {
   /** Doluysa şablon yerine bu HTML `merged_html` olarak kaydedilir (yalnız imzalanmamış kayıtta). */
   custom_merged_html?: string;
   /** Taksit satırı ödeme işareti (imzalı veya fiyat sonrası kartlar). */
-  taksit_odeme_update?: { index: number; odendi: boolean; not?: string; odendi_tarihi?: string };
+  taksit_odeme_update?: {
+    index: number;
+    odendi: boolean;
+    not?: string;
+    odendi_tarihi?: string;
+    payment_account_id?: string;
+    force_sync?: boolean;
+  };
   /** Taksit vade tarihleri (YYYY-MM-DD) — ücret/taksit güncellemesinde kullanılır */
   taksit_vadeleri?: string[];
   /** Taksit tutarları — ücret/taksit güncellemesinde kullanılır */
@@ -396,7 +403,14 @@ export async function deleteParentSignContract(id: string): Promise<void> {
 export async function patchParentSignKayitOnly(body: {
   id: string;
   kayit_json_merge?: Record<string, unknown>;
-  taksit_odeme_update?: { index: number; odendi: boolean; not?: string; odendi_tarihi?: string };
+  taksit_odeme_update?: {
+    index: number;
+    odendi: boolean;
+    not?: string;
+    odendi_tarihi?: string;
+    payment_account_id?: string;
+    force_sync?: boolean;
+  };
   taksit_vade_update?: { index: number; vade_tarihi: string };
 }): Promise<ParentSignContractRow> {
   const res = await apiFetch('/api/parent-sign-contracts', {
@@ -407,6 +421,31 @@ export async function patchParentSignKayitOnly(body: {
   const j = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error((j as { error?: string }).error || `API ${res.status}`);
   return (j as { data: ParentSignContractRow }).data;
+}
+
+/** Ağustos+ ödenmiş taksitleri öğrenci ödemelerine aktarır (banka/kart ayrımıyla). */
+export async function syncPaidTaksitToStudentPayments(institutionId?: string) {
+  const res = await apiFetch('/api/parent-sign-contracts', {
+    method: 'POST',
+    headers: JSON_HDR,
+    body: JSON.stringify({
+      action: 'sync_paid_taksit_to_student_payments',
+      institution_id: institutionId || undefined,
+      remap_account: true
+    })
+  });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((j as { error?: string }).error || `API ${res.status}`);
+  return (j as {
+    data: {
+      created: number;
+      updated: number;
+      skipped: number;
+      failed: number;
+      by_type?: { bank: number; credit_card: number };
+      cutoff?: string;
+    };
+  }).data;
 }
 
 export type VeliImzaRegistrationHint = {

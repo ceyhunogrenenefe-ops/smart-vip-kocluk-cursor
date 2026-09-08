@@ -8,6 +8,7 @@ import {
   listInstitutionsForPicker,
   listParentSignContracts,
   patchParentSignKayitOnly,
+  syncPaidTaksitToStudentPayments,
   type InstitutionPickRow,
   type ParentSignContractRow
 } from '../../lib/parentSignApi';
@@ -21,7 +22,22 @@ import {
   type TaksitFlatRow
 } from '../../lib/taksitMuhasebe';
 import { odemeSekliBadgeClass, odemeSekliLabel } from '../../lib/odemeSekli';
-import { AlertTriangle, CalendarDays, CheckCircle2, ChevronRight, ClipboardList, Loader2, RefreshCw } from 'lucide-react';
+import {
+  ACCOUNT_TYPE_LABELS,
+  listPaymentAccounts,
+  type PaymentAccount
+} from '../../lib/studentPaymentTrackerApi';
+import {
+  AlertTriangle,
+  Building2,
+  CalendarDays,
+  CheckCircle2,
+  ChevronRight,
+  ClipboardList,
+  Loader2,
+  RefreshCw,
+  Wallet
+} from 'lucide-react';
 
 export type TahsilatStats = {
   overdueCount: number;
@@ -80,6 +96,17 @@ export function TahsilatTaksitPanel({ compactHeader = false, onStatsChange }: Pr
   const [dueTo, setDueTo] = useState('');
   const [onlyOverdue, setOnlyOverdue] = useState(false);
   const [search, setSearch] = useState('');
+  const [accounts, setAccounts] = useState<PaymentAccount[]>([]);
+  const [syncingPaid, setSyncingPaid] = useState(false);
+  const [payModal, setPayModal] = useState<{
+    contractId: string;
+    index: number;
+    odemeSekli: string;
+    suggestedDate: string;
+    studentLabel: string;
+  } | null>(null);
+  const [payDate, setPayDate] = useState(todayYmdLocal());
+  const [payAccountId, setPayAccountId] = useState('');
 
   useEffect(() => {
     if (!isSuper) return;
@@ -121,6 +148,44 @@ export function TahsilatTaksitPanel({ compactHeader = false, onStatsChange }: Pr
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    let c = false;
+    void (async () => {
+      if (!effectiveInstitutionId) {
+        if (!c) setAccounts([]);
+        return;
+      }
+      try {
+        const acc = await listPaymentAccounts(effectiveInstitutionId);
+        if (!c) setAccounts(acc.data || []);
+      } catch {
+        if (!c) setAccounts([]);
+      }
+    })();
+    return () => {
+      c = true;
+    };
+  }, [effectiveInstitutionId]);
+
+  const bankAccounts = useMemo(
+    () => accounts.filter((a) => (a.account_type || 'bank') === 'bank'),
+    [accounts]
+  );
+  const cardAccounts = useMemo(
+    () => accounts.filter((a) => a.account_type === 'credit_card'),
+    [accounts]
+  );
+
+  const suggestAccountId = useCallback(
+    (odemeSekli: string) => {
+      const preferCard = String(odemeSekli || '').startsWith('kredi_karti');
+      if (preferCard && cardAccounts[0]?.id) return cardAccounts[0].id;
+      if (bankAccounts[0]?.id) return bankAccounts[0].id;
+      return accounts[0]?.id || '';
+    },
+    [accounts, bankAccounts, cardAccounts]
+  );
 
   const flat = useMemo(() => flattenTaksitRows(rows), [rows]);
 
@@ -184,40 +249,95 @@ export function TahsilatTaksitPanel({ compactHeader = false, onStatsChange }: Pr
     );
   }, [flat, search, onlyOverdue, filterMonth, dueFrom, dueTo]);
 
-  const toggle = async (contractId: string, index: number, odendi: boolean, currentPaidDate?: string) => {
-    setBusyKey(`${contractId}:${index}`);
+  const openPayModal = (row: TaksitFlatRow) => {
+    const suggested =
+      row.odendiTarihi && /^\d{4}-\d{2}-\d{2}$/.test(row.odendiTarihi)
+        ? row.odendiTarihi
+        : todayYmdLocal();
+    setPayDate(suggested);
+    setPayAccountId(suggestAccountId(row.odemeSekli));
+    setPayModal({
+      contractId: row.contractId,
+      index: row.taksitIndex,
+      odemeSekli: row.odemeSekli,
+      suggestedDate: suggested,
+      studentLabel: row.ogrenciLabel
+    });
+  };
+
+  const confirmPayModal = async () => {
+    if (!payModal) return;
+    const cleaned = String(payDate).trim().slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(cleaned)) {
+      setMsg('Geçerli bir ödeme tarihi girin (YYYY-MM-DD)');
+      return;
+    }
+    if (!payAccountId) {
+      setMsg('Ödemenin gideceği banka veya kredi kartı hesabını seçin.');
+      return;
+    }
+    setBusyKey(`${payModal.contractId}:${payModal.index}`);
     setMsg(null);
     try {
-      let odendi_tarihi: string | undefined;
-      if (odendi) {
-        const suggested = (currentPaidDate && /^\d{4}-\d{2}-\d{2}$/.test(currentPaidDate)
-          ? currentPaidDate
-          : todayYmdLocal());
-        const entered = window.prompt('Ödeme tarihi (YYYY-MM-DD) — öğrenci ödemelerine bu tarihle işlenir', suggested);
-        if (entered == null) {
-          setBusyKey(null);
-          return;
-        }
-        const cleaned = String(entered).trim().slice(0, 10);
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(cleaned)) {
-          setMsg('Geçerli bir ödeme tarihi girin (YYYY-MM-DD)');
-          setBusyKey(null);
-          return;
-        }
-        odendi_tarihi = cleaned;
-      }
       await patchParentSignKayitOnly({
-        id: contractId,
-        taksit_odeme_update: { index, odendi, odendi_tarihi }
+        id: payModal.contractId,
+        taksit_odeme_update: {
+          index: payModal.index,
+          odendi: true,
+          odendi_tarihi: cleaned,
+          payment_account_id: payAccountId,
+          force_sync: true
+        }
       });
+      setPayModal(null);
       await load();
-      if (odendi) {
-        setMsg(`Ödendi işaretlendi; öğrenci ödemelerine ${odendi_tarihi} tarihiyle işlendi.`);
-      }
+      const accLabel = accounts.find((a) => a.id === payAccountId)?.label || 'hesap';
+      setMsg(`Ödendi · ${cleaned} · ${accLabel} — öğrenci ödemelerine aktarıldı.`);
     } catch (e) {
       setMsg(e instanceof Error ? e.message : 'Güncellenemedi');
     } finally {
       setBusyKey(null);
+    }
+  };
+
+  const toggle = async (row: TaksitFlatRow, odendi: boolean) => {
+    if (odendi) {
+      openPayModal(row);
+      return;
+    }
+    setBusyKey(`${row.contractId}:${row.taksitIndex}`);
+    setMsg(null);
+    try {
+      await patchParentSignKayitOnly({
+        id: row.contractId,
+        taksit_odeme_update: { index: row.taksitIndex, odendi: false }
+      });
+      await load();
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : 'Güncellenemedi');
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
+  const syncAllPaid = async () => {
+    if (!effectiveInstitutionId) {
+      setMsg('Kurum seçin');
+      return;
+    }
+    setSyncingPaid(true);
+    setMsg(null);
+    try {
+      const r = await syncPaidTaksitToStudentPayments(effectiveInstitutionId);
+      const bankN = r.by_type?.bank ?? 0;
+      const cardN = r.by_type?.credit_card ?? 0;
+      setMsg(
+        `Gerçekleşen ödemeler aktarıldı: ${r.created} yeni, ${r.updated} güncellendi (banka ${bankN} · kart ${cardN}). Atlanan ${r.skipped}.`
+      );
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : 'Aktarım başarısız');
+    } finally {
+      setSyncingPaid(false);
     }
   };
 
@@ -243,6 +363,16 @@ export function TahsilatTaksitPanel({ compactHeader = false, onStatsChange }: Pr
             >
               Veli onayı <ChevronRight className="w-4 h-4" />
             </Link>
+            <button
+              type="button"
+              disabled={loading || syncingPaid || !effectiveInstitutionId}
+              onClick={() => void syncAllPaid()}
+              className="inline-flex items-center gap-2 rounded-xl border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-950 hover:bg-emerald-100 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-100 disabled:opacity-50"
+              title="Ağustos 2026 sonrası ödenen taksitleri banka/kart ayrımıyla öğrenci ödemelerine aktarır"
+            >
+              {syncingPaid ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wallet className="w-4 h-4" />}
+              Gerçekleşenleri aktar
+            </button>
             <button
               type="button"
               disabled={loading}
@@ -324,7 +454,13 @@ export function TahsilatTaksitPanel({ compactHeader = false, onStatsChange }: Pr
       ) : null}
 
       {msg ? (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200">
+        <div
+          className={`rounded-lg border px-3 py-2 text-sm ${
+            /aktar|işlendi|Ödendi/i.test(msg) && !/başarısız|Güncellenemedi|girin|seçin/i.test(msg)
+              ? 'border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-100'
+              : 'border-red-200 bg-red-50 text-red-800 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200'
+          }`}
+        >
           {msg}
         </div>
       ) : null}
@@ -460,12 +596,22 @@ export function TahsilatTaksitPanel({ compactHeader = false, onStatsChange }: Pr
                           type="checkbox"
                           checked={x.odendi}
                           disabled={busy}
-                          onChange={(e) => void toggle(x.contractId, x.taksitIndex, e.target.checked, x.odendiTarihi)}
+                          onChange={(e) => void toggle(x, e.target.checked)}
                         />
                         {busy ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
                       </label>
                       {x.odendi && x.odendiTarihi ? (
                         <span className="block text-[10px] text-slate-500 mt-0.5">{formatTrShortDate(x.odendiTarihi)}</span>
+                      ) : null}
+                      {x.odendi ? (
+                        <button
+                          type="button"
+                          className="mt-0.5 text-[10px] font-semibold text-emerald-700 underline-offset-2 hover:underline dark:text-emerald-300"
+                          disabled={busy}
+                          onClick={() => openPayModal(x)}
+                        >
+                          Hesabı güncelle
+                        </button>
                       ) : null}
                     </td>
                     <td className="px-3 py-2 font-mono text-[11px] text-slate-600 dark:text-slate-400">
@@ -481,6 +627,78 @@ export function TahsilatTaksitPanel({ compactHeader = false, onStatsChange }: Pr
           </table>
         </div>
       )}
+
+      {payModal ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-5 shadow-xl dark:border-slate-700 dark:bg-slate-900">
+            <h3 className="text-base font-bold text-slate-900 dark:text-white">Ödemeyi kaydet</h3>
+            <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
+              {payModal.studentLabel} — öğrenci ödemelerine banka/kart hesabına göre işlenir.
+            </p>
+            <label className="mt-4 block text-xs font-semibold text-slate-500">
+              Ödeme tarihi
+              <input
+                type="date"
+                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-950"
+                value={payDate}
+                onChange={(e) => setPayDate(e.target.value)}
+              />
+            </label>
+            <label className="mt-3 block text-xs font-semibold text-slate-500">
+              Hesap (banka / kredi kartı)
+              <select
+                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-950"
+                value={payAccountId}
+                onChange={(e) => setPayAccountId(e.target.value)}
+              >
+                <option value="">Seçin…</option>
+                {bankAccounts.length ? (
+                  <optgroup label={ACCOUNT_TYPE_LABELS.bank}>
+                    {bankAccounts.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.label}
+                        {a.bank_name ? ` · ${a.bank_name}` : ''}
+                      </option>
+                    ))}
+                  </optgroup>
+                ) : null}
+                {cardAccounts.length ? (
+                  <optgroup label={ACCOUNT_TYPE_LABELS.credit_card}>
+                    {cardAccounts.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.label}
+                        {a.bank_name ? ` · ${a.bank_name}` : ''}
+                      </option>
+                    ))}
+                  </optgroup>
+                ) : null}
+              </select>
+            </label>
+            <p className="mt-2 text-[11px] text-slate-500">
+              Öneri: {String(payModal.odemeSekli || '').startsWith('kredi_karti') ? 'kredi kartı' : 'banka'} hesabı
+              {accounts.length === 0 ? ' — önce Öğrenci ödemelerinden hesap ekleyin.' : ''}
+            </p>
+            <div className="mt-5 flex flex-wrap justify-end gap-2">
+              <button
+                type="button"
+                className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-200"
+                onClick={() => setPayModal(null)}
+              >
+                Vazgeç
+              </button>
+              <button
+                type="button"
+                className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+                disabled={Boolean(busyKey)}
+                onClick={() => void confirmPayModal()}
+              >
+                {busyKey ? <Loader2 className="h-4 w-4 animate-spin" /> : <Building2 className="h-4 w-4" />}
+                Kaydet ve aktar
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
