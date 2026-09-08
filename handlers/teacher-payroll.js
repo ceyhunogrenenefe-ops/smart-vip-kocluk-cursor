@@ -559,16 +559,23 @@ async function handleSaveRates(req, res, actor, roleSet) {
     throw error;
   }
 
-  // Eski grup ücreti tablosunu da senkron tut (canlı ders özeti bozulmasın)
-  await supabaseAdmin.from('teacher_group_lesson_rates').upsert(
-    {
-      teacher_id: teacherId,
-      institution_id: institutionId || null,
-      unit_price_tl: money(group) || DEFAULT_RATE,
-      updated_at: new Date().toISOString()
-    },
-    { onConflict: 'teacher_id' }
-  );
+  // Eski grup ücreti tablosu varsa senkron tut (yoksa sessizce atla)
+  try {
+    const { error: legacyErr } = await supabaseAdmin.from('teacher_group_lesson_rates').upsert(
+      {
+        teacher_id: teacherId,
+        institution_id: institutionId || null,
+        unit_price_tl: money(group) || DEFAULT_RATE,
+        updated_at: new Date().toISOString()
+      },
+      { onConflict: 'teacher_id' }
+    );
+    if (legacyErr && !/teacher_group_lesson_rates|does not exist|schema cache|PGRST205/i.test(errorMessage(legacyErr))) {
+      console.warn('[teacher-payroll] legacy rate sync', legacyErr.message);
+    }
+  } catch {
+    /* ignore missing legacy table */
+  }
 
   return res.status(200).json({ data });
 }
