@@ -318,8 +318,12 @@
     const selectedSets = selectedBookSets();
     const selectedSetIds = selectedBookSetIds();
     const kitaplarText = selectedSets.length
-      ? selectedSets.map((s) => s.name + ' — ' + (s.kitap_icerigi || '')).join(' | ')
-      : (setsRequireSelection ? '' : 'Kitap siparişi');
+      ? selectedSets.map((s) => {
+          const detail = String(s.kitap_icerigi || '').trim();
+          const useful = detail && detail !== '.' && detail !== '-' && !/^kitap\s*sipari[sş]i$/i.test(detail);
+          return useful ? (s.name + ' — ' + detail) : s.name;
+        }).join(' | ')
+      : (setsRequireSelection ? '' : '');
     if (setsRequireSelection && !selectedSets.length) {
       check('kitapset');
       const firstBox = kitapSetListEl.querySelector('input[name="kitapset-item"]');

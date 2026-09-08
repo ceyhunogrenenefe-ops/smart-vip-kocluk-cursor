@@ -46,23 +46,38 @@ describe('commerce-kitap-form-import helpers', () => {
     expect(parsed.contents).toEqual([]);
   });
 
-  it('resolves set lines from kitap_set_ids', () => {
+  it('ignores junk kitap_icerigi placeholders like "."', () => {
+    const parsed = parseFormImportLine('LGS Deneme — .');
+    expect(parsed.setName).toBe('LGS Deneme');
+    expect(parsed.contents).toEqual([]);
+    const snap = parseFormImportLine('LGS Deneme (1 kitap): .');
+    expect(snap.setName).toBe('LGS Deneme');
+    expect(snap.contents).toEqual([]);
+  });
+
+  it('treats Kitap siparişi as placeholder line', () => {
+    const parsed = parseFormImportLine('Kitap siparişi');
+    expect(parsed.setName).toBe('Kitap seti (form)');
+    expect(parsed.contents).toEqual([]);
+  });
+
+  it('prefers set ids over placeholder kitaplar text', () => {
     const setRowsById = new Map([
       [
         'set-1',
         {
           id: 'set-1',
-          name: 'LGS Deneme',
-          kitap_icerigi: 'Türkçe, Matematik, Fen',
+          name: 'VIP 8 Set',
+          kitap_icerigi: 'Türkçe, Matematik',
         },
       ],
     ]);
     const lines = resolveFormImportSetLines(
-      { kitap_set_ids: ['set-1'], kitaplar: null },
+      { kitap_set_ids: ['set-1'], kitaplar: 'Kitap siparişi' },
       setRowsById
     );
-    expect(lines[0].setName).toBe('LGS Deneme');
-    expect(lines[0].contents.map((c) => c.title)).toEqual(['Türkçe', 'Matematik', 'Fen']);
+    expect(lines[0].setName).toBe('VIP 8 Set');
+    expect(lines[0].contents.map((c) => c.title)).toEqual(['Türkçe', 'Matematik']);
   });
 
   it('attaches package_contents for form import orders', () => {
@@ -73,6 +88,17 @@ describe('commerce-kitap-form-import helpers', () => {
     );
     expect(items[0].package_name).toBe('Set X');
     expect(items[0].package_contents).toHaveLength(2);
+  });
+
+  it('cleans junk snapshot titles for form imports without inventing books', () => {
+    const notes = `${FORM_IMPORT_MARKER}11111111-2222-3333-4444-555555555555`;
+    const items = attachFormImportPackageContents(
+      [{ title_snapshot: 'LGS Deneme (1 kitap): .', quantity: 1 }],
+      notes
+    );
+    expect(items[0].package_name).toBe('LGS Deneme');
+    expect(items[0].title_snapshot).toBe('LGS Deneme');
+    expect(items[0].package_contents).toBeNull();
   });
 
   it('splits comma-separated kitap detail', () => {

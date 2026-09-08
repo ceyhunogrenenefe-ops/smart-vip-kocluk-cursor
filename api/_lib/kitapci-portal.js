@@ -136,7 +136,19 @@ function orderSetIds(order) {
 function formatSetRowLabel(row) {
   if (!row?.name) return '';
   const detail = String(row.kitap_icerigi || '').trim();
-  return detail ? `${row.name} — ${detail}` : String(row.name).trim();
+  if (!detail || detail === '.' || detail === '-' || detail === '—' || detail === '–') {
+    return String(row.name).trim();
+  }
+  if (/^kitap\s*sipari[sş]i$/i.test(detail)) return String(row.name).trim();
+  return `${row.name} — ${detail}`;
+}
+
+function isPlaceholderKitaplar(raw) {
+  const t = String(raw || '').trim();
+  if (!t) return true;
+  if (/^kitap\s*sipari[sş]i$/i.test(t)) return true;
+  if (/^kitap\s*seti\s*\(form\)$/i.test(t)) return true;
+  return false;
 }
 
 async function loadSetLabelsById(setIds) {
@@ -181,9 +193,10 @@ function kitaplarFromFormPayload(order) {
 async function enrichPortalOrdersKitaplar(orders) {
   const allSetIds = [];
   for (const order of orders || []) {
-    if (String(order?.kitaplar || '').trim()) continue;
+    const existing = String(order?.kitaplar || '').trim();
+    if (existing && !isPlaceholderKitaplar(existing)) continue;
     const fromForm = kitaplarFromFormPayload(order);
-    if (fromForm) {
+    if (fromForm && !isPlaceholderKitaplar(fromForm)) {
       order.kitaplar = fromForm;
       continue;
     }
@@ -191,9 +204,10 @@ async function enrichPortalOrdersKitaplar(orders) {
   }
   const setLabelById = await loadSetLabelsById(allSetIds);
   for (const order of orders || []) {
-    if (!String(order?.kitaplar || '').trim()) {
+    const existing = String(order?.kitaplar || '').trim();
+    if (!existing || isPlaceholderKitaplar(existing)) {
       const resolved = kitaplarFromSetIds(order, setLabelById) || kitaplarFromFormPayload(order);
-      if (resolved) order.kitaplar = resolved;
+      if (resolved && !isPlaceholderKitaplar(resolved)) order.kitaplar = resolved;
     }
     const ids = orderSetIds(order);
     if (!Array.isArray(order.kitap_set_ids)) order.kitap_set_ids = ids;

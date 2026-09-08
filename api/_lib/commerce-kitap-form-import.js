@@ -37,26 +37,42 @@ export function mapFormStatusToOrderStatus(formStatus) {
 
 export function parseKitapLineTitles(kitaplarText) {
   const raw = String(kitaplarText || '').trim();
-  if (!raw) return ['Kitap seti (form)'];
+  if (!raw || isPlaceholderKitaplar(raw)) return ['Kitap seti (form)'];
   return raw
     .split(/\s*\|\s*/)
     .map((part) => part.trim())
     .filter(Boolean);
 }
 
+export function isUsefulKitapDetail(raw) {
+  const d = String(raw || '').trim();
+  if (!d) return false;
+  if (d === '.' || d === '-' || d === '—' || d === '–') return false;
+  if (/^kitap\s*sipari[sş]i$/i.test(d)) return false;
+  return true;
+}
+
+export function isPlaceholderKitaplar(raw) {
+  const t = String(raw || '').trim();
+  if (!t) return true;
+  if (/^kitap\s*sipari[sş]i$/i.test(t)) return true;
+  if (/^kitap\s*seti\s*\(form\)$/i.test(t)) return true;
+  return false;
+}
+
 export function splitKitapDetail(detail) {
   const d = String(detail || '').trim();
-  if (!d) return [];
-  const byComma = d.split(/\s*,\s*/).map((s) => s.trim()).filter(Boolean);
+  if (!isUsefulKitapDetail(d)) return [];
+  const byComma = d.split(/\s*,\s*/).map((s) => s.trim()).filter((p) => isUsefulKitapDetail(p));
   if (byComma.length > 1 && byComma.every((p) => p.length <= 120)) return byComma;
-  const bySemi = d.split(/\s*;\s*/).map((s) => s.trim()).filter(Boolean);
+  const bySemi = d.split(/\s*;\s*/).map((s) => s.trim()).filter((p) => isUsefulKitapDetail(p));
   if (bySemi.length > 1 && bySemi.every((p) => p.length <= 120)) return bySemi;
   return [d];
 }
 
 export function parseFormImportLine(line) {
   const raw = String(line || '').trim();
-  if (!raw || raw === '[object Promise]') {
+  if (!raw || raw === '[object Promise]' || isPlaceholderKitaplar(raw)) {
     return { setName: 'Kitap seti (form)', contents: [] };
   }
   const snapMatch = raw.match(/^(.+?)\s*\(\d+\s*kitap\)\s*:\s*(.+)$/i);
@@ -65,7 +81,7 @@ export function parseFormImportLine(line) {
     const books = snapMatch[2]
       .split(/\s*;\s*/)
       .map((t) => t.replace(/\s*\[[^\]]+\]\s*(×\d+)?$/i, '').trim())
-      .filter(Boolean)
+      .filter((t) => isUsefulKitapDetail(t))
       .map((title) => ({ title, quantity: 1 }));
     return { setName, contents: books };
   }
@@ -84,14 +100,28 @@ export function attachFormImportPackageContents(items, orderNotes) {
   if (!formImportNoteId(orderNotes)) return items || [];
   return (items || []).map((it) => {
     if (it?.package_id) return it;
-    if (Array.isArray(it?.package_contents) && it.package_contents.length) return it;
+    if (Array.isArray(it?.package_contents) && it.package_contents.length) {
+      const cleaned = it.package_contents.filter((c) => isUsefulKitapDetail(c?.title));
+      if (cleaned.length) return { ...it, package_contents: cleaned };
+    }
     const parsed = parseFormImportLine(it?.title_snapshot);
-    if (!parsed.contents.length) return it;
-    return {
-      ...it,
-      package_name: parsed.setName,
-      package_contents: parsed.contents,
-    };
+    if (parsed.contents.length) {
+      return {
+        ...it,
+        package_name: parsed.setName,
+        package_contents: parsed.contents,
+      };
+    }
+    // «Set (1 kitap): .» / «Kitap siparişi» → satıcıya en azından temiz set adı
+    if (parsed.setName && parsed.setName !== 'Kitap seti (form)') {
+      return {
+        ...it,
+        package_name: parsed.setName,
+        package_contents: null,
+        title_snapshot: parsed.setName,
+      };
+    }
+    return it;
   });
 }
 
@@ -127,18 +157,23 @@ async function loadSetRowsById(setIds) {
 }
 
 function resolveKitaplarForRow(row, setRowsById) {
-  if (String(row.kitaplar || '').trim()) return String(row.kitaplar).trim();
   const ids = collectSetIdsFromFormRow(row);
-  if (!ids.length) return null;
-  const parts = ids
-    .map((id) => setRowsById.get(String(id)))
-    .filter(Boolean)
-    .map((setRow) => {
-      const detail = String(setRow.kitap_icerigi || '').trim();
-      return detail ? `${setRow.name} — ${detail}` : String(setRow.name || '').trim();
-    })
-    .filter(Boolean);
-  return parts.length ? parts.join(' | ') : null;
+  if (ids.length) {
+    const parts = ids
+      .map((id) => setRowsById.get(String(id)))
+      .filter(Boolean)
+      .map((setRow) => {
+        const detail = String(setRow.kitap_icerigi || '').trim();
+        return isUsefulKitapDetail(detail)
+          ? `${setRow.name} — ${detail}`
+          : String(setRow.name || '').trim();
+      })
+      .filter(Boolean);
+    if (parts.length) return parts.join(' | ');
+  }
+  const raw = String(row.kitaplar || '').trim();
+  if (raw && !isPlaceholderKitaplar(raw)) return raw;
+  return null;
 }
 
 export function resolveFormImportSetLines(formRow, setRowsById) {
@@ -267,8 +302,13 @@ async function ensureFormImportBook(vendorId, actorSub) {
 function itemRowsNeedRepair(items) {
   if (!items?.length) return true;
   return items.some((i) => {
-    const t = String(i.title_snapshot || '');
-    return t.includes('[object Promise]') || t === 'Kitap seti (form)';
+    const t = String(i.title_snapshot || '').trim();
+    if (!t) return true;
+    if (t.includes('[object Promise]')) return true;
+    if (isPlaceholderKitaplar(t)) return true;
+    if (/\(\d+\s*kitap\)\s*:\s*\.?\s*$/i.test(t)) return true;
+    if (/\s[—–-]\s*\.?\s*$/.test(t)) return true;
+    return false;
   });
 }
 

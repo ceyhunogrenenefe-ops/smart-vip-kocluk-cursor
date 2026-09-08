@@ -65,7 +65,10 @@ function packageDisplayName(item) {
 }
 
 export function formatSellerItemLabel(item) {
-  const contents = Array.isArray(item?.package_contents) ? item.package_contents : [];
+  const contents = (Array.isArray(item?.package_contents) ? item.package_contents : []).filter((c) => {
+    const t = String(c?.title || '').trim();
+    return t && t !== '.' && t !== '-' && !/^kitap\s*sipari[sş]i$/i.test(t);
+  });
   if (contents.length) {
     const setName = packageDisplayName(item);
     const setQty = Math.max(1, Number(item.quantity) || 1);
@@ -73,7 +76,11 @@ export function formatSellerItemLabel(item) {
     return `${head} → ${contents.map(formatContentBook).join(' · ')}`;
   }
   const qty = Math.max(1, Number(item?.quantity) || 1);
-  const title = String(item?.title_snapshot || item?.title || 'Kitap').trim();
+  let title = String(item?.title_snapshot || item?.title || 'Kitap').trim();
+  // Form aktarımında «(1 kitap): .» gibi boş içerik kalıntısını temizle
+  title = title.replace(/\s*\(\d+\s*kitap\)\s*:\s*\.?\s*$/i, '').trim() || title;
+  title = title.replace(/\s[—–-]\s*\.?\s*$/g, '').trim() || title;
+  if (/^kitap\s*sipari[sş]i$/i.test(title)) title = 'Kitap siparişi';
   const isbn = String(item?.isbn_snapshot || item?.isbn || '').trim();
   const label = isbn && !title.includes(isbn) ? `${title} [${isbn}]` : title;
   return qty > 1 ? `${label} × ${qty}` : label;

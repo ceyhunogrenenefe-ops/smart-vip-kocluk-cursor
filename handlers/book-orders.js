@@ -214,6 +214,30 @@ function buildOrderAdminPatch(body) {
   return patch;
 }
 
+/** Boş / nokta placeholder — kitapçıya gerçek set adı+içerik gitsin. */
+function isUsefulKitapDetail(raw) {
+  const d = String(raw || '').trim();
+  if (!d) return false;
+  if (d === '.' || d === '-' || d === '—' || d === '–') return false;
+  if (/^kitap\s*sipari[sş]i$/i.test(d)) return false;
+  return true;
+}
+
+function isPlaceholderKitaplar(raw) {
+  const t = String(raw || '').trim();
+  if (!t) return true;
+  if (/^kitap\s*sipari[sş]i$/i.test(t)) return true;
+  if (/^kitap\s*seti\s*\(form\)$/i.test(t)) return true;
+  return false;
+}
+
+function formatSetKitapLabel(name, kitapIcerigi) {
+  const setName = String(name || '').trim();
+  if (!setName) return null;
+  const detail = String(kitapIcerigi || '').trim();
+  return isUsefulKitapDetail(detail) ? `${setName} — ${detail}` : setName;
+}
+
 async function resolveKitaplarFromSetId(setId) {
   const id = String(setId || '').trim();
   if (!id) return null;
@@ -223,8 +247,7 @@ async function resolveKitaplarFromSetId(setId) {
     .eq('id', id)
     .maybeSingle();
   if (!setRow?.name) return null;
-  const detail = String(setRow.kitap_icerigi || '').trim();
-  return detail ? `${setRow.name} — ${detail}` : setRow.name;
+  return formatSetKitapLabel(setRow.name, setRow.kitap_icerigi);
 }
 
 async function resolveKitaplarFromSetIds(setIds) {
@@ -237,11 +260,23 @@ async function resolveKitaplarFromSetIds(setIds) {
   if (!Array.isArray(rows) || !rows.length) return null;
   const byId = new Map(rows.map((r) => [String(r.id), r]));
   const ordered = ids.map((id) => byId.get(String(id))).filter(Boolean);
-  const parts = ordered.map((row) => {
-    const detail = String(row.kitap_icerigi || '').trim();
-    return detail ? `${row.name} — ${detail}` : String(row.name || '').trim();
-  }).filter(Boolean);
+  const parts = ordered
+    .map((row) => formatSetKitapLabel(row.name, row.kitap_icerigi))
+    .filter(Boolean);
   return parts.length ? parts.join(' | ') : null;
+}
+
+/** Set id varsa sunucu etiketini kullan; istemci «Kitap siparişi» placeholder'ını ez. */
+async function resolveKitaplarForInsert(parsed) {
+  const ids = normalizeIdArray(parsed?.kitap_set_ids);
+  if (!ids.length && parsed?.kitap_set_id) ids.push(String(parsed.kitap_set_id).trim());
+  if (ids.length) {
+    const fromSets = await resolveKitaplarFromSetIds(ids);
+    if (fromSets) return fromSets;
+  }
+  const raw = String(parsed?.kitaplar || '').trim();
+  if (raw && !isPlaceholderKitaplar(raw)) return raw;
+  return null;
 }
 
 function parsePublicOrderBody(body) {
@@ -373,17 +408,11 @@ export default async function handler(req, res) {
     }
 
     try {
-      let kitaplar = parsed.kitaplar;
-      if (!kitaplar && parsed.kitap_set_ids.length) {
-        kitaplar = await resolveKitaplarFromSetIds(parsed.kitap_set_ids);
-      }
-      if (!kitaplar && parsed.kitap_set_id) {
-        kitaplar = await resolveKitaplarFromSetId(parsed.kitap_set_id);
-      }
+      const kitaplar = (await resolveKitaplarForInsert(parsed)) || 'Kitap siparişi';
       const order = await insertBookOrder({
         institution_id,
         ...parsed,
-        kitaplar: kitaplar || parsed.kitaplar || 'Kitap siparişi',
+        kitaplar,
         source: 'form',
         form_payload: body,
         status: 'pending',
@@ -488,17 +517,11 @@ export default async function handler(req, res) {
     }
 
     try {
-      let kitaplar = parsed.kitaplar;
-      if (!kitaplar && parsed.kitap_set_ids.length) {
-        kitaplar = await resolveKitaplarFromSetIds(parsed.kitap_set_ids);
-      }
-      if (!kitaplar && parsed.kitap_set_id) {
-        kitaplar = await resolveKitaplarFromSetId(parsed.kitap_set_id);
-      }
+      const kitaplar = (await resolveKitaplarForInsert(parsed)) || 'Kitap siparişi';
       const order = await insertBookOrder({
         institution_id,
         ...parsed,
-        kitaplar: kitaplar || parsed.kitaplar || 'Kitap siparişi',
+        kitaplar,
         source: 'admin',
         status: 'pending',
         whatsapp_status: 'awaiting_approval'
