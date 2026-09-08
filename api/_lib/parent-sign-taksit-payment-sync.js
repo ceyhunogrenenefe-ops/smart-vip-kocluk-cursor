@@ -1,6 +1,7 @@
 /**
  * Parent-sign taksit ↔ student_payment_records senkronu.
  * Not alanı: parent_sign_taksit:{contractId}:{index}
+ * Hesap: payment_account_id (banka / kredi kartı ayrımı)
  */
 import { supabaseAdmin } from './supabase-admin.js';
 import { errorMessage } from './error-msg.js';
@@ -30,14 +31,87 @@ export function parentSignTaksitNoteKey(contractId, index) {
   return `${NOTE_PREFIX}${String(contractId)}:${Number(index)}`;
 }
 
+export function preferredAccountTypeFromOdemeSekli(sekli) {
+  const s = String(sekli || '').trim();
+  if (s === 'kredi_karti_tek' || s === 'kredi_karti_otomatik' || s.startsWith('kredi_karti')) {
+    return 'credit_card';
+  }
+  return 'bank';
+}
+
 function money(n) {
   const x = Number(n);
   return Number.isFinite(x) ? Math.round(x * 100) / 100 : 0;
 }
 
+function resolveOdemeSekli(contract, card) {
+  const fromCard = String(card?.odeme_sekli || '').trim();
+  if (fromCard) return fromCard;
+  const kj = contract?.kayit_formu_json;
+  if (kj && typeof kj === 'object') {
+    const fromJson = String(kj.odeme_sekli || '').trim();
+    if (fromJson) return fromJson;
+  }
+  return String(contract?.odeme_sekli || '').trim() || 'aylik_taksit';
+}
+
+async function pickDefaultAccountId(institutionId, accountType) {
+  const types = accountType === 'credit_card' ? ['credit_card', 'bank'] : ['bank', 'credit_card'];
+  for (const t of types) {
+    try {
+      let aq = supabaseAdmin
+        .from('payment_accounts')
+        .select('id, account_type')
+        .eq('active', true)
+        .eq('account_type', t)
+        .order('sort_order', { ascending: true })
+        .order('label', { ascending: true })
+        .limit(1);
+      if (institutionId) aq = aq.or(`institution_id.eq.${institutionId},institution_id.is.null`);
+      const { data: accs } = await aq;
+      if (accs?.[0]?.id) return accs[0].id;
+    } catch {
+      /* try next */
+    }
+  }
+  return null;
+}
+
+async function validateAccountId(institutionId, paymentAccountId) {
+  const id = String(paymentAccountId || '').trim();
+  if (!id) return null;
+  try {
+    let q = supabaseAdmin
+      .from('payment_accounts')
+      .select('id, account_type, active')
+      .eq('id', id)
+      .maybeSingle();
+    const { data } = await q;
+    if (!data?.id || data.active === false) return null;
+    return data.id;
+  } catch {
+    return null;
+  }
+}
+
+async function accountTypeOf(accountId) {
+  if (!accountId) return null;
+  try {
+    const { data } = await supabaseAdmin
+      .from('payment_accounts')
+      .select('account_type')
+      .eq('id', accountId)
+      .maybeSingle();
+    return data?.account_type || null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Taksit ödendi/ödenmedi değişince öğrenci ödemeleri kaydını güncelle.
- * paidAt: YYYY-MM-DD (ödeme tarihi) — ödendiğinde zorunlu anlamlı.
+ * paidAt: YYYY-MM-DD — ödendiğinde zorunlu anlamlı.
+ * paymentAccountId: banka / kredi kartı hesabı (yoksa ödeme şekline göre seçilir)
  */
 export async function syncParentSignTaksitToStudentPayment({
   contract,
@@ -45,7 +119,9 @@ export async function syncParentSignTaksitToStudentPayment({
   card,
   paid,
   paidAt,
-  actorSub
+  actorSub,
+  paymentAccountId,
+  remapAccount = false
 }) {
   const contractId = String(contract?.id || '').trim();
   if (!contractId) return { ok: false, reason: 'no_contract' };
@@ -74,26 +150,12 @@ export async function syncParentSignTaksitToStudentPayment({
 
   const studentId = String(contract.student_id || '').trim() || null;
   const institutionId = contract.institution_id || null;
-
-  let defaultAccountId = null;
-  try {
-    let aq = supabaseAdmin
-      .from('payment_accounts')
-      .select('id')
-      .eq('active', true)
-      .eq('account_type', 'bank')
-      .order('sort_order', { ascending: true })
-      .limit(1);
-    if (institutionId) aq = aq.or(`institution_id.eq.${institutionId},institution_id.is.null`);
-    const { data: accs } = await aq;
-    defaultAccountId = accs?.[0]?.id || null;
-  } catch {
-    defaultAccountId = null;
-  }
+  const odemeSekli = resolveOdemeSekli(contract, card);
+  const preferredType = preferredAccountTypeFromOdemeSekli(odemeSekli);
 
   let findQ = supabaseAdmin
     .from('student_payment_records')
-    .select('id, notes')
+    .select('id, notes, payment_account_id')
     .eq('notes', noteKey)
     .limit(1);
   let { data: foundRows, error: fe } = await findQ;
@@ -104,15 +166,16 @@ export async function syncParentSignTaksitToStudentPayment({
     throw fe;
   }
   let existingId = foundRows?.[0]?.id || null;
+  let existingAccountId = foundRows?.[0]?.payment_account_id || null;
 
   if (!existingId) {
-    // Eski kayıtlar: notes içinde anahtar geçenler
     const { data: loose } = await supabaseAdmin
       .from('student_payment_records')
-      .select('id, notes')
+      .select('id, notes, payment_account_id')
       .ilike('notes', `%${noteKey}%`)
       .limit(5);
     existingId = loose?.[0]?.id || null;
+    existingAccountId = loose?.[0]?.payment_account_id || null;
   }
 
   if (!paid) {
@@ -133,7 +196,6 @@ export async function syncParentSignTaksitToStudentPayment({
   // Ağustos 2026 öncesi ödemeler senkronlanmaz (manuel girilmiş kayıtlar korunur)
   if (paidYmd < TAKSIT_PAYMENT_SYNC_FROM) {
     if (existingId) {
-      // Yanlışlıkla oluşturulmuş otomatik kayıtları kaldır
       const { data: ex } = await supabaseAdmin
         .from('student_payment_records')
         .select('id, notes, created_at')
@@ -147,13 +209,28 @@ export async function syncParentSignTaksitToStudentPayment({
     return { ok: true, skipped: true, reason: 'before_august_2026' };
   }
 
+  const fromCardAccount =
+    String(paymentAccountId || card?.odeme_hesap_id || card?.payment_account_id || '').trim() || null;
+  let resolvedAccountId = await validateAccountId(institutionId, fromCardAccount);
+
+  if (!resolvedAccountId && existingAccountId && !remapAccount) {
+    const existingType = await accountTypeOf(existingAccountId);
+    if (existingType === preferredType) {
+      resolvedAccountId = existingAccountId;
+    }
+  }
+
+  if (!resolvedAccountId) {
+    resolvedAccountId = await pickDefaultAccountId(institutionId, preferredType);
+  }
+
   const row = {
     institution_id: institutionId,
     student_id: studentId,
     external_student_name: studentId ? null : ogrenci || 'Öğrenci',
     class_level: String(contract.sinif || '').trim() || null,
     payment_type: 'donem_kayit',
-    payment_account_id: defaultAccountId,
+    payment_account_id: resolvedAccountId,
     title,
     amount_total: amount > 0 ? amount : money(card?.amount),
     amount_paid: amount > 0 ? amount : money(card?.amount),
@@ -167,7 +244,6 @@ export async function syncParentSignTaksitToStudentPayment({
     updated_at: new Date().toISOString()
   };
 
-  // Tutar 0 ise yine de oluştur (yönetici sonra düzeltsin) — ama tutarı sözleşmeden dene
   if (!row.amount_total || row.amount_total <= 0) {
     const fromContract = money(contract.ucret);
     const taksitN = Math.max(1, Number(contract.taksit_sayisi) || 1);
@@ -186,7 +262,13 @@ export async function syncParentSignTaksitToStudentPayment({
       .select('id')
       .maybeSingle();
     if (error) throw error;
-    return { ok: true, id: data?.id || existingId, updated: true };
+    return {
+      ok: true,
+      id: data?.id || existingId,
+      updated: true,
+      payment_account_id: resolvedAccountId,
+      account_type: preferredType
+    };
   }
 
   const { data, error } = await supabaseAdmin
@@ -198,7 +280,13 @@ export async function syncParentSignTaksitToStudentPayment({
     .select('id')
     .maybeSingle();
   if (error) throw error;
-  return { ok: true, id: data?.id || null, created: true };
+  return {
+    ok: true,
+    id: data?.id || null,
+    created: true,
+    payment_account_id: resolvedAccountId,
+    account_type: preferredType
+  };
 }
 
 /**
@@ -238,8 +326,14 @@ export async function cleanupPreAugustAutoTaksitPayments({ institutionId } = {})
 
 /**
  * Kurumdaki ödenmiş taksit kartlarını öğrenci ödemelerine aktarır (yalnızca Ağustos+).
+ * remapAccount=true: ödeme şekline göre banka/kart hesabını yeniden atar.
  */
-export async function backfillPaidTaksitToStudentPayments({ institutionId, actorSub, limit = 300 }) {
+export async function backfillPaidTaksitToStudentPayments({
+  institutionId,
+  actorSub,
+  limit = 300,
+  remapAccount = true
+} = {}) {
   let q = supabaseAdmin
     .from('parent_sign_contracts')
     .select(
@@ -255,6 +349,7 @@ export async function backfillPaidTaksitToStudentPayments({ institutionId, actor
   let updated = 0;
   let skipped = 0;
   let failed = 0;
+  const byType = { bank: 0, credit_card: 0 };
   const errors = [];
 
   for (const contract of data || []) {
@@ -279,12 +374,20 @@ export async function backfillPaidTaksitToStudentPayments({ institutionId, actor
           card,
           paid: true,
           paidAt,
-          actorSub
+          actorSub,
+          paymentAccountId: card.odeme_hesap_id || card.payment_account_id || null,
+          remapAccount
         });
         if (res?.skipped) skipped += 1;
-        else if (res?.created) created += 1;
-        else if (res?.updated || res?.ok) updated += 1;
-        else failed += 1;
+        else if (res?.created) {
+          created += 1;
+          if (res.account_type === 'credit_card') byType.credit_card += 1;
+          else byType.bank += 1;
+        } else if (res?.updated || res?.ok) {
+          updated += 1;
+          if (res.account_type === 'credit_card') byType.credit_card += 1;
+          else byType.bank += 1;
+        } else failed += 1;
       } catch (e) {
         failed += 1;
         if (errors.length < 8) errors.push(errorMessage(e));
@@ -292,5 +395,14 @@ export async function backfillPaidTaksitToStudentPayments({ institutionId, actor
     }
   }
 
-  return { ok: true, created, updated, skipped, failed, errors, cutoff: TAKSIT_PAYMENT_SYNC_FROM };
+  return {
+    ok: true,
+    created,
+    updated,
+    skipped,
+    failed,
+    by_type: byType,
+    errors,
+    cutoff: TAKSIT_PAYMENT_SYNC_FROM
+  };
 }

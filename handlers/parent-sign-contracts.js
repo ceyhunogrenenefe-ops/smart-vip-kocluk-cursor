@@ -32,7 +32,8 @@ import { notifyVeliSignReady } from '../api/_lib/veli-sign-ready-notify.js';
 import {
   istanbulYmd,
   syncParentSignTaksitToStudentPayment,
-  cleanupPreAugustAutoTaksitPayments
+  cleanupPreAugustAutoTaksitPayments,
+  backfillPaidTaksitToStudentPayments
 } from '../api/_lib/parent-sign-taksit-payment-sync.js';
 
 const ODEME_SEKLI_SET = new Set(['aylik_taksit', 'kredi_karti_tek', 'kredi_karti_otomatik']);
@@ -1064,11 +1065,18 @@ export default async function handler(req, res) {
         const todayStr = istanbulYmd();
         const paidDateRaw = String(mergeTak.odendi_tarihi || '').trim().slice(0, 10);
         const paidDate = paid ? (/^\d{4}-\d{2}-\d{2}$/.test(paidDateRaw) ? paidDateRaw : todayStr) : '';
+        const paymentAccountId = String(
+          mergeTak.payment_account_id || mergeTak.odeme_hesap_id || ''
+        ).trim();
+        const forceSync = Boolean(mergeTak.force_sync);
         tk[idx] = {
           ...cur,
           odendi: paid,
           odendi_tarihi: paidDate,
-          odeme_notu: mergeTak.not != null ? String(mergeTak.not).slice(0, 200) : String(cur.odeme_notu || '')
+          odeme_notu: mergeTak.not != null ? String(mergeTak.not).slice(0, 200) : String(cur.odeme_notu || ''),
+          odeme_hesap_id: paid
+            ? paymentAccountId || String(cur.odeme_hesap_id || '').trim() || null
+            : null
         };
         kjM.taksit_kartlari = tk;
         const nowM = new Date().toISOString();
@@ -1080,9 +1088,10 @@ export default async function handler(req, res) {
           .single();
         if (uErrM) throw uErrM;
 
-        // Yalnızca yeni ödeme işaretinde öğrenci ödemesine aktar (geriye dönük backfill yok)
+        // Yeni ödeme veya hesap/aktarım güncellemesinde öğrenci ödemesine yaz
         let paymentSync = null;
-        if (paid && !wasPaidBefore) {
+        const shouldSyncPaid = paid && (!wasPaidBefore || paymentAccountId || forceSync);
+        if (shouldSyncPaid) {
           try {
             paymentSync = await syncParentSignTaksitToStudentPayment({
               contract: { ...existing, kayit_formu_json: kjM },
@@ -1090,7 +1099,9 @@ export default async function handler(req, res) {
               card: tk[idx],
               paid: true,
               paidAt: paidDate || todayStr,
-              actorSub: String(actor?.sub || actor?.id || '') || null
+              actorSub: String(actor?.sub || actor?.id || '') || null,
+              paymentAccountId: paymentAccountId || tk[idx].odeme_hesap_id || null,
+              remapAccount: Boolean(paymentAccountId) || forceSync
             });
           } catch (syncErr) {
             console.warn(
@@ -1099,9 +1110,11 @@ export default async function handler(req, res) {
             );
             paymentSync = { ok: false, reason: syncErr instanceof Error ? syncErr.message : 'sync_failed' };
           }
-          void notifyTaksitMarkedPaid({ ...existing, kayit_formu_json: kjM }, idx, wasPaidBefore).catch((e) => {
-            console.warn('[parent-sign-contracts] taksit paid whatsapp', e instanceof Error ? e.message : String(e));
-          });
+          if (!wasPaidBefore) {
+            void notifyTaksitMarkedPaid({ ...existing, kayit_formu_json: kjM }, idx, wasPaidBefore).catch((e) => {
+              console.warn('[parent-sign-contracts] taksit paid whatsapp', e instanceof Error ? e.message : String(e));
+            });
+          }
         } else if (!paid && wasPaidBefore) {
           // Ödeme geri alındıysa bağlı öğrenci ödeme satırını temizle
           try {
@@ -1398,6 +1411,31 @@ export default async function handler(req, res) {
           return res.status(200).json({ data: result });
         } catch (e) {
           console.error('[parent-sign-contracts cleanup_pre_august]', errorMessage(e), e);
+          return res.status(500).json({ error: errorMessage(e) });
+        }
+      }
+
+      if (
+        postAction === 'sync_paid_taksit_to_student_payments' ||
+        postAction === 'backfill_paid_taksit_payments'
+      ) {
+        if (role !== 'super_admin' && role !== 'admin') {
+          return res.status(403).json({ error: 'forbidden' });
+        }
+        let instId = resolveReadInstitutionId(actor, body.institution_id || req.query?.institution_id);
+        if (!instId && role === 'admin') instId = actor.institution_id || null;
+        if (role === 'admin' && instId && !hasInstitutionAccess(actor, instId)) {
+          return res.status(403).json({ error: 'forbidden' });
+        }
+        try {
+          const result = await backfillPaidTaksitToStudentPayments({
+            institutionId: instId || null,
+            actorSub: String(actor?.sub || actor?.id || '') || null,
+            remapAccount: body.remap_account !== false
+          });
+          return res.status(200).json({ data: result });
+        } catch (e) {
+          console.error('[parent-sign-contracts sync_paid_taksit]', errorMessage(e), e);
           return res.status(500).json({ error: errorMessage(e) });
         }
       }

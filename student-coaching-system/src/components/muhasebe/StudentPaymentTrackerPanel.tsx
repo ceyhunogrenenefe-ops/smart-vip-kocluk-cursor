@@ -362,6 +362,49 @@ export default function StudentPaymentTrackerPanel() {
 
   const hasDateRange = Boolean(dueFrom || dueTo || filterMonth || onlyOverdue);
 
+  const accountBuckets = useMemo(() => {
+    const byId = new Map<
+      string,
+      { id: string; label: string; rows: StudentPaymentRecord[]; paidSum: number; totalSum: number }
+    >();
+    for (const a of channelAccounts) {
+      byId.set(a.id, {
+        id: a.id,
+        label: a.label,
+        rows: [],
+        paidSum: 0,
+        totalSum: 0
+      });
+    }
+    const unassigned = {
+      id: '__null__',
+      label: 'Hesap seçilmemiş',
+      rows: [] as StudentPaymentRecord[],
+      paidSum: 0,
+      totalSum: 0
+    };
+    for (const r of rows) {
+      const key = r.payment_account_id || '__null__';
+      const bucket =
+        key === '__null__'
+          ? unassigned
+          : byId.get(key) || {
+              id: key,
+              label: r.account_label || 'Hesap',
+              rows: [],
+              paidSum: 0,
+              totalSum: 0
+            };
+      if (key !== '__null__' && !byId.has(key)) byId.set(key, bucket);
+      bucket.rows.push(r);
+      bucket.paidSum += Number(r.amount_paid || 0);
+      bucket.totalSum += Number(r.amount_total || 0);
+    }
+    const list = [...byId.values()].filter((b) => b.rows.length > 0 || !filterAccount);
+    if (unassigned.rows.length) list.push(unassigned);
+    return list;
+  }, [rows, channelAccounts, filterAccount]);
+
   const closeForm = () => {
     setFormOpen(false);
     setEditingId(null);
@@ -655,6 +698,145 @@ export default function StudentPaymentTrackerPanel() {
     }
   };
 
+  const renderPaymentRow = (r: StudentPaymentRecord, opts?: { hideAccount?: boolean }) => {
+    const vadeDurum = rowVadeDurum(r);
+    const vadeEtiket = vadeDurumEtiket(vadeDurum);
+    return (
+      <tr key={r.id} className="border-b border-slate-50 last:border-0 dark:border-slate-800">
+        <td className="px-3 py-2.5 whitespace-nowrap">
+          {r.due_date ? (
+            <div className="space-y-1">
+              <div className="flex items-center gap-1 text-xs font-medium text-slate-800 dark:text-slate-200">
+                <CalendarDays className="h-3 w-3 text-slate-400" />
+                <span title="Vade">{formatTrShortDate(String(r.due_date).slice(0, 10))}</span>
+              </div>
+              {r.status === 'paid' && r.paid_at ? (
+                <div className="text-[10px] font-semibold text-emerald-700 dark:text-emerald-300">
+                  Ödeme: {formatTrShortDate(String(r.paid_at).slice(0, 10))}
+                </div>
+              ) : (
+                <span className={`inline-flex rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${vadeEtiket.cls}`}>
+                  {vadeEtiket.text}
+                </span>
+              )}
+            </div>
+          ) : r.paid_at ? (
+            <div className="text-xs font-semibold text-emerald-700">
+              Ödeme: {formatTrShortDate(String(r.paid_at).slice(0, 10))}
+            </div>
+          ) : (
+            <span className="text-xs text-slate-400">—</span>
+          )}
+        </td>
+        <td className="px-3 py-2.5">
+          <input
+            type="checkbox"
+            checked={r.status === 'paid'}
+            onChange={(e) => void togglePaid(r, e.target.checked)}
+            title="Ödendi işaretle"
+            className="rounded border-slate-300"
+          />
+        </td>
+        <td className="px-3 py-2.5">
+          <div className="font-medium text-slate-900 dark:text-white">{r.student_name}</div>
+          <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
+            {r.is_external || !r.student_id ? (
+              <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-900 dark:bg-amber-900/40 dark:text-amber-100">
+                Dışarıdan
+              </span>
+            ) : null}
+            <span className="text-[11px] text-slate-500">
+              {r.contact_phone_resolved || r.contact_phone || '—'}
+            </span>
+          </div>
+        </td>
+        <td className="px-3 py-2.5 text-slate-700 dark:text-slate-300">
+          <div>{r.class_level != null ? formatClassLevelLabel(r.class_level) : '—'}</div>
+          <div className="text-[11px] text-slate-500">{r.coach_name || '—'}</div>
+        </td>
+        <td className="px-3 py-2.5">
+          <div>{PAYMENT_TYPE_LABELS[r.payment_type] || r.payment_type}</div>
+          {r.title ? <div className="text-[11px] text-slate-500">{r.title}</div> : null}
+          {r.installment_no && r.installment_count ? (
+            <span className="mt-0.5 inline-flex rounded-full bg-indigo-100 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-900 dark:bg-indigo-900/40 dark:text-indigo-200">
+              Taksit {r.installment_no}/{r.installment_count}
+            </span>
+          ) : null}
+        </td>
+        {opts?.hideAccount ? null : (
+          <td className="px-3 py-2.5 text-xs text-slate-600 dark:text-slate-400">{r.account_label || '—'}</td>
+        )}
+        <td className="px-3 py-2.5 text-right tabular-nums font-medium">{formatTry(r.amount_total)}</td>
+        <td className="px-3 py-2.5 text-right">
+          <input
+            type="number"
+            min={0}
+            step={1}
+            defaultValue={r.amount_paid}
+            key={`${r.id}-${r.amount_paid}`}
+            onBlur={(e) => void updatePaidAmount(r, e.target.value)}
+            className="w-24 rounded border border-slate-200 px-1.5 py-1 text-right text-xs tabular-nums dark:border-slate-600 dark:bg-slate-800"
+          />
+        </td>
+        <td className="px-3 py-2.5 text-right tabular-nums font-semibold text-rose-700 dark:text-rose-300">
+          {formatTry(r.remaining ?? 0)}
+        </td>
+        <td className="px-3 py-2.5">
+          <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${statusBadge(r.status)}`}>
+            {PAYMENT_STATUS_LABELS[r.status] || r.status}
+          </span>
+        </td>
+        <td className="px-3 py-2.5">
+          <div className="flex flex-wrap items-center justify-end gap-1">
+            <button
+              type="button"
+              title="Düzenle"
+              onClick={() => openEdit(r)}
+              className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-800 dark:hover:bg-slate-800 dark:hover:text-slate-100"
+            >
+              <Pencil className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              title="WhatsApp"
+              onClick={() => openWhatsApp(r)}
+              className="rounded-lg p-1.5 text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/40"
+            >
+              <MessageCircle className="h-4 w-4" />
+            </button>
+            {(r.remaining ?? 0) > 0 && r.status !== 'paid' && r.status !== 'cancelled' ? (
+              <button
+                type="button"
+                title="Garanti ödeme linki"
+                onClick={() => void createGarantiLink(r)}
+                className="rounded-lg p-1.5 text-sky-600 hover:bg-sky-50 dark:hover:bg-sky-950/40"
+              >
+                <Link2 className="h-4 w-4" />
+              </button>
+            ) : null}
+            {r.status !== 'paid' ? (
+              <button
+                type="button"
+                onClick={() => void markPaid(r)}
+                className="rounded-lg px-2 py-1 text-[11px] font-semibold text-emerald-700 hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-950/40"
+              >
+                Ödendi
+              </button>
+            ) : null}
+            <button
+              type="button"
+              title="Sil"
+              onClick={() => void removeRow(r)}
+              className="rounded-lg p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600"
+            >
+              <Trash2 className="h-4 w-4" />
+            </button>
+          </div>
+        </td>
+      </tr>
+    );
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -903,29 +1085,57 @@ export default function StudentPaymentTrackerPanel() {
         </label>
       </div>
 
-      {channelAccounts.length > 0 ? (
+      {channelAccounts.length > 0 || accountBuckets.some((b) => b.id === '__null__' && b.rows.length) ? (
         <div className="flex flex-wrap gap-2">
           <span className="text-xs font-semibold uppercase tracking-wide text-slate-500 self-center">
             {isCreditCard ? 'Kredi kartları:' : 'Banka hesapları:'}
           </span>
-          {channelAccounts.map((a) => (
-            <span
-              key={a.id}
-              className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs ${
-                isCreditCard
-                  ? 'border-violet-200 bg-violet-50 text-violet-900 dark:border-violet-800 dark:bg-violet-950/40 dark:text-violet-200'
-                  : 'border-slate-200 bg-white text-slate-700 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200'
-              }`}
-              title={[a.bank_name, a.account_holder, a.iban].filter(Boolean).join(' · ')}
-            >
-              {isCreditCard ? (
-                <CreditCard className="h-3 w-3 text-violet-600" />
-              ) : (
-                <Building2 className="h-3 w-3 text-emerald-600" />
-              )}
-              {a.label}
-            </span>
-          ))}
+          <button
+            type="button"
+            onClick={() => setFilterAccount('')}
+            className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-semibold transition ${
+              !filterAccount
+                ? isCreditCard
+                  ? 'border-violet-500 bg-violet-100 text-violet-950 dark:border-violet-400 dark:bg-violet-900/50 dark:text-violet-100'
+                  : 'border-emerald-500 bg-emerald-100 text-emerald-950 dark:border-emerald-400 dark:bg-emerald-900/40 dark:text-emerald-100'
+                : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300'
+            }`}
+          >
+            Tümü
+          </button>
+          {channelAccounts.map((a) => {
+            const bucket = accountBuckets.find((b) => b.id === a.id);
+            const active = filterAccount === a.id;
+            return (
+              <button
+                key={a.id}
+                type="button"
+                onClick={() => setFilterAccount(active ? '' : a.id)}
+                className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition ${
+                  active
+                    ? isCreditCard
+                      ? 'border-violet-500 bg-violet-100 text-violet-950 dark:border-violet-400 dark:bg-violet-900/50 dark:text-violet-100'
+                      : 'border-emerald-500 bg-emerald-100 text-emerald-950 dark:border-emerald-400 dark:bg-emerald-900/40 dark:text-emerald-100'
+                    : isCreditCard
+                      ? 'border-violet-200 bg-violet-50 text-violet-900 hover:border-violet-400 dark:border-violet-800 dark:bg-violet-950/40 dark:text-violet-200'
+                      : 'border-slate-200 bg-white text-slate-700 hover:border-emerald-400 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200'
+                }`}
+                title={[a.bank_name, a.account_holder, a.iban].filter(Boolean).join(' · ')}
+              >
+                {isCreditCard ? (
+                  <CreditCard className="h-3 w-3 text-violet-600" />
+                ) : (
+                  <Building2 className="h-3 w-3 text-emerald-600" />
+                )}
+                <span className="font-semibold">{a.label}</span>
+                {bucket && bucket.rows.length > 0 ? (
+                  <span className="tabular-nums opacity-80">
+                    · {bucket.rows.length} · {formatTry(bucket.paidSum)}
+                  </span>
+                ) : null}
+              </button>
+            );
+          })}
         </div>
       ) : (
         <p className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-800/40">
@@ -941,7 +1151,7 @@ export default function StudentPaymentTrackerPanel() {
         <p className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-10 text-center text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-800/40">
           Bu kanalda henüz ödeme kaydı yok. «{isCreditCard ? 'Kart ödemesi' : 'Hesap ödemesi'}» ile ekleyin.
         </p>
-      ) : (
+      ) : filterAccount || accountBuckets.length <= 1 ? (
         <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
           <table className="min-w-full text-left text-sm">
             <thead className="border-b border-slate-100 bg-slate-50 text-[11px] uppercase tracking-wide text-slate-500 dark:border-slate-700 dark:bg-slate-800">
@@ -960,146 +1170,57 @@ export default function StudentPaymentTrackerPanel() {
               </tr>
             </thead>
             <tbody>
-              {rows.map((r) => {
-                const vadeDurum = rowVadeDurum(r);
-                const vadeEtiket = vadeDurumEtiket(vadeDurum);
-                return (
-                <tr key={r.id} className="border-b border-slate-50 last:border-0 dark:border-slate-800">
-                  <td className="px-3 py-2.5 whitespace-nowrap">
-                    {r.due_date ? (
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-1 text-xs font-medium text-slate-800 dark:text-slate-200">
-                          <CalendarDays className="h-3 w-3 text-slate-400" />
-                          <span title="Vade">{formatTrShortDate(String(r.due_date).slice(0, 10))}</span>
-                        </div>
-                        {r.status === 'paid' && r.paid_at ? (
-                          <div className="text-[10px] font-semibold text-emerald-700 dark:text-emerald-300">
-                            Ödeme: {formatTrShortDate(String(r.paid_at).slice(0, 10))}
-                          </div>
-                        ) : (
-                          <span className={`inline-flex rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${vadeEtiket.cls}`}>
-                            {vadeEtiket.text}
-                          </span>
-                        )}
-                      </div>
-                    ) : r.paid_at ? (
-                      <div className="text-xs font-semibold text-emerald-700">
-                        Ödeme: {formatTrShortDate(String(r.paid_at).slice(0, 10))}
-                      </div>
-                    ) : (
-                      <span className="text-xs text-slate-400">—</span>
-                    )}
-                  </td>
-                  <td className="px-3 py-2.5">
-                    <input
-                      type="checkbox"
-                      checked={r.status === 'paid'}
-                      onChange={(e) => void togglePaid(r, e.target.checked)}
-                      title="Ödendi işaretle"
-                      className="rounded border-slate-300"
-                    />
-                  </td>
-                  <td className="px-3 py-2.5">
-                    <div className="font-medium text-slate-900 dark:text-white">{r.student_name}</div>
-                    <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
-                      {r.is_external || !r.student_id ? (
-                        <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-900 dark:bg-amber-900/40 dark:text-amber-100">
-                          Dışarıdan
-                        </span>
-                      ) : null}
-                      <span className="text-[11px] text-slate-500">
-                        {r.contact_phone_resolved || r.contact_phone || '—'}
-                      </span>
-                    </div>
-                  </td>
-                  <td className="px-3 py-2.5 text-slate-700 dark:text-slate-300">
-                    <div>{r.class_level != null ? formatClassLevelLabel(r.class_level) : '—'}</div>
-                    <div className="text-[11px] text-slate-500">{r.coach_name || '—'}</div>
-                  </td>
-                  <td className="px-3 py-2.5">
-                    <div>{PAYMENT_TYPE_LABELS[r.payment_type] || r.payment_type}</div>
-                    {r.title ? <div className="text-[11px] text-slate-500">{r.title}</div> : null}
-                    {r.installment_no && r.installment_count ? (
-                      <span className="mt-0.5 inline-flex rounded-full bg-indigo-100 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-900 dark:bg-indigo-900/40 dark:text-indigo-200">
-                        Taksit {r.installment_no}/{r.installment_count}
-                      </span>
-                    ) : null}
-                  </td>
-                  <td className="px-3 py-2.5 text-xs text-slate-600 dark:text-slate-400">
-                    {r.account_label || '—'}
-                  </td>
-                  <td className="px-3 py-2.5 text-right tabular-nums font-medium">{formatTry(r.amount_total)}</td>
-                  <td className="px-3 py-2.5 text-right">
-                    <input
-                      type="number"
-                      min={0}
-                      step={1}
-                      defaultValue={r.amount_paid}
-                      key={`${r.id}-${r.amount_paid}`}
-                      onBlur={(e) => void updatePaidAmount(r, e.target.value)}
-                      className="w-24 rounded border border-slate-200 px-1.5 py-1 text-right text-xs tabular-nums dark:border-slate-600 dark:bg-slate-800"
-                    />
-                  </td>
-                  <td className="px-3 py-2.5 text-right tabular-nums font-semibold text-rose-700 dark:text-rose-300">
-                    {formatTry(r.remaining ?? 0)}
-                  </td>
-                  <td className="px-3 py-2.5">
-                    <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${statusBadge(r.status)}`}>
-                      {PAYMENT_STATUS_LABELS[r.status] || r.status}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2.5">
-                    <div className="flex flex-wrap items-center justify-end gap-1">
-                      <button
-                        type="button"
-                        title="Düzenle"
-                        onClick={() => openEdit(r)}
-                        className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-800 dark:hover:bg-slate-800 dark:hover:text-slate-100"
-                      >
-                        <Pencil className="h-4 w-4" />
-                      </button>
-                      <button
-                        type="button"
-                        title="WhatsApp"
-                        onClick={() => openWhatsApp(r)}
-                        className="rounded-lg p-1.5 text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/40"
-                      >
-                        <MessageCircle className="h-4 w-4" />
-                      </button>
-                      {(r.remaining ?? 0) > 0 && r.status !== 'paid' && r.status !== 'cancelled' ? (
-                        <button
-                          type="button"
-                          title="Garanti ödeme linki"
-                          onClick={() => void createGarantiLink(r)}
-                          className="rounded-lg p-1.5 text-sky-600 hover:bg-sky-50 dark:hover:bg-sky-950/40"
-                        >
-                          <Link2 className="h-4 w-4" />
-                        </button>
-                      ) : null}
-                      {r.status !== 'paid' ? (
-                        <button
-                          type="button"
-                          onClick={() => void markPaid(r)}
-                          className="rounded-lg px-2 py-1 text-[11px] font-semibold text-emerald-700 hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-950/40"
-                        >
-                          Ödendi
-                        </button>
-                      ) : null}
-                      <button
-                        type="button"
-                        title="Sil"
-                        onClick={() => void removeRow(r)}
-                        className="rounded-lg p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              );
-              })}
+              {rows.map((r) => renderPaymentRow(r))}
             </tbody>
           </table>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {accountBuckets
+            .filter((b) => b.rows.length > 0)
+            .map((bucket) => (
+              <div
+                key={bucket.id}
+                className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 bg-slate-50 px-3 py-2.5 dark:border-slate-700 dark:bg-slate-800">
+                  <div className="flex items-center gap-2 text-sm font-bold text-slate-900 dark:text-white">
+                    {isCreditCard ? (
+                      <CreditCard className="h-4 w-4 text-violet-600" />
+                    ) : (
+                      <Building2 className="h-4 w-4 text-emerald-600" />
+                    )}
+                    {bucket.label}
+                    <span className="text-xs font-semibold text-slate-500">{bucket.rows.length} kayıt</span>
+                  </div>
+                  <div className="text-sm font-semibold tabular-nums text-slate-800 dark:text-slate-100">
+                    Ödenen {formatTry(bucket.paidSum)}
+                    <span className="ml-2 text-xs font-medium text-slate-500">
+                      / {formatTry(bucket.totalSum)}
+                    </span>
+                  </div>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-left text-sm">
+                    <thead className="border-b border-slate-100 text-[11px] uppercase tracking-wide text-slate-500 dark:border-slate-800">
+                      <tr>
+                        <th className="px-3 py-2">Tarih</th>
+                        <th className="px-3 py-2 w-10">Ödendi</th>
+                        <th className="px-3 py-2">Öğrenci</th>
+                        <th className="px-3 py-2">Sınıf / Koç</th>
+                        <th className="px-3 py-2">Tür</th>
+                        <th className="px-3 py-2 text-right">Tutar</th>
+                        <th className="px-3 py-2 text-right">Ödenen</th>
+                        <th className="px-3 py-2 text-right">Kalan</th>
+                        <th className="px-3 py-2">Durum</th>
+                        <th className="px-3 py-2 text-right">İşlem</th>
+                      </tr>
+                    </thead>
+                    <tbody>{bucket.rows.map((r) => renderPaymentRow(r, { hideAccount: true }))}</tbody>
+                  </table>
+                </div>
+              </div>
+            ))}
         </div>
       )}
 
