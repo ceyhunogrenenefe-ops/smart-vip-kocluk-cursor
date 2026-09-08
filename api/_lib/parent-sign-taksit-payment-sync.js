@@ -7,6 +7,8 @@ import { errorMessage } from './error-msg.js';
 
 const YMD = /^\d{4}-\d{2}-\d{2}$/;
 const NOTE_PREFIX = 'parent_sign_taksit:';
+/** Tahsilat → öğrenci ödemesi senkronu bu tarihten itibaren geçerlidir */
+export const TAKSIT_PAYMENT_SYNC_FROM = '2026-08-01';
 
 export function istanbulYmd() {
   try {
@@ -128,6 +130,23 @@ export async function syncParentSignTaksitToStudentPayment({
     return { ok: true, cleared: true, id: existingId };
   }
 
+  // Ağustos 2026 öncesi ödemeler senkronlanmaz (manuel girilmiş kayıtlar korunur)
+  if (paidYmd < TAKSIT_PAYMENT_SYNC_FROM) {
+    if (existingId) {
+      // Yanlışlıkla oluşturulmuş otomatik kayıtları kaldır
+      const { data: ex } = await supabaseAdmin
+        .from('student_payment_records')
+        .select('id, notes, created_at')
+        .eq('id', existingId)
+        .maybeSingle();
+      if (ex && String(ex.notes || '').startsWith(NOTE_PREFIX)) {
+        await supabaseAdmin.from('student_payment_records').delete().eq('id', existingId);
+        return { ok: true, skipped: true, deleted_pre_cutoff: true, reason: 'before_august_2026' };
+      }
+    }
+    return { ok: true, skipped: true, reason: 'before_august_2026' };
+  }
+
   const row = {
     institution_id: institutionId,
     student_id: studentId,
@@ -183,7 +202,42 @@ export async function syncParentSignTaksitToStudentPayment({
 }
 
 /**
- * Kurumdaki ödenmiş tüm taksit kartlarını öğrenci ödemelerine aktarır (geri doldurma).
+ * parent_sign_taksit otomatik kayıtlarından Ağustos öncekileri siler.
+ * Manuel (notes farklı) kayıtlar dokunulmaz.
+ */
+export async function cleanupPreAugustAutoTaksitPayments({ institutionId } = {}) {
+  let q = supabaseAdmin
+    .from('student_payment_records')
+    .select('id, paid_at, due_date, notes, title')
+    .like('notes', `${NOTE_PREFIX}%`)
+    .limit(2000);
+  if (institutionId) q = q.eq('institution_id', institutionId);
+  const { data, error } = await q;
+  if (error) throw error;
+
+  const toDelete = (data || []).filter((r) => {
+    const paid = String(r.paid_at || '').slice(0, 10);
+    const due = String(r.due_date || '').slice(0, 10);
+    const anchor = YMD.test(paid) ? paid : due;
+    return !anchor || anchor < TAKSIT_PAYMENT_SYNC_FROM;
+  });
+
+  let deleted = 0;
+  for (const row of toDelete) {
+    const { error: de } = await supabaseAdmin.from('student_payment_records').delete().eq('id', row.id);
+    if (!de) deleted += 1;
+  }
+  return {
+    ok: true,
+    scanned: (data || []).length,
+    deleted,
+    cutoff: TAKSIT_PAYMENT_SYNC_FROM,
+    deleted_ids: toDelete.map((r) => r.id)
+  };
+}
+
+/**
+ * Kurumdaki ödenmiş taksit kartlarını öğrenci ödemelerine aktarır (yalnızca Ağustos+).
  */
 export async function backfillPaidTaksitToStudentPayments({ institutionId, actorSub, limit = 300 }) {
   let q = supabaseAdmin
@@ -213,27 +267,30 @@ export async function backfillPaidTaksitToStudentPayments({ institutionId, actor
         skipped += 1;
         continue;
       }
+      const paidAt = String(card.odendi_tarihi || '').slice(0, 10);
+      if (!YMD.test(paidAt) || paidAt < TAKSIT_PAYMENT_SYNC_FROM) {
+        skipped += 1;
+        continue;
+      }
       try {
         const res = await syncParentSignTaksitToStudentPayment({
           contract,
           index: i,
           card,
           paid: true,
-          paidAt: card.odendi_tarihi || istanbulYmd(),
+          paidAt,
           actorSub
         });
-        if (res?.created) created += 1;
-        else if (res?.updated) updated += 1;
-        else if (res?.ok) updated += 1;
+        if (res?.skipped) skipped += 1;
+        else if (res?.created) created += 1;
+        else if (res?.updated || res?.ok) updated += 1;
         else failed += 1;
       } catch (e) {
         failed += 1;
-        if (errors.length < 8) {
-          errors.push(errorMessage(e));
-        }
+        if (errors.length < 8) errors.push(errorMessage(e));
       }
     }
   }
 
-  return { ok: true, created, updated, skipped, failed, errors };
+  return { ok: true, created, updated, skipped, failed, errors, cutoff: TAKSIT_PAYMENT_SYNC_FROM };
 }
