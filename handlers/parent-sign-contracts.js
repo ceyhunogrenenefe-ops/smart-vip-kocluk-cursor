@@ -31,7 +31,8 @@ import { notifyAdminsOnVeliKayitForm } from '../api/_lib/veli-kayit-admin-notify
 import { notifyVeliSignReady } from '../api/_lib/veli-sign-ready-notify.js';
 import {
   istanbulYmd,
-  syncParentSignTaksitToStudentPayment
+  syncParentSignTaksitToStudentPayment,
+  backfillPaidTaksitToStudentPayments
 } from '../api/_lib/parent-sign-taksit-payment-sync.js';
 
 const ODEME_SEKLI_SET = new Set(['aylik_taksit', 'kredi_karti_tek', 'kredi_karti_otomatik']);
@@ -1360,6 +1361,31 @@ export default async function handler(req, res) {
     if (req.method === 'POST') {
       const body = parseBody(req);
       const postAction = String(body.action || '').trim();
+
+      if (postAction === 'sync_paid_taksit_to_payments' || postAction === 'backfill_taksit_payments') {
+        if (role !== 'super_admin' && role !== 'admin') {
+          return res.status(403).json({ error: 'forbidden' });
+        }
+        let instId = resolveReadInstitutionId(actor, body.institution_id || req.query?.institution_id);
+        if (!instId && role === 'admin') instId = actor.institution_id || null;
+        if (!instId && role !== 'super_admin') {
+          return res.status(400).json({ error: 'institution_required' });
+        }
+        if (role === 'admin' && instId && !hasInstitutionAccess(actor, instId)) {
+          return res.status(403).json({ error: 'forbidden' });
+        }
+        try {
+          const result = await backfillPaidTaksitToStudentPayments({
+            institutionId: instId || null,
+            actorSub: String(actor.sub || actor.id || '') || null,
+            limit: Number(body.limit) || 400
+          });
+          return res.status(200).json({ data: result });
+        } catch (e) {
+          console.error('[parent-sign-contracts backfill_taksit]', errorMessage(e), e);
+          return res.status(500).json({ error: errorMessage(e) });
+        }
+      }
 
       if (postAction === 'provision_student_account') {
         const id = String(body.id || body.contract_id || '').trim();
