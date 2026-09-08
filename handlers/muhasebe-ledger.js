@@ -74,7 +74,45 @@ function parseRange(req) {
   return { from, to };
 }
 
+async function loadPaidPayrollSettlements(from, to) {
+  const { data, error } = await supabaseAdmin
+    .from('teacher_payroll_settlements')
+    .select('id, teacher_id, period_from, period_to, total_tl, lesson_gross_tl, extras_tl, status, expense_item_id')
+    .eq('status', 'paid')
+    .lte('period_from', to)
+    .gte('period_to', from)
+    .limit(2000);
+  if (error) {
+    if (/teacher_payroll_settlements|does not exist|schema cache|PGRST205/i.test(errorMessage(error))) {
+      return { rows: [], paidTeacherIds: new Set(), expenseIds: new Set() };
+    }
+    throw error;
+  }
+  const paidTeacherIds = new Set();
+  const expenseIds = new Set();
+  let lessonSum = 0;
+  let extraSum = 0;
+  let total = 0;
+  for (const r of data || []) {
+    paidTeacherIds.add(String(r.teacher_id));
+    if (r.expense_item_id) expenseIds.add(String(r.expense_item_id));
+    lessonSum += Number(r.lesson_gross_tl) || 0;
+    extraSum += Number(r.extras_tl) || 0;
+    total += Number(r.total_tl) || 0;
+  }
+  return {
+    rows: data || [],
+    paidTeacherIds,
+    expenseIds,
+    lesson_sum: Math.round(lessonSum * 100) / 100,
+    extra_sum: Math.round(extraSum * 100) / 100,
+    total: Math.round(total * 100) / 100
+  };
+}
+
 async function loadTeacherExpense(from, to) {
+  const payroll = await loadPaidPayrollSettlements(from, to);
+
   const { data: sessions, error } = await supabaseAdmin
     .from('class_sessions')
     .select('id, teacher_id, start_time, end_time, lesson_date, status')
@@ -89,8 +127,11 @@ async function loadTeacherExpense(from, to) {
 
   let lessonSum = 0;
   for (const s of sessions || []) {
+    const tid = String(s.teacher_id || '');
+    // Ödenen hakediş kartı varsa o öğretmenin dönem tahakkuku settlement'tan gelir (çift sayım yok)
+    if (payroll.paidTeacherIds.has(tid)) continue;
     const units = sessionLessonUnits40(s);
-    const price = rateMap.get(String(s.teacher_id)) || 500;
+    const price = rateMap.get(tid) || 500;
     lessonSum += units * price;
   }
 
@@ -98,33 +139,41 @@ async function loadTeacherExpense(from, to) {
   const seenExtra = new Set();
   const { data: extrasByDate } = await supabaseAdmin
     .from('teacher_payment_extra_items')
-    .select('id, amount_tl, item_date')
+    .select('id, amount_tl, item_date, teacher_id')
     .gte('item_date', from)
     .lte('item_date', to)
     .limit(2000);
   for (const e of extrasByDate || []) {
     const id = String(e.id);
     if (seenExtra.has(id)) continue;
+    if (payroll.paidTeacherIds.has(String(e.teacher_id || ''))) continue;
     seenExtra.add(id);
     extraSum += Number(e.amount_tl) || 0;
   }
   const { data: extrasByPeriod } = await supabaseAdmin
     .from('teacher_payment_extra_items')
-    .select('id, amount_tl, item_date, period_from, period_to')
+    .select('id, amount_tl, item_date, period_from, period_to, teacher_id')
     .eq('period_from', from)
     .eq('period_to', to)
     .limit(2000);
   for (const e of extrasByPeriod || []) {
     const id = String(e.id);
     if (seenExtra.has(id)) continue;
+    if (payroll.paidTeacherIds.has(String(e.teacher_id || ''))) continue;
     seenExtra.add(id);
     extraSum += Number(e.amount_tl) || 0;
   }
 
+  const accruedLesson = Math.round(lessonSum * 100) / 100;
+  const accruedExtra = Math.round(extraSum * 100) / 100;
+  const paidLesson = payroll.lesson_sum || 0;
+  const paidExtra = payroll.extra_sum || 0;
+
   return {
-    lesson_sum: Math.round(lessonSum * 100) / 100,
-    extra_sum: Math.round(extraSum * 100) / 100,
-    total: Math.round((lessonSum + extraSum) * 100) / 100
+    lesson_sum: Math.round((accruedLesson + paidLesson) * 100) / 100,
+    extra_sum: Math.round((accruedExtra + paidExtra) * 100) / 100,
+    total: Math.round((accruedLesson + accruedExtra + (payroll.total || 0)) * 100) / 100,
+    payroll_expense_ids: payroll.expenseIds
   };
 }
 
@@ -174,7 +223,7 @@ async function loadStudentIncome(inst, from, to) {
   };
 }
 
-async function loadOtherExpenses(inst, from, to) {
+async function loadOtherExpenses(inst, from, to, excludeIds) {
   let q = supabaseAdmin
     .from('institution_expense_items')
     .select('*')
@@ -188,7 +237,14 @@ async function loadOtherExpenses(inst, from, to) {
     if (schemaMissing(error)) return { items: [], total: 0, hint: 'muhasebe_ledger_sql_missing' };
     throw error;
   }
-  const items = data || [];
+  const exclude = excludeIds instanceof Set ? excludeIds : new Set(excludeIds || []);
+  const items = (data || []).filter((row) => {
+    const id = String(row.id || '');
+    if (exclude.has(id)) return false;
+    const note = String(row.note || '');
+    if (note.startsWith('teacher_payroll:')) return false;
+    return true;
+  });
   const total = items.reduce((a, r) => a + (Number(r.amount_tl) || 0), 0);
   return { items, total: Math.round(total * 100) / 100 };
 }
@@ -199,10 +255,10 @@ async function handleGetSummary(req, res, actor, roleSet) {
     return res.status(200).json({ error: 'institution_required' });
   }
   const range = parseRange(req);
-  const [income, teacher, otherExp] = await Promise.all([
+  const teacher = await loadTeacherExpense(range.from, range.to);
+  const [income, otherExp] = await Promise.all([
     loadStudentIncome(inst, range.from, range.to),
-    loadTeacherExpense(range.from, range.to),
-    loadOtherExpenses(inst, range.from, range.to)
+    loadOtherExpenses(inst, range.from, range.to, teacher.payroll_expense_ids)
   ]);
 
   const gelirToplam = income.paid_sum;
