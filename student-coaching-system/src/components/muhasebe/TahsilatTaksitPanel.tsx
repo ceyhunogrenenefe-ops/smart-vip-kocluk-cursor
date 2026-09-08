@@ -175,7 +175,11 @@ export function TahsilatTaksitPanel({ compactHeader = false, onStatsChange }: Pr
       const p = filterMonth.trim();
       f = f.filter((x) => x.vadeYmd.startsWith(p) || (!x.odendi && x.durum === 'overdue'));
     }
-    return [...f].sort((a, b) => a.vadeYmd.localeCompare(b.vadeYmd) || a.contractNumber.localeCompare(b.contractNumber));
+    return [...f].sort(
+      (a, b) =>
+        String(a.vadeYmd || '').localeCompare(String(b.vadeYmd || '')) ||
+        String(a.contractNumber || '').localeCompare(String(b.contractNumber || ''))
+    );
   }, [flat, search, onlyOverdue, filterMonth, dueFrom, dueTo]);
 
   const toggle = async (contractId: string, index: number, odendi: boolean) => {
