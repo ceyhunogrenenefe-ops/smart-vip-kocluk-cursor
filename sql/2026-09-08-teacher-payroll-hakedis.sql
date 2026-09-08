@@ -21,11 +21,16 @@ CREATE INDEX IF NOT EXISTS idx_teacher_payroll_rates_institution
 COMMENT ON TABLE public.teacher_payroll_rates IS
   'Hakediş — öğretmen başına grup / özel / rehberlik birim ücreti (40 dk)';
 
--- Eski grup ücreti varsa seed et (yoksa atla)
-INSERT INTO public.teacher_payroll_rates (teacher_id, institution_id, group_unit_price_tl, updated_at)
-SELECT r.teacher_id, r.institution_id, r.unit_price_tl, COALESCE(r.updated_at, now())
-FROM public.teacher_group_lesson_rates r
-ON CONFLICT (teacher_id) DO NOTHING;
+-- Eski grup ücreti tablosu varsa seed et; yoksa sessizce atla
+DO $$
+BEGIN
+  IF to_regclass('public.teacher_group_lesson_rates') IS NOT NULL THEN
+    INSERT INTO public.teacher_payroll_rates (teacher_id, institution_id, group_unit_price_tl, updated_at)
+    SELECT r.teacher_id, r.institution_id, r.unit_price_tl, COALESCE(r.updated_at, now())
+    FROM public.teacher_group_lesson_rates r
+    ON CONFLICT (teacher_id) DO NOTHING;
+  END IF;
+END $$;
 
 -- 2) Dönem hakediş kartı (onaylanan sayılar + kilit + gider)
 CREATE TABLE IF NOT EXISTS public.teacher_payroll_settlements (
