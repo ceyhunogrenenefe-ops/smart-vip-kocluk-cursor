@@ -8,7 +8,7 @@ import { enforceCoachLicenseForStudentInsert, LicenseError } from '../api/_lib/c
 import { getTeacherPanelStudentScope } from '../api/_lib/teacher-class-scope.js';
 import { normalizedUserRolesFromDb } from '../api/_lib/user-roles-fetch.js';
 import { STUDENT_LIST_COLUMNS, STUDENT_LIST_OPTIONAL_COLUMNS } from '../api/_lib/list-query-columns.js';
-import { selectWithOptionalColumns, updateOneOptionalModerator } from '../api/_lib/supabase-optional-moderator.js';
+import { selectWithOptionalColumns, updateOneOptionalModerator, insertOneOptionalModerator } from '../api/_lib/supabase-optional-moderator.js';
 import { resolveViewAsActorIfAllowed } from '../api/_lib/view-as-actor.js';
 import { autoEnrollStudentRow } from '../api/_lib/edesis-auto-enroll.js';
 
@@ -654,8 +654,14 @@ export default async function handler(req, res) {
         created_at: body.created_at || new Date().toISOString(),
         updated_at: new Date().toISOString()
       };
-      let { data, error } = await supabaseAdmin.from('students').insert(payload).select().single();
+      let { data, error } = await insertOneOptionalModerator('students', payload);
       if (error) throw error;
+      // insertOneOptionalModerator maybeSingle — select sonrası tek satır
+      if (!data) {
+        const again = await supabaseAdmin.from('students').select('*').eq('id', resolvedId).maybeSingle();
+        data = again.data;
+        if (again.error) throw again.error;
+      }
 
       data = await finalizeStudentRow(data, payload);
       try {
@@ -740,12 +746,12 @@ export default async function handler(req, res) {
         }
       }
 
-      const { data, error } = await supabaseAdmin
-        .from('students')
-        .update({ ...patchBody, updated_at: new Date().toISOString() })
-        .eq('id', id)
-        .select()
-        .single();
+      const patch = { ...patchBody, updated_at: new Date().toISOString() };
+      // enrollment_status / deleted_at eski prod şemasında yok olabilir — kolon yoksa düşürülür
+      const upd = await updateOneOptionalModerator('students', patch, 'id', id);
+      if (upd.error) throw upd.error;
+
+      const { data, error } = await supabaseAdmin.from('students').select('*').eq('id', id).single();
       if (error) throw error;
       const coachChanged = String(prevCoachId || '') !== String((data?.coach_id ?? '') || '');
       if (coachChanged) {

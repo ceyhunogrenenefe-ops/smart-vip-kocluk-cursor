@@ -6,7 +6,10 @@ const OPTIONAL_INSERT_COLUMNS = [
   'schedule_batch_id',
   'bbb_meeting_id',
   'bbb_attendee_pw',
-  'recording_link'
+  'recording_link',
+  // students soft-delete / kayıt durumu (sql/2026-09-05-students-enrollment-soft-delete.sql)
+  'enrollment_status',
+  'deleted_at',
 ];
 
 function errorText(err) {
