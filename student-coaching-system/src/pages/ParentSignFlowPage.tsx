@@ -923,7 +923,22 @@ export default function ParentSignFlowPage() {
     setParentSignRowBusy(`${r.id}:t${index}`);
     setMsg(null);
     try {
-      await patchParentSignKayitOnly({ id: r.id, taksit_odeme_update: { index, odendi } });
+      let odendi_tarihi: string | undefined;
+      if (odendi) {
+        const entered = window.prompt('Ödeme tarihi (YYYY-MM-DD)', todayYmdLocal());
+        if (entered == null) {
+          setParentSignRowBusy(null);
+          return;
+        }
+        const cleaned = String(entered).trim().slice(0, 10);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(cleaned)) {
+          setMsg('Geçerli bir ödeme tarihi girin (YYYY-MM-DD)');
+          setParentSignRowBusy(null);
+          return;
+        }
+        odendi_tarihi = cleaned;
+      }
+      await patchParentSignKayitOnly({ id: r.id, taksit_odeme_update: { index, odendi, odendi_tarihi } });
       void load();
     } catch (e) {
       setMsg(e instanceof Error ? e.message : 'Taksit güncellenemedi');
