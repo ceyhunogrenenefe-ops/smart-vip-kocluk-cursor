@@ -93,6 +93,19 @@ describe('commerce-vendor-order-notify', () => {
     expect(payload.kitap_seti).toContain('Kuvvet [9782]');
   });
 
+  it('strips junk package_contents dots and cleans (1 kitap): . titles', () => {
+    const payload = buildVendorOrderNotifyPayload({
+      order: { order_number: 'VIP-10', customer_name: 'Ayşe' },
+      items: [{
+        title_snapshot: 'LGS Deneme (1 kitap): .',
+        quantity: 1,
+        package_contents: [{ title: '.', quantity: 1 }],
+      }],
+    });
+    expect(payload.kitap_seti).toBe('LGS Deneme');
+    expect(payload.kitap_seti).not.toContain('→');
+  });
+
   it('does not put checkout IBAN notes into the address field', () => {
     const payload = buildVendorOrderNotifyPayload({
       order: {

@@ -10,6 +10,7 @@ import {
   vendorNotifyPhone,
 } from './commerce-vendor-notify-payload.js';
 import { attachPackageContents, loadPackageContentsByIds } from './commerce-package-contents.js';
+import { attachFormImportPackageContents } from './commerce-kitap-form-import.js';
 
 export { buildVendorOrderNotifyPayload, vendorNotifyPhone };
 
@@ -125,7 +126,11 @@ export async function notifyVendorWhatsAppForPaidOrder(orderId, opts = {}) {
     supabaseAdmin,
     (items || []).map((it) => it.package_id)
   );
-  const sellerItems = attachPackageContents(items || [], contentsByPackageId, namesByPackageId);
+  // Portal ile aynı: mağaza paketleri + form aktarım satırlarından kitap listesi
+  const sellerItems = attachFormImportPackageContents(
+    attachPackageContents(items || [], contentsByPackageId, namesByPackageId),
+    order.notes
+  );
 
   const results = [];
   for (const vendor of vendors) {

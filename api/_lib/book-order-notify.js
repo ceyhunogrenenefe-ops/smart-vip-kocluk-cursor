@@ -23,6 +23,22 @@ function normBooksellerName(name) {
   return String(name || '').trim().toLocaleLowerCase('tr');
 }
 
+function isPlaceholderKitaplar(raw) {
+  const t = String(raw || '').trim();
+  if (!t) return true;
+  if (/^kitap\s*sipari[sş]i$/i.test(t)) return true;
+  if (/^kitap\s*seti\s*\(form\)$/i.test(t)) return true;
+  return false;
+}
+
+function isUsefulKitapDetail(raw) {
+  const d = String(raw || '').trim();
+  if (!d) return false;
+  if (d === '.' || d === '-' || d === '—' || d === '–') return false;
+  if (/^kitap\s*sipari[sş]i$/i.test(d)) return false;
+  return true;
+}
+
 async function enrichOrderForNotify(order) {
   const enriched = { ...order };
   const ids = Array.isArray(enriched.kitap_set_ids)
@@ -36,7 +52,8 @@ async function enrichOrderForNotify(order) {
   if (!String(enriched.kitap_set_id || '').trim() && ids.length) {
     enriched.kitap_set_id = ids[0];
   }
-  if (!String(enriched.kitaplar || '').trim() && ids.length) {
+  const needsResolve = isPlaceholderKitaplar(enriched.kitaplar) && ids.length;
+  if (needsResolve || (!String(enriched.kitaplar || '').trim() && ids.length)) {
     const { data: setRows } = await supabaseAdmin
       .from('kitap_siparis_setleri')
       .select('id,name,kitap_icerigi')
@@ -48,7 +65,9 @@ async function enrichOrderForNotify(order) {
         .filter(Boolean)
         .map((row) => {
           const detail = String(row.kitap_icerigi || '').trim();
-          return detail ? `${row.name} — ${detail}` : String(row.name || '').trim();
+          return isUsefulKitapDetail(detail)
+            ? `${row.name} — ${detail}`
+            : String(row.name || '').trim();
         })
         .filter(Boolean);
       if (parts.length) {
@@ -56,7 +75,7 @@ async function enrichOrderForNotify(order) {
       }
     }
   }
-  if (!String(enriched.kitaplar || '').trim() && enriched.kitap_set_id) {
+  if (isPlaceholderKitaplar(enriched.kitaplar) && enriched.kitap_set_id) {
     const { data: setRow } = await supabaseAdmin
       .from('kitap_siparis_setleri')
       .select('name, kitap_icerigi')
@@ -64,7 +83,9 @@ async function enrichOrderForNotify(order) {
       .maybeSingle();
     if (setRow?.name) {
       const detail = String(setRow.kitap_icerigi || '').trim();
-      enriched.kitaplar = detail ? `${setRow.name} — ${detail}` : setRow.name;
+      enriched.kitaplar = isUsefulKitapDetail(detail)
+        ? `${setRow.name} — ${detail}`
+        : setRow.name;
       enriched.kitap_seti = enriched.kitap_seti || enriched.kitaplar;
     }
   }
