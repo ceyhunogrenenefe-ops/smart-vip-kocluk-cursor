@@ -399,7 +399,7 @@ export function GroupLessonPaymentSummary({
       return {
         rows: withRates,
         teacherTotals: [...totalsMap.values()].sort((a, b) =>
-          a.teacher_name.localeCompare(b.teacher_name, 'tr')
+          String(a.teacher_name || '').localeCompare(String(b.teacher_name || ''), 'tr')
         ),
         sessions: sessionsEnriched
       };

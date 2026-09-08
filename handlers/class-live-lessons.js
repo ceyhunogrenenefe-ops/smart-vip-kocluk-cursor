@@ -1176,8 +1176,8 @@ export default async function handler(req, res) {
           return {
             teacher_id: r.teacher_id,
             class_id: r.class_id,
-            teacher_name: teacherNames[r.teacher_id] || r.teacher_id,
-            class_name: classNames[r.class_id] || r.class_id,
+            teacher_name: String(teacherNames[r.teacher_id] || r.teacher_id || 'Öğretmen atanmamış'),
+            class_name: String(classNames[r.class_id] || r.class_id || 'Sınıf yok'),
             completed_lesson_count: r.completed_lesson_count,
             total_minutes: r.total_minutes,
             total_hours: roundUnits(r.total_minutes / 60),
@@ -1187,9 +1187,9 @@ export default async function handler(req, res) {
           };
         })
         .sort((a, b) => {
-          const x = a.teacher_name.localeCompare(b.teacher_name, 'tr');
+          const x = String(a.teacher_name || '').localeCompare(String(b.teacher_name || ''), 'tr');
           if (x !== 0) return x;
-          return a.class_name.localeCompare(b.class_name, 'tr');
+          return String(a.class_name || '').localeCompare(String(b.class_name || ''), 'tr');
         });
 
       const teacherTotalsMap = new Map();
@@ -1249,7 +1249,7 @@ export default async function handler(req, res) {
           } else {
             teacherTotalsMap.set(tid, {
               teacher_id: tid,
-              teacher_name: teacherNames[tid] || tid,
+              teacher_name: String(teacherNames[tid] || tid || 'Öğretmen atanmamış'),
               completed_lesson_count: 0,
               total_minutes: 0,
               lesson_units_40: 0,
@@ -1267,7 +1267,7 @@ export default async function handler(req, res) {
       }
 
       const teacher_totals = [...teacherTotalsMap.values()].sort((a, b) =>
-        a.teacher_name.localeCompare(b.teacher_name, 'tr')
+        String(a.teacher_name || '').localeCompare(String(b.teacher_name || ''), 'tr')
       );
 
       let sessions = undefined;
@@ -1285,8 +1285,8 @@ export default async function handler(req, res) {
               subject: row.subject,
               teacher_id: row.teacher_id,
               class_id: row.class_id,
-              teacher_name: teacherNames[row.teacher_id] || row.teacher_id,
-              class_name: classNames[row.class_id] || row.class_id,
+              teacher_name: String(teacherNames[row.teacher_id] || row.teacher_id || 'Öğretmen atanmamış'),
+              class_name: String(classNames[row.class_id] || row.class_id || 'Sınıf yok'),
               total_minutes: minutes,
               lesson_units_40: units,
               unit_price_tl: unitPrice,
@@ -1294,9 +1294,9 @@ export default async function handler(req, res) {
             };
           })
           .sort((a, b) => {
-            const d = String(a.lesson_date).localeCompare(String(b.lesson_date));
+            const d = String(a.lesson_date || '').localeCompare(String(b.lesson_date || ''));
             if (d !== 0) return d;
-            return String(a.start_time).localeCompare(String(b.start_time));
+            return String(a.start_time || '').localeCompare(String(b.start_time || ''));
           });
       }
 
