@@ -256,10 +256,20 @@ async function handleGetRecords(req, res, actor, roleSet) {
 
   if (accountType && ACCOUNT_TYPES.has(accountType)) {
     const typeIds = await accountIdsForType(inst, accountType);
-    if (!typeIds.length) {
-      return res.status(200).json({ data: [], stats: emptyPaymentStats() });
+    if (accountType === 'bank') {
+      // Tahsilat/taksit senkronu hesap seçmeden kayıt açar (payment_account_id null).
+      // Banka kanalında bu kayıtlar da görünsün.
+      if (typeIds.length) {
+        q = q.or(`payment_account_id.in.(${typeIds.join(',')}),payment_account_id.is.null`);
+      } else {
+        q = q.is('payment_account_id', null);
+      }
+    } else {
+      if (!typeIds.length) {
+        return res.status(200).json({ data: [], stats: emptyPaymentStats() });
+      }
+      q = q.in('payment_account_id', typeIds);
     }
-    q = q.in('payment_account_id', typeIds);
   }
 
   const { data, error } = await q;
