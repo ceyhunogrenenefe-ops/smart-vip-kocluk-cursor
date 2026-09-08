@@ -25,7 +25,16 @@ const ACCOUNT_TYPES = new Set(['bank', 'credit_card']);
 const YMD = /^\d{4}-\d{2}-\d{2}$/;
 
 function todayYmd() {
-  return new Date().toISOString().slice(0, 10);
+  try {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Europe/Istanbul',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    }).format(new Date());
+  } catch {
+    return new Date().toISOString().slice(0, 10);
+  }
 }
 
 function shiftYmdByMonths(ymd, deltaMonths) {
@@ -518,8 +527,22 @@ async function handlePatchRecord(req, res, actor, roleSet) {
     nextPaid,
     body.status !== undefined ? String(body.status) : null
   );
-  if (patch.status === 'paid' && !patch.paid_at && !existing.paid_at) {
-    patch.paid_at = new Date().toISOString().slice(0, 10);
+  if (patch.status === 'paid') {
+    const incomingPaidAt =
+      patch.paid_at != null
+        ? String(patch.paid_at).slice(0, 10)
+        : body.paid_at != null
+          ? String(body.paid_at).slice(0, 10)
+          : '';
+    if (YMD.test(incomingPaidAt)) {
+      patch.paid_at = incomingPaidAt;
+    } else if (existing.paid_at) {
+      patch.paid_at = String(existing.paid_at).slice(0, 10);
+    } else {
+      patch.paid_at = todayYmd();
+    }
+  } else if (patch.status === 'unpaid' && Number(nextPaid) === 0) {
+    patch.paid_at = null;
   }
 
   const { data, error } = await supabaseAdmin

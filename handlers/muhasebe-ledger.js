@@ -156,39 +156,73 @@ async function loadTeacherExpense(from, to) {
 }
 
 async function loadStudentIncome(inst, from, to) {
-  let q = supabaseAdmin
+  // Nakit bazlı gelir: ödeme tarihi (paid_at) seçili aralıkta olanlar
+  let paidQ = supabaseAdmin
+    .from('student_payment_records')
+    .select('payment_type, amount_total, amount_paid, status, due_date, paid_at')
+    .neq('status', 'cancelled')
+    .gte('paid_at', from)
+    .lte('paid_at', to)
+    .limit(5000);
+  if (inst) paidQ = paidQ.eq('institution_id', inst);
+
+  // Vade bazlı tahakkuk / kalan (ödenmemiş veya kısmi)
+  let dueQ = supabaseAdmin
     .from('student_payment_records')
     .select('payment_type, amount_total, amount_paid, status, due_date, paid_at')
     .neq('status', 'cancelled')
     .gte('due_date', from)
     .lte('due_date', to)
     .limit(5000);
-  if (inst) q = q.eq('institution_id', inst);
-  const { data, error } = await q;
-  if (error) {
-    if (schemaMissing(error)) return { student_sum: 0, other_sum: 0, total_sum: 0, paid_sum: 0, remaining_sum: 0, by_type: {} };
-    throw error;
+  if (inst) dueQ = dueQ.eq('institution_id', inst);
+
+  const [{ data: paidRows, error: pe }, { data: dueRows, error: de }] = await Promise.all([paidQ, dueQ]);
+  if (pe || de) {
+    const err = pe || de;
+    if (schemaMissing(err)) {
+      return { student_sum: 0, other_sum: 0, total_sum: 0, paid_sum: 0, remaining_sum: 0, by_type: {} };
+    }
+    throw err;
   }
+
+  // Legacy: paid_at boş ama status=paid ve due_date ay içinde → hâlâ say
+  let legacyQ = supabaseAdmin
+    .from('student_payment_records')
+    .select('payment_type, amount_total, amount_paid, status, due_date, paid_at')
+    .eq('status', 'paid')
+    .is('paid_at', null)
+    .gte('due_date', from)
+    .lte('due_date', to)
+    .limit(2000);
+  if (inst) legacyQ = legacyQ.eq('institution_id', inst);
+  const { data: legacyRows } = await legacyQ;
 
   const byType = {};
   let studentSum = 0;
   let otherSum = 0;
   let paidSum = 0;
-  let remainingSum = 0;
-  let totalSum = 0;
 
-  for (const r of data || []) {
+  const addPaid = (r) => {
     const type = String(r.payment_type || 'diger');
-    const total = Number(r.amount_total) || 0;
     const paid = Number(r.amount_paid) || 0;
-    const rem = Math.max(0, total - paid);
-    totalSum += total;
+    if (paid <= 0) return;
     paidSum += paid;
-    remainingSum += rem;
     byType[type] = (byType[type] || 0) + paid;
     if (OTHER_INCOME_TYPES.has(type)) otherSum += paid;
     else if (STUDENT_INCOME_TYPES.has(type) || type === 'kurs') studentSum += paid;
     else otherSum += paid;
+  };
+
+  for (const r of paidRows || []) addPaid(r);
+  for (const r of legacyRows || []) addPaid(r);
+
+  let remainingSum = 0;
+  let totalSum = 0;
+  for (const r of dueRows || []) {
+    const total = Number(r.amount_total) || 0;
+    const paid = Number(r.amount_paid) || 0;
+    totalSum += total;
+    remainingSum += Math.max(0, total - paid);
   }
 
   return {

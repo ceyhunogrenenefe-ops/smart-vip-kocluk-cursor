@@ -168,7 +168,8 @@ export default function MuhasebeOverviewPanel({ onGoTab }: Props) {
                 {formatTryAmount(pnl.gelir.toplam)} ₺
               </p>
               <p className="mt-1 text-xs text-emerald-800/80 dark:text-emerald-200/80">
-                Öğrenci {formatTryAmount(pnl.gelir.ogrenci)} · Diğer {formatTryAmount(pnl.gelir.diger)}
+                Ödeme tarihine göre · Öğrenci {formatTryAmount(pnl.gelir.ogrenci)} · Diğer{' '}
+                {formatTryAmount(pnl.gelir.diger)}
               </p>
             </div>
             <div className="rounded-2xl border border-rose-200 bg-rose-50/70 p-4 dark:border-rose-900 dark:bg-rose-950/30">

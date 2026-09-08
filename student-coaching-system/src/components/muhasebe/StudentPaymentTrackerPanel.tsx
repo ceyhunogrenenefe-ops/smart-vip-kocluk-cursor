@@ -531,10 +531,25 @@ export default function StudentPaymentTrackerPanel() {
 
   const togglePaid = async (row: StudentPaymentRecord, paid: boolean) => {
     try {
+      let paid_at: string | null = null;
+      if (paid) {
+        const suggested =
+          (row.paid_at && String(row.paid_at).slice(0, 10)) ||
+          todayYmdLocal();
+        const entered = window.prompt('Ödeme tarihi (YYYY-MM-DD)', suggested);
+        if (entered == null) return;
+        const cleaned = String(entered).trim().slice(0, 10);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(cleaned)) {
+          toast.error('Geçerli bir ödeme tarihi girin (YYYY-MM-DD)');
+          return;
+        }
+        paid_at = cleaned;
+      }
       await patchStudentPayment({
         id: row.id,
         amount_paid: paid ? row.amount_total : 0,
-        status: paid ? 'paid' : 'unpaid'
+        status: paid ? 'paid' : 'unpaid',
+        paid_at
       });
       await reload();
     } catch (e) {
@@ -544,12 +559,22 @@ export default function StudentPaymentTrackerPanel() {
 
   const markPaid = async (row: StudentPaymentRecord) => {
     try {
+      const suggested =
+        (row.paid_at && String(row.paid_at).slice(0, 10)) || todayYmdLocal();
+      const entered = window.prompt('Ödeme tarihi (YYYY-MM-DD)', suggested);
+      if (entered == null) return;
+      const cleaned = String(entered).trim().slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(cleaned)) {
+        toast.error('Geçerli bir ödeme tarihi girin (YYYY-MM-DD)');
+        return;
+      }
       await patchStudentPayment({
         id: row.id,
         amount_paid: row.amount_total,
-        status: 'paid'
+        status: 'paid',
+        paid_at: cleaned
       });
-      toast.success('Ödendi işaretlendi');
+      toast.success(`Ödendi işaretlendi (${cleaned})`);
       await reload();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Güncellenemedi');
@@ -945,11 +970,21 @@ export default function StudentPaymentTrackerPanel() {
                       <div className="space-y-1">
                         <div className="flex items-center gap-1 text-xs font-medium text-slate-800 dark:text-slate-200">
                           <CalendarDays className="h-3 w-3 text-slate-400" />
-                          {formatTrShortDate(String(r.due_date).slice(0, 10))}
+                          <span title="Vade">{formatTrShortDate(String(r.due_date).slice(0, 10))}</span>
                         </div>
-                        <span className={`inline-flex rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${vadeEtiket.cls}`}>
-                          {vadeEtiket.text}
-                        </span>
+                        {r.status === 'paid' && r.paid_at ? (
+                          <div className="text-[10px] font-semibold text-emerald-700 dark:text-emerald-300">
+                            Ödeme: {formatTrShortDate(String(r.paid_at).slice(0, 10))}
+                          </div>
+                        ) : (
+                          <span className={`inline-flex rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${vadeEtiket.cls}`}>
+                            {vadeEtiket.text}
+                          </span>
+                        )}
+                      </div>
+                    ) : r.paid_at ? (
+                      <div className="text-xs font-semibold text-emerald-700">
+                        Ödeme: {formatTrShortDate(String(r.paid_at).slice(0, 10))}
                       </div>
                     ) : (
                       <span className="text-xs text-slate-400">—</span>
