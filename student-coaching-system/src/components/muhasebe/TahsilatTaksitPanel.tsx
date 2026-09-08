@@ -15,6 +15,7 @@ import {
   formatMultiCurrencySums,
   formatTrShortDate,
   sumTaksitByCurrency,
+  todayYmdLocal,
   type TaksitDurum,
   type TaksitFlatRow
 } from '../../lib/taksitMuhasebe';
@@ -182,12 +183,36 @@ export function TahsilatTaksitPanel({ compactHeader = false, onStatsChange }: Pr
     );
   }, [flat, search, onlyOverdue, filterMonth, dueFrom, dueTo]);
 
-  const toggle = async (contractId: string, index: number, odendi: boolean) => {
+  const toggle = async (contractId: string, index: number, odendi: boolean, currentPaidDate?: string) => {
     setBusyKey(`${contractId}:${index}`);
     setMsg(null);
     try {
-      await patchParentSignKayitOnly({ id: contractId, taksit_odeme_update: { index, odendi } });
+      let odendi_tarihi: string | undefined;
+      if (odendi) {
+        const suggested = (currentPaidDate && /^\d{4}-\d{2}-\d{2}$/.test(currentPaidDate)
+          ? currentPaidDate
+          : todayYmdLocal());
+        const entered = window.prompt('Ödeme tarihi (YYYY-MM-DD) — öğrenci ödemelerine bu tarihle işlenir', suggested);
+        if (entered == null) {
+          setBusyKey(null);
+          return;
+        }
+        const cleaned = String(entered).trim().slice(0, 10);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(cleaned)) {
+          setMsg('Geçerli bir ödeme tarihi girin (YYYY-MM-DD)');
+          setBusyKey(null);
+          return;
+        }
+        odendi_tarihi = cleaned;
+      }
+      await patchParentSignKayitOnly({
+        id: contractId,
+        taksit_odeme_update: { index, odendi, odendi_tarihi }
+      });
       await load();
+      if (odendi) {
+        setMsg(`Ödendi işaretlendi; öğrenci ödemelerine ${odendi_tarihi} tarihiyle işlendi.`);
+      }
     } catch (e) {
       setMsg(e instanceof Error ? e.message : 'Güncellenemedi');
     } finally {
@@ -434,7 +459,7 @@ export function TahsilatTaksitPanel({ compactHeader = false, onStatsChange }: Pr
                           type="checkbox"
                           checked={x.odendi}
                           disabled={busy}
-                          onChange={(e) => void toggle(x.contractId, x.taksitIndex, e.target.checked)}
+                          onChange={(e) => void toggle(x.contractId, x.taksitIndex, e.target.checked, x.odendiTarihi)}
                         />
                         {busy ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
                       </label>

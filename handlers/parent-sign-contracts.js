@@ -29,6 +29,10 @@ import { resolveSinifFromVeliKayit } from '../api/_lib/veli-kayit-class-level.js
 import { provisionStudentFromParentSignContract } from '../api/_lib/provision-student-from-parent-sign.js';
 import { notifyAdminsOnVeliKayitForm } from '../api/_lib/veli-kayit-admin-notify.js';
 import { notifyVeliSignReady } from '../api/_lib/veli-sign-ready-notify.js';
+import {
+  istanbulYmd,
+  syncParentSignTaksitToStudentPayment
+} from '../api/_lib/parent-sign-taksit-payment-sync.js';
 
 const ODEME_SEKLI_SET = new Set(['aylik_taksit', 'kredi_karti_tek', 'kredi_karti_otomatik']);
 const ODEME_TERCİHİ_VELİ_SET = new Set(['henuz_odemedi', 'kredi_karti_odendi', 'aylik_taksit_istiyorum']);
@@ -62,7 +66,7 @@ function applyKkTahsilToPlan(cards, odeme_sekli, kkTahsil) {
       ...list[0],
       odendi: true,
       odeme_notu: String(list[0].odeme_notu || 'KK tek çekim').slice(0, 200) || 'KK tek çekim',
-      odendi_tarihi: new Date().toISOString().slice(0, 10)
+      odendi_tarihi: istanbulYmd()
     };
   }
   return list;
@@ -1056,11 +1060,13 @@ export default async function handler(req, res) {
         const cur = tk[idx] && typeof tk[idx] === 'object' ? { ...tk[idx] } : { no: idx + 1 };
         const wasPaidBefore = Boolean(cur.odendi);
         const paid = Boolean(mergeTak.odendi);
-        const todayStr = new Date().toISOString().slice(0, 10);
+        const todayStr = istanbulYmd();
+        const paidDateRaw = String(mergeTak.odendi_tarihi || '').trim().slice(0, 10);
+        const paidDate = paid ? (/^\d{4}-\d{2}-\d{2}$/.test(paidDateRaw) ? paidDateRaw : todayStr) : '';
         tk[idx] = {
           ...cur,
           odendi: paid,
-          odendi_tarihi: paid ? String(mergeTak.odendi_tarihi || '').trim().slice(0, 10) || todayStr : '',
+          odendi_tarihi: paidDate,
           odeme_notu: mergeTak.not != null ? String(mergeTak.not).slice(0, 200) : String(cur.odeme_notu || '')
         };
         kjM.taksit_kartlari = tk;
@@ -1072,12 +1078,31 @@ export default async function handler(req, res) {
           .select()
           .single();
         if (uErrM) throw uErrM;
+
+        let paymentSync = null;
+        try {
+          paymentSync = await syncParentSignTaksitToStudentPayment({
+            contract: { ...existing, kayit_formu_json: kjM },
+            index: idx,
+            card: tk[idx],
+            paid,
+            paidAt: paidDate || todayStr,
+            actorSub: String(actor?.sub || actor?.id || '') || null
+          });
+        } catch (syncErr) {
+          console.warn(
+            '[parent-sign-contracts] student_payment sync',
+            syncErr instanceof Error ? syncErr.message : String(syncErr)
+          );
+          paymentSync = { ok: false, reason: syncErr instanceof Error ? syncErr.message : 'sync_failed' };
+        }
+
         if (paid && !wasPaidBefore) {
           void notifyTaksitMarkedPaid({ ...existing, kayit_formu_json: kjM }, idx, wasPaidBefore).catch((e) => {
             console.warn('[parent-sign-contracts] taksit paid whatsapp', e instanceof Error ? e.message : String(e));
           });
         }
-        return res.status(200).json({ data: updM });
+        return res.status(200).json({ data: updM, payment_sync: paymentSync });
       }
 
       const kjm = body.kayit_json_merge;
