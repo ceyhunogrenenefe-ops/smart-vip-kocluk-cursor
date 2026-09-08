@@ -1,5 +1,9 @@
 -- Öğrenci soft-delete + kayıt durumu (kesin / deneme / kayıt sildirdi)
 -- UserManagement filtresi ve kalıcı silme yerine arşivleme için.
+--
+-- ZORUNLU (prod): Bu dosya uygulanmadan enrollment_status / deleted_at yazımı
+-- API tarafında kolon düşürülerek devam eder; soft-delete ve kayıt durumu filtresi
+-- tam çalışmaz. Supabase → SQL Editor → Run.
 
 ALTER TABLE public.students
   ADD COLUMN IF NOT EXISTS enrollment_status text;

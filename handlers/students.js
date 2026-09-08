@@ -801,6 +801,20 @@ export default async function handler(req, res) {
         const softResult = await updateOneOptionalModerator('students', softPatch, 'id', id);
         if (softResult.error) throw softResult.error;
 
+        const { data: refreshed } = await supabaseAdmin.from('students').select('*').eq('id', id).maybeSingle();
+        const softApplied =
+          Boolean(refreshed?.deleted_at) ||
+          String(refreshed?.enrollment_status || '').toLowerCase() === 'withdrawn';
+        if (!softApplied) {
+          return res.status(409).json({
+            error: 'soft_delete_schema_missing',
+            hint:
+              "Öğrenci soft-delete kolonları (deleted_at / enrollment_status) veritabanında yok. " +
+              'student-coaching-system/sql/2026-09-05-students-enrollment-soft-delete.sql dosyasını Supabase SQL Editor’da çalıştırın; ' +
+              'veya kalıcı silme için hard=1 kullanın.',
+          });
+        }
+
         // Bağlı giriş hesabını pasife çek (hesabı silme)
         const linkedIds = [existing.user_id, existing.platform_user_id].filter(Boolean).map(String);
         for (const uid of [...new Set(linkedIds)]) {
@@ -814,7 +828,6 @@ export default async function handler(req, res) {
           }
         }
 
-        const { data: refreshed } = await supabaseAdmin.from('students').select('*').eq('id', id).maybeSingle();
         return res.status(200).json({
           ok: true,
           soft_deleted: true,
