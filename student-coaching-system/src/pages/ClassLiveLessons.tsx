@@ -1094,7 +1094,9 @@ export default function ClassLiveLessons() {
         }
 
         // Ada göre sırala
-        mapped.sort((a, b) => a.name.localeCompare(b.name, 'tr', { sensitivity: 'base' }));
+        mapped.sort((a, b) =>
+          String(a.name || '').localeCompare(String(b.name || ''), 'tr', { sensitivity: 'base' })
+        );
         if (!cancel) setTeacherOptions(mapped);
       } catch (e) {
         // API başarısız olsa bile öğretmen en azından kendini görsün
