@@ -1080,28 +1080,45 @@ export default async function handler(req, res) {
           .single();
         if (uErrM) throw uErrM;
 
+        // Yalnızca yeni ödeme işaretinde öğrenci ödemesine aktar (geriye dönük backfill yok)
         let paymentSync = null;
-        try {
-          paymentSync = await syncParentSignTaksitToStudentPayment({
-            contract: { ...existing, kayit_formu_json: kjM },
-            index: idx,
-            card: tk[idx],
-            paid,
-            paidAt: paidDate || todayStr,
-            actorSub: String(actor?.sub || actor?.id || '') || null
-          });
-        } catch (syncErr) {
-          console.warn(
-            '[parent-sign-contracts] student_payment sync',
-            syncErr instanceof Error ? syncErr.message : String(syncErr)
-          );
-          paymentSync = { ok: false, reason: syncErr instanceof Error ? syncErr.message : 'sync_failed' };
-        }
-
         if (paid && !wasPaidBefore) {
+          try {
+            paymentSync = await syncParentSignTaksitToStudentPayment({
+              contract: { ...existing, kayit_formu_json: kjM },
+              index: idx,
+              card: tk[idx],
+              paid: true,
+              paidAt: paidDate || todayStr,
+              actorSub: String(actor?.sub || actor?.id || '') || null
+            });
+          } catch (syncErr) {
+            console.warn(
+              '[parent-sign-contracts] student_payment sync',
+              syncErr instanceof Error ? syncErr.message : String(syncErr)
+            );
+            paymentSync = { ok: false, reason: syncErr instanceof Error ? syncErr.message : 'sync_failed' };
+          }
           void notifyTaksitMarkedPaid({ ...existing, kayit_formu_json: kjM }, idx, wasPaidBefore).catch((e) => {
             console.warn('[parent-sign-contracts] taksit paid whatsapp', e instanceof Error ? e.message : String(e));
           });
+        } else if (!paid && wasPaidBefore) {
+          // Ödeme geri alındıysa bağlı öğrenci ödeme satırını temizle
+          try {
+            paymentSync = await syncParentSignTaksitToStudentPayment({
+              contract: { ...existing, kayit_formu_json: kjM },
+              index: idx,
+              card: tk[idx],
+              paid: false,
+              paidAt: todayStr,
+              actorSub: String(actor?.sub || actor?.id || '') || null
+            });
+          } catch (syncErr) {
+            console.warn(
+              '[parent-sign-contracts] student_payment unsync',
+              syncErr instanceof Error ? syncErr.message : String(syncErr)
+            );
+          }
         }
         return res.status(200).json({ data: updM, payment_sync: paymentSync });
       }
