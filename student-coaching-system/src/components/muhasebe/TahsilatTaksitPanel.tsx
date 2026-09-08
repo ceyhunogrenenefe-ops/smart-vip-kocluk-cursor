@@ -111,27 +111,6 @@ export function TahsilatTaksitPanel({ compactHeader = false, onStatsChange }: Pr
         return;
       }
       setRows(all.filter((r) => String(r.institution_id || '') === inst));
-
-      // Ödenmiş taksitleri öğrenci ödemelerine geri doldur (hesapsız kayıtlar dahil)
-      try {
-        const syncRes = await apiFetch('/api/parent-sign-contracts', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            action: 'sync_paid_taksit_to_payments',
-            institution_id: inst
-          })
-        });
-        const sj = await syncRes.json().catch(() => ({}));
-        if (syncRes.ok && sj?.data) {
-          const d = sj.data;
-          if (Number(d.created) > 0) {
-            setMsg(`${d.created} taksit öğrenci ödemelerine aktarıldı.`);
-          }
-        }
-      } catch {
-        /* backfill best-effort */
-      }
     } catch (e) {
       setMsg(e instanceof Error ? e.message : 'Liste yüklenemedi');
     } finally {
