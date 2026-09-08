@@ -179,7 +179,7 @@ export default function MuhasebeOverviewPanel({ onGoTab }: Props) {
                 {formatTryAmount(pnl.gider.toplam)} ₺
               </p>
               <p className="mt-1 text-xs text-rose-800/80 dark:text-rose-200/80">
-                Öğretmen {formatTryAmount(pnl.gider.ogretmen)} · Diğer {formatTryAmount(pnl.gider.diger)}
+                Ödenen öğretmen {formatTryAmount(pnl.gider.ogretmen)} · Diğer {formatTryAmount(pnl.gider.diger)}
               </p>
             </div>
             <div
@@ -243,20 +243,64 @@ export default function MuhasebeOverviewPanel({ onGoTab }: Props) {
 
             <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
               <h3 className="text-sm font-bold text-slate-900 dark:text-white">Gider kırılımı</h3>
+              <p className="mt-1 text-xs text-slate-500">
+                Öğretmen kalemi yalnızca bu ay ödenen hakedişleri gösterir; ödenmemiş tahakkuk dahil edilmez.
+              </p>
               <ul className="mt-3 space-y-2 text-sm">
                 <li className="flex justify-between gap-2">
-                  <span className="text-slate-600 dark:text-slate-300">Öğretmen (ders)</span>
+                  <span className="text-slate-600 dark:text-slate-300">Öğretmen hakediş (ödendi)</span>
                   <span className="font-semibold tabular-nums">{formatTryAmount(pnl.gider.ogretmen_ders)} ₺</span>
                 </li>
                 <li className="flex justify-between gap-2">
-                  <span className="text-slate-600 dark:text-slate-300">Öğretmen (ekstra kalem)</span>
+                  <span className="text-slate-600 dark:text-slate-300">Öğretmen ek kalem (ödendi)</span>
                   <span className="font-semibold tabular-nums">{formatTryAmount(pnl.gider.ogretmen_ekstra)} ₺</span>
+                </li>
+                <li className="flex justify-between gap-2 border-t border-slate-100 pt-2 dark:border-slate-800">
+                  <span className="font-medium text-slate-700 dark:text-slate-200">Öğretmen toplam (ödendi)</span>
+                  <span className="font-bold tabular-nums">{formatTryAmount(pnl.gider.ogretmen)} ₺</span>
                 </li>
                 <li className="flex justify-between gap-2">
                   <span className="text-slate-600 dark:text-slate-300">Diğer giderler</span>
                   <span className="font-semibold tabular-nums">{formatTryAmount(pnl.gider.diger)} ₺</span>
                 </li>
               </ul>
+
+              {(pnl.paid_teachers || []).length > 0 ? (
+                <div className="mt-4 overflow-x-auto rounded-xl border border-slate-100 dark:border-slate-800">
+                  <table className="min-w-full text-xs">
+                    <thead className="bg-slate-50 text-left text-[11px] uppercase text-slate-500 dark:bg-slate-800">
+                      <tr>
+                        <th className="px-2.5 py-1.5">Öğretmen</th>
+                        <th className="px-2.5 py-1.5">Dönem</th>
+                        <th className="px-2.5 py-1.5 text-right">Tutar</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(pnl.paid_teachers || []).map((row) => (
+                        <tr
+                          key={`${row.teacher_id}-${row.period_from}-${row.period_to}`}
+                          className="border-t border-slate-100 dark:border-slate-800"
+                        >
+                          <td className="px-2.5 py-1.5 font-medium text-slate-800 dark:text-slate-100">
+                            {row.teacher_name}
+                          </td>
+                          <td className="px-2.5 py-1.5 text-slate-500">
+                            {row.period_from} → {row.period_to}
+                          </td>
+                          <td className="px-2.5 py-1.5 text-right font-semibold tabular-nums">
+                            {formatTryAmount(row.total_tl)} ₺
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className="mt-3 rounded-lg border border-dashed border-slate-200 px-3 py-2 text-xs text-slate-500 dark:border-slate-700">
+                  Bu ay ödenen öğretmen hakedişi yok.
+                </p>
+              )}
+
               {onGoTab ? (
                 <div className="mt-3 flex flex-wrap gap-3">
                   <button

@@ -7,7 +7,6 @@ import {
   roleSetHasSuperAdmin
 } from '../api/_lib/actor-roles.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
-import { sessionLessonUnits40 } from '../api/_lib/class-lesson-payment-units.js';
 
 const jsonError = (res, status, error, extra) => res.status(status).json({ error, ...extra });
 
@@ -75,19 +74,50 @@ function parseRange(req) {
 }
 
 async function loadPaidPayrollSettlements(from, to) {
-  const { data, error } = await supabaseAdmin
+  const empty = {
+    rows: [],
+    paidTeacherIds: new Set(),
+    expenseIds: new Set(),
+    lesson_sum: 0,
+    extra_sum: 0,
+    total: 0
+  };
+
+  // Önce ödeme tarihi (paid_at) seçili ay içinde olanlar — nakit bazlı genel bakış
+  let q = supabaseAdmin
     .from('teacher_payroll_settlements')
-    .select('id, teacher_id, period_from, period_to, total_tl, lesson_gross_tl, extras_tl, status, expense_item_id')
+    .select(
+      'id, teacher_id, period_from, period_to, total_tl, lesson_gross_tl, extras_tl, status, expense_item_id, paid_at'
+    )
     .eq('status', 'paid')
-    .lte('period_from', to)
-    .gte('period_to', from)
+    .gte('paid_at', `${from}T00:00:00`)
+    .lte('paid_at', `${to}T23:59:59.999`)
     .limit(2000);
+
+  let { data, error } = await q;
   if (error) {
     if (/teacher_payroll_settlements|does not exist|schema cache|PGRST205/i.test(errorMessage(error))) {
-      return { rows: [], paidTeacherIds: new Set(), expenseIds: new Set() };
+      return empty;
     }
-    throw error;
+    // paid_at filtresi bazı ortamlarda sorun çıkarırsa dönem overlap'e düş
+    const fallback = await supabaseAdmin
+      .from('teacher_payroll_settlements')
+      .select(
+        'id, teacher_id, period_from, period_to, total_tl, lesson_gross_tl, extras_tl, status, expense_item_id, paid_at'
+      )
+      .eq('status', 'paid')
+      .lte('period_from', to)
+      .gte('period_to', from)
+      .limit(2000);
+    if (fallback.error) {
+      if (/teacher_payroll_settlements|does not exist|schema cache|PGRST205/i.test(errorMessage(fallback.error))) {
+        return empty;
+      }
+      throw fallback.error;
+    }
+    data = fallback.data;
   }
+
   const paidTeacherIds = new Set();
   const expenseIds = new Set();
   let lessonSum = 0;
@@ -110,70 +140,18 @@ async function loadPaidPayrollSettlements(from, to) {
   };
 }
 
+/**
+ * Genel bakış öğretmen gideri: yalnızca ÖDENMİŞ hakedişler.
+ * Tahakkuk (tamamlanan ders × birim ücret) yansıtılmaz.
+ */
 async function loadTeacherExpense(from, to) {
   const payroll = await loadPaidPayrollSettlements(from, to);
-
-  const { data: sessions, error } = await supabaseAdmin
-    .from('class_sessions')
-    .select('id, teacher_id, start_time, end_time, lesson_date, status')
-    .eq('status', 'completed')
-    .gte('lesson_date', from)
-    .lte('lesson_date', to)
-    .limit(5000);
-  if (error) throw error;
-
-  const { data: rates } = await supabaseAdmin.from('teacher_group_lesson_rates').select('teacher_id, unit_price_tl');
-  const rateMap = new Map((rates || []).map((r) => [String(r.teacher_id), Number(r.unit_price_tl) || 500]));
-
-  let lessonSum = 0;
-  for (const s of sessions || []) {
-    const tid = String(s.teacher_id || '');
-    // Ödenen hakediş kartı varsa o öğretmenin dönem tahakkuku settlement'tan gelir (çift sayım yok)
-    if (payroll.paidTeacherIds.has(tid)) continue;
-    const units = sessionLessonUnits40(s);
-    const price = rateMap.get(tid) || 500;
-    lessonSum += units * price;
-  }
-
-  let extraSum = 0;
-  const seenExtra = new Set();
-  const { data: extrasByDate } = await supabaseAdmin
-    .from('teacher_payment_extra_items')
-    .select('id, amount_tl, item_date, teacher_id')
-    .gte('item_date', from)
-    .lte('item_date', to)
-    .limit(2000);
-  for (const e of extrasByDate || []) {
-    const id = String(e.id);
-    if (seenExtra.has(id)) continue;
-    if (payroll.paidTeacherIds.has(String(e.teacher_id || ''))) continue;
-    seenExtra.add(id);
-    extraSum += Number(e.amount_tl) || 0;
-  }
-  const { data: extrasByPeriod } = await supabaseAdmin
-    .from('teacher_payment_extra_items')
-    .select('id, amount_tl, item_date, period_from, period_to, teacher_id')
-    .eq('period_from', from)
-    .eq('period_to', to)
-    .limit(2000);
-  for (const e of extrasByPeriod || []) {
-    const id = String(e.id);
-    if (seenExtra.has(id)) continue;
-    if (payroll.paidTeacherIds.has(String(e.teacher_id || ''))) continue;
-    seenExtra.add(id);
-    extraSum += Number(e.amount_tl) || 0;
-  }
-
-  const accruedLesson = Math.round(lessonSum * 100) / 100;
-  const accruedExtra = Math.round(extraSum * 100) / 100;
-  const paidLesson = payroll.lesson_sum || 0;
-  const paidExtra = payroll.extra_sum || 0;
-
   return {
-    lesson_sum: Math.round((accruedLesson + paidLesson) * 100) / 100,
-    extra_sum: Math.round((accruedExtra + paidExtra) * 100) / 100,
-    total: Math.round((accruedLesson + accruedExtra + (payroll.total || 0)) * 100) / 100,
-    payroll_expense_ids: payroll.expenseIds
+    lesson_sum: payroll.lesson_sum || 0,
+    extra_sum: payroll.extra_sum || 0,
+    total: payroll.total || 0,
+    payroll_expense_ids: payroll.expenseIds,
+    paid_rows: payroll.rows || []
   };
 }
 
@@ -267,6 +245,28 @@ async function handleGetSummary(req, res, actor, roleSet) {
   const giderToplam = Math.round((giderOgretmen + giderDiger) * 100) / 100;
   const kar = Math.round((gelirToplam - giderToplam) * 100) / 100;
 
+  const paidRows = teacher.paid_rows || [];
+  const teacherIds = [...new Set(paidRows.map((r) => String(r.teacher_id || '')).filter(Boolean))];
+  const nameMap = new Map();
+  if (teacherIds.length) {
+    const { data: users } = await supabaseAdmin.from('users').select('id,name,email').in('id', teacherIds);
+    for (const u of users || []) {
+      nameMap.set(String(u.id), String(u.name || u.email || u.id));
+    }
+  }
+  const paidTeachers = paidRows
+    .map((r) => ({
+      teacher_id: String(r.teacher_id || ''),
+      teacher_name: nameMap.get(String(r.teacher_id || '')) || String(r.teacher_id || ''),
+      period_from: r.period_from,
+      period_to: r.period_to,
+      paid_at: r.paid_at || null,
+      lesson_gross_tl: Math.round((Number(r.lesson_gross_tl) || 0) * 100) / 100,
+      extras_tl: Math.round((Number(r.extras_tl) || 0) * 100) / 100,
+      total_tl: Math.round((Number(r.total_tl) || 0) * 100) / 100
+    }))
+    .sort((a, b) => String(a.teacher_name || '').localeCompare(String(b.teacher_name || ''), 'tr'));
+
   return res.status(200).json({
     from: range.from,
     to: range.to,
@@ -285,6 +285,7 @@ async function handleGetSummary(req, res, actor, roleSet) {
       diger: giderDiger,
       toplam: giderToplam
     },
+    paid_teachers: paidTeachers,
     kar,
     expenses: otherExp.items,
     hint: otherExp.hint || null

@@ -34,6 +34,17 @@ export type InstitutionExpenseItem = {
   note?: string | null;
 };
 
+export type PaidTeacherExpense = {
+  teacher_id: string;
+  teacher_name: string;
+  period_from: string;
+  period_to: string;
+  paid_at?: string | null;
+  lesson_gross_tl: number;
+  extras_tl: number;
+  total_tl: number;
+};
+
 export type MuhasebePnL = {
   from: string;
   to: string;
@@ -52,6 +63,8 @@ export type MuhasebePnL = {
     diger: number;
     toplam: number;
   };
+  /** Seçili ayda ödenen hakediş satırları (tahakkuk yok) */
+  paid_teachers?: PaidTeacherExpense[];
   kar: number;
   expenses: InstitutionExpenseItem[];
   hint?: string | null;
