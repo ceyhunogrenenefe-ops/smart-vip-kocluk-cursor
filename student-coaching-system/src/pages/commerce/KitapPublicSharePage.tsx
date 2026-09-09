@@ -76,6 +76,23 @@ export default function KitapPublicSharePage({ mode }: { mode: Mode }) {
       : Number(offer?.compare_at_price_kurus || 0);
   const items = pkg ? packageItemsOf(pkg) : [];
   const canBuy = Boolean(title) && price > 0 && (mode === 'package' ? Boolean(pkg?.id) : Boolean(offer?.id));
+  const description =
+    mode === 'package'
+      ? String(pkg?.description || '').trim()
+      : String(book?.description || book?.subtitle || '').trim();
+  const setContents =
+    mode === 'book' && Array.isArray(book?.metadata?.set_contents)
+      ? (book!.metadata!.set_contents as unknown[]).map((x) => String(x)).filter(Boolean)
+      : [];
+
+  useEffect(() => {
+    if (!title) return;
+    const prev = document.title;
+    document.title = `${title} — Online VIP Kitap`;
+    return () => {
+      document.title = prev;
+    };
+  }, [title]);
 
   const handleBuy = async () => {
     if (!canBuy) return;
@@ -129,11 +146,17 @@ export default function KitapPublicSharePage({ mode }: { mode: Mode }) {
                     {mode === 'package' ? 'Sınıf paketi' : 'Kitap'}
                   </p>
                   <h2 className="mt-0.5 text-xl font-bold leading-snug text-slate-900">{title}</h2>
+                  {mode === 'book' && book?.subtitle && book.subtitle !== description ? (
+                    <p className="mt-1 text-sm font-medium text-slate-600">{book.subtitle}</p>
+                  ) : null}
                   {mode === 'package' && pkg?.class_level ? (
                     <p className="mt-1 text-sm text-slate-500">Kademe: {pkg.class_level}</p>
                   ) : null}
                   {mode === 'book' && book?.author ? (
                     <p className="mt-1 text-sm text-slate-500">{book.author}</p>
+                  ) : null}
+                  {mode === 'book' && book?.publisher ? (
+                    <p className="mt-0.5 text-xs text-slate-400">{book.publisher}</p>
                   ) : null}
                 </div>
               </div>
@@ -151,8 +174,29 @@ export default function KitapPublicSharePage({ mode }: { mode: Mode }) {
                 </div>
               ) : null}
 
-              {mode === 'package' && pkg?.description ? (
-                <p className="text-sm leading-relaxed text-slate-600">{pkg.description}</p>
+              {description ? (
+                <div className="rounded-2xl border border-indigo-100 bg-indigo-50/60 px-4 py-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-indigo-700">Açıklama</p>
+                  <p className="mt-1.5 whitespace-pre-wrap text-sm leading-relaxed text-slate-700">{description}</p>
+                </div>
+              ) : (
+                <p className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500">
+                  Bu ürün için henüz açıklama girilmemiş. Mağazadan paket/kitap düzenleyerek açıklama ekleyebilirsiniz.
+                </p>
+              )}
+
+              {setContents.length > 0 ? (
+                <div>
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Set içeriği</p>
+                  <ul className="space-y-1.5">
+                    {setContents.map((line, i) => (
+                      <li key={i} className="flex items-start gap-2 text-sm text-slate-700">
+                        <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-500" />
+                        <span>{line}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               ) : null}
 
               {mode === 'package' && items.length > 0 ? (
