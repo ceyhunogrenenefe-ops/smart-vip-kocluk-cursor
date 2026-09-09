@@ -8,6 +8,8 @@
  *  catalog.list          — onaylı teklifleri sayfa bazlı listele
  *  catalog.get           — kitap slug/id ile detay + teklifler
  *  catalog.packages      — aktif paketleri listele
+ *  catalog.package       — paket slug/id detay (public, veli linki)
+ *  catalog.buy_now       — girişsiz tek paket/kitap → odeme/kitap token
  *  catalog.collections   — 8. sınıf VIP / Paraf / Deneme grupları (geriye dönük)
  *  catalog.browse        — sınıf → kategori → kitap (süper admin store_browse)
  *  catalog.assigned      — öğrenciye atanmış kitaplar
@@ -248,6 +250,68 @@ async function handleCatalog(op, body, actor) {
       packages = packages.filter((p) => !p.class_level || classKeyMatchesLevels(body.class_level, [p.class_level]));
     }
     return { ok: true, packages };
+  }
+
+  if (op === 'catalog.package') {
+    const slug = String(body.slug || '').trim();
+    const id = String(body.id || '').trim();
+    if (!slug && !id) throw new Error('slug veya id gerekli');
+    let q = supabaseAdmin
+      .from('commerce_book_packages')
+      .select(`
+        id, name, slug, description, class_level, program,
+        price_kurus, compare_at_price_kurus, cover_image_url, sort_order
+      `)
+      .eq('is_active', true)
+      .is('deleted_at', null)
+      .limit(1);
+    q = slug ? q.eq('slug', slug) : q.eq('id', id);
+    const { data: pkg, error } = await q.maybeSingle();
+    if (error) throw error;
+    if (!pkg) throw new Error('Paket bulunamadı');
+
+    const { data: items, error: itemsErr } = await supabaseAdmin
+      .from('commerce_book_package_items')
+      .select('id, package_id, quantity, is_required, sort_order, book_id, vendor_offer_id')
+      .eq('package_id', pkg.id)
+      .order('sort_order', { ascending: true });
+    if (itemsErr) throw itemsErr;
+
+    const bookMap = await fetchBooksByIds((items ?? []).map((i) => i.book_id));
+    const offerIds = (items ?? []).map((i) => i.vendor_offer_id).filter(Boolean);
+    let offerMap = new Map();
+    if (offerIds.length) {
+      const { data: offerRows, error: offerErr } = await supabaseAdmin
+        .from('commerce_vendor_offers')
+        .select('id, price_kurus, stock_quantity, status')
+        .in('id', offerIds);
+      if (offerErr) throw offerErr;
+      offerMap = new Map((offerRows ?? []).map((o) => [o.id, o]));
+    }
+
+    const commerce_book_package_items = (items ?? []).map((item) => ({
+      ...item,
+      commerce_books: bookMap.get(item.book_id) ?? null,
+      commerce_vendor_offers: item.vendor_offer_id ? (offerMap.get(item.vendor_offer_id) ?? null) : null,
+    }));
+
+    return { ok: true, package: { ...pkg, commerce_book_package_items } };
+  }
+
+  if (op === 'catalog.buy_now') {
+    const settings = await loadCommerceSettings();
+    if (settings.student_store_enabled === false) throw new Error('Kitap mağazası şu an kapalı');
+
+    const packageId = String(body.package_id || '').trim();
+    const offerId = String(body.vendor_offer_id || '').trim();
+    const quantity = Math.max(1, Math.min(20, Math.round(Number(body.quantity) || 1)));
+    if (!packageId && !offerId) throw new Error('package_id veya vendor_offer_id gerekli');
+
+    const guestItems = packageId
+      ? [{ vendor_offer_id: null, package_id: packageId, quantity, title_snapshot: 'Paket' }]
+      : [{ vendor_offer_id: offerId, package_id: null, quantity, title_snapshot: 'Kitap' }];
+
+    return prepareCheckout(body, actor, { guestItems });
   }
 
   if (op === 'catalog.collections') {
@@ -552,10 +616,17 @@ async function loadShippingAddress(orderId) {
 }
 
 async function prepareCheckout(body, actor, opts = {}) {
-  if (!actor?.sub || actor.sub === 'anonymous') throw new Error('Ödeme için giriş gerekli');
-  const userId = actor.sub;
-  const cartId = await getOrCreateCart(userId);
-  const items = await enrichCart(cartId);
+  const guestItems = Array.isArray(opts.guestItems) ? opts.guestItems : null;
+  const userId = actor?.sub && actor.sub !== 'anonymous' ? actor.sub : null;
+  if (!userId && !guestItems?.length) throw new Error('Ödeme için giriş gerekli');
+
+  let items;
+  if (guestItems?.length) {
+    items = guestItems;
+  } else {
+    const cartId = await getOrCreateCart(userId);
+    items = await enrichCart(cartId);
+  }
   if (!items.length) throw new Error('Sepet boş');
 
   const settings = await loadCommerceSettings();
@@ -682,8 +753,8 @@ async function prepareCheckout(body, actor, opts = {}) {
   if (total < 100) throw new Error('Ödeme tutarı geçersiz');
 
   const orderNumber = await nextOrderNumber(settings.order_number_prefix);
-  const studentId = actor.student_id || body.student_id || null;
-  let institutionId = actor.institution_id || null;
+  const studentId = actor?.student_id || body.student_id || null;
+  let institutionId = actor?.institution_id || null;
   if (!institutionId && studentId) {
     const { data: st } = await supabaseAdmin.from('students').select('institution_id').eq('id', studentId).maybeSingle();
     institutionId = st?.institution_id || null;

@@ -58,6 +58,26 @@ export const csGetBook = (idOrSlug: string, isSlug = true) =>
 export const csListPackages = (class_level?: string) =>
   post<{ packages: CommerceBookPackage[] }>('catalog.packages', class_level ? { class_level } : {});
 
+export const csGetPackage = (slugOrId: string) => {
+  const v = String(slugOrId || '').trim();
+  const looksUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
+  return post<{ package: CommerceBookPackage }>(
+    'catalog.package',
+    looksUuid ? { id: v } : { slug: v }
+  );
+};
+
+/** Girişsiz tek ürün/paket satın alma → odeme/kitap URL */
+export const csBuyNow = (params: { package_id?: string; vendor_offer_id?: string; quantity?: number }) =>
+  post<{
+    ok: true;
+    token: string;
+    checkout_url: string;
+    order_id: string;
+    order_number: string;
+    total_kurus: number;
+  }>('catalog.buy_now', params);
+
 export type StoreCollectionBook = CommerceBook & {
   buyable?: boolean;
   commerce_vendor_offers?: (CommerceVendorOffer & { commerce_vendors?: { id: string; name: string; slug?: string } })[];
