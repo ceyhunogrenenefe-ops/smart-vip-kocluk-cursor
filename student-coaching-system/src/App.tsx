@@ -95,6 +95,7 @@ import KitapPazaryeriPage from './pages/commerce/KitapPazaryeriPage';
 import VendorPanelPage from './pages/commerce/VendorPanelPage';
 import KitapMagazasiPage from './pages/commerce/KitapMagazasiPage';
 import KitapDetayPage from './pages/commerce/KitapDetayPage';
+import KitapPublicSharePage from './pages/commerce/KitapPublicSharePage';
 import SepetPage from './pages/commerce/SepetPage';
 import KitapOdemePage from './pages/commerce/KitapOdemePage';
 import GarantiOdemePage, { GarantiOdemeSonucPage } from './pages/GarantiOdemePage';
@@ -700,6 +701,8 @@ function App() {
             } />
 
             <Route path="/kitapci/:token" element={<KitapciPortalPage />} />
+            <Route path="/kitap/paket/:slug" element={<KitapPublicSharePage mode="package" />} />
+            <Route path="/kitap/urun/:slug" element={<KitapPublicSharePage mode="book" />} />
             <Route path="/odeme/sonuc" element={<GarantiOdemeSonucPage />} />
             <Route path="/odeme/:token" element={<GarantiOdemePage />} />
             <Route path="/review/public" element={<PublicTeacherReviewPage />} />

@@ -12,6 +12,8 @@ export function isGuestPublicPath(pathname?: string): boolean {
     path.startsWith('/veli-imza/') ||
     path.startsWith('/sign-contract/') ||
     path.startsWith('/kitapci/') ||
+    path.startsWith('/kitap/paket/') ||
+    path.startsWith('/kitap/urun/') ||
     path.startsWith('/verify-document') ||
     path.startsWith('/veli-kayit-metin/') ||
     path.startsWith('/d/') ||

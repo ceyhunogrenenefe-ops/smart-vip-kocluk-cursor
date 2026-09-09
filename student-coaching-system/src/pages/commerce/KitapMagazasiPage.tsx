@@ -13,6 +13,7 @@ import {
   Loader2,
   Package,
   Pencil,
+  Link2,
   Search,
   ShoppingBag,
   ShoppingCart,
@@ -45,6 +46,11 @@ import {
   type StoreBrowseCategoryWithBooks,
   type StoreCollectionBook,
 } from '../../lib/commerceStoreApi';
+import {
+  copyTextToClipboard,
+  kitapBookShareUrl,
+  kitapPackageShareUrl
+} from '../../lib/kitapShareLinks';
 import type { CommerceBookPackage, CommerceSettings, CommerceStudentBookAssignment, StoreBrowseClass } from '../../types/commerce.types';
 import { formatCommerceTry } from '../../types/commerce.types';
 import { useAuth } from '../../context/AuthContext';
@@ -113,6 +119,7 @@ function BookCard({
   staffSelect = false,
   selected = false,
   onToggleSelect,
+  showShareLink = false,
 }: {
   offer: OfferWithBook;
   onCartChange?: () => void;
@@ -120,10 +127,22 @@ function BookCard({
   staffSelect?: boolean;
   selected?: boolean;
   onToggleSelect?: (bookId: string) => void;
+  showShareLink?: boolean;
 }) {
   const navigate = useNavigate();
   const book = offer.commerce_books;
   if (!book) return null;
+
+  const copyShare = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      await copyTextToClipboard(kitapBookShareUrl(book.slug));
+      toast.success('Veli kitap linki kopyalandı');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Kopyalanamadı');
+    }
+  };
+
   return (
     <div
       className={`bg-white rounded-2xl border overflow-hidden hover:shadow-md transition-shadow cursor-pointer ${
@@ -192,6 +211,16 @@ function BookCard({
             <CartButton offerId={offer.id} stock={offer.stock_quantity} onAdded={onCartChange} />
           </div>
         )}
+        {showShareLink && book.slug ? (
+          <button
+            type="button"
+            onClick={(e) => void copyShare(e)}
+            className="mt-2 inline-flex w-full items-center justify-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-white"
+            title="Veliye atmak için paylaşım linkini kopyala"
+          >
+            <Link2 className="h-3.5 w-3.5" /> Linki kopyala
+          </button>
+        ) : null}
       </div>
     </div>
   );
@@ -686,7 +715,7 @@ function PaketlerTab({ classLevel, staffRole }: { classLevel?: string; staffRole
     <>
       {staffRole && (
         <p className="text-xs text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-xl px-3 py-2 mb-3">
-          Yanlış paket: karttaki <b>Düzenle</b> ile adı, kademeyi, fiyatı veya kitapları düzeltin. Silmek de aynı yerden.
+          Yanlış paket: karttaki <b>Düzenle</b> ile düzeltin. Veliye göndermek için <b>Link</b> ile paylaşım URL’sini kopyalayın — veli giriş yapmadan satın alabilir.
         </p>
       )}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -705,15 +734,36 @@ function PaketlerTab({ classLevel, staffRole }: { classLevel?: string; staffRole
               <div className="p-4">
                 <div className="flex items-start justify-between gap-2">
                   <div className="font-bold text-base">{pkg.name}</div>
-                  {staffRole && (
-                    <button
-                      type="button"
-                      onClick={() => setEditing(pkg)}
-                      className="flex items-center gap-1 text-xs font-medium text-indigo-700 bg-indigo-50 px-2 py-1 rounded-lg flex-shrink-0"
-                    >
-                      <Pencil className="w-3 h-3" /> Düzenle
-                    </button>
-                  )}
+                  <div className="flex flex-shrink-0 items-center gap-1">
+                    {pkg.slug ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void (async () => {
+                            try {
+                              await copyTextToClipboard(kitapPackageShareUrl(pkg.slug));
+                              toast.success('Veli paket linki kopyalandı');
+                            } catch (e) {
+                              toast.error(e instanceof Error ? e.message : 'Kopyalanamadı');
+                            }
+                          })();
+                        }}
+                        className="flex items-center gap-1 text-xs font-medium text-emerald-800 bg-emerald-50 px-2 py-1 rounded-lg"
+                        title="Veliye WhatsApp için paylaşım linki"
+                      >
+                        <Link2 className="w-3 h-3" /> Link
+                      </button>
+                    ) : null}
+                    {staffRole && (
+                      <button
+                        type="button"
+                        onClick={() => setEditing(pkg)}
+                        className="flex items-center gap-1 text-xs font-medium text-indigo-700 bg-indigo-50 px-2 py-1 rounded-lg"
+                      >
+                        <Pencil className="w-3 h-3" /> Düzenle
+                      </button>
+                    )}
+                  </div>
                 </div>
                 {pkg.class_level && <div className="text-xs text-indigo-600 font-medium mt-0.5">{classLevelLabel(pkg.class_level)}</div>}
                 {pkg.description && <div className="text-sm text-gray-500 mt-1 line-clamp-2">{pkg.description}</div>}
@@ -1341,6 +1391,7 @@ export default function KitapMagazasiPage() {
             staffSelect={staffRole && (tab === 'tum-kitaplar' || tab === 'onerilen')}
             selected={selectedBookIds.includes(o.commerce_books.id)}
             onToggleSelect={(id) => setSelectedBookIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id])}
+            showShareLink={staffRole}
           />
         ))}
       </div>

@@ -8,6 +8,7 @@ import {
   BookOpen,
   Check,
   CheckCircle2,
+  Link2,
   Loader2,
   Package,
   ShoppingCart,
@@ -20,11 +21,15 @@ import type { CommerceBook, CommerceVendorOffer } from '../../types/commerce.typ
 import { formatCommerceTry } from '../../types/commerce.types';
 import { useAuth } from '../../context/AuthContext';
 import BookCoverImage from '../../components/commerce/BookCoverImage';
+import { copyTextToClipboard, kitapBookShareUrl } from '../../lib/kitapShareLinks';
 
 export default function KitapDetayPage() {
   const { slug } = useParams<{ slug: string }>();
   const navigate = useNavigate();
   const { effectiveUser } = useAuth();
+  const staffRole = ['super_admin', 'admin', 'coach', 'teacher'].includes(
+    String(effectiveUser?.role || '')
+  );
 
   const [book, setBook] = useState<(CommerceBook & { commerce_vendor_offers: (CommerceVendorOffer & { commerce_vendors: { id: string; name: string } })[] }) | null>(null);
   const [loading, setLoading] = useState(true);
@@ -118,6 +123,25 @@ export default function KitapDetayPage() {
           {book.subtitle && <p className="text-gray-500 mt-1">{book.subtitle}</p>}
           {book.author && <p className="text-base text-gray-600 mt-1">✍️ {book.author}</p>}
           {book.publisher && <p className="text-sm text-gray-400 mt-0.5">🏛️ {book.publisher}</p>}
+
+          {staffRole && book.slug ? (
+            <button
+              type="button"
+              onClick={() => {
+                void (async () => {
+                  try {
+                    await copyTextToClipboard(kitapBookShareUrl(book.slug));
+                    toast.success('Veli kitap linki kopyalandı — giriş gerekmez');
+                  } catch (e) {
+                    toast.error(e instanceof Error ? e.message : 'Kopyalanamadı');
+                  }
+                })();
+              }}
+              className="mt-3 inline-flex items-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-900 hover:bg-emerald-100"
+            >
+              <Link2 className="h-4 w-4" /> Veliye link kopyala
+            </button>
+          ) : null}
 
           {/* Sınıf & Ders */}
           <div className="flex flex-wrap gap-2 mt-3">
