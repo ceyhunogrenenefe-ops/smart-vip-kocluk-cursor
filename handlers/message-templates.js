@@ -287,6 +287,59 @@ export default async function handler(req, res) {
       });
     }
 
+    if (action === 'submit_attendance_templates') {
+      const types = [
+        'attendance_status_update',
+        'coach_lesson_attendance_summary',
+        'attendance_coach_late_update'
+      ];
+      const results = [];
+      for (const type of types) {
+        const { data: row, error: oneErr } = await supabaseAdmin
+          .from('message_templates')
+          .select('*')
+          .eq('type', type)
+          .maybeSingle();
+        if (oneErr || !row) {
+          results.push({ type, ok: false, error: oneErr?.message || 'template_not_found_in_db' });
+          continue;
+        }
+        let payload;
+        try {
+          payload = buildMetaTemplateCreatePayload({
+            name: row.meta_template_name || row.type,
+            language: row.meta_template_language || 'tr',
+            category: 'UTILITY',
+            bodyText: row.content,
+          });
+        } catch (e) {
+          results.push({ type, ok: false, error: e.message });
+          continue;
+        }
+        const submitted = await createOrReuseMetaMessageTemplate(payload);
+        if (submitted.ok) {
+          await supabaseAdmin
+            .from('message_templates')
+            .update({
+              meta_template_name: submitted.name,
+              meta_template_language: submitted.language || row.meta_template_language || 'tr',
+              meta_named_body_parameters: true,
+              whatsapp_template_status: submitted.status,
+              whatsapp_template_synced_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', row.id);
+        }
+        results.push({ type, ok: submitted.ok, submitted, error: submitted.ok ? null : submitted.error });
+      }
+      const ok = results.every((r) => r.ok);
+      return res.status(ok ? 200 : 400).json({
+        ok,
+        deployMarker: 'attendance-meta-templates-2026-09-10',
+        results,
+      });
+    }
+
     if (action === 'submit_meta_template') {
       const id = typeof body.id === 'string' ? body.id.trim() : '';
       if (!id) return res.status(400).json({ error: 'id_required' });
