@@ -512,10 +512,16 @@ export default function ClassLiveLessons() {
 
   const [attendanceSession, setAttendanceSession] = useState<SessionRow | null>(null);
   const [attendanceDraft, setAttendanceDraft] = useState<
-    { student_id: string; student_name?: string; status: 'present' | 'absent' | 'late' }[]
+    {
+      student_id: string;
+      student_name?: string;
+      status: 'present' | 'absent' | 'late';
+      camera_status: 'on' | 'off' | null;
+    }[]
   >([]);
   const [attendanceModalLoading, setAttendanceModalLoading] = useState(false);
   const [attendanceSaving, setAttendanceSaving] = useState(false);
+  const [attendanceCameraWarn, setAttendanceCameraWarn] = useState<string | null>(null);
 
   const [editingSession, setEditingSession] = useState<SessionRow | null>(null);
   const [editingSlotRow, setEditingSlotRow] = useState<SlotRow | null>(null);
@@ -1308,11 +1314,13 @@ export default function ClassLiveLessons() {
   const closeAttendanceModal = () => {
     setAttendanceSession(null);
     setAttendanceDraft([]);
+    setAttendanceCameraWarn(null);
     setAttendanceModalLoading(false);
   };
 
   const openAttendanceForSession = useCallback(async (s: SessionRow) => {
     setAttendanceSession(s);
+    setAttendanceCameraWarn(null);
     setAttendanceModalLoading(true);
     try {
       const res = await apiFetch(
@@ -1327,6 +1335,12 @@ export default function ClassLiveLessons() {
           String(row.status || '').trim()
         ])
       );
+      const cameraById = new Map<string, string>(
+        existing.map((row: { student_id?: string; camera_status?: string | null }) => [
+          String(row.student_id || '').trim(),
+          String(row.camera_status || '').trim()
+        ])
+      );
       const resolveStatus = (studentId: string) => {
         const direct = statusById.get(studentId);
         if (direct) return direct;
@@ -1335,6 +1349,21 @@ export default function ClassLiveLessons() {
         if (stu?.platformUserId && statusById.has(stu.platformUserId)) return statusById.get(stu.platformUserId)!;
         if (stu?.authUserId && statusById.has(stu.authUserId)) return statusById.get(stu.authUserId)!;
         return '';
+      };
+      const resolveCamera = (studentId: string, status: string): 'on' | 'off' | null => {
+        if (status === 'absent') return null;
+        const raw = cameraById.get(studentId) || '';
+        if (raw === 'on' || raw === 'open') return 'on';
+        if (raw === 'off' || raw === 'closed') return 'off';
+        const stu = resolveStudentInList(safeStudents, studentId);
+        const alt =
+          (stu?.id && cameraById.get(stu.id)) ||
+          (stu?.platformUserId && cameraById.get(stu.platformUserId)) ||
+          (stu?.authUserId && cameraById.get(stu.authUserId)) ||
+          '';
+        if (alt === 'on' || alt === 'open') return 'on';
+        if (alt === 'off' || alt === 'closed') return 'off';
+        return null;
       };
       const toDraftStatus = (st: string): 'present' | 'absent' | 'late' => {
         if (st === 'absent') return 'absent';
@@ -1345,10 +1374,12 @@ export default function ClassLiveLessons() {
         setAttendanceDraft(
           roster.map((row: { student_id?: string; student_name?: string }) => {
             const id = String(row.student_id || '').trim();
+            const status = toDraftStatus(resolveStatus(id));
             return {
               student_id: id,
               student_name: String(row.student_name || '').trim() || undefined,
-              status: toDraftStatus(resolveStatus(id))
+              status,
+              camera_status: resolveCamera(id, status)
             };
           })
         );
@@ -1357,10 +1388,14 @@ export default function ClassLiveLessons() {
       const clsRow = classes.find((c) => c.id === s.class_id);
       const ids = Array.isArray(clsRow?.student_ids) ? clsRow!.student_ids.map(String).filter(Boolean) : [];
       setAttendanceDraft(
-        ids.map((id) => ({
-          student_id: id,
-          status: toDraftStatus(resolveStatus(id))
-        }))
+        ids.map((id) => {
+          const status = toDraftStatus(resolveStatus(id));
+          return {
+            student_id: id,
+            status,
+            camera_status: resolveCamera(id, status)
+          };
+        })
       );
     } catch {
       setAttendanceDraft([]);
@@ -1369,9 +1404,77 @@ export default function ClassLiveLessons() {
     }
   }, [classes, safeStudents]);
 
+  const attendanceSummary = useMemo(() => {
+    let present = 0;
+    let late = 0;
+    let absent = 0;
+    let cameraOpen = 0;
+    let cameraClosed = 0;
+    for (const r of attendanceDraft) {
+      if (r.status === 'present') present += 1;
+      else if (r.status === 'late') late += 1;
+      else absent += 1;
+      if (r.status === 'present' || r.status === 'late') {
+        if (r.camera_status === 'on') cameraOpen += 1;
+        else if (r.camera_status === 'off') cameraClosed += 1;
+      }
+    }
+    return { total: attendanceDraft.length, present, late, absent, cameraOpen, cameraClosed };
+  }, [attendanceDraft]);
+
+  const setDraftStatus = (idx: number, status: 'present' | 'absent' | 'late') => {
+    setAttendanceCameraWarn(null);
+    setAttendanceDraft((prev) =>
+      prev.map((r, i) =>
+        i === idx
+          ? {
+              ...r,
+              status,
+              camera_status: status === 'absent' ? null : r.camera_status
+            }
+          : r
+      )
+    );
+  };
+
+  const setDraftCamera = (idx: number, camera: 'on' | 'off') => {
+    setAttendanceCameraWarn(null);
+    setAttendanceDraft((prev) =>
+      prev.map((r, i) => (i === idx ? { ...r, camera_status: camera } : r))
+    );
+  };
+
+  const bulkSetStatus = (status: 'present' | 'absent' | 'late') => {
+    setAttendanceCameraWarn(null);
+    setAttendanceDraft((prev) =>
+      prev.map((r) => ({
+        ...r,
+        status,
+        camera_status: status === 'absent' ? null : r.camera_status
+      }))
+    );
+  };
+
+  const bulkCamerasOn = () => {
+    setAttendanceCameraWarn(null);
+    setAttendanceDraft((prev) =>
+      prev.map((r) =>
+        r.status === 'present' || r.status === 'late' ? { ...r, camera_status: 'on' as const } : r
+      )
+    );
+  };
+
   const saveAttendance = async () => {
     if (!attendanceSession || attendanceDraft.length === 0) return;
+    const missingCam = attendanceDraft.filter(
+      (r) => (r.status === 'present' || r.status === 'late') && r.camera_status !== 'on' && r.camera_status !== 'off'
+    );
+    if (missingCam.length) {
+      setAttendanceCameraWarn('Kamerası açık/kapalı bilgisi seçilmeyen öğrenciler bulunuyor.');
+      return;
+    }
     setAttendanceSaving(true);
+    setAttendanceCameraWarn(null);
     try {
       const res = await apiFetch('/api/class-live-lessons?op=mark-attendance', {
         method: 'POST',
@@ -1379,18 +1482,25 @@ export default function ClassLiveLessons() {
           session_id: attendanceSession.id,
           attendance: attendanceDraft.map((row) => ({
             student_id: row.student_id,
-            status: row.status
+            student_name: row.student_name,
+            status: row.status,
+            camera_status: row.status === 'absent' ? 'n_a' : row.camera_status
           }))
         })
       });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) {
+        if (j.error === 'camera_status_required') {
+          setAttendanceCameraWarn(String(j.message || 'Kamerası açık/kapalı bilgisi seçilmeyen öğrenciler bulunuyor.'));
+          return;
+        }
         setError(String(j.error || 'Yoklama kaydedilemedi'));
         return;
       }
       const waRows = Array.isArray(j.absent_whatsapp) ? j.absent_whatsapp : [];
-      const waFailed = waRows.filter(
-        (x: { ok?: boolean; skipped?: string }) => x && x.ok === false && x.skipped !== 'auto_whatsapp_absent_disabled'
+      const lateRows = Array.isArray(j.late_whatsapp) ? j.late_whatsapp : [];
+      const waFailed = [...waRows, ...lateRows].filter(
+        (x: { ok?: boolean; skipped?: string }) => x && x.ok === false && x.skipped !== 'auto_whatsapp_absent_disabled' && x.skipped !== 'already_sent'
       );
       const hintWa = (note: string) => {
         const n = String(note || '').toLowerCase();
@@ -1407,16 +1517,23 @@ export default function ClassLiveLessons() {
           return 'Meta Business’ta class_absent_notice_1 şablonu (dil tr) onaylı mı kontrol edin.';
         return String(note || 'Bilinmeyen hata');
       };
+      const warnList = Array.isArray(j.warnings) ? j.warnings.map(String).filter(Boolean) : [];
       closeAttendanceModal();
+      const parts: string[] = [];
       if (waFailed.length) {
-        const parts = waFailed.map((row: { student_id?: string; note?: string }) => {
-          const sid = String(row.student_id || '');
-          const stu = resolveStudentInList(safeStudents, sid);
-          const draftName = attendanceDraft.find((d) => d.student_id === sid)?.student_name;
-          const name = draftName || stu?.name || sid.slice(0, 8);
-          return `${name}: ${hintWa(String(row.note || ''))}`;
-        });
-        setError(`Yoklama kaydedildi. Veli WhatsApp gönderilemedi — ${parts.join(' · ')}`);
+        parts.push(
+          ...waFailed.map((row: { student_id?: string; note?: string }) => {
+            const sid = String(row.student_id || '');
+            const stu = resolveStudentInList(safeStudents, sid);
+            const draftName = attendanceDraft.find((d) => d.student_id === sid)?.student_name;
+            const name = draftName || stu?.name || sid.slice(0, 8);
+            return `${name}: ${hintWa(String(row.note || ''))}`;
+          })
+        );
+      }
+      parts.push(...warnList);
+      if (parts.length) {
+        setError(`Yoklama kaydedildi. Bildirim: ${parts.join(' · ')}`);
       } else {
         setError(null);
       }
@@ -2800,7 +2917,7 @@ export default function ClassLiveLessons() {
               Kapat
             </button>
           </AppModalHeader>
-          <AppModalBody className="space-y-2 max-h-[min(55dvh,420px)] overflow-y-auto">
+          <AppModalBody className="space-y-3 max-h-[min(60dvh,480px)] overflow-y-auto">
             {attendanceModalLoading ? (
               <p className="text-sm text-slate-500">Yükleniyor…</p>
             ) : attendanceDraft.length === 0 ? (
@@ -2808,34 +2925,103 @@ export default function ClassLiveLessons() {
                 Bu sınıfa henüz öğrenci atanmamış veya liste boş. Önce sınıf üyelerinden öğrenci ekleyin.
               </p>
             ) : (
-              attendanceDraft.map((row, idx) => {
-                const stu = resolveStudentInList(safeStudents, row.student_id);
-                const displayName = row.student_name || stu?.name || row.student_id;
-                return (
-                  <div
-                    key={row.student_id}
-                    className="flex items-center justify-between gap-2 text-sm border border-slate-100 rounded-lg px-3 py-2.5"
+              <>
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700 grid grid-cols-2 gap-x-3 gap-y-1 sm:grid-cols-3">
+                  <span>👥 {attendanceSummary.total} Öğrenci</span>
+                  <span>✅ {attendanceSummary.present} Katıldı</span>
+                  <span>🕐 {attendanceSummary.late} Geç</span>
+                  <span>❌ {attendanceSummary.absent} Katılmadı</span>
+                  <span>🎥 {attendanceSummary.cameraOpen} Kamera açık</span>
+                  <span>🚫 {attendanceSummary.cameraClosed} Kamera kapalı</span>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => bulkSetStatus('present')}
+                    className="rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-[11px] font-semibold text-emerald-800 touch-manipulation"
                   >
-                    <span className="text-slate-800 min-w-0 truncate">{displayName}</span>
-                    <select
-                      value={row.status}
-                      onChange={(e) => {
-                        const raw = e.target.value;
-                        const v =
-                          raw === 'absent' ? ('absent' as const) : raw === 'late' ? ('late' as const) : ('present' as const);
-                        setAttendanceDraft((prev) =>
-                          prev.map((r, i) => (i === idx ? { ...r, status: v } : r))
-                        );
-                      }}
-                      className="shrink-0 border border-slate-200 rounded-lg px-2 py-2 text-xs min-h-[40px] touch-manipulation"
+                    Tümünü Katıldı
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => bulkSetStatus('absent')}
+                    className="rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-[11px] font-semibold text-rose-800 touch-manipulation"
+                  >
+                    Tümünü Katılmadı
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => bulkCamerasOn()}
+                    className="rounded-lg border border-sky-200 bg-sky-50 px-2.5 py-1.5 text-[11px] font-semibold text-sky-800 touch-manipulation"
+                  >
+                    Katılanların kamerasını açık yap
+                  </button>
+                </div>
+                {attendanceCameraWarn ? (
+                  <p className="text-xs text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                    {attendanceCameraWarn}
+                  </p>
+                ) : null}
+                {attendanceDraft.map((row, idx) => {
+                  const stu = resolveStudentInList(safeStudents, row.student_id);
+                  const displayName = row.student_name || stu?.name || row.student_id;
+                  const showCam = row.status === 'present' || row.status === 'late';
+                  return (
+                    <div
+                      key={row.student_id}
+                      className="border border-slate-100 rounded-xl px-3 py-2.5 space-y-2"
                     >
-                      <option value="present">Katıldı</option>
-                      <option value="late">Geç katıldı</option>
-                      <option value="absent">Katılmadı</option>
-                    </select>
-                  </div>
-                );
-              })
+                      <div className="text-sm font-medium text-slate-800 truncate">{displayName}</div>
+                      <div className="grid grid-cols-3 gap-1.5">
+                        {(
+                          [
+                            { v: 'present' as const, label: '✅ Katıldı', active: 'bg-emerald-600 text-white border-emerald-600' },
+                            { v: 'absent' as const, label: '❌ Katılmadı', active: 'bg-rose-600 text-white border-rose-600' },
+                            { v: 'late' as const, label: '🕐 Geç', active: 'bg-amber-600 text-white border-amber-600' }
+                          ] as const
+                        ).map((opt) => (
+                          <button
+                            key={opt.v}
+                            type="button"
+                            onClick={() => setDraftStatus(idx, opt.v)}
+                            className={`min-h-[40px] rounded-lg border px-1 text-[11px] font-semibold touch-manipulation ${
+                              row.status === opt.v ? opt.active : 'border-slate-200 bg-white text-slate-700'
+                            }`}
+                          >
+                            {opt.label}
+                          </button>
+                        ))}
+                      </div>
+                      {showCam ? (
+                        <div className="grid grid-cols-2 gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => setDraftCamera(idx, 'on')}
+                            className={`min-h-[40px] rounded-lg border px-2 text-[11px] font-semibold touch-manipulation ${
+                              row.camera_status === 'on'
+                                ? 'bg-sky-600 text-white border-sky-600'
+                                : 'border-slate-200 bg-white text-slate-700'
+                            }`}
+                          >
+                            🎥 Kamera açık
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setDraftCamera(idx, 'off')}
+                            className={`min-h-[40px] rounded-lg border px-2 text-[11px] font-semibold touch-manipulation ${
+                              row.camera_status === 'off'
+                                ? 'bg-slate-700 text-white border-slate-700'
+                                : 'border-slate-200 bg-white text-slate-700'
+                            }`}
+                          >
+                            🚫 Kamera kapalı
+                          </button>
+                        </div>
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </>
             )}
           </AppModalBody>
           <AppModalFooter className="gap-2">

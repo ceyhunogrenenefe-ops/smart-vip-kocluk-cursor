@@ -12,14 +12,29 @@ export function normalizeAttendanceStatus(raw) {
   return 'absent';
 }
 
-/** Katılmadı → n_a; katıldı/geç → on | off */
+/** Katılmadı → n_a; katıldı/geç → on | off | null (eksik) */
 export function normalizeCameraStatus(attendanceStatus, raw) {
   const st = normalizeAttendanceStatus(attendanceStatus);
   if (st === 'absent') return 'n_a';
-  const v = String(raw || '').trim().toLowerCase();
-  if (v === 'off' || v === 'closed' || v === 'kapali' || v === 'kapalı') return 'off';
-  if (v === 'n_a' || v === 'na' || v === 'n/a' || v === 'uygulanamaz') return 'n_a';
+  const parsed = parseCameraStatusInput(st, raw);
+  if (parsed === 'on' || parsed === 'off' || parsed === 'n_a') return parsed;
+  // BBB / eski çağrılar: belirtilmemişse açık varsay
   return 'on';
+}
+
+/**
+ * Öğretmen kaydı için: present/late + kamera seçilmemiş → null (validation).
+ * open/closed alias kabul eder.
+ */
+export function parseCameraStatusInput(attendanceStatus, raw) {
+  const st = normalizeAttendanceStatus(attendanceStatus);
+  if (st === 'absent') return 'n_a';
+  if (raw == null || String(raw).trim() === '') return null;
+  const v = String(raw).trim().toLowerCase();
+  if (v === 'off' || v === 'closed' || v === 'kapali' || v === 'kapalı') return 'off';
+  if (v === 'on' || v === 'open' || v === 'acik' || v === 'açık') return 'on';
+  if (v === 'n_a' || v === 'na' || v === 'n/a' || v === 'uygulanamaz') return 'n_a';
+  return null;
 }
 
 export function attendanceNoticeKind(status, cameraStatus) {
