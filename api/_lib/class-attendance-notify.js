@@ -634,22 +634,22 @@ export async function sendCoachLessonAttendanceSummary({
     summary
   });
 
+  const summaryLine = clipMetaParam(
+    `Toplam ${summary.total} · Katilan ${summary.present} · Gec ${summary.late} · Yok ${summary.absent} · Kamera acik ${summary.cameraOpen} · Kapali ${summary.cameraClosed}`,
+    200
+  );
+
+  // Meta UTILITY ≤10 gövde parametresi — coach_attendance_report şablonu
   const vars = {
     class_name: clipMetaParam(className || 'Sınıf', 80),
     lesson_name: clipMetaParam(session.subject || 'Ders', 80),
     teacher_name: clipMetaParam(teacherName, 80),
     coach_name: clipMetaParam(resolved.coach.name, 80),
     lesson_date_time: clipMetaParam(lessonDateTime, 80),
-    total_students: String(summary.total),
-    present_count: String(summary.present),
-    late_count: String(summary.late),
-    absent_count: String(summary.absent),
-    camera_open_count: String(summary.cameraOpen),
-    camera_closed_count: String(summary.cameraClosed),
+    summary_line: summaryLine,
     present_students: clipMetaParam(numberedStudentNames(summary.presentStudents)),
     late_students: clipMetaParam(numberedStudentNames(summary.lateStudents)),
     absent_students: clipMetaParam(numberedStudentNames(summary.absentStudents)),
-    camera_open_students: clipMetaParam(numberedStudentNames(summary.cameraOpenStudents)),
     camera_closed_students: clipMetaParam(numberedStudentNames(summary.cameraClosedStudents))
   };
 
