@@ -71,6 +71,7 @@ export async function sendAttendanceTemplateOrPlain({
   coachId
 }) {
   const templateRow = await loadAttendanceTemplate(templateType);
+  let templateError = null;
   // meta_template_name boş olsa bile type adı ile Meta’ya dene (resolveMetaTemplateName)
   if (templateRow?.content) {
     const sent = await sendAutomationTemplateMessage({
@@ -95,9 +96,13 @@ export async function sendAttendanceTemplateOrPlain({
         sid: sent.sid,
         gateway_message_id: sent.gateway_message_id,
         meta_template_name: sent.meta_template_name || templateRow.meta_template_name || templateType,
-        bodyPreview: body
+        bodyPreview: body,
+        template_error: null
       };
     }
+    templateError = sent.error || sent.errorCode || 'template_send_failed';
+  } else {
+    templateError = 'template_row_missing';
   }
   const plain = await sendAutomationPlainText({
     phone,
@@ -112,7 +117,9 @@ export async function sendAttendanceTemplateOrPlain({
     gateway_message_id: plain.gateway_message_id,
     meta_template_name: plain.meta_template_name || 'gateway_plain',
     bodyPreview: plainText,
-    error: plain.ok ? null : plain.error || 'send_failed'
+    error: plain.ok ? null : plain.error || 'send_failed',
+    template_error: templateError,
+    fallback_plain: true
   };
 }
 
@@ -674,6 +681,8 @@ export async function sendCoachLessonAttendanceSummary({
     coach_phone_suffix: String(resolved.coach.phone || '').slice(-4) || null,
     meta_template_name: sent.meta_template_name || null,
     channel: sent.channel || channel,
+    template_error: sent.template_error || null,
+    fallback_plain: Boolean(sent.fallback_plain),
     note: sent.ok ? null : sent.error || 'whatsapp_failed',
     warning: sent.ok ? null : 'Yoklama kaydedildi ancak koç WhatsApp bildirimi gönderilemedi.'
   };
