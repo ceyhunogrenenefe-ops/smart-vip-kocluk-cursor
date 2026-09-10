@@ -39,25 +39,20 @@ export const ATTENDANCE_META_SEED = [
   },
   {
     type: 'coach_lesson_attendance_summary',
+    metaTemplateName: 'coach_attendance_report',
     name: 'Koç ders yoklama özeti',
     content:
-      '📋 DERS YOKLAMA RAPORU\n🏫 Sınıf: {{class_name}}\n📚 Ders: {{lesson_name}}\n👨‍🏫 Öğretmen: {{teacher_name}}\n👤 Koç: {{coach_name}}\n📅 {{lesson_date_time}}\n👥 Toplam: {{total_students}}\n✅ Katılan: {{present_count}}\n🕐 Geç: {{late_count}}\n❌ Katılmayan: {{absent_count}}\n🎥 Kamera açık: {{camera_open_count}}\n🚫 Kamera kapalı: {{camera_closed_count}}\n\n✅ KATILAN\n{{present_students}}\n\n🕐 GEÇ KATILAN\n{{late_students}}\n\n❌ KATILMAYAN\n{{absent_students}}\n\n🎥 KAMERA AÇIK\n{{camera_open_students}}\n\n🚫 KAMERA KAPALI\n{{camera_closed_students}}\n\nOnline VIP Dershane',
+      'YOKLAMA RAPORU\nSinif: {{class_name}}\nDers: {{lesson_name}}\nOgretmen: {{teacher_name}}\nKoc: {{coach_name}}\nTarih: {{lesson_date_time}}\nOzet: {{summary_line}}\nKatilan: {{present_students}}\nGec: {{late_students}}\nKatilmayan: {{absent_students}}\nKamera kapali: {{camera_closed_students}}',
     variables: [
       'class_name',
       'lesson_name',
       'teacher_name',
       'coach_name',
       'lesson_date_time',
-      'total_students',
-      'present_count',
-      'late_count',
-      'absent_count',
-      'camera_open_count',
-      'camera_closed_count',
+      'summary_line',
       'present_students',
       'late_students',
       'absent_students',
-      'camera_open_students',
       'camera_closed_students'
     ]
   },
@@ -78,6 +73,7 @@ export const ATTENDANCE_META_SEED = [
 ];
 
 async function upsertSeedRow(seed) {
+  const metaName = String(seed.metaTemplateName || seed.type).trim() || seed.type;
   const row = {
     name: seed.name,
     type: seed.type,
@@ -86,7 +82,7 @@ async function upsertSeedRow(seed) {
     twilio_variable_bindings: seed.variables,
     channel: 'whatsapp',
     is_active: true,
-    meta_template_name: seed.type,
+    meta_template_name: metaName,
     meta_template_language: 'tr',
     meta_named_body_parameters: true,
     updated_at: new Date().toISOString()
@@ -139,7 +135,9 @@ export async function ensureAttendanceMetaTemplates(opts = {}) {
     }
 
     try {
-      const phone = await fetchMetaTemplatesFromPhoneWaba(seed.type, { includeComponents: false });
+      const metaName = String(seed.metaTemplateName || seed.type).trim() || seed.type;
+      entry.meta_name = metaName;
+      const phone = await fetchMetaTemplatesFromPhoneWaba(metaName, { includeComponents: false });
       const matches = phone.ok ? phone.matches || [] : [];
       const approved =
         matches.find(
@@ -164,11 +162,15 @@ export async function ensureAttendanceMetaTemplates(opts = {}) {
         const { error: syncErr } = await supabaseAdmin
           .from('message_templates')
           .update({
-            meta_template_name: seed.type,
+            meta_template_name: metaName,
             meta_template_language: entry.meta_language || 'tr',
             whatsapp_template_status: String(entry.meta_status || 'APPROVED'),
             whatsapp_template_synced_at: new Date().toISOString(),
             is_active: true,
+            content: seed.content,
+            variables: seed.variables,
+            twilio_variable_bindings: seed.variables,
+            meta_named_body_parameters: true,
             updated_at: new Date().toISOString()
           })
           .eq('id', up.row.id);
@@ -178,7 +180,7 @@ export async function ensureAttendanceMetaTemplates(opts = {}) {
         let payload;
         try {
           payload = buildMetaTemplateCreatePayload({
-            name: seed.type,
+            name: metaName,
             language: 'tr',
             category: 'UTILITY',
             bodyText: seed.content
@@ -201,11 +203,15 @@ export async function ensureAttendanceMetaTemplates(opts = {}) {
           await supabaseAdmin
             .from('message_templates')
             .update({
-              meta_template_name: submitted.name || seed.type,
+              meta_template_name: submitted.name || metaName,
               meta_template_language: submitted.language || 'tr',
               whatsapp_template_status: String(submitted.status || 'PENDING'),
               whatsapp_template_synced_at: new Date().toISOString(),
               is_active: true,
+              content: seed.content,
+              variables: seed.variables,
+              twilio_variable_bindings: seed.variables,
+              meta_named_body_parameters: true,
               updated_at: new Date().toISOString()
             })
             .eq('id', up.row.id);
@@ -220,7 +226,7 @@ export async function ensureAttendanceMetaTemplates(opts = {}) {
           entry.hint = submitted.error || 'meta_submit_failed';
         }
       } else if (!entry.meta_found) {
-        entry.hint = `WABA'da "${seed.type}" yok`;
+        entry.hint = `WABA'da "${metaName}" yok`;
       } else if (!entry.meta_approved) {
         entry.hint = `Meta durumu gönderime uygun değil: ${entry.meta_status}`;
       }
