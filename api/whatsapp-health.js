@@ -19,6 +19,7 @@ import {
   listConnectedGatewaySessionIds,
   probeConnectedGatewaySessionIds
 } from './_lib/whatsapp-gateway-send.js';
+import { ensureAttendanceMetaTemplates } from './_lib/ensure-attendance-meta-templates.js';
 
 const ATTENDANCE_META_TYPES = [
   'class_absent_notice_1',
@@ -167,12 +168,21 @@ export default async function handler(req, res) {
   const wantAttendance =
     String(req.query?.attendance_templates || req.query?.attendance || '').trim() === '1' ||
     String(req.query?.diag || '').trim() === 'attendance';
+  const wantEnsure =
+    String(req.query?.ensure || req.query?.bootstrap || '').trim() === '1' ||
+    String(req.query?.fix || '').trim() === 'attendance_meta';
 
   let attendance_meta_templates = null;
-  if (wantAttendance && metaReady) {
-    attendance_meta_templates = await diagnoseAttendanceMetaTemplates();
-  } else if (wantAttendance) {
-    attendance_meta_templates = { ok: false, error: 'meta_not_configured', templates: [] };
+  let attendance_meta_ensure = null;
+  if (wantEnsure) {
+    attendance_meta_ensure = await ensureAttendanceMetaTemplates({ submitMissing: true });
+  }
+  if (wantAttendance || wantEnsure) {
+    if (metaReady) {
+      attendance_meta_templates = await diagnoseAttendanceMetaTemplates();
+    } else {
+      attendance_meta_templates = { ok: false, error: 'meta_not_configured', templates: [] };
+    }
   }
 
   const gatewayEnv = getGatewaySendEnvStatus();
@@ -251,6 +261,7 @@ export default async function handler(req, res) {
     twilio_configured: twilioReady,
     automation_provider: metaReady ? 'meta_cloud_api' : twilioReady ? 'twilio' : null,
     attendance_meta_templates,
+    attendance_meta_ensure,
     gateway: {
       upstream_reachable: gatewayHealth.ok === true,
       upstream_error: gatewayHealth.error || null,
