@@ -4,8 +4,10 @@ import { normalizePhoneToE164 } from './phone-whatsapp.js';
 import {
   resolveAutomationSendChannel,
   sendAutomationTemplateMessage,
-  sendAutomationPlainText
+  sendAutomationPlainText,
+  automationGatewaySessionCandidates
 } from './whatsapp-automation-channel.js';
+import { sendGatewayTextMessage } from './whatsapp-gateway-send.js';
 import {
   attendanceStatusLabelTr,
   buildAttendanceSummary,
@@ -104,6 +106,36 @@ export async function sendAttendanceTemplateOrPlain({
   } else {
     templateError = 'template_row_missing';
   }
+
+  // Meta şablon yok/hatalıysa: kurum gateway ile düz metin (24s pencere gerekmez)
+  const gwCandidates = automationGatewaySessionCandidates();
+  if (gwCandidates.length && plainText) {
+    try {
+      const gw = await sendGatewayTextMessage({
+        phone,
+        message: plainText,
+        sessionId: gwCandidates[0],
+        sessionCandidates: gwCandidates,
+        allowSharedFallback: true
+      });
+      if (gw.ok) {
+        return {
+          ok: true,
+          channel: 'gateway',
+          sid: gw.gateway_message_id || gw.sid || null,
+          gateway_message_id: gw.gateway_message_id || gw.sid || null,
+          meta_template_name: 'gateway_plain',
+          bodyPreview: plainText,
+          template_error: templateError,
+          fallback_plain: true,
+          fallback_from: 'gateway_after_template'
+        };
+      }
+    } catch {
+      /* Meta plain’e düş */
+    }
+  }
+
   const plain = await sendAutomationPlainText({
     phone,
     message: plainText,
