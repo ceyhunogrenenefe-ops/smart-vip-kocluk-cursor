@@ -1,6 +1,11 @@
 import { getMetaWhatsAppEnvStatus, loadMetaWhatsAppSecretsFromDb, metaWhatsAppConfigured } from './_lib/meta-whatsapp.js';
 import { getTwilioEnvStatus } from './_lib/whatsapp-twilio.js';
-import { resolvePrimaryWabaId } from './_lib/meta-templates-sync.js';
+import {
+  fetchMetaTemplatesFromPhoneWaba,
+  isMetaTemplateSendableStatus,
+  resolvePrimaryWabaId
+} from './_lib/meta-templates-sync.js';
+import { supabaseAdmin } from './_lib/supabase-admin.js';
 import {
   reportReminderIstHour,
   reportReminderSendChannel
@@ -15,15 +20,138 @@ import {
   probeConnectedGatewaySessionIds
 } from './_lib/whatsapp-gateway-send.js';
 
+const ATTENDANCE_META_TYPES = [
+  'class_absent_notice_1',
+  'class_camera_off_notice',
+  'attendance_status_update',
+  'coach_lesson_attendance_summary',
+  'attendance_coach_late_update'
+];
+
 const maskId = (id) => {
   const s = String(id || '').trim();
   if (!s) return null;
   return s.length > 12 ? `…${s.slice(-12)}` : s;
 };
 
+async function diagnoseAttendanceMetaTemplates() {
+  const out = [];
+  let dbRows = [];
+  try {
+    const { data } = await supabaseAdmin
+      .from('message_templates')
+      .select('type, name, meta_template_name, meta_template_language, whatsapp_template_status, is_active')
+      .in('type', ATTENDANCE_META_TYPES);
+    dbRows = data || [];
+  } catch (e) {
+    return {
+      ok: false,
+      error: e instanceof Error ? e.message : String(e),
+      templates: []
+    };
+  }
+
+  for (const type of ATTENDANCE_META_TYPES) {
+    const row = dbRows.find((r) => String(r.type) === type) || null;
+    const metaName = String(row?.meta_template_name || type).trim();
+    const preferredLang = String(row?.meta_template_language || 'tr').trim() || 'tr';
+    /** @type {Record<string, unknown>} */
+    const entry = {
+      type,
+      db_row: Boolean(row),
+      db_active: row ? row.is_active !== false : false,
+      db_meta_template_name: row?.meta_template_name || null,
+      db_language: row?.meta_template_language || null,
+      db_status: row?.whatsapp_template_status || null,
+      meta_name_queried: metaName,
+      meta_ok: false,
+      meta_status: null,
+      meta_language: null,
+      meta_approved: false,
+      meta_matches: [],
+      hint: null
+    };
+
+    if (!metaWhatsAppConfigured()) {
+      entry.hint = 'meta_not_configured';
+      out.push(entry);
+      continue;
+    }
+
+    try {
+      const phone = await fetchMetaTemplatesFromPhoneWaba(metaName, { includeComponents: false });
+      if (!phone.ok) {
+        entry.hint = phone.hint || phone.error || 'phone_waba_lookup_failed';
+        out.push(entry);
+        continue;
+      }
+      const matches = phone.matches || [];
+      entry.meta_matches = matches.map((m) => ({
+        name: m.name,
+        language: m.language,
+        status: m.status
+      }));
+      const approved =
+        matches.find(
+          (m) =>
+            isMetaTemplateSendableStatus(m.status) &&
+            String(m.language || '')
+              .toLowerCase()
+              .startsWith('tr')
+        ) ||
+        matches.find((m) => isMetaTemplateSendableStatus(m.status)) ||
+        null;
+      const any = approved || matches[0] || null;
+      if (any) {
+        entry.meta_ok = true;
+        entry.meta_status = any.status || null;
+        entry.meta_language = any.language || null;
+        entry.meta_approved = isMetaTemplateSendableStatus(any.status);
+      } else {
+        entry.hint = `WABA'da "${metaName}" yok`;
+      }
+
+      // DB durumunu Meta ile hizala (panelde APPROVED görünsün)
+      if (row && entry.meta_approved) {
+        try {
+          await supabaseAdmin
+            .from('message_templates')
+            .update({
+              meta_template_name: metaName,
+              meta_template_language: entry.meta_language || preferredLang,
+              whatsapp_template_status: String(entry.meta_status || 'APPROVED'),
+              whatsapp_template_synced_at: new Date().toISOString(),
+              is_active: true,
+              updated_at: new Date().toISOString()
+            })
+            .eq('type', type);
+          entry.db_synced = true;
+        } catch {
+          entry.db_synced = false;
+        }
+      }
+    } catch (e) {
+      entry.hint = e instanceof Error ? e.message : String(e);
+    }
+    out.push(entry);
+  }
+
+  const approvedCount = out.filter((t) => t.meta_approved).length;
+  return {
+    ok: approvedCount > 0,
+    approved_count: approvedCount,
+    total: out.length,
+    all_required_approved: ['class_camera_off_notice', 'coach_lesson_attendance_summary', 'attendance_status_update'].every(
+      (t) => out.find((x) => x.type === t)?.meta_approved
+    ),
+    templates: out
+  };
+}
+
 /**
  * WhatsApp teşhis — giriş gerekmez.
  * GET /api/whatsapp-health
+ * GET /api/whatsapp-health?attendance_templates=1  → Meta yoklama şablon durumları
  */
 export default async function handler(req, res) {
   if (req.method !== 'GET') {
@@ -35,6 +163,17 @@ export default async function handler(req, res) {
   const twilio = getTwilioEnvStatus();
   const metaReady = metaWhatsAppConfigured();
   const twilioReady = Boolean(twilio.configured);
+
+  const wantAttendance =
+    String(req.query?.attendance_templates || req.query?.attendance || '').trim() === '1' ||
+    String(req.query?.diag || '').trim() === 'attendance';
+
+  let attendance_meta_templates = null;
+  if (wantAttendance && metaReady) {
+    attendance_meta_templates = await diagnoseAttendanceMetaTemplates();
+  } else if (wantAttendance) {
+    attendance_meta_templates = { ok: false, error: 'meta_not_configured', templates: [] };
+  }
 
   const gatewayEnv = getGatewaySendEnvStatus();
   const gatewayHealth = await probeGatewayHealth();
@@ -111,6 +250,7 @@ export default async function handler(req, res) {
     waba_id_suffix: waba_diag.waba_id_suffix,
     twilio_configured: twilioReady,
     automation_provider: metaReady ? 'meta_cloud_api' : twilioReady ? 'twilio' : null,
+    attendance_meta_templates,
     gateway: {
       upstream_reachable: gatewayHealth.ok === true,
       upstream_error: gatewayHealth.error || null,
