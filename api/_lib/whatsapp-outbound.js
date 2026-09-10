@@ -86,7 +86,12 @@ export function buildTemplateBodyParameters(bindingKeys, vars) {
   return (bindingKeys || []).map((key) => {
     const k = String(key || '').trim();
     const v = k ? safe[k] ?? safe[k.replace(/\s/g, '_')] ?? '' : '';
-    return String(v == null ? '' : v).slice(0, 4096);
+    // Meta: satır sonu / tab şablon parametresinde yasak
+    return String(v == null ? '' : v)
+      .replace(/[\r\n\t]+/g, ' · ')
+      .replace(/\s{2,}/g, ' ')
+      .trim()
+      .slice(0, 1024) || '—';
   });
 }
 
