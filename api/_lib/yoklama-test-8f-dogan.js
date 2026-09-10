@@ -256,7 +256,18 @@ export async function runYoklamaTest8FDogan(opts = {}) {
     .from('class_session_attendance')
     .upsert(upsertPayload, { onConflict: 'session_id,student_id' });
   if (upErr) {
-    return { ok: false, step: 'upsert_attendance', error: upErr.message };
+    const msg = String(upErr.message || '').toLowerCase();
+    if (msg.includes('camera_status')) {
+      const stripped = upsertPayload.map(({ camera_status: _c, ...rest }) => rest);
+      const { error: upErr2 } = await supabaseAdmin
+        .from('class_session_attendance')
+        .upsert(stripped, { onConflict: 'session_id,student_id' });
+      if (upErr2) {
+        return { ok: false, step: 'upsert_attendance', error: upErr2.message };
+      }
+    } else {
+      return { ok: false, step: 'upsert_attendance', error: upErr.message };
+    }
   }
 
   if (forceResend) {
