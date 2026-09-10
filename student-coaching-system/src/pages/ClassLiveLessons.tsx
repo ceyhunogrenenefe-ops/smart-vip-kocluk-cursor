@@ -1518,6 +1518,7 @@ export default function ClassLiveLessons() {
         return String(note || 'Bilinmeyen hata');
       };
       const warnList = Array.isArray(j.warnings) ? j.warnings.map(String).filter(Boolean) : [];
+      const coachWa = j.coach_whatsapp && typeof j.coach_whatsapp === 'object' ? j.coach_whatsapp : null;
       closeAttendanceModal();
       const parts: string[] = [];
       if (waFailed.length) {
@@ -1532,8 +1533,14 @@ export default function ClassLiveLessons() {
         );
       }
       parts.push(...warnList);
+      if (coachWa?.ok && coachWa?.skipped !== 'already_sent') {
+        const coachName = String(coachWa.coach_name || 'Koç');
+        parts.unshift(`Koça yoklama raporu gönderildi (${coachName})`);
+      } else if (coachWa && coachWa.ok === false && coachWa.skipped !== 'already_sent') {
+        parts.push(`Koç raporu gönderilemedi: ${hintWa(String(coachWa.note || coachWa.warning || ''))}`);
+      }
       if (parts.length) {
-        setError(`Yoklama kaydedildi. Bildirim: ${parts.join(' · ')}`);
+        setError(`Yoklama kaydedildi. ${parts.join(' · ')}`);
       } else {
         setError(null);
       }
