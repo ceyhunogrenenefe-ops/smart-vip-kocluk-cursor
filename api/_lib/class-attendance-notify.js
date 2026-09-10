@@ -440,21 +440,19 @@ async function resolveTeacherName(teacherId) {
   return coach?.name || 'Öğretmen';
 }
 
-/** Ders başına tek toplu koç raporu (idempotent). */
+/** Ders başına tek toplu koç raporu — öğretmen Kaydet der demez (idempotent). */
 export async function sendCoachLessonAttendanceSummary({
   session,
   className,
   rows,
   studentIds,
-  institutionId
+  institutionId: _institutionId
 }) {
   const channel = resolveAutomationSendChannel();
   if (channel === 'none') {
     return { ok: false, note: 'automation_channel_not_ready', warning: null };
   }
-  if (!(await attendanceAutoWaEnabled(institutionId))) {
-    return { ok: true, skipped: 'auto_whatsapp_absent_disabled' };
-  }
+  // Koç özeti, veli auto_whatsapp_absent tercihinden bağımsızdır.
   if (await coachSessionNoticeAlreadySent(session?.id, COACH_SUMMARY_KINDS)) {
     return { ok: true, skipped: 'already_sent' };
   }
@@ -547,14 +545,12 @@ export async function sendCoachLateArrivalDelta({
   lateRows,
   allRows,
   studentIds,
-  institutionId
+  institutionId: _institutionId
 }) {
   if (!lateRows?.length) return { ok: true, skipped: 'no_late_rows' };
   const channel = resolveAutomationSendChannel();
   if (channel === 'none') return { ok: false, note: 'automation_channel_not_ready' };
-  if (!(await attendanceAutoWaEnabled(institutionId))) {
-    return { ok: true, skipped: 'auto_whatsapp_absent_disabled' };
-  }
+  // Koç delta da veli auto_whatsapp tercihinden bağımsız.
 
   // Öğrenci bazlı dedupe: her late öğrenci için bir kez koç delta
   const pending = [];
