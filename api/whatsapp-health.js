@@ -130,7 +130,7 @@ export default async function handler(req, res) {
         ? gatewayHealth.sessions_detail
         : null,
       pending_message_fix_fix:
-        'Alıcıda «Mesaj bekleniyor» genelde Baileys getMessage eksikliğinden olur. Gateway sürümü message store kullanmalı.'
+        'Alıcıda «Mesaj bekleniyor» genelde Baileys getMessage / LID-PN uyumsuzluğundan olur. Gateway marker wa-mesaj-bekleniyor-fix-2026-09-10 olmalı; Meta WABA numarasını QR ile bağlamayın (aynı hatta Meta+Baileys → telefonda bekleyen balon). VPS: pm2 restart whatsapp-gateway.'
     },
     report_reminder: {
       channel: reportReminderSendChannel(),
