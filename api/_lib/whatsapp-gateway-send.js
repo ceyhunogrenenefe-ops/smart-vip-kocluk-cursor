@@ -533,7 +533,7 @@ export async function sendGatewayTextMessage({
 
 /** Otomatik / toplu gönderimde alıcılar arası bekleme (Signal «Mesaj bekleniyor» önlemi). */
 export function autoSendGapMs() {
-  return Math.min(8000, Math.max(0, Number(process.env.WA_AUTO_SEND_GAP_MS) || 1100));
+  return Math.min(8000, Math.max(0, Number(process.env.WA_AUTO_SEND_GAP_MS) || 1500));
 }
 
 export async function waitAutoSendGap() {

@@ -1406,6 +1406,10 @@ app.post('/sessions/:coachId/send-document', requireGatewayAuth, requireCoachSco
 });
 
 app.listen(port, async () => {
+  console.error(
+    '[FATAL] whatsapp-gateway-server.js is DEPRECATED and broken (getMessage → undefined = «Mesaj bekleniyor»). Use: cd whatsapp-gateway && pm2 start ecosystem.config.cjs'
+  );
+  process.exit(1);
   await fs.mkdir(dataRoot, { recursive: true });
 
   async function restorePersistedSessions() {
