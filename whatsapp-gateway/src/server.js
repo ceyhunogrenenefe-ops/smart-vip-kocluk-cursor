@@ -113,7 +113,7 @@ const SEND_MESSAGE_RETRIES = Math.min(
 /** İstenen oturum bağlı değilse başka bağlı WhatsApp hattından gönder (otomasyon). Varsayılan kapalı — WA_SHARED_SEND_FALLBACK=1 ile açılır. */
 const SHARED_SEND_FALLBACK = String(process.env.WA_SHARED_SEND_FALLBACK ?? '0') !== '0';
 /** Aynı oturumdan peş peşe otomatik gönderimde Signal yarışı → alıcıda «Mesaj bekleniyor». Manuel tek gönderimde bekleme yok (önceki yok). */
-const SEND_PACE_MS = Math.min(8_000, Math.max(0, Number(process.env.WA_SEND_PACE_MS) || 1200));
+const SEND_PACE_MS = Math.min(8_000, Math.max(0, Number(process.env.WA_SEND_PACE_MS) || 1500));
 const ASSERT_SESSIONS_TIMEOUT_MS = Math.min(
   15_000,
   Math.max(3_000, Number(process.env.WA_ASSERT_SESSIONS_TIMEOUT_MS) || 8_000)
@@ -122,7 +122,7 @@ const RECIPIENT_JID_TTL_MS = Math.min(
   24 * 3600_000,
   Math.max(60_000, Number(process.env.WA_RECIPIENT_JID_TTL_MS) || 6 * 3600_000)
 );
-const GATEWAY_FIX_MARKER = 'wa-qr-start-wait-2026-08-31';
+const GATEWAY_FIX_MARKER = 'wa-mesaj-bekleniyor-fix-2026-09-10';
 
 app.use(
   cors({
@@ -712,7 +712,13 @@ async function sendTextWithDeliveryCheck(
     throw err;
   }
 
-  const putOpts = { coachId, fallbackText: message, aliasJids };
+  const keyAliases = [
+    ...aliasJids,
+    result?.key?.remoteJid,
+    result?.key?.remoteJidAlt,
+    jid,
+  ].filter(Boolean);
+  const putOpts = { coachId, fallbackText: message, aliasJids: keyAliases };
   // Retry için içeriği hemen sakla (fallbackText: result.message boş/eksik olsa bile)
   await messageStore.put(result, putOpts);
   if (!result.message) {
@@ -733,7 +739,7 @@ async function sendTextWithDeliveryCheck(
     throw err;
   }
   // ACK sonrası store'u tazele (bazen message alanı sonradan dolar)
-  await messageStore.put(result, { coachId, fallbackText: message, aliasJids });
+  await messageStore.put(result, putOpts);
   return result;
 }
 
@@ -1161,13 +1167,27 @@ async function setupSession(coachId, { allowDiskAuth = true } = {}) {
       // KRİTİK: undefined → alıcıda "Mesaj bekleniyor / Waiting for this message"
       getMessage: async (key) => {
         try {
-          const msg = await messageStore.getMessage(key);
+          let msg = await messageStore.getMessage(key);
           if (msg) return msg;
+          // Baileys dahili yükleme (varsa) — LID/PN retry için son çare
+          const liveSock = sessionState.sock;
+          if (liveSock && typeof liveSock.loadMessage === 'function' && key?.id && key?.remoteJid) {
+            try {
+              const loaded = await liveSock.loadMessage(key.remoteJid, key.id);
+              if (loaded?.message) {
+                await messageStore.put(loaded, { coachId });
+                return loaded.message;
+              }
+            } catch {
+              /* loadMessage yok / başarısız */
+            }
+          }
           logger.warn(
             {
               coachId,
               id: key?.id ? String(key.id).slice(0, 16) : null,
               remote_jid: key?.remoteJid ? String(key.remoteJid).slice(0, 48) : null,
+              remote_jid_alt: key?.remoteJidAlt ? String(key.remoteJidAlt).slice(0, 48) : null,
               store_size: messageStore.stats().size,
             },
             'getMessage miss — retry content unavailable (alıcıda Mesaj bekleniyor)'
@@ -1499,7 +1519,7 @@ app.get('/admin/health', (req, res) => {
     marker: GATEWAY_FIX_MARKER,
     send_pace_ms: SEND_PACE_MS,
     note:
-      'wa-auto-pending-fix-2026-08-27 — otomatik burst: kuyruk aralığı + assertSessions retry + JID cache. Manuel tek gönderim aynı /send.',
+      'wa-mesaj-bekleniyor-fix-2026-09-10 — LID/PN alias + loadMessage fallback + belge gönderiminde resolveRecipientJid. Manuel/toplu aynı store.',
   });
 });
 
@@ -1847,12 +1867,11 @@ app.post('/sessions/:coachId/send-document', requireGatewayAuth, requireCoachSco
     req.body?.strict_session === true ||
     String(req.headers['x-gateway-strict-session'] || '').trim() === '1';
   try {
-    const jid = ensurePhoneJid(digits);
     const dataBase64 = String(req.body?.data_base64 || '').trim();
     const caption = String(req.body?.caption || '').trim();
     const filename = String(req.body?.filename || 'document.pdf').trim().slice(0, 120) || 'document.pdf';
     const mimetype = String(req.body?.mimetype || 'application/pdf').trim() || 'application/pdf';
-    if (!jid || !dataBase64) {
+    if (!digits || !dataBase64) {
       return res.status(400).json({ ok: false, error: 'phone_and_document_required' });
     }
     const buf = Buffer.from(dataBase64, 'base64');
@@ -1864,6 +1883,7 @@ app.post('/sessions/:coachId/send-document', requireGatewayAuth, requireCoachSco
     }
 
     let sendMeta = { sharedFallback: false, usedCoachId: coachId };
+    let resolvedJid = null;
     const result = await runInCoachSendQueue(coachId, async () => {
       const resolved = await resolveSendSession(coachId, { strictSession });
       sendMeta = {
@@ -1884,13 +1904,33 @@ app.post('/sessions/:coachId/send-document', requireGatewayAuth, requireCoachSco
         throw err;
       }
 
+      resolvedJid = await resolveRecipientJid(session.sock, digits);
+      const pnJid = ensurePhoneJid(digits);
+      await warmSignalSession(session.sock, resolvedJid, sendMeta.usedCoachId);
+
       const payload = {
         document: buf,
         mimetype,
         fileName: filename
       };
       if (caption) payload.caption = caption;
-      return sendDocumentWithTimeout(session.sock, jid, payload);
+      const sent = await sendDocumentWithTimeout(session.sock, resolvedJid, payload);
+      const aliases = [resolvedJid, pnJid, sent?.key?.remoteJid, sent?.key?.remoteJidAlt].filter(Boolean);
+      await messageStore.put(sent, {
+        coachId: sendMeta.usedCoachId,
+        fallbackText: caption || filename,
+        aliasJids: aliases
+      });
+      if (!sent?.message) {
+        await messageStore.put(
+          {
+            key: sent?.key || { id: sent?.key?.id, remoteJid: resolvedJid, fromMe: true },
+            message: { conversation: caption || filename }
+          },
+          { coachId: sendMeta.usedCoachId, fallbackText: caption || filename, aliasJids: aliases }
+        );
+      }
+      return sent;
     });
 
     const mid = result?.key?.id ? String(result.key.id).trim() : '';
@@ -1902,13 +1942,12 @@ app.post('/sessions/:coachId/send-document', requireGatewayAuth, requireCoachSco
       throw err;
     }
 
-    await messageStore.put(result, { coachId: sendMeta.usedCoachId });
-
     res.json({
       ok: true,
       id: mid,
       correlation_id: newCorrelationId(),
       phone: digits,
+      jid: resolvedJid ? String(resolvedJid).slice(0, 48) : null,
       shared_fallback: sendMeta.sharedFallback,
       gateway_session_id: sendMeta.usedCoachId,
       message_store: 'ok'

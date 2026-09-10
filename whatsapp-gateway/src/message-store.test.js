@@ -55,6 +55,29 @@ async function main() {
   const byLid = await store.getMessage({ id: 'ALIAS1', remoteJid: '999888777666555@lid' });
   assert.equal(byLid.conversation, 'alias test');
 
+  // remoteJidAlt ile sakla / sorgu
+  assert.equal(
+    await store.put(
+      {
+        key: {
+          id: 'ALT1',
+          remoteJid: '905551112233@s.whatsapp.net',
+          remoteJidAlt: '111222333444555@lid',
+          fromMe: true,
+        },
+        message: { conversation: 'alt jid' },
+      },
+      { coachId: 'coach1' }
+    ),
+    true
+  );
+  const byAlt = await store.getMessage({
+    id: 'ALT1',
+    remoteJid: '111222333444555@lid',
+    remoteJidAlt: '905551112233@s.whatsapp.net',
+  });
+  assert.equal(byAlt.conversation, 'alt jid');
+
   const cache = createMsgRetryCounterCache(1000);
   cache.set('k1', 1);
   assert.equal(cache.get('k1'), 1);
