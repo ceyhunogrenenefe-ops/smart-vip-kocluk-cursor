@@ -152,6 +152,39 @@ export const NOTIFICATION_DEFINITIONS = [
     allowMetaFallback: false
   },
   {
+    id: 'attendance_status_update',
+    templateType: 'attendance_status_update',
+    nameTr: 'Yoklama güncelleme — geç katıldı (veli)',
+    descriptionTr: 'absent→late; Meta Utility; yalnızca ilgili veli.',
+    sendChannel: SEND_CHANNELS.META_API,
+    mode: 'instant',
+    cronJobKey: 'absent_student_notification',
+    coachScoped: false,
+    allowMetaFallback: true
+  },
+  {
+    id: 'coach_lesson_attendance_summary',
+    templateType: 'coach_lesson_attendance_summary',
+    nameTr: 'Koç ders yoklama özeti',
+    descriptionTr: 'Ders başına tek toplu rapor; sınıf koçuna.',
+    sendChannel: SEND_CHANNELS.META_API,
+    mode: 'instant',
+    cronJobKey: 'absent_student_notification',
+    coachScoped: true,
+    allowMetaFallback: true
+  },
+  {
+    id: 'attendance_coach_late_update',
+    templateType: 'attendance_coach_late_update',
+    nameTr: 'Koç yoklama güncelleme — geç katılım',
+    descriptionTr: 'Tam raporu tekrarlamadan kısa delta; sınıf koçuna.',
+    sendChannel: SEND_CHANNELS.META_API,
+    mode: 'instant',
+    cronJobKey: 'absent_student_notification',
+    coachScoped: true,
+    allowMetaFallback: true
+  },
+  {
     id: 'veli_sign_ready_notify',
     templateType: 'veli_sign_ready_notify',
     nameTr: 'Veli imza bildirimi',
