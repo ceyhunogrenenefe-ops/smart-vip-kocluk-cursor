@@ -250,6 +250,8 @@ export async function runCoachReportTest(opts = {}) {
       skipped: sent.skipped || null,
       channel: sent.channel || null,
       meta_template_name: sent.meta_template_name || null,
+      template_error: sent.template_error || null,
+      fallback_plain: Boolean(sent.fallback_plain),
       note: sent.note || null,
       warning: sent.warning || null,
       expected_template: COACH_SUMMARY_KIND
