@@ -14,15 +14,8 @@ export const BBB_EARLY_ABSENT_GRACE_MS =
   Math.max(1, Number(process.env.BBB_EARLY_ABSENT_GRACE_MINUTES || 10) || 10) * 60_000;
 
 async function absentWaAlreadySent(sessionId, studentId) {
-  const { data } = await supabaseAdmin
-    .from('message_logs')
-    .select('id')
-    .eq('related_id', sessionId)
-    .eq('student_id', studentId)
-    .in('kind', ['class_absent_notice_1', 'class_absent_notice'])
-    .eq('status', 'sent')
-    .limit(1);
-  return Boolean(data?.length);
+  const { attendanceWaAlreadySent, ABSENT_WA_KINDS } = await import('./class-attendance-notify.js');
+  return attendanceWaAlreadySent(sessionId, studentId, ABSENT_WA_KINDS);
 }
 
 /**

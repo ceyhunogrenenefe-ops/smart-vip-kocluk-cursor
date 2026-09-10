@@ -21,9 +21,19 @@ import {
 import { sendMetaTextMessage } from '../api/_lib/meta-whatsapp.js';
 import {
   normalizeAttendanceStatus,
-  normalizeCameraStatus,
+  parseCameraStatusInput,
   buildAttendanceNotifyText
 } from '../api/_lib/attendance-notice-templates.js';
+import {
+  sendAbsentNoticeForStudent,
+  sendLateArrivalUpdateForStudent,
+  sendCoachLessonAttendanceSummary,
+  sendCoachLateArrivalDelta
+} from '../api/_lib/class-attendance-notify.js';
+import {
+  buildAttendanceSummary,
+  computeAttendanceNotifyPlan
+} from '../api/_lib/attendance-summary.js';
 import { isUuid } from '../api/_lib/uuid.js';
 import { randomUUID } from 'crypto';
 import {
@@ -81,7 +91,6 @@ import { buildBbbAttendeeJoinUrl, buildStaffBbbJoinUrl, parseBbbJoinCredentials,
 import { pollBbbPresenceForSession, applyAutoAttendanceForClassSession } from '../api/_lib/bbb-attendance.js';
 import { isBbbAutoAttendanceEnabled } from '../api/_lib/bbb-auto-attendance-enabled.js';
 import { applyEarlyBbbAbsentCheck } from '../api/_lib/bbb-early-absent.js';
-import { sendAbsentNoticeForStudent } from '../api/_lib/class-attendance-notify.js';
 import {
   completedSessionMinutes,
   sessionLessonUnits40,
@@ -2382,33 +2391,63 @@ export default async function handler(req, res) {
         .from('class_session_attendance')
         .select('student_id,status,camera_status')
         .eq('session_id', sessionId);
-      const priorStatusByStudent = new Map((priorRows || []).map((r) => [String(r.student_id), String(r.status || '')]));
+      const priorByStudent = new Map(
+        (priorRows || []).map((r) => [
+          String(r.student_id),
+          { status: String(r.status || ''), camera_status: r.camera_status ?? null }
+        ])
+      );
 
-      const prepared = rows
-        .map((r) => {
-          const status = normalizeAttendanceStatus(r.status);
-          return {
-            session_id: sessionId,
-            student_id: String(r.student_id || '').trim(),
-            status,
-            camera_status: normalizeCameraStatus(status, r.camera_status),
-            marked_by: actor.sub,
-            marked_at: new Date().toISOString()
-          };
-        })
-        .filter((r) => r.student_id);
+      const nameById = new Map();
+      for (const r of rows) {
+        const sid = String(r.student_id || '').trim();
+        const nm = String(r.student_name || r.name || '').trim();
+        if (sid && nm) nameById.set(sid, nm);
+      }
 
-      const { error } = await upsertAttendanceRows(prepared);
+      const prepared = [];
+      const missingCamera = [];
+      for (const r of rows) {
+        const studentId = String(r.student_id || '').trim();
+        if (!studentId) continue;
+        const status = normalizeAttendanceStatus(r.status);
+        const camera_status = parseCameraStatusInput(status, r.camera_status);
+        if ((status === 'present' || status === 'late') && (camera_status !== 'on' && camera_status !== 'off')) {
+          missingCamera.push(studentId);
+          continue;
+        }
+        prepared.push({
+          session_id: sessionId,
+          student_id: studentId,
+          status,
+          camera_status: status === 'absent' ? 'n_a' : camera_status,
+          marked_by: actor.sub,
+          marked_at: new Date().toISOString(),
+          student_name: nameById.get(studentId) || null
+        });
+      }
+
+      if (missingCamera.length) {
+        return res.status(400).json({
+          error: 'camera_status_required',
+          message: 'Kamerası açık/kapalı bilgisi seçilmeyen öğrenciler bulunuyor.',
+          student_ids: missingCamera
+        });
+      }
+      if (!prepared.length) return res.status(400).json({ error: 'session_id_and_attendance_required' });
+
+      const upsertPayload = prepared.map(({ student_name: _n, ...rest }) => rest);
+      const { error } = await upsertAttendanceRows(upsertPayload);
       if (error) return res.status(500).json({ error: error.message });
 
       const instKey = session.institution_id != null ? String(session.institution_id).trim() : '';
       const className = details.class?.name || 'Sınıf';
+      const plan = computeAttendanceNotifyPlan(priorByStudent, prepared);
+      const summary = buildAttendanceSummary(prepared);
 
       /** @type {{ student_id: string, ok: boolean, note?: string|null, error_code?: string|null, skipped?: string }[]} */
       const absent_whatsapp = [];
-      for (const row of prepared) {
-        if (row.status !== 'absent') continue;
-        if (priorStatusByStudent.get(row.student_id) === 'absent') continue;
+      for (const row of plan.newlyAbsent) {
         try {
           const r = await sendAbsentNoticeForStudent({
             session,
@@ -2431,10 +2470,82 @@ export default async function handler(req, res) {
           });
         }
       }
+
+      /** @type {{ student_id: string, ok: boolean, note?: string|null, skipped?: string }[]} */
+      const late_whatsapp = [];
+      for (const row of plan.lateFromAbsent) {
+        try {
+          const r = await sendLateArrivalUpdateForStudent({
+            session,
+            className,
+            studentId: row.student_id,
+            institutionId: instKey,
+            cameraStatus: row.camera_status
+          });
+          late_whatsapp.push({
+            student_id: row.student_id,
+            ok: Boolean(r.ok),
+            note: r.ok ? null : r.note || null,
+            skipped: r.skipped
+          });
+        } catch (e) {
+          late_whatsapp.push({
+            student_id: row.student_id,
+            ok: false,
+            note: e instanceof Error ? e.message : 'exception'
+          });
+        }
+      }
+
+      let coach_whatsapp = null;
+      const warnings = [];
+      const studentIdsForCoach = prepared.map((r) => r.student_id);
+      if (plan.sendCoachLateDelta) {
+        try {
+          coach_whatsapp = await sendCoachLateArrivalDelta({
+            session,
+            className,
+            lateRows: plan.lateFromAbsent,
+            allRows: prepared,
+            studentIds: studentIdsForCoach,
+            institutionId: instKey
+          });
+          if (coach_whatsapp?.warning) warnings.push(coach_whatsapp.warning);
+        } catch (e) {
+          coach_whatsapp = { ok: false, note: e instanceof Error ? e.message : 'exception' };
+        }
+      } else {
+        // Ders başına tek toplu rapor — message_logs ile idempotent (BBB sonrası ilk öğretmen kaydı da kapsar)
+        try {
+          coach_whatsapp = await sendCoachLessonAttendanceSummary({
+            session,
+            className,
+            rows: prepared,
+            studentIds: studentIdsForCoach,
+            institutionId: instKey
+          });
+          if (coach_whatsapp?.warning) warnings.push(coach_whatsapp.warning);
+        } catch (e) {
+          coach_whatsapp = { ok: false, note: e instanceof Error ? e.message : 'exception' };
+          warnings.push('Yoklama kaydedildi ancak koç WhatsApp bildirimi gönderilemedi.');
+        }
+      }
+
       return res.status(200).json({
         ok: true,
-        suggest_notify: prepared.some((r) => r.status === 'absent'),
-        absent_whatsapp
+        suggest_notify: plan.newlyAbsent.length > 0,
+        summary,
+        absent_whatsapp,
+        late_whatsapp,
+        coach_whatsapp,
+        warnings,
+        notify_plan: {
+          newly_absent: plan.newlyAbsent.length,
+          late_from_absent: plan.lateFromAbsent.length,
+          unchanged_absent: plan.unchangedAbsent.length,
+          coach_full_summary: plan.sendCoachFullSummary,
+          coach_late_delta: plan.sendCoachLateDelta
+        }
       });
     }
 
