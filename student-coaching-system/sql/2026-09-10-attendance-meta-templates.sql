@@ -58,6 +58,19 @@ VALUES
   'tr',
   true,
   NOW()
+),
+(
+  'Yoklama — kamerası kapalı öğrenci (veli)',
+  'class_camera_off_notice',
+  E'Sayın velimiz, öğrencimiz {{student_name}}, {{subject}} dersine katılmış ancak ders sırasında kamerasını açmamıştır. Bilginize.',
+  '["student_name","subject"]'::jsonb,
+  '["student_name","subject"]'::jsonb,
+  'whatsapp',
+  true,
+  'class_camera_off_notice',
+  'tr',
+  true,
+  NOW()
 )
 ON CONFLICT (type) DO UPDATE SET
   name = EXCLUDED.name,
@@ -89,6 +102,13 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_message_logs_attendance_coach_late_sent
   ON message_logs (related_id, student_id, kind)
   WHERE status = 'sent'
     AND kind = 'attendance_coach_late_update'
+    AND related_id IS NOT NULL
+    AND student_id IS NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_message_logs_camera_off_sent
+  ON message_logs (related_id, student_id, kind)
+  WHERE status = 'sent'
+    AND kind = 'class_camera_off_notice'
     AND related_id IS NOT NULL
     AND student_id IS NOT NULL;
 

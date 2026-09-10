@@ -25,6 +25,8 @@ export const COACH_SUMMARY_KIND = 'coach_lesson_attendance_summary';
 export const COACH_SUMMARY_KINDS = ['coach_lesson_attendance_summary', 'class_attendance_coach_summary'];
 export const COACH_LATE_DELTA_KIND = 'attendance_coach_late_update';
 export const COACH_LATE_DELTA_KINDS = ['attendance_coach_late_update', 'class_attendance_coach_late_delta'];
+export const CAMERA_OFF_KIND = 'class_camera_off_notice';
+export const CAMERA_OFF_KINDS = ['class_camera_off_notice', 'attendance_camera_off'];
 
 function clipMetaParam(value, max = 900) {
   const t = String(value ?? '');
@@ -55,10 +57,15 @@ async function sendAttendanceTemplateOrPlain({
   coachId
 }) {
   const templateRow = await loadAttendanceTemplate(templateType);
-  if (templateRow?.content && String(templateRow.meta_template_name || '').trim()) {
+  // meta_template_name boş olsa bile type adı ile Meta’ya dene (resolveMetaTemplateName)
+  if (templateRow?.content) {
     const sent = await sendAutomationTemplateMessage({
       phone,
-      templateRow,
+      templateRow: {
+        ...templateRow,
+        meta_template_name:
+          String(templateRow.meta_template_name || '').trim() || String(templateType || '').trim()
+      },
       vars,
       templateType,
       coachId
@@ -73,7 +80,7 @@ async function sendAttendanceTemplateOrPlain({
         channel: sent.channel,
         sid: sent.sid,
         gateway_message_id: sent.gateway_message_id,
-        meta_template_name: sent.meta_template_name || templateRow.meta_template_name,
+        meta_template_name: sent.meta_template_name || templateRow.meta_template_name || templateType,
         bodyPreview: body
       };
     }
@@ -360,6 +367,89 @@ export async function sendLateArrivalUpdateForStudent({
     studentId,
     sessionId: session.id,
     kind: LATE_UPDATE_KIND,
+    message: sent.bodyPreview || text,
+    ok: Boolean(sent.ok),
+    error: sent.ok ? null : sent.error || 'send_failed',
+    phone: parentPhone,
+    metaMessageId: sent.sid || sent.gateway_message_id || null,
+    metaTemplateName: sent.meta_template_name || null,
+    logDate,
+    channel: sent.channel || channel
+  });
+
+  return {
+    ok: Boolean(sent.ok),
+    student_id: studentId,
+    note: sent.ok ? null : sent.error || 'whatsapp_failed'
+  };
+}
+
+/** present/late + kamera kapalı: yalnızca ilgili veli (idempotent). */
+export async function sendCameraOffNoticeForStudent({
+  session,
+  className,
+  studentId,
+  institutionId,
+  studentName
+}) {
+  const channel = resolveAutomationSendChannel();
+  if (channel === 'none') return { ok: false, note: 'automation_channel_not_ready', student_id: studentId };
+  if (!(await attendanceAutoWaEnabled(institutionId))) {
+    return { ok: true, skipped: 'auto_whatsapp_absent_disabled', student_id: studentId };
+  }
+  if (await attendanceWaAlreadySent(session?.id, studentId, CAMERA_OFF_KINDS)) {
+    return { ok: true, skipped: 'already_sent', student_id: studentId };
+  }
+
+  const { data: student } = await supabaseAdmin
+    .from('students')
+    .select('name, parent_phone')
+    .eq('id', studentId)
+    .maybeSingle();
+  if (!student) return { ok: false, note: 'student_not_found', student_id: studentId };
+
+  const name = String(studentName || student.name || 'Öğrenciniz').trim() || 'Öğrenciniz';
+  const subject = session.subject || 'Ders';
+  const vars = {
+    student_name: clipMetaParam(name, 80),
+    subject: clipMetaParam(subject, 80),
+    class_name: clipMetaParam(className || 'Sınıf', 80),
+    lesson_name: clipMetaParam(subject, 80),
+    camera_status: clipMetaParam(cameraStatusLabelTr('present', 'off'), 80)
+  };
+  const text = renderMessageTemplate(
+    'Sayın velimiz, öğrencimiz {{student_name}}, {{subject}} dersine katılmış ancak ders sırasında kamerasını açmamıştır. Bilginize.',
+    vars
+  );
+
+  const parentPhone = normalizePhoneToE164(student.parent_phone);
+  const logDate = sessionLogDate(session);
+  if (!parentPhone) {
+    await logAttendanceWa({
+      studentId,
+      sessionId: session.id,
+      kind: CAMERA_OFF_KIND,
+      message: text,
+      ok: false,
+      error: 'parent_phone_missing',
+      phone: null,
+      logDate,
+      channel
+    });
+    return { ok: false, note: 'parent_phone_missing', student_id: studentId };
+  }
+
+  const sent = await sendAttendanceTemplateOrPlain({
+    phone: parentPhone,
+    templateType: CAMERA_OFF_KIND,
+    vars,
+    plainText: text
+  });
+
+  await logAttendanceWa({
+    studentId,
+    sessionId: session.id,
+    kind: CAMERA_OFF_KIND,
     message: sent.bodyPreview || text,
     ok: Boolean(sent.ok),
     error: sent.ok ? null : sent.error || 'send_failed',
