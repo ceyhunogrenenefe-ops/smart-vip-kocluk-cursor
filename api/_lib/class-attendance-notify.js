@@ -49,7 +49,7 @@ async function loadAttendanceTemplate(type) {
 }
 
 /** Meta şablon (varsa) → başarısızsa plain text yedek */
-async function sendAttendanceTemplateOrPlain({
+export async function sendAttendanceTemplateOrPlain({
   phone,
   templateType,
   vars,
