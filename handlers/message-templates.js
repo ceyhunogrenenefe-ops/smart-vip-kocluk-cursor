@@ -291,7 +291,8 @@ export default async function handler(req, res) {
       const types = [
         'attendance_status_update',
         'coach_lesson_attendance_summary',
-        'attendance_coach_late_update'
+        'attendance_coach_late_update',
+        'class_camera_off_notice'
       ];
       const results = [];
       for (const type of types) {

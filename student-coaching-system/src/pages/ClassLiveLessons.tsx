@@ -1515,7 +1515,8 @@ export default function ClassLiveLessons() {
       }
       const waRows = Array.isArray(j.absent_whatsapp) ? j.absent_whatsapp : [];
       const lateRows = Array.isArray(j.late_whatsapp) ? j.late_whatsapp : [];
-      const waFailed = [...waRows, ...lateRows].filter(
+      const camRows = Array.isArray(j.camera_whatsapp) ? j.camera_whatsapp : [];
+      const waFailed = [...waRows, ...lateRows, ...camRows].filter(
         (x: { ok?: boolean; skipped?: string }) => x && x.ok === false && x.skipped !== 'auto_whatsapp_absent_disabled' && x.skipped !== 'already_sent'
       );
       const hintWa = (note: string) => {
@@ -1552,9 +1553,15 @@ export default function ClassLiveLessons() {
       if (coachWa?.ok && coachWa?.skipped !== 'already_sent') {
         const coachName = String(coachWa.coach_name || 'Koç');
         parts.unshift(`Koça yoklama raporu gönderildi (${coachName})`);
+      } else if (coachWa?.skipped === 'already_sent') {
+        /* sessiz — ders için özet daha önce gitti */
       } else if (coachWa && coachWa.ok === false && coachWa.skipped !== 'already_sent') {
         parts.push(`Koç raporu gönderilemedi: ${hintWa(String(coachWa.note || coachWa.warning || ''))}`);
+      } else if (coachWa?.skipped && coachWa.skipped !== 'already_sent') {
+        parts.push(`Koç raporu: ${String(coachWa.warning || coachWa.skipped)}`);
       }
+      const camOk = camRows.filter((x: { ok?: boolean; skipped?: string }) => x?.ok && x.skipped !== 'already_sent').length;
+      if (camOk) parts.unshift(`${camOk} veliye kamera kapalı bildirimi gönderildi`);
       if (parts.length) {
         toast.success(`Yoklama kaydedildi. ${parts.join(' · ')}`);
       } else {
