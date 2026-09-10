@@ -252,6 +252,8 @@ export async function runCoachReportTest(opts = {}) {
       meta_template_name: sent.meta_template_name || null,
       template_error: sent.template_error || null,
       fallback_plain: Boolean(sent.fallback_plain),
+      fallback_from: sent.fallback_from || null,
+      gateway_session_id_suffix: sent.gateway_session_id_suffix || null,
       note: sent.note || null,
       warning: sent.warning || null,
       expected_template: COACH_SUMMARY_KIND
