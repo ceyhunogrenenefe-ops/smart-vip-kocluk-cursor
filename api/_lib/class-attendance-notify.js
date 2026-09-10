@@ -5,9 +5,9 @@ import {
   resolveAutomationSendChannel,
   sendAutomationTemplateMessage,
   sendAutomationPlainText,
-  automationGatewaySessionCandidates
+  automationGatewaySessionId
 } from './whatsapp-automation-channel.js';
-import { sendGatewayTextMessage } from './whatsapp-gateway-send.js';
+import { bookOrderGatewaySessionId, sendGatewayTextMessage } from './whatsapp-gateway-send.js';
 import {
   attendanceStatusLabelTr,
   buildAttendanceSummary,
@@ -107,16 +107,18 @@ export async function sendAttendanceTemplateOrPlain({
     templateError = 'template_row_missing';
   }
 
-  // Meta şablon yok/hatalıysa: kurum gateway ile düz metin (24s pencere gerekmez)
-  const gwCandidates = automationGatewaySessionCandidates();
-  if (gwCandidates.length && plainText) {
+  // Meta şablon yok/hatalıysa: yalnızca süper admin / kurum gateway (BOOK_ORDER_GATEWAY_SESSION_ID)
+  // — diğer koç QR oturumlarına düşme (allowSharedFallback kapalı).
+  const adminGatewaySid =
+    String(bookOrderGatewaySessionId() || automationGatewaySessionId() || '').trim() || null;
+  if (adminGatewaySid && plainText) {
     try {
       const gw = await sendGatewayTextMessage({
         phone,
         message: plainText,
-        sessionId: gwCandidates[0],
-        sessionCandidates: gwCandidates,
-        allowSharedFallback: true
+        sessionId: adminGatewaySid,
+        sessionCandidates: [adminGatewaySid],
+        allowSharedFallback: false
       });
       if (gw.ok) {
         return {
@@ -124,11 +126,12 @@ export async function sendAttendanceTemplateOrPlain({
           channel: 'gateway',
           sid: gw.gateway_message_id || gw.sid || null,
           gateway_message_id: gw.gateway_message_id || gw.sid || null,
+          gateway_session_id: gw.gateway_session_id || adminGatewaySid,
           meta_template_name: 'gateway_plain',
           bodyPreview: plainText,
           template_error: templateError,
           fallback_plain: true,
-          fallback_from: 'gateway_after_template'
+          fallback_from: 'admin_gateway_after_template'
         };
       }
     } catch {
@@ -147,6 +150,7 @@ export async function sendAttendanceTemplateOrPlain({
     channel: plain.channel,
     sid: plain.sid,
     gateway_message_id: plain.gateway_message_id,
+    gateway_session_id: plain.gateway_session_id || null,
     meta_template_name: plain.meta_template_name || 'gateway_plain',
     bodyPreview: plainText,
     error: plain.ok ? null : plain.error || 'send_failed',
@@ -713,8 +717,13 @@ export async function sendCoachLessonAttendanceSummary({
     coach_phone_suffix: String(resolved.coach.phone || '').slice(-4) || null,
     meta_template_name: sent.meta_template_name || null,
     channel: sent.channel || channel,
+    gateway_session_id: sent.gateway_session_id || null,
+    gateway_session_id_suffix: sent.gateway_session_id
+      ? `…${String(sent.gateway_session_id).slice(-12)}`
+      : null,
     template_error: sent.template_error || null,
     fallback_plain: Boolean(sent.fallback_plain),
+    fallback_from: sent.fallback_from || null,
     note: sent.ok ? null : sent.error || 'whatsapp_failed',
     warning: sent.ok ? null : 'Yoklama kaydedildi ancak koç WhatsApp bildirimi gönderilemedi.'
   };
