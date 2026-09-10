@@ -155,12 +155,12 @@ export const NOTIFICATION_DEFINITIONS = [
     id: 'class_camera_off_notice',
     templateType: 'class_camera_off_notice',
     nameTr: 'Yoklama — kamera kapalı (veli)',
-    descriptionTr: 'Katıldı + kamera kapalı; öğretmen önizler ve düzenler.',
+    descriptionTr: 'Katıldı + kamera kapalı; Kaydet anında ilgili veliye.',
     sendChannel: SEND_CHANNELS.META_API,
     mode: 'instant',
     cronJobKey: 'absent_student_notification',
     coachScoped: false,
-    allowMetaFallback: false
+    allowMetaFallback: true
   },
   {
     id: 'attendance_status_update',

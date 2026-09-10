@@ -189,6 +189,7 @@ export function computeAttendanceNotifyPlan(prior, prepared) {
   const newlyAbsent = [];
   const lateFromAbsent = [];
   const unchangedAbsent = [];
+  const newlyCameraOff = [];
 
   for (const row of prepared || []) {
     const sid = String(row.student_id || '').trim();
@@ -196,6 +197,17 @@ export function computeAttendanceNotifyPlan(prior, prepared) {
     const prev = priorMap.get(sid);
     const prevStatus = prev ? normalizeAttendanceStatus(prev.status) : null;
     const nextStatus = normalizeAttendanceStatus(row.status);
+    const nextCam =
+      nextStatus === 'absent'
+        ? 'n_a'
+        : normalizeCameraStatus(nextStatus, row.camera_status == null ? 'on' : row.camera_status);
+    const prevCamRaw = prev?.camera_status;
+    const prevCam =
+      prevStatus == null
+        ? null
+        : prevStatus === 'absent'
+          ? 'n_a'
+          : normalizeCameraStatus(prevStatus, prevCamRaw == null ? null : prevCamRaw);
 
     if (nextStatus === 'absent') {
       if (prevStatus === 'absent') unchangedAbsent.push(row);
@@ -204,6 +216,13 @@ export function computeAttendanceNotifyPlan(prior, prepared) {
     if (prevStatus === 'absent' && nextStatus === 'late') {
       lateFromAbsent.push(row);
     }
+
+    // Katıldı/geç + kamera kapalı (önceden kapalı değilse) → veli kamera bildirimi
+    if ((nextStatus === 'present' || nextStatus === 'late') && nextCam === 'off') {
+      const wasAlreadyOff =
+        (prevStatus === 'present' || prevStatus === 'late') && prevCam === 'off';
+      if (!wasAlreadyOff) newlyCameraOff.push(row);
+    }
   }
 
   const isFirstMark = priorMap.size === 0;
@@ -211,10 +230,14 @@ export function computeAttendanceNotifyPlan(prior, prepared) {
     newlyAbsent,
     lateFromAbsent,
     unchangedAbsent,
+    newlyCameraOff,
     isFirstMark,
-    /** İlk yoklama kaydında bir kez; güncellemede hayır */
-    sendCoachFullSummary: isFirstMark,
-    /** absent→late sonrası kısa koç güncellemesi */
-    sendCoachLateDelta: !isFirstMark && lateFromAbsent.length > 0
+    /**
+     * Her Kaydet’te dene — sendCoachLessonAttendanceSummary message_logs ile idempotent.
+     * BBB erken yoklama prior yazsa bile öğretmen Kaydet’te koç özeti gitsin.
+     */
+    sendCoachFullSummary: true,
+    /** absent→late sonrası kısa koç güncellemesi (tam özetten bağımsız) */
+    sendCoachLateDelta: lateFromAbsent.length > 0
   };
 }
