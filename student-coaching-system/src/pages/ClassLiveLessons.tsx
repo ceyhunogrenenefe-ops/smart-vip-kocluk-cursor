@@ -1363,7 +1363,8 @@ export default function ClassLiveLessons() {
           '';
         if (alt === 'on' || alt === 'open') return 'on';
         if (alt === 'off' || alt === 'closed') return 'off';
-        return null;
+        // İlk kayıt / kamera seçilmemiş: Kaydet engellenmesin — varsayılan açık
+        return 'on';
       };
       const toDraftStatus = (st: string): 'present' | 'absent' | 'late' => {
         if (st === 'absent') return 'absent';
@@ -1430,7 +1431,12 @@ export default function ClassLiveLessons() {
           ? {
               ...r,
               status,
-              camera_status: status === 'absent' ? null : r.camera_status
+              camera_status:
+                status === 'absent'
+                  ? null
+                  : r.camera_status === 'on' || r.camera_status === 'off'
+                    ? r.camera_status
+                    : 'on'
             }
           : r
       )
@@ -1450,7 +1456,12 @@ export default function ClassLiveLessons() {
       prev.map((r) => ({
         ...r,
         status,
-        camera_status: status === 'absent' ? null : r.camera_status
+        camera_status:
+          status === 'absent'
+            ? null
+            : r.camera_status === 'on' || r.camera_status === 'off'
+              ? r.camera_status
+              : 'on'
       }))
     );
   };
@@ -1466,25 +1477,29 @@ export default function ClassLiveLessons() {
 
   const saveAttendance = async () => {
     if (!attendanceSession || attendanceDraft.length === 0) return;
-    const missingCam = attendanceDraft.filter(
-      (r) => (r.status === 'present' || r.status === 'late') && r.camera_status !== 'on' && r.camera_status !== 'off'
+    // Kamera seçilmemiş katılanlar → varsayılan açık (Kaydet engellenmesin)
+    const normalizedDraft = attendanceDraft.map((row) => {
+      if (row.status === 'absent') return { ...row, camera_status: null as 'on' | 'off' | null };
+      if (row.camera_status === 'on' || row.camera_status === 'off') return row;
+      return { ...row, camera_status: 'on' as const };
+    });
+    const cameraFilled = normalizedDraft.some(
+      (row, i) => row.camera_status !== attendanceDraft[i]?.camera_status
     );
-    if (missingCam.length) {
-      setAttendanceCameraWarn('Kamerası açık/kapalı bilgisi seçilmeyen öğrenciler bulunuyor.');
-      return;
-    }
+    if (cameraFilled) setAttendanceDraft(normalizedDraft);
     setAttendanceSaving(true);
     setAttendanceCameraWarn(null);
+    setError(null);
     try {
       const res = await apiFetch('/api/class-live-lessons?op=mark-attendance', {
         method: 'POST',
         body: JSON.stringify({
           session_id: attendanceSession.id,
-          attendance: attendanceDraft.map((row) => ({
+          attendance: normalizedDraft.map((row) => ({
             student_id: row.student_id,
             student_name: row.student_name,
             status: row.status,
-            camera_status: row.status === 'absent' ? 'n_a' : row.camera_status
+            camera_status: row.status === 'absent' ? 'n_a' : row.camera_status || 'on'
           }))
         })
       });
@@ -1494,6 +1509,7 @@ export default function ClassLiveLessons() {
           setAttendanceCameraWarn(String(j.message || 'Kamerası açık/kapalı bilgisi seçilmeyen öğrenciler bulunuyor.'));
           return;
         }
+        toast.error(String(j.error || 'Yoklama kaydedilemedi'));
         setError(String(j.error || 'Yoklama kaydedilemedi'));
         return;
       }
@@ -1526,7 +1542,7 @@ export default function ClassLiveLessons() {
           ...waFailed.map((row: { student_id?: string; note?: string }) => {
             const sid = String(row.student_id || '');
             const stu = resolveStudentInList(safeStudents, sid);
-            const draftName = attendanceDraft.find((d) => d.student_id === sid)?.student_name;
+            const draftName = normalizedDraft.find((d) => d.student_id === sid)?.student_name;
             const name = draftName || stu?.name || sid.slice(0, 8);
             return `${name}: ${hintWa(String(row.note || ''))}`;
           })
@@ -1540,12 +1556,15 @@ export default function ClassLiveLessons() {
         parts.push(`Koç raporu gönderilemedi: ${hintWa(String(coachWa.note || coachWa.warning || ''))}`);
       }
       if (parts.length) {
-        setError(`Yoklama kaydedildi. ${parts.join(' · ')}`);
+        toast.success(`Yoklama kaydedildi. ${parts.join(' · ')}`);
       } else {
-        setError(null);
+        toast.success('Yoklama kaydedildi');
       }
+      setError(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Yoklama hatası');
+      const msg = e instanceof Error ? e.message : 'Yoklama hatası';
+      toast.error(msg);
+      setError(msg);
     } finally {
       setAttendanceSaving(false);
     }
