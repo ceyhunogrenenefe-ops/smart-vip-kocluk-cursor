@@ -7,6 +7,21 @@ export function staffCanManageStore(roleSet) {
   return ['super_admin', 'admin', 'coach', 'teacher'].some((r) => roleSet.has(r));
 }
 
+/** Koç: kendi öğrencileri; öğretmen/admin: kurum; super_admin: tümü (institution filtresi yok). */
+export function staffStudentScopeFilter(actor, roleSet, institutionId) {
+  const filter = {};
+  if (institutionId && !roleSet?.has('super_admin')) {
+    filter.institution_id = institutionId;
+  }
+  const coachOnly =
+    roleSet?.has('coach') &&
+    actor?.coach_id &&
+    !roleSet.has('admin') &&
+    !roleSet.has('super_admin');
+  if (coachOnly) filter.coach_id = actor.coach_id;
+  return filter;
+}
+
 export function assignmentSourceFromRoles(roleSet) {
   if (roleSet?.has('teacher')) return 'teacher';
   if (roleSet?.has('coach')) return 'coach';

@@ -215,6 +215,61 @@ export type StaffRosterClass = { id: string; name: string | null; class_level: s
 export const csStaffRoster = () =>
   post<{ classes: StaffRosterClass[]; students: StaffRosterStudent[]; can_manage: boolean }>('staff.roster');
 
+export type StaffStoreOrder = {
+  id: string;
+  order_number: string;
+  student_id: string | null;
+  student_name?: string | null;
+  student_class_level?: string | null;
+  class_id?: string | null;
+  class_name?: string | null;
+  status: string;
+  payment_status?: string | null;
+  payment_method?: string | null;
+  total_kurus: number;
+  customer_name: string | null;
+  customer_phone?: string | null;
+  created_at: string;
+  receipt_url?: string | null;
+  commerce_order_items?: Array<{
+    id: string;
+    title_snapshot: string | null;
+    quantity: number;
+    unit_price_kurus: number;
+  }>;
+  commerce_vendor_orders?: Array<{
+    id: string;
+    vendor_id: string;
+    status: string;
+    commerce_vendors?: { id: string; name: string } | null;
+  }>;
+};
+
+export type StaffStoreOrderClass = { id: string; name: string | null; class_level: string | null };
+
+export const csStaffListOrders = (params?: {
+  status?: string;
+  student_id?: string;
+  class_id?: string;
+  class_level?: string;
+  search?: string;
+  limit?: number;
+  offset?: number;
+}) =>
+  post<{
+    orders: StaffStoreOrder[];
+    classes: StaffStoreOrderClass[];
+    student_count: number;
+    scope: 'coach' | 'institution';
+  }>('staff.orders', params ?? {});
+
+export const csStaffDeleteOrders = (ids: string[]) =>
+  post<{
+    deleted: Array<{ id: string; order_number: string | null }>;
+    skipped: Array<{ id: string; order_number: string | null; reason: string }>;
+    deleted_count: number;
+  }>('staff.orders_delete', { ids });
+
 export const csStaffAssign = (params: {
   book_ids: string[];
   student_ids?: string[];
