@@ -50,7 +50,7 @@ async function findClass8F(classHint = '8F') {
   const want = normalizeClassKey(hint);
   const { data, error } = await supabaseAdmin
     .from('classes')
-    .select('id,name,institution_id,teacher_id')
+    .select('id,name,institution_id')
     .order('name', { ascending: true })
     .limit(400);
   if (error) return { ok: false, error: error.message };
