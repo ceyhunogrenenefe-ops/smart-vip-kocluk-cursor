@@ -7,7 +7,9 @@ import {
   sendAutomationPlainText
 } from './whatsapp-automation-channel.js';
 import {
+  attendanceStatusLabelTr,
   buildAttendanceSummary,
+  cameraStatusLabelTr,
   formatCoachAttendanceSummaryMessage,
   formatLateArrivalUpdateMessage
 } from './attendance-summary.js';
@@ -16,9 +18,82 @@ const FALLBACK_ABSENT =
   'Sayın veli, {{student_name}} {{lesson_date}} tarihinde {{lesson_time}} başlangıçlı {{class_name}} sınıfı {{subject}} grup canlı dersine katılmamıştır (yoklama: gelmedi).';
 
 export const ABSENT_WA_KINDS = ['class_absent_notice_1', 'class_absent_notice'];
-export const LATE_UPDATE_KIND = 'class_attendance_late_update';
-export const COACH_SUMMARY_KIND = 'class_attendance_coach_summary';
-export const COACH_LATE_DELTA_KIND = 'class_attendance_coach_late_delta';
+/** Meta type + legacy log kinds */
+export const LATE_UPDATE_KIND = 'attendance_status_update';
+export const LATE_UPDATE_KINDS = ['attendance_status_update', 'class_attendance_late_update'];
+export const COACH_SUMMARY_KIND = 'coach_lesson_attendance_summary';
+export const COACH_SUMMARY_KINDS = ['coach_lesson_attendance_summary', 'class_attendance_coach_summary'];
+export const COACH_LATE_DELTA_KIND = 'attendance_coach_late_update';
+export const COACH_LATE_DELTA_KINDS = ['attendance_coach_late_update', 'class_attendance_coach_late_delta'];
+
+function clipMetaParam(value, max = 900) {
+  const t = String(value ?? '');
+  if (t.length <= max) return t || '—';
+  return `${t.slice(0, Math.max(0, max - 1))}…`;
+}
+
+function numberedStudentNames(entries) {
+  if (!entries?.length) return 'Yok';
+  return entries.map((e, i) => `${i + 1}. ${e.name}`).join('\n');
+}
+
+async function loadAttendanceTemplate(type) {
+  const { data } = await supabaseAdmin
+    .from('message_templates')
+    .select('*')
+    .eq('type', type)
+    .maybeSingle();
+  return data || null;
+}
+
+/** Meta şablon (varsa) → başarısızsa plain text yedek */
+async function sendAttendanceTemplateOrPlain({
+  phone,
+  templateType,
+  vars,
+  plainText,
+  coachId
+}) {
+  const templateRow = await loadAttendanceTemplate(templateType);
+  if (templateRow?.content && String(templateRow.meta_template_name || '').trim()) {
+    const sent = await sendAutomationTemplateMessage({
+      phone,
+      templateRow,
+      vars,
+      templateType,
+      coachId
+    });
+    const body =
+      sent.bodyPreview ||
+      renderMessageTemplate(templateRow.content, vars) ||
+      plainText;
+    if (sent.ok) {
+      return {
+        ok: true,
+        channel: sent.channel,
+        sid: sent.sid,
+        gateway_message_id: sent.gateway_message_id,
+        meta_template_name: sent.meta_template_name || templateRow.meta_template_name,
+        bodyPreview: body
+      };
+    }
+  }
+  const plain = await sendAutomationPlainText({
+    phone,
+    message: plainText,
+    notificationType: templateType,
+    coachId
+  });
+  return {
+    ok: Boolean(plain.ok),
+    channel: plain.channel,
+    sid: plain.sid,
+    gateway_message_id: plain.gateway_message_id,
+    meta_template_name: plain.meta_template_name || 'gateway_plain',
+    bodyPreview: plainText,
+    error: plain.ok ? null : plain.error || 'send_failed'
+  };
+}
 
 export async function attendanceAutoWaEnabled(institutionId) {
   const iid = institutionId != null && institutionId !== '' ? String(institutionId).trim() : '';
@@ -82,14 +157,16 @@ export async function attendanceWaAlreadySent(sessionId, studentId, kinds) {
   return Boolean(data?.length);
 }
 
-export async function coachSessionNoticeAlreadySent(sessionId, kind) {
+export async function coachSessionNoticeAlreadySent(sessionId, kinds) {
   const sid = String(sessionId || '').trim();
   if (!sid) return false;
+  const kindList = Array.isArray(kinds) && kinds.length ? kinds : [String(kinds || '').trim()].filter(Boolean);
+  if (!kindList.length) return false;
   const { data } = await supabaseAdmin
     .from('message_logs')
     .select('id')
     .eq('related_id', sid)
-    .eq('kind', kind)
+    .in('kind', kindList)
     .eq('status', 'sent')
     .limit(1);
   return Boolean(data?.length);
@@ -227,7 +304,7 @@ export async function sendLateArrivalUpdateForStudent({
   if (!(await attendanceAutoWaEnabled(institutionId))) {
     return { ok: true, skipped: 'auto_whatsapp_absent_disabled', student_id: studentId };
   }
-  if (await attendanceWaAlreadySent(session?.id, studentId, [LATE_UPDATE_KIND])) {
+  if (await attendanceWaAlreadySent(session?.id, studentId, LATE_UPDATE_KINDS)) {
     return { ok: true, skipped: 'already_sent', student_id: studentId };
   }
 
@@ -237,6 +314,14 @@ export async function sendLateArrivalUpdateForStudent({
     .eq('id', studentId)
     .maybeSingle();
   if (!student) return { ok: false, note: 'student_not_found', student_id: studentId };
+
+  const vars = {
+    student_name: clipMetaParam(student.name || 'Öğrenciniz', 80),
+    class_name: clipMetaParam(className || 'Sınıf', 80),
+    lesson_name: clipMetaParam(session.subject || 'Ders', 80),
+    attendance_status: clipMetaParam(attendanceStatusLabelTr('late'), 80),
+    camera_status: clipMetaParam(cameraStatusLabelTr('late', cameraStatus), 80)
+  };
 
   const text = formatLateArrivalUpdateMessage({
     studentName: student.name,
@@ -264,17 +349,18 @@ export async function sendLateArrivalUpdateForStudent({
     return { ok: false, note: 'parent_phone_missing', student_id: studentId };
   }
 
-  const sent = await sendAutomationPlainText({
+  const sent = await sendAttendanceTemplateOrPlain({
     phone: parentPhone,
-    message: text,
-    notificationType: LATE_UPDATE_KIND
+    templateType: LATE_UPDATE_KIND,
+    vars,
+    plainText: text
   });
 
   await logAttendanceWa({
     studentId,
     sessionId: session.id,
     kind: LATE_UPDATE_KIND,
-    message: text,
+    message: sent.bodyPreview || text,
     ok: Boolean(sent.ok),
     error: sent.ok ? null : sent.error || 'send_failed',
     phone: parentPhone,
@@ -287,8 +373,7 @@ export async function sendLateArrivalUpdateForStudent({
   return {
     ok: Boolean(sent.ok),
     student_id: studentId,
-    note: sent.ok ? null : sent.error || 'whatsapp_failed',
-    skipped: sent.ok ? undefined : undefined
+    note: sent.ok ? null : sent.error || 'whatsapp_failed'
   };
 }
 
@@ -370,7 +455,7 @@ export async function sendCoachLessonAttendanceSummary({
   if (!(await attendanceAutoWaEnabled(institutionId))) {
     return { ok: true, skipped: 'auto_whatsapp_absent_disabled' };
   }
-  if (await coachSessionNoticeAlreadySent(session?.id, COACH_SUMMARY_KIND)) {
+  if (await coachSessionNoticeAlreadySent(session?.id, COACH_SUMMARY_KINDS)) {
     return { ok: true, skipped: 'already_sent' };
   }
 
@@ -406,10 +491,30 @@ export async function sendCoachLessonAttendanceSummary({
     summary
   });
 
-  const sent = await sendAutomationPlainText({
+  const vars = {
+    class_name: clipMetaParam(className || 'Sınıf', 80),
+    lesson_name: clipMetaParam(session.subject || 'Ders', 80),
+    teacher_name: clipMetaParam(teacherName, 80),
+    coach_name: clipMetaParam(resolved.coach.name, 80),
+    lesson_date_time: clipMetaParam(lessonDateTime, 80),
+    total_students: String(summary.total),
+    present_count: String(summary.present),
+    late_count: String(summary.late),
+    absent_count: String(summary.absent),
+    camera_open_count: String(summary.cameraOpen),
+    camera_closed_count: String(summary.cameraClosed),
+    present_students: clipMetaParam(numberedStudentNames(summary.presentStudents)),
+    late_students: clipMetaParam(numberedStudentNames(summary.lateStudents)),
+    absent_students: clipMetaParam(numberedStudentNames(summary.absentStudents)),
+    camera_open_students: clipMetaParam(numberedStudentNames(summary.cameraOpenStudents)),
+    camera_closed_students: clipMetaParam(numberedStudentNames(summary.cameraClosedStudents))
+  };
+
+  const sent = await sendAttendanceTemplateOrPlain({
     phone: resolved.coach.phone,
-    message: text,
-    notificationType: COACH_SUMMARY_KIND,
+    templateType: COACH_SUMMARY_KIND,
+    vars,
+    plainText: text,
     coachId: resolved.coach.id
   });
 
@@ -417,7 +522,7 @@ export async function sendCoachLessonAttendanceSummary({
     studentId: null,
     sessionId: session.id,
     kind: COACH_SUMMARY_KIND,
-    message: text,
+    message: sent.bodyPreview || text,
     ok: Boolean(sent.ok),
     error: sent.ok ? null : sent.error || 'send_failed',
     phone: resolved.coach.phone,
@@ -456,7 +561,7 @@ export async function sendCoachLateArrivalDelta({
   for (const row of lateRows) {
     const sid = String(row.student_id || '').trim();
     if (!sid) continue;
-    if (await attendanceWaAlreadySent(session?.id, sid, [COACH_LATE_DELTA_KIND])) continue;
+    if (await attendanceWaAlreadySent(session?.id, sid, COACH_LATE_DELTA_KINDS)) continue;
     pending.push(row);
   }
   if (!pending.length) return { ok: true, skipped: 'already_sent' };
@@ -475,9 +580,13 @@ export async function sendCoachLateArrivalDelta({
 
   const summary = buildAttendanceSummary(allRows);
   const presentLike = summary.present + summary.late;
-  const chunks = pending.map((row) =>
-    formatLateArrivalUpdateMessage({
-      studentName: row.student_name || row.name || 'Öğrenci',
+  let anyOk = false;
+  let lastError = null;
+
+  for (const row of pending) {
+    const studentName = row.student_name || row.name || 'Öğrenci';
+    const plain = formatLateArrivalUpdateMessage({
+      studentName,
       className,
       lessonName: session.subject || 'Ders',
       attendanceStatus: 'late',
@@ -486,23 +595,29 @@ export async function sendCoachLateArrivalDelta({
       previousLabel: 'Katılmadı',
       presentCount: presentLike,
       totalCount: summary.total
-    })
-  );
-  const text = chunks.join('\n\n---\n\n');
-
-  const sent = await sendAutomationPlainText({
-    phone: resolved.coach.phone,
-    message: text,
-    notificationType: COACH_LATE_DELTA_KIND,
-    coachId: resolved.coach.id
-  });
-
-  for (const row of pending) {
+    });
+    const vars = {
+      class_name: clipMetaParam(className || 'Sınıf', 80),
+      lesson_name: clipMetaParam(session.subject || 'Ders', 80),
+      student_name: clipMetaParam(studentName, 80),
+      attendance_status: clipMetaParam(attendanceStatusLabelTr('late'), 80),
+      camera_status: clipMetaParam(cameraStatusLabelTr('late', row.camera_status), 80),
+      present_total: clipMetaParam(`${presentLike}/${summary.total}`, 40)
+    };
+    const sent = await sendAttendanceTemplateOrPlain({
+      phone: resolved.coach.phone,
+      templateType: COACH_LATE_DELTA_KIND,
+      vars,
+      plainText: plain,
+      coachId: resolved.coach.id
+    });
+    if (sent.ok) anyOk = true;
+    else lastError = sent.error || 'whatsapp_failed';
     await logAttendanceWa({
       studentId: row.student_id,
       sessionId: session.id,
       kind: COACH_LATE_DELTA_KIND,
-      message: text,
+      message: sent.bodyPreview || plain,
       ok: Boolean(sent.ok),
       error: sent.ok ? null : sent.error || 'send_failed',
       phone: resolved.coach.phone,
@@ -514,8 +629,8 @@ export async function sendCoachLateArrivalDelta({
   }
 
   return {
-    ok: Boolean(sent.ok),
+    ok: anyOk,
     coach_name: resolved.coach.name,
-    note: sent.ok ? null : sent.error || 'whatsapp_failed'
+    note: anyOk ? null : lastError || 'whatsapp_failed'
   };
 }

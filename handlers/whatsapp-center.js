@@ -34,6 +34,9 @@ export const TEMPLATE_TYPE_TO_CRON_JOB_KEY = {
   meeting_notification: 'meeting_reminders',
   /** Grup yoklaması devamsızlık — anlık gönderim mark-attendance; cron yalnızca başarısız yeniden deneme */
   class_absent_notice_1: 'absent_student_notification',
+  attendance_status_update: 'absent_student_notification',
+  coach_lesson_attendance_summary: 'absent_student_notification',
+  attendance_coach_late_update: 'absent_student_notification',
   class_absent_parent_notice: 'absent_student_notification',
   class_camera_off_notice: 'absent_student_notification',
   /** Kitap siparişi — onayda anlık gönderim; cron yalnızca pending yedek */
