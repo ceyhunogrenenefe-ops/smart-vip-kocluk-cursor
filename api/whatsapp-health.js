@@ -153,6 +153,7 @@ async function diagnoseAttendanceMetaTemplates() {
  * WhatsApp teşhis — giriş gerekmez.
  * GET /api/whatsapp-health
  * GET /api/whatsapp-health?attendance_templates=1  → Meta yoklama şablon durumları
+ * GET /api/whatsapp-health?attendance_templates=1&ensure=1  → DB upsert + eksik şablonu Meta’ya gönder
  */
 export default async function handler(req, res) {
   if (req.method !== 'GET') {
