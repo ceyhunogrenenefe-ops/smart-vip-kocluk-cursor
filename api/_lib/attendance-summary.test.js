@@ -70,7 +70,7 @@ describe('attendance-summary', () => {
     expect(plan.newlyAbsent).toHaveLength(0);
     expect(plan.unchangedAbsent).toHaveLength(0);
     expect(plan.lateFromAbsent.map((r) => r.student_id)).toEqual(['ece']);
-    expect(plan.sendCoachFullSummary).toBe(false);
+    expect(plan.sendCoachFullSummary).toBe(true);
     expect(plan.sendCoachLateDelta).toBe(true);
   });
 
@@ -88,17 +88,47 @@ describe('attendance-summary', () => {
     expect(plan.sendCoachLateDelta).toBe(false);
   });
 
-  it('TEST11 camera-only change does not create newlyAbsent or lateFromAbsent', () => {
+  it('BBB prior rows still request coach full summary on teacher Kaydet', () => {
+    const prior = new Map([
+      ['1', { status: 'absent', camera_status: 'n_a' }],
+      ['2', { status: 'absent', camera_status: 'n_a' }]
+    ]);
+    const plan = computeAttendanceNotifyPlan(prior, [
+      { student_id: '1', status: 'present', camera_status: 'on' },
+      { student_id: '2', status: 'absent', camera_status: 'n_a' }
+    ]);
+    expect(plan.isFirstMark).toBe(false);
+    expect(plan.sendCoachFullSummary).toBe(true);
+    expect(plan.newlyAbsent).toHaveLength(0);
+  });
+
+  it('TEST11 camera on-only change does not create newlyAbsent or lateFromAbsent', () => {
     const prior = new Map([['1', { status: 'present', camera_status: 'off' }]]);
     const plan = computeAttendanceNotifyPlan(prior, [
       { student_id: '1', status: 'present', camera_status: 'on' }
     ]);
     expect(plan.newlyAbsent).toHaveLength(0);
     expect(plan.lateFromAbsent).toHaveLength(0);
-    expect(plan.sendCoachFullSummary).toBe(false);
+    expect(plan.newlyCameraOff).toHaveLength(0);
+    expect(plan.sendCoachFullSummary).toBe(true);
     expect(plan.sendCoachLateDelta).toBe(false);
   });
 
+  it('camera off transition notifies parent plan', () => {
+    const prior = new Map([['1', { status: 'present', camera_status: 'on' }]]);
+    const plan = computeAttendanceNotifyPlan(prior, [
+      { student_id: '1', status: 'present', camera_status: 'off', student_name: 'Ali' }
+    ]);
+    expect(plan.newlyCameraOff.map((r) => r.student_id)).toEqual(['1']);
+    expect(plan.newlyAbsent).toHaveLength(0);
+  });
+
+  it('first mark with camera off includes newlyCameraOff', () => {
+    const plan = computeAttendanceNotifyPlan(new Map(), [
+      { student_id: '1', status: 'present', camera_status: 'off' }
+    ]);
+    expect(plan.newlyCameraOff).toHaveLength(1);
+  });
   it('formats coach and late messages', () => {
     const summary = buildAttendanceSummary([
       { student_id: '1', name: 'Ece', status: 'late', camera_status: 'on' }

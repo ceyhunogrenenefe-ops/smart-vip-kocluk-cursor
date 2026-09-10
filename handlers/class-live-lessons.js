@@ -27,6 +27,7 @@ import {
 import {
   sendAbsentNoticeForStudent,
   sendLateArrivalUpdateForStudent,
+  sendCameraOffNoticeForStudent,
   sendCoachLessonAttendanceSummary,
   sendCoachLateArrivalDelta
 } from '../api/_lib/class-attendance-notify.js';
@@ -2446,8 +2447,54 @@ export default async function handler(req, res) {
       const plan = computeAttendanceNotifyPlan(priorByStudent, prepared);
       const summary = buildAttendanceSummary(prepared);
 
-      /** Yoklama DB'de; WA uzun sürerse Kaydet yine 200 dönsün */
+      /** Yoklama DB'de; koç özeti önce (timeout’ta kaybolmasın), sonra veli bildirimleri */
       const runNotices = async () => {
+        const warnings = [];
+        const studentIdsForCoach = prepared.map((r) => r.student_id);
+
+        /** @type {object|null} */
+        let coach_whatsapp = null;
+        // Koç tam özeti her Kaydet’te dene (message_logs already_sent ile tek sefer)
+        try {
+          coach_whatsapp = await sendCoachLessonAttendanceSummary({
+            session,
+            className,
+            rows: prepared,
+            studentIds: studentIdsForCoach,
+            institutionId: instKey
+          });
+          if (coach_whatsapp?.warning) warnings.push(coach_whatsapp.warning);
+        } catch (e) {
+          coach_whatsapp = { ok: false, note: e instanceof Error ? e.message : 'exception' };
+          warnings.push('Yoklama kaydedildi ancak koç WhatsApp bildirimi gönderilemedi.');
+        }
+
+        /** @type {{ student_id: string, ok: boolean, note?: string|null, skipped?: string }[]} */
+        const camera_whatsapp = [];
+        for (const row of plan.newlyCameraOff || []) {
+          try {
+            const r = await sendCameraOffNoticeForStudent({
+              session,
+              className,
+              studentId: row.student_id,
+              institutionId: instKey,
+              studentName: row.student_name
+            });
+            camera_whatsapp.push({
+              student_id: row.student_id,
+              ok: Boolean(r.ok),
+              note: r.ok ? null : r.note || null,
+              skipped: r.skipped
+            });
+          } catch (e) {
+            camera_whatsapp.push({
+              student_id: row.student_id,
+              ok: false,
+              note: e instanceof Error ? e.message : 'exception'
+            });
+          }
+        }
+
         /** @type {{ student_id: string, ok: boolean, note?: string|null, error_code?: string|null, skipped?: string }[]} */
         const absent_whatsapp = [];
         for (const row of plan.newlyAbsent) {
@@ -2500,12 +2547,10 @@ export default async function handler(req, res) {
           }
         }
 
-        let coach_whatsapp = null;
-        const warnings = [];
-        const studentIdsForCoach = prepared.map((r) => r.student_id);
+        // absent→late kısa koç delta (tam özete ek)
         if (plan.sendCoachLateDelta) {
           try {
-            coach_whatsapp = await sendCoachLateArrivalDelta({
+            const delta = await sendCoachLateArrivalDelta({
               session,
               className,
               lateRows: plan.lateFromAbsent,
@@ -2513,31 +2558,32 @@ export default async function handler(req, res) {
               studentIds: studentIdsForCoach,
               institutionId: instKey
             });
-            if (coach_whatsapp?.warning) warnings.push(coach_whatsapp.warning);
+            if (delta?.warning) warnings.push(delta.warning);
+            // İlk kayıttaki tam özet yoksa delta bilgisini yüzeyde tut
+            if (!coach_whatsapp?.ok && delta) {
+              coach_whatsapp = {
+                ...(coach_whatsapp && typeof coach_whatsapp === 'object' ? coach_whatsapp : {}),
+                ...delta,
+                coach_summary: coach_whatsapp,
+                late_delta: true
+              };
+            } else if (coach_whatsapp && typeof coach_whatsapp === 'object') {
+              coach_whatsapp = { ...coach_whatsapp, late_delta: delta };
+            }
           } catch (e) {
-            coach_whatsapp = { ok: false, note: e instanceof Error ? e.message : 'exception' };
-          }
-        } else {
-          try {
-            coach_whatsapp = await sendCoachLessonAttendanceSummary({
-              session,
-              className,
-              rows: prepared,
-              studentIds: studentIdsForCoach,
-              institutionId: instKey
-            });
-            if (coach_whatsapp?.warning) warnings.push(coach_whatsapp.warning);
-          } catch (e) {
-            coach_whatsapp = { ok: false, note: e instanceof Error ? e.message : 'exception' };
-            warnings.push('Yoklama kaydedildi ancak koç WhatsApp bildirimi gönderilemedi.');
+            warnings.push(
+              `Koç geç-katılım güncellemesi gönderilemedi: ${e instanceof Error ? e.message : 'exception'}`
+            );
           }
         }
-        return { absent_whatsapp, late_whatsapp, coach_whatsapp, warnings };
+
+        return { absent_whatsapp, late_whatsapp, camera_whatsapp, coach_whatsapp, warnings };
       };
 
       let noticeResult = {
         absent_whatsapp: [],
         late_whatsapp: [],
+        camera_whatsapp: [],
         coach_whatsapp: null,
         warnings: /** @type {string[]} */ ([])
       };
@@ -2553,12 +2599,13 @@ export default async function handler(req, res) {
                 resolve({
                   absent_whatsapp: [],
                   late_whatsapp: [],
+                  camera_whatsapp: [],
                   coach_whatsapp: null,
                   warnings: [
                     'Yoklama kaydedildi; WhatsApp bildirimleri zaman aşımına uğradı (arka planda devam edebilir).'
                   ]
                 }),
-              18000
+              25000
             );
           })
         ]);
@@ -2567,6 +2614,7 @@ export default async function handler(req, res) {
         noticeResult = {
           absent_whatsapp: [],
           late_whatsapp: [],
+          camera_whatsapp: [],
           coach_whatsapp: { ok: false, note: e instanceof Error ? e.message : 'exception' },
           warnings: ['Yoklama kaydedildi ancak bildirimler gönderilemedi.']
         };
@@ -2574,14 +2622,16 @@ export default async function handler(req, res) {
 
       return res.status(200).json({
         ok: true,
-        suggest_notify: plan.newlyAbsent.length > 0,
+        suggest_notify: plan.newlyAbsent.length > 0 || (plan.newlyCameraOff || []).length > 0,
         summary,
         absent_whatsapp: noticeResult.absent_whatsapp,
         late_whatsapp: noticeResult.late_whatsapp,
+        camera_whatsapp: noticeResult.camera_whatsapp,
         coach_whatsapp: noticeResult.coach_whatsapp,
         warnings: noticeResult.warnings,
         notify_plan: {
           newly_absent: plan.newlyAbsent.length,
+          newly_camera_off: (plan.newlyCameraOff || []).length,
           late_from_absent: plan.lateFromAbsent.length,
           unchanged_absent: plan.unchangedAbsent.length,
           coach_full_summary: plan.sendCoachFullSummary,
