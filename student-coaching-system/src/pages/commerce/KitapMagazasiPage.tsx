@@ -1,6 +1,6 @@
 /**
  * Öğrenci/Veli Kitap Mağazası
- * Sekmeler: Tüm Kitaplar | Önerilen | Sınıf Paketleri | Atanmış Kitaplarım
+ * Sekmeler: Tüm Kitaplar | Önerilen | Sınıf Paketleri | Atanmış | (personel) Mağaza Siparişleri
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -8,6 +8,7 @@ import {
   BookOpen,
   CheckCircle2,
   ChevronRight,
+  Eye,
   LayoutGrid,
   List,
   Loader2,
@@ -20,6 +21,7 @@ import {
   SlidersHorizontal,
   Star,
   Tag,
+  Trash2,
   Truck,
   Users,
   X,
@@ -35,13 +37,17 @@ import {
   csListPackages,
   csStaffAssign,
   csStaffCreatePackage,
+  csStaffDeleteOrders,
   csStaffDeletePackage,
+  csStaffListOrders,
   csStaffRoster,
   csStaffSetPackageItems,
   csStaffUpdatePackage,
   type CatalogListParams,
   type StaffRosterClass,
   type StaffRosterStudent,
+  type StaffStoreOrder,
+  type StaffStoreOrderClass,
   type OfferWithBook,
   type StoreBrowseCategoryWithBooks,
   type StoreCollectionBook,
@@ -52,18 +58,345 @@ import {
   kitapPackageShareUrl
 } from '../../lib/kitapShareLinks';
 import type { CommerceBookPackage, CommerceSettings, CommerceStudentBookAssignment, StoreBrowseClass } from '../../types/commerce.types';
-import { formatCommerceTry } from '../../types/commerce.types';
+import { COMMERCE_ORDER_STATUS_LABELS, formatCommerceTry } from '../../types/commerce.types';
 import { useAuth } from '../../context/AuthContext';
 import BookCoverImage from '../../components/commerce/BookCoverImage';
 
-type Tab = 'tum-kitaplar' | 'onerilen' | 'paketler' | 'atanmis';
+type Tab = 'tum-kitaplar' | 'onerilen' | 'paketler' | 'atanmis' | 'siparisler';
 
-const TABS: { key: Tab; label: string }[] = [
+const BASE_TABS: { key: Tab; label: string }[] = [
   { key: 'tum-kitaplar', label: 'Tüm Kitaplar' },
   { key: 'onerilen', label: 'Öğretmen Önerileri' },
   { key: 'paketler', label: 'Sınıf Paketleri' },
   { key: 'atanmis', label: 'Atanmış Kitaplarım' },
 ];
+
+function paymentMethodLabel(method?: string | null) {
+  const m = String(method || '').toLowerCase();
+  if (m === 'iban') return 'IBAN';
+  if (m === 'paytr' || m === 'garanti') return 'Kart';
+  return method || '—';
+}
+
+function OrderStatusBadge({ status }: { status: string }) {
+  const colors: Record<string, string> = {
+    paid: 'bg-blue-100 text-blue-800',
+    confirmed: 'bg-teal-100 text-teal-800',
+    preparing: 'bg-indigo-100 text-indigo-800',
+    shipped: 'bg-violet-100 text-violet-800',
+    delivered: 'bg-emerald-100 text-emerald-800',
+    cancelled: 'bg-red-100 text-red-700',
+    pending_payment: 'bg-amber-100 text-amber-800',
+    refunded: 'bg-red-50 text-red-600',
+    payment_failed: 'bg-red-50 text-red-600',
+  };
+  const label = COMMERCE_ORDER_STATUS_LABELS[status as keyof typeof COMMERCE_ORDER_STATUS_LABELS] ?? status;
+  return (
+    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${colors[status] ?? 'bg-gray-100 text-gray-600'}`}>
+      {label}
+    </span>
+  );
+}
+
+/** Koç / öğretmen: kendi öğrencilerinin mağaza siparişleri */
+function StaffOrdersTab() {
+  const [orders, setOrders] = useState<StaffStoreOrder[]>([]);
+  const [classes, setClasses] = useState<StaffStoreOrderClass[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [filterStatus, setFilterStatus] = useState('');
+  const [filterClassId, setFilterClassId] = useState('');
+  const [filterClassLevel, setFilterClassLevel] = useState('');
+  const [search, setSearch] = useState('');
+  const [scope, setScope] = useState<'coach' | 'institution'>('coach');
+  const [studentCount, setStudentCount] = useState(0);
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const load = useCallback(async (params: {
+    status?: string;
+    search?: string;
+    class_id?: string;
+    class_level?: string;
+  }) => {
+    setLoading(true);
+    try {
+      const r = await csStaffListOrders({
+        status: params.status || undefined,
+        search: params.search || undefined,
+        class_id: params.class_id || undefined,
+        class_level: params.class_level || undefined,
+        limit: 100,
+      });
+      setOrders(r.orders || []);
+      setClasses(r.classes || []);
+      setScope(r.scope);
+      setStudentCount(r.student_count ?? 0);
+      setSelectedIds(new Set());
+    } catch (e: unknown) {
+      toast.error((e as Error).message);
+      setOrders([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    searchTimer.current = setTimeout(() => {
+      load({
+        status: filterStatus || undefined,
+        search: search.trim() || undefined,
+        class_id: filterClassId || undefined,
+        class_level: filterClassLevel || undefined,
+      });
+    }, 300);
+    return () => { if (searchTimer.current) clearTimeout(searchTimer.current); };
+  }, [filterStatus, filterClassId, filterClassLevel, search, load]);
+
+  const classLevels = useMemo(() => {
+    const set = new Set<string>();
+    for (const c of classes) {
+      if (c.class_level) set.add(String(c.class_level));
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'tr', { numeric: true }));
+  }, [classes]);
+
+  const allSelected = orders.length > 0 && orders.every((o) => selectedIds.has(o.id));
+  const someSelected = selectedIds.size > 0;
+
+  const toggleSelectAll = () => {
+    if (allSelected) setSelectedIds(new Set());
+    else setSelectedIds(new Set(orders.map((o) => o.id)));
+  };
+
+  const toggleOne = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const deleteSelected = async () => {
+    const ids = Array.from(selectedIds);
+    if (!ids.length) return;
+    if (!confirm(`${ids.length} siparişi silmek istediğinize emin misiniz? Ödenmiş siparişler atlanır.`)) return;
+    setBulkBusy(true);
+    try {
+      const r = await csStaffDeleteOrders(ids);
+      const skippedPaid = (r.skipped || []).filter((s) => s.reason === 'ödenmiş').length;
+      if (r.deleted_count > 0) {
+        toast.success(
+          skippedPaid
+            ? `${r.deleted_count} silindi · ${skippedPaid} ödenmiş atlandı`
+            : `${r.deleted_count} sipariş silindi`
+        );
+      } else if (skippedPaid) {
+        toast.error('Ödenmiş siparişler silinemez');
+      } else {
+        toast.error('Sipariş silinemedi');
+      }
+      await load({
+        status: filterStatus || undefined,
+        search: search.trim() || undefined,
+        class_id: filterClassId || undefined,
+        class_level: filterClassLevel || undefined,
+      });
+    } catch (e: unknown) {
+      toast.error((e as Error).message);
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
+  return (
+    <div>
+      <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-semibold text-gray-900">Mağaza siparişleri</h2>
+          <p className="text-xs text-gray-500 mt-0.5">
+            {scope === 'coach'
+              ? `Koç listenizdeki ${studentCount} öğrencinin kitap mağazası siparişleri.`
+              : `Kapsamdaki ${studentCount} öğrencinin kitap mağazası siparişleri.`}
+            {' '}Soldan seçip toplu silebilirsiniz (ödenmişler hariç).
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2 items-center">
+          {someSelected && (
+            <button
+              type="button"
+              disabled={bulkBusy}
+              onClick={() => void deleteSelected()}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              {bulkBusy ? 'Siliniyor…' : `Seçilenleri sil (${selectedIds.size})`}
+            </button>
+          )}
+          <div className="relative">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+            <input
+              className="pl-8 pr-3 py-1.5 border rounded-lg text-sm w-44 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+              placeholder="Sipariş no / müşteri"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
+          <select
+            className="border rounded-lg text-sm px-2 py-1.5 focus:outline-none max-w-[11rem]"
+            value={filterClassId}
+            onChange={(e) => setFilterClassId(e.target.value)}
+          >
+            <option value="">Tüm sınıflar</option>
+            {classes.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name || 'Sınıf'}{c.class_level ? ` (${c.class_level})` : ''}
+              </option>
+            ))}
+          </select>
+          <select
+            className="border rounded-lg text-sm px-2 py-1.5 focus:outline-none"
+            value={filterClassLevel}
+            onChange={(e) => setFilterClassLevel(e.target.value)}
+          >
+            <option value="">Tüm kademeler</option>
+            {classLevels.map((lv) => (
+              <option key={lv} value={lv}>{lv}. sınıf</option>
+            ))}
+          </select>
+          <select
+            className="border rounded-lg text-sm px-2 py-1.5 focus:outline-none"
+            value={filterStatus}
+            onChange={(e) => setFilterStatus(e.target.value)}
+          >
+            <option value="">Tüm durumlar</option>
+            {Object.entries(COMMERCE_ORDER_STATUS_LABELS).map(([v, l]) => (
+              <option key={v} value={v}>{l}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="flex justify-center p-10"><Loader2 className="animate-spin w-6 h-6 text-gray-400" /></div>
+      ) : orders.length === 0 ? (
+        <div className="text-center py-14 text-gray-500 text-sm border border-dashed border-gray-200 rounded-2xl bg-white">
+          Filtreye uyan mağaza siparişi yok.
+        </div>
+      ) : (
+        <div className="overflow-x-auto rounded-2xl border border-gray-200 bg-white">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 text-gray-600 text-left">
+              <tr>
+                <th className="px-3 py-3 w-10">
+                  <input
+                    type="checkbox"
+                    checked={allSelected}
+                    onChange={toggleSelectAll}
+                    disabled={bulkBusy || !orders.length}
+                    className="rounded border-gray-300"
+                    aria-label="Tümünü seç"
+                    title="Tümünü seç / kaldır"
+                  />
+                </th>
+                <th className="px-4 py-3 font-medium">Sipariş</th>
+                <th className="px-4 py-3 font-medium">Öğrenci</th>
+                <th className="px-4 py-3 font-medium">Sınıf</th>
+                <th className="px-4 py-3 font-medium">Müşteri</th>
+                <th className="px-4 py-3 font-medium">Toplam</th>
+                <th className="px-4 py-3 font-medium">Ödeme</th>
+                <th className="px-4 py-3 font-medium">Durum</th>
+                <th className="px-4 py-3 font-medium">Tarih</th>
+                <th className="px-4 py-3 font-medium" />
+              </tr>
+            </thead>
+            <tbody>
+              {orders.map((o) => {
+                const items = o.commerce_order_items || [];
+                const open = expanded === o.id;
+                const checked = selectedIds.has(o.id);
+                return (
+                  <React.Fragment key={o.id}>
+                    <tr className={`border-t border-gray-100 hover:bg-gray-50/80 ${checked ? 'bg-red-50/40' : ''}`}>
+                      <td className="px-3 py-3">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleOne(o.id)}
+                          disabled={bulkBusy}
+                          className="rounded border-gray-300"
+                          aria-label={`${o.order_number} seç`}
+                        />
+                      </td>
+                      <td className="px-4 py-3 font-mono text-xs font-medium">{o.order_number}</td>
+                      <td className="px-4 py-3">
+                        <div className="font-medium text-gray-900">{o.student_name || '—'}</div>
+                        {o.student_class_level && (
+                          <div className="text-[11px] text-gray-500">{o.student_class_level}. sınıf</div>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-xs text-gray-700">{o.class_name || '—'}</td>
+                      <td className="px-4 py-3">
+                        <div>{o.customer_name ?? '—'}</div>
+                        {o.customer_phone && <div className="text-[11px] text-gray-500">{o.customer_phone}</div>}
+                      </td>
+                      <td className="px-4 py-3 font-medium">{formatCommerceTry(o.total_kurus)}</td>
+                      <td className="px-4 py-3 text-xs">
+                        <div className="font-medium">{paymentMethodLabel(o.payment_method)}</div>
+                        {o.receipt_url && (
+                          <a
+                            href={o.receipt_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-0.5 text-emerald-700 hover:underline mt-0.5"
+                          >
+                            <Eye className="w-3 h-3" /> Dekont
+                          </a>
+                        )}
+                      </td>
+                      <td className="px-4 py-3"><OrderStatusBadge status={o.status} /></td>
+                      <td className="px-4 py-3 text-gray-500 whitespace-nowrap">
+                        {new Date(o.created_at).toLocaleDateString('tr-TR')}
+                      </td>
+                      <td className="px-4 py-3">
+                        <button
+                          type="button"
+                          onClick={() => setExpanded(open ? null : o.id)}
+                          className="text-xs font-semibold text-indigo-700 hover:underline"
+                        >
+                          {open ? 'Gizle' : `Ürünler (${items.length})`}
+                        </button>
+                      </td>
+                    </tr>
+                    {open && (
+                      <tr className="bg-indigo-50/40 border-t border-indigo-50">
+                        <td colSpan={10} className="px-4 py-3">
+                          <ul className="space-y-1.5 text-xs text-gray-700">
+                            {items.length === 0 && <li className="text-gray-400">Kalem yok</li>}
+                            {items.map((it) => (
+                              <li key={it.id} className="flex flex-wrap gap-x-3 gap-y-0.5">
+                                <span className="font-medium">{it.title_snapshot || 'Ürün'}</span>
+                                <span className="text-gray-500">×{it.quantity}</span>
+                                <span>{formatCommerceTry((it.unit_price_kurus || 0) * (it.quantity || 1))}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ─── Yardımcı bileşenler ────────────────────────────────────────────
 
@@ -1187,6 +1520,10 @@ export default function KitapMagazasiPage() {
   const role = String(effectiveUser?.role || '');
   const staffRole = ['super_admin', 'admin', 'coach', 'teacher'].includes(role);
   const canBuy = ['student', 'super_admin', 'admin'].includes(role);
+  const tabs = useMemo(() => {
+    if (!staffRole) return BASE_TABS;
+    return [...BASE_TABS, { key: 'siparisler' as Tab, label: 'Mağaza Siparişleri' }];
+  }, [staffRole]);
   const [viewMode, setViewMode] = useState<'list' | 'categories'>('list');
   const [selectedBookIds, setSelectedBookIds] = useState<string[]>([]);
   const [staffAction, setStaffAction] = useState<StaffAction | null>(null);
@@ -1439,7 +1776,7 @@ export default function KitapMagazasiPage() {
       </div>
 
       <div className="flex gap-1 overflow-x-auto pb-1 mb-4 border-b border-gray-200">
-        {TABS.map((t) => (
+        {tabs.map((t) => (
           <button
             key={t.key}
             onClick={() => { setTab(t.key); setSearch(''); setFilters({}); if (t.key === 'tum-kitaplar') resetBrowse(); }}
@@ -1623,7 +1960,9 @@ export default function KitapMagazasiPage() {
         </div>
       )}
 
-      {tab === 'paketler' ? (
+      {tab === 'siparisler' && staffRole ? (
+        <StaffOrdersTab />
+      ) : tab === 'paketler' ? (
         <PaketlerTab classLevel={filters.class_level} staffRole={staffRole} />
       ) : tab === 'atanmis' ? (
         <AtanmisTab />
