@@ -28,15 +28,29 @@ export const COACH_LATE_DELTA_KINDS = ['attendance_coach_late_update', 'class_at
 export const CAMERA_OFF_KIND = 'class_camera_off_notice';
 export const CAMERA_OFF_KINDS = ['class_camera_off_notice', 'attendance_camera_off'];
 
-function clipMetaParam(value, max = 900) {
-  const t = String(value ?? '');
-  if (t.length <= max) return t || '—';
+/** Meta şablon parametreleri: satır sonu / tab yasak (Graph #132018). */
+export function sanitizeMetaTemplateParam(value, max = 900) {
+  const t = String(value ?? '')
+    .replace(/[\r\n\t]+/g, ' · ')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+  if (!t) return '—';
+  if (t.length <= max) return t;
   return `${t.slice(0, Math.max(0, max - 1))}…`;
 }
 
-function numberedStudentNames(entries) {
+function clipMetaParam(value, max = 900) {
+  return sanitizeMetaTemplateParam(value, max);
+}
+
+/** Meta gövde parametresi için tek satır liste */
+export function numberedStudentNamesForMeta(entries) {
   if (!entries?.length) return 'Yok';
-  return entries.map((e, i) => `${i + 1}. ${e.name}`).join('\n');
+  return entries.map((e, i) => `${i + 1}. ${e.name}`).join(' · ');
+}
+
+function numberedStudentNames(entries) {
+  return numberedStudentNamesForMeta(entries);
 }
 
 async function loadAttendanceTemplate(type) {
@@ -536,18 +550,52 @@ export async function sendCoachLessonAttendanceSummary({
   className,
   rows,
   studentIds,
-  institutionId: _institutionId
+  institutionId: _institutionId,
+  forceCoach = null,
+  forceResend = false
 }) {
   const channel = resolveAutomationSendChannel();
   if (channel === 'none') {
     return { ok: false, note: 'automation_channel_not_ready', warning: null };
   }
   // Koç özeti, veli auto_whatsapp_absent tercihinden bağımsızdır.
-  if (await coachSessionNoticeAlreadySent(session?.id, COACH_SUMMARY_KINDS)) {
+  if (!forceResend && (await coachSessionNoticeAlreadySent(session?.id, COACH_SUMMARY_KINDS))) {
     return { ok: true, skipped: 'already_sent' };
   }
+  if (forceResend && session?.id) {
+    try {
+      await supabaseAdmin
+        .from('message_logs')
+        .delete()
+        .eq('related_id', String(session.id))
+        .in('kind', COACH_SUMMARY_KINDS)
+        .eq('status', 'sent');
+    } catch {
+      /* idempotency temizliği opsiyonel */
+    }
+  }
 
-  const resolved = await resolveClassCoach(studentIds);
+  let resolved;
+  if (forceCoach?.phone) {
+    resolved = {
+      coach: {
+        id: forceCoach.id || null,
+        name: forceCoach.name || 'Koç',
+        phone: normalizePhoneToE164(forceCoach.phone)
+      },
+      reason: null
+    };
+    if (!resolved.coach.phone) {
+      return {
+        ok: true,
+        skipped: 'coach_phone_missing',
+        warning: 'Koçun WhatsApp telefon numarası bulunamadı.',
+        coach_name: forceCoach.name || 'Koç'
+      };
+    }
+  } else {
+    resolved = await resolveClassCoach(studentIds);
+  }
   if (!resolved.coach) {
     return {
       ok: true,
@@ -623,6 +671,9 @@ export async function sendCoachLessonAttendanceSummary({
   return {
     ok: Boolean(sent.ok),
     coach_name: resolved.coach.name,
+    coach_phone_suffix: String(resolved.coach.phone || '').slice(-4) || null,
+    meta_template_name: sent.meta_template_name || null,
+    channel: sent.channel || channel,
     note: sent.ok ? null : sent.error || 'whatsapp_failed',
     warning: sent.ok ? null : 'Yoklama kaydedildi ancak koç WhatsApp bildirimi gönderilemedi.'
   };
