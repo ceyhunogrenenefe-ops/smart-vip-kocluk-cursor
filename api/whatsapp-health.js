@@ -21,6 +21,7 @@ import {
 } from './_lib/whatsapp-gateway-send.js';
 import { ensureAttendanceMetaTemplates } from './_lib/ensure-attendance-meta-templates.js';
 import { runYoklamaTest8FDogan } from './_lib/yoklama-test-8f-dogan.js';
+import { runCoachReportTest } from './_lib/yoklama-test-coach-report.js';
 
 const ATTENDANCE_META_TYPES = [
   'class_absent_notice_1',
@@ -156,6 +157,7 @@ async function diagnoseAttendanceMetaTemplates() {
  * GET /api/whatsapp-health?attendance_templates=1  → Meta yoklama şablon durumları
  * GET /api/whatsapp-health?attendance_templates=1&ensure=1  → DB upsert + eksik şablonu Meta’ya gönder
  * GET /api/whatsapp-health?test_yoklama=1&class=8F  → 8F yoklama+kamera testini Doğan Aktürk’e gönder
+ * GET /api/whatsapp-health?test_coach_report=1&class=YKS&to=Tayyibe  → koç sınıf raporu testi
  */
 export default async function handler(req, res) {
   if (req.method !== 'GET') {
@@ -178,6 +180,7 @@ export default async function handler(req, res) {
   let attendance_meta_templates = null;
   let attendance_meta_ensure = null;
   let yoklama_test_8f_dogan = null;
+  let coach_report_test = null;
   if (wantEnsure) {
     attendance_meta_ensure = await ensureAttendanceMetaTemplates({ submitMissing: true });
   }
@@ -201,6 +204,24 @@ export default async function handler(req, res) {
       });
     } catch (e) {
       yoklama_test_8f_dogan = {
+        ok: false,
+        error: e instanceof Error ? e.message : String(e)
+      };
+    }
+  }
+
+  const wantCoachReport =
+    String(req.query?.test_coach_report || '').trim() === '1' ||
+    String(req.query?.test || '').trim() === 'coach_report';
+  if (wantCoachReport) {
+    try {
+      coach_report_test = await runCoachReportTest({
+        classHint: String(req.query?.class || 'YKS').trim() || 'YKS',
+        coachName: String(req.query?.to || req.query?.coach || 'Tayyibe Öğrenenefe').trim() || 'Tayyibe Öğrenenefe',
+        forceResend: String(req.query?.force || '1').trim() !== '0'
+      });
+    } catch (e) {
+      coach_report_test = {
         ok: false,
         error: e instanceof Error ? e.message : String(e)
       };
@@ -285,6 +306,7 @@ export default async function handler(req, res) {
     attendance_meta_templates,
     attendance_meta_ensure,
     yoklama_test_8f_dogan,
+    coach_report_test,
     gateway: {
       upstream_reachable: gatewayHealth.ok === true,
       upstream_error: gatewayHealth.error || null,
