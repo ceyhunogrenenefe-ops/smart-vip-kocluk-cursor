@@ -6,6 +6,7 @@ import { syncMessageTemplateRowFromPhoneWaba } from '../api/_lib/meta-template-i
 import { buildTemplatePreview } from '../api/_lib/whatsapp-outbound.js';
 import { buildMetaTemplateCreatePayload, createOrReuseMetaMessageTemplate } from '../api/_lib/meta-template-create.js';
 import { submitSellerOrderMetaTemplate } from '../api/_lib/book-order-meta-send.js';
+import { ensureAttendanceMetaTemplates } from '../api/_lib/ensure-attendance-meta-templates.js';
 
 function parseBody(req) {
   const b = req.body;
@@ -288,56 +289,11 @@ export default async function handler(req, res) {
     }
 
     if (action === 'submit_attendance_templates') {
-      const types = [
-        'attendance_status_update',
-        'coach_lesson_attendance_summary',
-        'attendance_coach_late_update',
-        'class_camera_off_notice'
-      ];
-      const results = [];
-      for (const type of types) {
-        const { data: row, error: oneErr } = await supabaseAdmin
-          .from('message_templates')
-          .select('*')
-          .eq('type', type)
-          .maybeSingle();
-        if (oneErr || !row) {
-          results.push({ type, ok: false, error: oneErr?.message || 'template_not_found_in_db' });
-          continue;
-        }
-        let payload;
-        try {
-          payload = buildMetaTemplateCreatePayload({
-            name: row.meta_template_name || row.type,
-            language: row.meta_template_language || 'tr',
-            category: 'UTILITY',
-            bodyText: row.content,
-          });
-        } catch (e) {
-          results.push({ type, ok: false, error: e.message });
-          continue;
-        }
-        const submitted = await createOrReuseMetaMessageTemplate(payload);
-        if (submitted.ok) {
-          await supabaseAdmin
-            .from('message_templates')
-            .update({
-              meta_template_name: submitted.name,
-              meta_template_language: submitted.language || row.meta_template_language || 'tr',
-              meta_named_body_parameters: true,
-              whatsapp_template_status: submitted.status,
-              whatsapp_template_synced_at: new Date().toISOString(),
-              updated_at: new Date().toISOString(),
-            })
-            .eq('id', row.id);
-        }
-        results.push({ type, ok: submitted.ok, submitted, error: submitted.ok ? null : submitted.error });
-      }
-      const ok = results.every((r) => r.ok);
-      return res.status(ok ? 200 : 400).json({
-        ok,
-        deployMarker: 'attendance-meta-templates-2026-09-10',
-        results,
+      const ensured = await ensureAttendanceMetaTemplates({ submitMissing: true });
+      return res.status(ensured.ok || ensured.ready_count > 0 ? 200 : 400).json({
+        ok: ensured.ok,
+        deployMarker: 'attendance-meta-ensure-2026-09-10',
+        ensured,
       });
     }
 
