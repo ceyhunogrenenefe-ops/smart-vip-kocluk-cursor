@@ -16,7 +16,8 @@
  *  catalog.settings      — genel mağaza ayarları (kargo eşiği vs)
  *  staff.roster          — sınıf/öğrenci listesi (öğretmen/koç/admin)
  *  staff.assign          — sınıfa veya kişiye kitap öner/ata
- *  staff.orders          — koç/öğretmen kapsamındaki öğrenci mağaza siparişleri (salt okunur)
+ *  staff.orders          — koç/öğretmen kapsamındaki öğrenci mağaza siparişleri
+ *  staff.orders_delete   — kapsam içi siparişleri tek/toplu sil
  *  staff.package_create  — sınıf paketi oluştur
  *  staff.package_update  — paket adı / kademe / fiyat
  *  staff.package_delete  — paketi sil (soft)
@@ -1308,6 +1309,10 @@ async function handleStaff(op, body, actor) {
   }
 
   if (op === 'staff.orders') {
+    let classQuery = supabaseAdmin.from('classes').select('id, name, class_level').order('name', { ascending: true }).limit(200);
+    if (institutionId && !roleSet.has('super_admin')) classQuery = classQuery.eq('institution_id', institutionId);
+    const { data: classes } = await classQuery;
+
     let studentQuery = supabaseAdmin
       .from('students')
       .select('id, name, class_level')
@@ -1317,12 +1322,45 @@ async function handleStaff(op, body, actor) {
     if (scope.coach_id) studentQuery = studentQuery.eq('coach_id', scope.coach_id);
     const { data: students, error: stErr } = await studentQuery;
     if (stErr) throw stErr;
-    const studentIds = (students || []).map((s) => s.id).filter(Boolean);
-    if (!studentIds.length) {
-      return { ok: true, orders: [], student_count: 0, scope: scope.coach_id ? 'coach' : 'institution' };
+
+    let scopedStudents = students || [];
+    const classLevelFilter = String(body.class_level || '').trim();
+    if (classLevelFilter) {
+      scopedStudents = scopedStudents.filter((s) => String(s.class_level || '') === classLevelFilter);
     }
-    const nameById = new Map((students || []).map((s) => [s.id, s.name || null]));
-    const levelById = new Map((students || []).map((s) => [s.id, s.class_level || null]));
+
+    let studentIds = scopedStudents.map((s) => s.id).filter(Boolean);
+    const classByStudent = new Map();
+    if (studentIds.length) {
+      const { data: links } = await supabaseAdmin
+        .from('class_students')
+        .select('student_id, class_id')
+        .in('student_id', studentIds)
+        .limit(2000);
+      for (const row of links || []) {
+        if (row.student_id && !classByStudent.has(row.student_id)) {
+          classByStudent.set(row.student_id, row.class_id || null);
+        }
+      }
+    }
+    const classIdFilter = String(body.class_id || '').trim();
+    if (classIdFilter) {
+      studentIds = studentIds.filter((id) => classByStudent.get(id) === classIdFilter);
+      scopedStudents = scopedStudents.filter((s) => studentIds.includes(s.id));
+    }
+
+    const classNameById = new Map((classes || []).map((c) => [c.id, c.name || null]));
+    if (!studentIds.length) {
+      return {
+        ok: true,
+        orders: [],
+        classes: classes || [],
+        student_count: 0,
+        scope: scope.coach_id ? 'coach' : 'institution',
+      };
+    }
+    const nameById = new Map(scopedStudents.map((s) => [s.id, s.name || null]));
+    const levelById = new Map(scopedStudents.map((s) => [s.id, s.class_level || null]));
 
     let q = supabaseAdmin
       .from('commerce_orders')
@@ -1346,18 +1384,76 @@ async function handleStaff(op, body, actor) {
     if (error) throw error;
     const orders = (data || []).map((row) => {
       const decorated = decorateOrderWithIbanReceipt(row);
+      const cid = classByStudent.get(row.student_id) || null;
       return {
         ...decorated,
         student_name: nameById.get(row.student_id) || null,
         student_class_level: levelById.get(row.student_id) || null,
+        class_id: cid,
+        class_name: cid ? classNameById.get(cid) || null : null,
       };
     });
     return {
       ok: true,
       orders,
+      classes: classes || [],
       student_count: studentIds.length,
       scope: scope.coach_id ? 'coach' : 'institution',
     };
+  }
+
+  if (op === 'staff.orders_delete') {
+    const ids = uniqueIds(body.ids || (body.id ? [body.id] : []));
+    if (!ids.length) throw new Error('ids gerekli');
+    if (ids.length > 50) throw new Error('En fazla 50 sipariş silinebilir');
+
+    let studentQuery = supabaseAdmin.from('students').select('id').limit(500);
+    const scope = staffStudentScopeFilter(actor, roleSet, institutionId);
+    if (scope.institution_id) studentQuery = studentQuery.eq('institution_id', scope.institution_id);
+    if (scope.coach_id) studentQuery = studentQuery.eq('coach_id', scope.coach_id);
+    const { data: students, error: stErr } = await studentQuery;
+    if (stErr) throw stErr;
+    const allowedStudents = new Set((students || []).map((s) => s.id).filter(Boolean));
+    if (!allowedStudents.size) throw new Error('Silinecek öğrenci kapsamı yok');
+
+    const { data: existing, error: loadErr } = await supabaseAdmin
+      .from('commerce_orders')
+      .select('id, status, payment_status, order_number, student_id')
+      .in('id', ids);
+    if (loadErr) throw loadErr;
+
+    const deleted = [];
+    const skipped = [];
+    for (const row of existing || []) {
+      if (!row.student_id || !allowedStudents.has(row.student_id)) {
+        skipped.push({ id: row.id, order_number: row.order_number, reason: 'kapsam dışı' });
+        continue;
+      }
+      const paid = row.payment_status === 'paid' || row.status === 'paid';
+      if (paid && row.status !== 'cancelled' && row.status !== 'refunded') {
+        skipped.push({ id: row.id, order_number: row.order_number, reason: 'ödenmiş' });
+        continue;
+      }
+      await supabaseAdmin.from('commerce_order_items').delete().eq('order_id', row.id);
+      await supabaseAdmin.from('commerce_order_addresses').delete().eq('order_id', row.id);
+      await supabaseAdmin.from('commerce_payments').delete().eq('order_id', row.id);
+      const { data: vos } = await supabaseAdmin.from('commerce_vendor_orders').select('id').eq('order_id', row.id);
+      for (const vo of vos || []) {
+        await supabaseAdmin.from('commerce_shipments').delete().eq('vendor_order_id', vo.id);
+      }
+      await supabaseAdmin.from('commerce_vendor_orders').delete().eq('order_id', row.id);
+      const { error: delErr } = await supabaseAdmin.from('commerce_orders').delete().eq('id', row.id);
+      if (delErr) {
+        skipped.push({ id: row.id, order_number: row.order_number, reason: delErr.message || 'silinemedi' });
+        continue;
+      }
+      deleted.push({ id: row.id, order_number: row.order_number });
+    }
+    const found = new Set((existing || []).map((r) => r.id));
+    for (const id of ids) {
+      if (!found.has(id)) skipped.push({ id, order_number: null, reason: 'bulunamadı' });
+    }
+    return { ok: true, deleted, skipped, deleted_count: deleted.length };
   }
 
   if (op === 'staff.assign') {

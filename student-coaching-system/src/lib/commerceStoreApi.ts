@@ -221,6 +221,8 @@ export type StaffStoreOrder = {
   student_id: string | null;
   student_name?: string | null;
   student_class_level?: string | null;
+  class_id?: string | null;
+  class_name?: string | null;
   status: string;
   payment_status?: string | null;
   payment_method?: string | null;
@@ -243,17 +245,30 @@ export type StaffStoreOrder = {
   }>;
 };
 
+export type StaffStoreOrderClass = { id: string; name: string | null; class_level: string | null };
+
 export const csStaffListOrders = (params?: {
   status?: string;
   student_id?: string;
+  class_id?: string;
+  class_level?: string;
   search?: string;
   limit?: number;
   offset?: number;
 }) =>
-  post<{ orders: StaffStoreOrder[]; student_count: number; scope: 'coach' | 'institution' }>(
-    'staff.orders',
-    params ?? {}
-  );
+  post<{
+    orders: StaffStoreOrder[];
+    classes: StaffStoreOrderClass[];
+    student_count: number;
+    scope: 'coach' | 'institution';
+  }>('staff.orders', params ?? {});
+
+export const csStaffDeleteOrders = (ids: string[]) =>
+  post<{
+    deleted: Array<{ id: string; order_number: string | null }>;
+    skipped: Array<{ id: string; order_number: string | null; reason: string }>;
+    deleted_count: number;
+  }>('staff.orders_delete', { ids });
 
 export const csStaffAssign = (params: {
   book_ids: string[];
