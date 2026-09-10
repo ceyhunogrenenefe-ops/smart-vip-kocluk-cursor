@@ -34,8 +34,10 @@ npm run dev
 - Frontend içinde `VITE_WHATSAPP_GATEWAY_URL` ile erişim adresi verin.
 - **Mesaj bekleniyor / Waiting for this message:** Baileys `getMessage` zorunludur.
   Bu sürümde giden mesajlar `message-store` ile saklanır; WhatsApp retry istediğinde içerik yeniden iletilir.
-  Otomatik (cron/toplu) gönderimde aynı oturum **ardışık alıcılar arasında** bekler (`WA_SEND_PACE_MS`, varsayılan 1200 ms) ve `assertSessions` iki kez denenir.
+  Otomatik (cron/toplu) gönderimde aynı oturum **ardışık alıcılar arasında** bekler (`WA_SEND_PACE_MS`, varsayılan 1500 ms) ve `assertSessions` iki kez denenir.
+  Belge gönderimi de LID/PN çözümler ve store’a yazar.
   Manuel tek mesaj aynı `/send` yolunu kullanır; kuyrukta önceki yoksa ekstra bekleme yoktur.
+  **Önemli:** Meta Cloud API (kurumsal WABA) numarasını QR ile gateway’e bağlamayın — aynı hatta hem Meta hem Baileys → telefonda «Mesaj bekleniyor».
   `pm2 restart whatsapp-gateway` sonrası yeni mesajlar düzelir. Eski “bekleyen” balonlar için ilgili sohbette yeniden gönderim gerekebilir.
 
 ## Production (PM2)

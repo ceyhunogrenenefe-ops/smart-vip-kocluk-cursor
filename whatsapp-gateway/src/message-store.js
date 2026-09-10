@@ -6,10 +6,10 @@
 import fs from 'fs/promises';
 import path from 'path';
 
-const DEFAULT_MAX = Math.min(20_000, Math.max(500, Number(process.env.WA_MSG_STORE_MAX) || 5_000));
+const DEFAULT_MAX = Math.min(20_000, Math.max(500, Number(process.env.WA_MSG_STORE_MAX) || 8_000));
 const DEFAULT_TTL_MS = Math.min(
   7 * 24 * 3600_000,
-  Math.max(60_000, Number(process.env.WA_MSG_STORE_TTL_MS) || 48 * 3600_000)
+  Math.max(60_000, Number(process.env.WA_MSG_STORE_TTL_MS) || 72 * 3600_000)
 );
 const DISK_ENABLED = String(process.env.WA_MSG_STORE_DISK ?? '1') !== '0';
 
@@ -32,6 +32,7 @@ function normalizeStoredMessage(message, fallbackText = '') {
     if (message.imageMessage || message.videoMessage || message.documentMessage || message.audioMessage) {
       return message;
     }
+    // protocolMessage / boş stub — metin fallback varsa kullan
   }
   const text = String(fallbackText || '').trim();
   if (text) return { conversation: text };
@@ -78,7 +79,10 @@ export function createMessageStore({
     mem.set(id, entry);
     const jid = bareJid(entry.key?.remoteJid);
     if (jid) mem.set(cacheKey(id, jid), entry);
-    // LID / PN farkı için yalnızca id anahtarı zaten var; ek jid yoksa id yeter
+    const alt = bareJid(entry.key?.remoteJidAlt);
+    if (alt) mem.set(cacheKey(id, alt), entry);
+    const participant = bareJid(entry.key?.participant);
+    if (participant) mem.set(cacheKey(id, participant), entry);
   }
 
   /**
@@ -98,6 +102,7 @@ export function createMessageStore({
       key: {
         id,
         remoteJid: key.remoteJid || null,
+        remoteJidAlt: key.remoteJidAlt || null,
         fromMe: key.fromMe !== false,
         participant: key.participant || null,
       },
@@ -131,17 +136,24 @@ export function createMessageStore({
       return undefined;
     }
     pruneExpired();
-    const ck = cacheKey(id, key.remoteJid);
-    let entry = (ck && mem.get(ck)) || mem.get(id);
-    if (entry?.message) {
-      hits += 1;
-      return entry.message;
+    const candidates = [
+      cacheKey(id, key.remoteJid),
+      cacheKey(id, key.remoteJidAlt),
+      cacheKey(id, key.participant),
+      id,
+    ].filter(Boolean);
+
+    for (const ck of candidates) {
+      const entry = mem.get(ck);
+      if (entry?.message) {
+        hits += 1;
+        return entry.message;
+      }
     }
 
     if (diskEnabled && dataRoot) {
       try {
         const safe = id.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 120);
-        // Önce coach klasörü biliniyorsa tek dosya; yoksa tarama
         const dirs = await fs.readdir(dataRoot, { withFileTypes: true });
         for (const ent of dirs) {
           if (!ent.isDirectory()) continue;
@@ -150,6 +162,13 @@ export function createMessageStore({
             const parsed = JSON.parse(raw);
             if (parsed?.message) {
               indexEntry(parsed);
+              // Retry isteğindeki jid'i de alias olarak bağla
+              if (key?.remoteJid) {
+                mem.set(cacheKey(id, key.remoteJid), parsed);
+              }
+              if (key?.remoteJidAlt) {
+                mem.set(cacheKey(id, key.remoteJidAlt), parsed);
+              }
               hits += 1;
               return parsed.message;
             }
