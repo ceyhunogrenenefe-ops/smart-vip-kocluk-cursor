@@ -1,6 +1,6 @@
 /**
  * Öğrenci/Veli Kitap Mağazası
- * Sekmeler: Tüm Kitaplar | Önerilen | Sınıf Paketleri | Atanmış Kitaplarım
+ * Sekmeler: Tüm Kitaplar | Önerilen | Sınıf Paketleri | Atanmış | (personel) Mağaza Siparişleri
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -8,6 +8,7 @@ import {
   BookOpen,
   CheckCircle2,
   ChevronRight,
+  Eye,
   LayoutGrid,
   List,
   Loader2,
@@ -36,12 +37,14 @@ import {
   csStaffAssign,
   csStaffCreatePackage,
   csStaffDeletePackage,
+  csStaffListOrders,
   csStaffRoster,
   csStaffSetPackageItems,
   csStaffUpdatePackage,
   type CatalogListParams,
   type StaffRosterClass,
   type StaffRosterStudent,
+  type StaffStoreOrder,
   type OfferWithBook,
   type StoreBrowseCategoryWithBooks,
   type StoreCollectionBook,
@@ -52,18 +55,212 @@ import {
   kitapPackageShareUrl
 } from '../../lib/kitapShareLinks';
 import type { CommerceBookPackage, CommerceSettings, CommerceStudentBookAssignment, StoreBrowseClass } from '../../types/commerce.types';
-import { formatCommerceTry } from '../../types/commerce.types';
+import { COMMERCE_ORDER_STATUS_LABELS, formatCommerceTry } from '../../types/commerce.types';
 import { useAuth } from '../../context/AuthContext';
 import BookCoverImage from '../../components/commerce/BookCoverImage';
 
-type Tab = 'tum-kitaplar' | 'onerilen' | 'paketler' | 'atanmis';
+type Tab = 'tum-kitaplar' | 'onerilen' | 'paketler' | 'atanmis' | 'siparisler';
 
-const TABS: { key: Tab; label: string }[] = [
+const BASE_TABS: { key: Tab; label: string }[] = [
   { key: 'tum-kitaplar', label: 'Tüm Kitaplar' },
   { key: 'onerilen', label: 'Öğretmen Önerileri' },
   { key: 'paketler', label: 'Sınıf Paketleri' },
   { key: 'atanmis', label: 'Atanmış Kitaplarım' },
 ];
+
+function paymentMethodLabel(method?: string | null) {
+  const m = String(method || '').toLowerCase();
+  if (m === 'iban') return 'IBAN';
+  if (m === 'paytr' || m === 'garanti') return 'Kart';
+  return method || '—';
+}
+
+function OrderStatusBadge({ status }: { status: string }) {
+  const colors: Record<string, string> = {
+    paid: 'bg-blue-100 text-blue-800',
+    confirmed: 'bg-teal-100 text-teal-800',
+    preparing: 'bg-indigo-100 text-indigo-800',
+    shipped: 'bg-violet-100 text-violet-800',
+    delivered: 'bg-emerald-100 text-emerald-800',
+    cancelled: 'bg-red-100 text-red-700',
+    pending_payment: 'bg-amber-100 text-amber-800',
+    refunded: 'bg-red-50 text-red-600',
+    payment_failed: 'bg-red-50 text-red-600',
+  };
+  const label = COMMERCE_ORDER_STATUS_LABELS[status as keyof typeof COMMERCE_ORDER_STATUS_LABELS] ?? status;
+  return (
+    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${colors[status] ?? 'bg-gray-100 text-gray-600'}`}>
+      {label}
+    </span>
+  );
+}
+
+/** Koç / öğretmen: kendi öğrencilerinin mağaza siparişleri (salt okunur) */
+function StaffOrdersTab() {
+  const [orders, setOrders] = useState<StaffStoreOrder[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [filterStatus, setFilterStatus] = useState('');
+  const [search, setSearch] = useState('');
+  const [scope, setScope] = useState<'coach' | 'institution'>('coach');
+  const [studentCount, setStudentCount] = useState(0);
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const load = useCallback(async (params: { status?: string; search?: string }) => {
+    setLoading(true);
+    try {
+      const r = await csStaffListOrders({
+        status: params.status || undefined,
+        search: params.search || undefined,
+        limit: 100,
+      });
+      setOrders(r.orders || []);
+      setScope(r.scope);
+      setStudentCount(r.student_count ?? 0);
+    } catch (e: unknown) {
+      toast.error((e as Error).message);
+      setOrders([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    searchTimer.current = setTimeout(() => {
+      load({ status: filterStatus || undefined, search: search.trim() || undefined });
+    }, 300);
+    return () => { if (searchTimer.current) clearTimeout(searchTimer.current); };
+  }, [filterStatus, search, load]);
+
+  return (
+    <div>
+      <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-semibold text-gray-900">Mağaza siparişleri</h2>
+          <p className="text-xs text-gray-500 mt-0.5">
+            {scope === 'coach'
+              ? `Koç listenizdeki ${studentCount} öğrencinin kitap mağazası siparişleri.`
+              : `Kapsamdaki ${studentCount} öğrencinin kitap mağazası siparişleri.`}
+            {' '}Durum takibi için; satıcı aktarma pazaryeri panelindedir.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <div className="relative">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+            <input
+              className="pl-8 pr-3 py-1.5 border rounded-lg text-sm w-44 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+              placeholder="Sipariş no / müşteri"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
+          <select
+            className="border rounded-lg text-sm px-2 py-1.5 focus:outline-none"
+            value={filterStatus}
+            onChange={(e) => setFilterStatus(e.target.value)}
+          >
+            <option value="">Tüm durumlar</option>
+            {Object.entries(COMMERCE_ORDER_STATUS_LABELS).map(([v, l]) => (
+              <option key={v} value={v}>{l}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="flex justify-center p-10"><Loader2 className="animate-spin w-6 h-6 text-gray-400" /></div>
+      ) : orders.length === 0 ? (
+        <div className="text-center py-14 text-gray-500 text-sm border border-dashed border-gray-200 rounded-2xl bg-white">
+          Henüz mağaza siparişi yok.
+        </div>
+      ) : (
+        <div className="overflow-x-auto rounded-2xl border border-gray-200 bg-white">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 text-gray-600 text-left">
+              <tr>
+                <th className="px-4 py-3 font-medium">Sipariş</th>
+                <th className="px-4 py-3 font-medium">Öğrenci</th>
+                <th className="px-4 py-3 font-medium">Müşteri</th>
+                <th className="px-4 py-3 font-medium">Toplam</th>
+                <th className="px-4 py-3 font-medium">Ödeme</th>
+                <th className="px-4 py-3 font-medium">Durum</th>
+                <th className="px-4 py-3 font-medium">Tarih</th>
+                <th className="px-4 py-3 font-medium" />
+              </tr>
+            </thead>
+            <tbody>
+              {orders.map((o) => {
+                const items = o.commerce_order_items || [];
+                const open = expanded === o.id;
+                return (
+                  <React.Fragment key={o.id}>
+                    <tr className="border-t border-gray-100 hover:bg-gray-50/80">
+                      <td className="px-4 py-3 font-mono text-xs font-medium">{o.order_number}</td>
+                      <td className="px-4 py-3">
+                        <div className="font-medium text-gray-900">{o.student_name || '—'}</div>
+                        {o.student_class_level && (
+                          <div className="text-[11px] text-gray-500">{o.student_class_level}. sınıf</div>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        <div>{o.customer_name ?? '—'}</div>
+                        {o.customer_phone && <div className="text-[11px] text-gray-500">{o.customer_phone}</div>}
+                      </td>
+                      <td className="px-4 py-3 font-medium">{formatCommerceTry(o.total_kurus)}</td>
+                      <td className="px-4 py-3 text-xs">
+                        <div className="font-medium">{paymentMethodLabel(o.payment_method)}</div>
+                        {o.receipt_url && (
+                          <a
+                            href={o.receipt_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-0.5 text-emerald-700 hover:underline mt-0.5"
+                          >
+                            <Eye className="w-3 h-3" /> Dekont
+                          </a>
+                        )}
+                      </td>
+                      <td className="px-4 py-3"><OrderStatusBadge status={o.status} /></td>
+                      <td className="px-4 py-3 text-gray-500 whitespace-nowrap">
+                        {new Date(o.created_at).toLocaleDateString('tr-TR')}
+                      </td>
+                      <td className="px-4 py-3">
+                        <button
+                          type="button"
+                          onClick={() => setExpanded(open ? null : o.id)}
+                          className="text-xs font-semibold text-indigo-700 hover:underline"
+                        >
+                          {open ? 'Gizle' : `Ürünler (${items.length})`}
+                        </button>
+                      </td>
+                    </tr>
+                    {open && (
+                      <tr className="bg-indigo-50/40 border-t border-indigo-50">
+                        <td colSpan={8} className="px-4 py-3">
+                          <ul className="space-y-1.5 text-xs text-gray-700">
+                            {items.length === 0 && <li className="text-gray-400">Kalem yok</li>}
+                            {items.map((it) => (
+                              <li key={it.id} className="flex flex-wrap gap-x-3 gap-y-0.5">
+                                <span className="font-medium">{it.title_snapshot || 'Ürün'}</span>
+                                <span className="text-gray-500">×{it.quantity}</span>
+                                <span>{formatCommerceTry((it.unit_price_kurus || 0) * (it.quantity || 1))}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ─── Yardımcı bileşenler ────────────────────────────────────────────
 
@@ -1186,6 +1383,10 @@ export default function KitapMagazasiPage() {
   const role = String(effectiveUser?.role || '');
   const staffRole = ['super_admin', 'admin', 'coach', 'teacher'].includes(role);
   const canBuy = ['student', 'super_admin', 'admin'].includes(role);
+  const tabs = useMemo(() => {
+    if (!staffRole) return BASE_TABS;
+    return [...BASE_TABS, { key: 'siparisler' as Tab, label: 'Mağaza Siparişleri' }];
+  }, [staffRole]);
   const [viewMode, setViewMode] = useState<'list' | 'categories'>('list');
   const [selectedBookIds, setSelectedBookIds] = useState<string[]>([]);
   const [staffAction, setStaffAction] = useState<StaffAction | null>(null);
@@ -1434,7 +1635,7 @@ export default function KitapMagazasiPage() {
       </div>
 
       <div className="flex gap-1 overflow-x-auto pb-1 mb-4 border-b border-gray-200">
-        {TABS.map((t) => (
+        {tabs.map((t) => (
           <button
             key={t.key}
             onClick={() => { setTab(t.key); setSearch(''); setFilters({}); if (t.key === 'tum-kitaplar') resetBrowse(); }}
@@ -1618,7 +1819,9 @@ export default function KitapMagazasiPage() {
         </div>
       )}
 
-      {tab === 'paketler' ? (
+      {tab === 'siparisler' && staffRole ? (
+        <StaffOrdersTab />
+      ) : tab === 'paketler' ? (
         <PaketlerTab classLevel={filters.class_level} staffRole={staffRole} />
       ) : tab === 'atanmis' ? (
         <AtanmisTab />
