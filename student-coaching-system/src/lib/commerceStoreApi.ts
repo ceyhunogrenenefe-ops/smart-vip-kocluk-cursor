@@ -250,6 +250,46 @@ export type StaffRosterClass = { id: string; name: string | null; class_level: s
 export const csStaffRoster = () =>
   post<{ classes: StaffRosterClass[]; students: StaffRosterStudent[]; can_manage: boolean }>('staff.roster');
 
+export type StaffStoreOrder = {
+  id: string;
+  order_number: string;
+  student_id: string | null;
+  student_name?: string | null;
+  student_class_level?: string | null;
+  status: string;
+  payment_status?: string | null;
+  payment_method?: string | null;
+  total_kurus: number;
+  customer_name: string | null;
+  customer_phone?: string | null;
+  created_at: string;
+  receipt_url?: string | null;
+  commerce_order_items?: Array<{
+    id: string;
+    title_snapshot: string | null;
+    quantity: number;
+    unit_price_kurus: number;
+  }>;
+  commerce_vendor_orders?: Array<{
+    id: string;
+    vendor_id: string;
+    status: string;
+    commerce_vendors?: { id: string; name: string } | null;
+  }>;
+};
+
+export const csStaffListOrders = (params?: {
+  status?: string;
+  student_id?: string;
+  search?: string;
+  limit?: number;
+  offset?: number;
+}) =>
+  post<{ orders: StaffStoreOrder[]; student_count: number; scope: 'coach' | 'institution' }>(
+    'staff.orders',
+    params ?? {}
+  );
+
 export const csStaffAssign = (params: {
   book_ids: string[];
   student_ids?: string[];

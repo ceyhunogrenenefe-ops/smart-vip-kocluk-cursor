@@ -8,6 +8,7 @@ import {
   normalizeAssignmentType,
   slugifyPackageName,
   staffCanManageStore,
+  staffStudentScopeFilter,
   uniqueIds
 } from './commerce-store-staff.js';
 
@@ -15,6 +16,18 @@ describe('commerce-store-staff', () => {
   it('allows teacher coach admin super_admin', () => {
     expect(staffCanManageStore(new Set(['teacher']))).toBe(true);
     expect(staffCanManageStore(new Set(['student']))).toBe(false);
+  });
+
+  it('scopes coach to own students and institution', () => {
+    expect(
+      staffStudentScopeFilter({ coach_id: 'c1' }, new Set(['coach']), 'inst1')
+    ).toEqual({ institution_id: 'inst1', coach_id: 'c1' });
+    expect(
+      staffStudentScopeFilter({ coach_id: 'c1' }, new Set(['coach', 'admin']), 'inst1')
+    ).toEqual({ institution_id: 'inst1' });
+    expect(
+      staffStudentScopeFilter({ coach_id: 'c1' }, new Set(['super_admin']), 'inst1')
+    ).toEqual({});
   });
 
   it('maps teacher role to teacher source', () => {

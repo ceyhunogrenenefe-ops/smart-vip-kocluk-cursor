@@ -16,11 +16,12 @@
  *  catalog.settings      — genel mağaza ayarları (kargo eşiği vs)
  *  staff.roster          — sınıf/öğrenci listesi (öğretmen/koç/admin)
  *  staff.assign          — sınıfa veya kişiye kitap öner/ata
+ *  staff.orders          — koç/öğretmen kapsamındaki öğrenci mağaza siparişleri (salt okunur)
  *  staff.package_create  — sınıf paketi oluştur
  *  staff.package_update  — paket adı / kademe / fiyat
  *  staff.package_delete  — paketi sil (soft)
  *  staff.package_items_set — paket kitaplarını değiştir
- *  deployMarker: kitap-iban-teslimat-2026-09-01
+ *  deployMarker: coach-kitap-orders-2026-09-10
  *  cart.get              — mevcut sepeti getir
  *  cart.add              — sepete ürün ekle
  *  cart.update           — adet güncelle
@@ -50,6 +51,7 @@ import {
   sumUniqueBookOfferPrices,
   slugifyPackageName,
   staffCanManageStore,
+  staffStudentScopeFilter,
   uniqueIds
 } from '../api/_lib/commerce-store-staff.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
@@ -70,6 +72,7 @@ import {
 import { startCommerceProviderPayment } from '../api/_lib/commerce-checkout-pay.js';
 import { COMMERCE_DEFAULT_SETTINGS } from '../api/_lib/commerce-constants.js';
 import {
+  decorateOrderWithIbanReceipt,
   formatIbanDisplay,
   parseIbanReceipt,
   resolveIbanAccount,
@@ -1423,10 +1426,9 @@ async function handleStaff(op, body, actor) {
       .from('students')
       .select('id, name, class_level, coach_id, institution_id')
       .limit(500);
-    if (institutionId && !roleSet.has('super_admin')) studentQuery = studentQuery.eq('institution_id', institutionId);
-    if (roleSet.has('coach') && actor.coach_id && !roleSet.has('admin') && !roleSet.has('super_admin')) {
-      studentQuery = studentQuery.eq('coach_id', actor.coach_id);
-    }
+    const scope = staffStudentScopeFilter(actor, roleSet, institutionId);
+    if (scope.institution_id) studentQuery = studentQuery.eq('institution_id', scope.institution_id);
+    if (scope.coach_id) studentQuery = studentQuery.eq('coach_id', scope.coach_id);
     const { data: students, error: stErr } = await studentQuery;
     if (stErr) throw stErr;
     const studentIds = (students || []).map((s) => s.id);
@@ -1453,6 +1455,59 @@ async function handleStaff(op, body, actor) {
         class_id: classByStudent.get(s.id) || null
       })),
       can_manage: true
+    };
+  }
+
+  if (op === 'staff.orders') {
+    let studentQuery = supabaseAdmin
+      .from('students')
+      .select('id, name, class_level')
+      .limit(500);
+    const scope = staffStudentScopeFilter(actor, roleSet, institutionId);
+    if (scope.institution_id) studentQuery = studentQuery.eq('institution_id', scope.institution_id);
+    if (scope.coach_id) studentQuery = studentQuery.eq('coach_id', scope.coach_id);
+    const { data: students, error: stErr } = await studentQuery;
+    if (stErr) throw stErr;
+    const studentIds = (students || []).map((s) => s.id).filter(Boolean);
+    if (!studentIds.length) {
+      return { ok: true, orders: [], student_count: 0, scope: scope.coach_id ? 'coach' : 'institution' };
+    }
+    const nameById = new Map((students || []).map((s) => [s.id, s.name || null]));
+    const levelById = new Map((students || []).map((s) => [s.id, s.class_level || null]));
+
+    let q = supabaseAdmin
+      .from('commerce_orders')
+      .select('*, commerce_order_items(id, title_snapshot, quantity, unit_price_kurus, vendor_id), commerce_payments(id, provider, status, paid_at), commerce_vendor_orders(id, vendor_id, status, commerce_vendors(id, name))')
+      .in('student_id', studentIds)
+      .order('created_at', { ascending: false });
+    if (body.status) q = q.eq('status', body.status);
+    if (body.student_id) {
+      const sid = String(body.student_id).trim();
+      if (!studentIds.includes(sid)) throw new Error('Bu öğrenci sizin listenizde değil');
+      q = q.eq('student_id', sid);
+    }
+    if (body.search) {
+      const s = String(body.search).replace(/%/g, '').trim();
+      if (s) q = q.or(`customer_name.ilike.%${s}%,order_number.ilike.%${s}%`);
+    }
+    const limit = Math.min(parseInt(body.limit ?? 100, 10) || 100, 200);
+    const offset = parseInt(body.offset ?? 0, 10) || 0;
+    q = q.range(offset, offset + limit - 1);
+    const { data, error } = await q;
+    if (error) throw error;
+    const orders = (data || []).map((row) => {
+      const decorated = decorateOrderWithIbanReceipt(row);
+      return {
+        ...decorated,
+        student_name: nameById.get(row.student_id) || null,
+        student_class_level: levelById.get(row.student_id) || null,
+      };
+    });
+    return {
+      ok: true,
+      orders,
+      student_count: studentIds.length,
+      scope: scope.coach_id ? 'coach' : 'institution',
     };
   }
 
