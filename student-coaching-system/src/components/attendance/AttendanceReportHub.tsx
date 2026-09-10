@@ -402,8 +402,14 @@ export function AttendanceReportHub({ institutions, activeInstitutionId }: Props
         r.subject,
         r.teacher_name,
         r.student_name,
-        r.status === 'present' ? 'katıldı' : r.status === 'late' ? 'geç katıldı' : 'katılmadı',
-        r.camera_status === 'off' ? 'kapalı' : r.camera_status === 'on' ? 'açık' : r.status === 'absent' ? 'uygulanamaz' : '',
+        r.status === 'present' ? '✅ Katıldı' : r.status === 'late' ? '🕐 Geç Katıldı' : '❌ Katılmadı',
+        r.camera_status === 'off'
+          ? '🚫 Kapalı'
+          : r.camera_status === 'on'
+            ? '🎥 Açık'
+            : r.status === 'absent'
+              ? '—'
+              : '',
         r.marked_at ? new Date(r.marked_at).toLocaleString('tr-TR') : ''
       ]
         .map((c) => `"${String(c).replace(/"/g, '""')}"`)
