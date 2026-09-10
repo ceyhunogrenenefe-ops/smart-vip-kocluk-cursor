@@ -20,6 +20,7 @@ import {
   probeConnectedGatewaySessionIds
 } from './_lib/whatsapp-gateway-send.js';
 import { ensureAttendanceMetaTemplates } from './_lib/ensure-attendance-meta-templates.js';
+import { runYoklamaTest8FDogan } from './_lib/yoklama-test-8f-dogan.js';
 
 const ATTENDANCE_META_TYPES = [
   'class_absent_notice_1',
@@ -154,6 +155,7 @@ async function diagnoseAttendanceMetaTemplates() {
  * GET /api/whatsapp-health
  * GET /api/whatsapp-health?attendance_templates=1  → Meta yoklama şablon durumları
  * GET /api/whatsapp-health?attendance_templates=1&ensure=1  → DB upsert + eksik şablonu Meta’ya gönder
+ * GET /api/whatsapp-health?test_yoklama=1&class=8F  → 8F yoklama+kamera testini Doğan Aktürk’e gönder
  */
 export default async function handler(req, res) {
   if (req.method !== 'GET') {
@@ -175,6 +177,7 @@ export default async function handler(req, res) {
 
   let attendance_meta_templates = null;
   let attendance_meta_ensure = null;
+  let yoklama_test_8f_dogan = null;
   if (wantEnsure) {
     attendance_meta_ensure = await ensureAttendanceMetaTemplates({ submitMissing: true });
   }
@@ -183,6 +186,24 @@ export default async function handler(req, res) {
       attendance_meta_templates = await diagnoseAttendanceMetaTemplates();
     } else {
       attendance_meta_templates = { ok: false, error: 'meta_not_configured', templates: [] };
+    }
+  }
+
+  const wantYoklamaTest =
+    String(req.query?.test_yoklama || '').trim() === '1' ||
+    String(req.query?.test || '').trim() === 'yoklama_8f_dogan';
+  if (wantYoklamaTest) {
+    try {
+      yoklama_test_8f_dogan = await runYoklamaTest8FDogan({
+        classHint: String(req.query?.class || '8F').trim() || '8F',
+        forceResend: String(req.query?.force || '1').trim() !== '0',
+        sendParentCamera: String(req.query?.parent_camera || '1').trim() !== '0'
+      });
+    } catch (e) {
+      yoklama_test_8f_dogan = {
+        ok: false,
+        error: e instanceof Error ? e.message : String(e)
+      };
     }
   }
 
@@ -263,6 +284,7 @@ export default async function handler(req, res) {
     automation_provider: metaReady ? 'meta_cloud_api' : twilioReady ? 'twilio' : null,
     attendance_meta_templates,
     attendance_meta_ensure,
+    yoklama_test_8f_dogan,
     gateway: {
       upstream_reachable: gatewayHealth.ok === true,
       upstream_error: gatewayHealth.error || null,
