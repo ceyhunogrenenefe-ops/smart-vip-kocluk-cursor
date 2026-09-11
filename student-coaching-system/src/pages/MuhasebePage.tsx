@@ -1,19 +1,27 @@
 import React, { useCallback, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { ClipboardList, LayoutDashboard, School, Users, Wallet } from 'lucide-react';
+import { ClipboardList, GraduationCap, LayoutDashboard, School, Users, Wallet } from 'lucide-react';
 import TahsilatTaksitPanel from '../components/muhasebe/TahsilatTaksitPanel';
 import TeacherPaymentsPanel from '../components/muhasebe/TeacherPaymentsPanel';
 import StudentPaymentTrackerPanel from '../components/muhasebe/StudentPaymentTrackerPanel';
 import MuhasebeOverviewPanel from '../components/muhasebe/MuhasebeOverviewPanel';
 import MuhasebeClassReportPanel from '../components/muhasebe/MuhasebeClassReportPanel';
+import PrivateLessonFeesPanel from '../components/muhasebe/PrivateLessonFeesPanel';
 
-type MuhasebeTab = 'ozet' | 'tahsilat' | 'ogrenci-odeme' | 'ogretmen' | 'sinif-rapor';
+type MuhasebeTab =
+  | 'ozet'
+  | 'tahsilat'
+  | 'ogrenci-odeme'
+  | 'ogretmen'
+  | 'sinif-rapor'
+  | 'ozel-ders-ucret';
 
 const TAB_ITEMS: { id: MuhasebeTab; label: string; icon: typeof Wallet }[] = [
   { id: 'ozet', label: 'Genel bakış', icon: LayoutDashboard },
   { id: 'sinif-rapor', label: 'Sınıf raporu', icon: School },
   { id: 'tahsilat', label: 'Tahsilat & taksit', icon: Wallet },
   { id: 'ogrenci-odeme', label: 'Öğrenci ödemeleri', icon: ClipboardList },
+  { id: 'ozel-ders-ucret', label: 'Özel ders ücretleri', icon: GraduationCap },
   { id: 'ogretmen', label: 'Öğretmen ödemeleri', icon: Users }
 ];
 
@@ -23,7 +31,8 @@ function parseTab(raw: string | null): MuhasebeTab {
     raw === 'ogretmen' ||
     raw === 'ozet' ||
     raw === 'ogrenci-odeme' ||
-    raw === 'sinif-rapor'
+    raw === 'sinif-rapor' ||
+    raw === 'ozel-ders-ucret'
   ) {
     return raw;
   }
@@ -51,7 +60,8 @@ export default function MuhasebePage() {
             Muhasebe
           </h1>
           <p className="text-sm text-slate-600 dark:text-slate-400 mt-1 max-w-2xl">
-            Aylık gelir–gider–kâr, ekstra giderler, sınıf bazlı öğrenci ödemeleri ve öğretmen giderleri.
+            Aylık gelir–gider–kâr, ekstra giderler, sınıf bazlı öğrenci ödemeleri, özel ders veli tahsilatı ve
+            öğretmen giderleri.
           </p>
         </div>
         <Link
@@ -91,6 +101,8 @@ export default function MuhasebePage() {
       {tab === 'tahsilat' ? <TahsilatTaksitPanel /> : null}
 
       {tab === 'ogrenci-odeme' ? <StudentPaymentTrackerPanel /> : null}
+
+      {tab === 'ozel-ders-ucret' ? <PrivateLessonFeesPanel /> : null}
 
       {tab === 'ogretmen' ? <TeacherPaymentsPanel onTeacherTotalChange={setTeacherPayableTry} /> : null}
     </div>
