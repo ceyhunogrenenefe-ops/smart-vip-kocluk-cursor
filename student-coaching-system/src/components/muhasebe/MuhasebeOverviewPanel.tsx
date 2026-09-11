@@ -156,7 +156,8 @@ export default function MuhasebeOverviewPanel({ onGoTab }: Props) {
             Aylık muhasebe özeti
           </h2>
           <p className="text-sm text-slate-600 dark:text-slate-400 mt-0.5">
-            Öğrenci gelirleri − öğretmen ve ekstra giderler = dönem kârı
+            Ay filtresi vade / hakediş dönemine göredir (ödeme gününe değil). Öğrenci gelirleri − öğretmen ve
+            ekstra giderler = dönem kârı
           </p>
         </div>
         <label className="text-xs text-slate-500">
@@ -200,7 +201,7 @@ export default function MuhasebeOverviewPanel({ onGoTab }: Props) {
                 {formatTryAmount(spotlight.ogrenciOdeme)} ₺
               </p>
               <p className="mt-1 text-xs text-emerald-800/80 dark:text-emerald-200/80">
-                Taksit / kurs tahsilatları · detay için tıkla
+                Seçili ay vadeli tahsilatlar · detay için tıkla
               </p>
             </button>
 
@@ -242,7 +243,7 @@ export default function MuhasebeOverviewPanel({ onGoTab }: Props) {
                 {formatTryAmount(spotlight.ogretmenGider)} ₺
               </p>
               <p className="mt-1 text-xs text-rose-800/80 dark:text-rose-200/80">
-                Bu ay ödenen hakedişler · detay için tıkla
+                Seçili ay dönemine ait ödenmiş hakedişler · detay için tıkla
               </p>
             </button>
           </div>
