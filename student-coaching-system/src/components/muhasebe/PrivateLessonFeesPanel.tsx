@@ -1,14 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { GraduationCap, Loader2, Plus, RefreshCw, Save, UserPlus } from 'lucide-react';
+import { GraduationCap, Loader2, Plus, RefreshCw, Save, Trash2, UserPlus } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '../../context/AuthContext';
 import { useApp } from '../../context/AppContext';
 import { formatTryAmount } from '../../lib/groupLessonPaymentUnits';
+import { listPaymentAccounts, type PaymentAccount } from '../../lib/studentPaymentTrackerApi';
 import {
-  listPaymentAccounts,
-  type PaymentAccount
-} from '../../lib/studentPaymentTrackerApi';
-import {
+  deletePrivateLessonFee,
   fetchPrivateLessonFees,
   formatPaymentAccountLabel,
   PRIVATE_LESSON_FEE_STATUS_LABELS,
@@ -57,14 +55,17 @@ function accountOptionLabel(acc: PaymentAccount) {
   return label || bank || acc.id;
 }
 
+const fieldCls =
+  'mt-1 w-full min-w-0 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-950';
+
 export default function PrivateLessonFeesPanel() {
   const { effectiveUser } = useAuth();
   const { activeInstitutionId } = useApp();
   const isSuper = effectiveUser?.role === 'super_admin';
   const institutionId = String(
     isSuper
-      ? activeInstitutionId || effectiveUser?.institution_id || ''
-      : effectiveUser?.institution_id || activeInstitutionId || ''
+      ? activeInstitutionId || effectiveUser?.institutionId || effectiveUser?.institution_id || ''
+      : effectiveUser?.institutionId || effectiveUser?.institution_id || activeInstitutionId || ''
   ).trim();
 
   const [month, setMonth] = useState(currentMonthYm);
@@ -75,6 +76,7 @@ export default function PrivateLessonFeesPanel() {
   const [loading, setLoading] = useState(true);
   const [schemaHint, setSchemaHint] = useState<string | null>(null);
   const [savingId, setSavingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [addingExternal, setAddingExternal] = useState(false);
   const [extName, setExtName] = useState('');
   const [extHours, setExtHours] = useState('0');
@@ -173,6 +175,46 @@ export default function PrivateLessonFeesPanel() {
     }
   };
 
+  const deleteRow = async (row: PrivateLessonFeeRow) => {
+    const key = privateLessonFeeRowKey(row);
+    const canDelete = Boolean(row.fee_row_id) || Boolean(row.is_external);
+    if (!canDelete) {
+      toast.error('Silinecek ücret kaydı yok (yalnızca tamamlanan derslerden geliyor)');
+      return;
+    }
+    const label = row.student_name || 'öğrenci';
+    if (
+      !window.confirm(
+        `"${label}" kaydı silinsin mi?${
+          row.is_external
+            ? ''
+            : ' Ücret/tahsilat kaydı silinir; tamamlanan dersler varsa satır listede kalabilir.'
+        }`
+      )
+    ) {
+      return;
+    }
+
+    setDeletingId(key);
+    try {
+      await deletePrivateLessonFee({
+        fee_row_id: row.fee_row_id || null,
+        student_id: row.is_external ? null : row.student_id,
+        external_student_name: row.is_external
+          ? row.external_student_name || row.student_name
+          : null,
+        month,
+        institution_id: institutionId || null
+      });
+      toast.success('Silindi');
+      await reload();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Silme başarısız');
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
   const addExternalStudent = async () => {
     const name = extName.trim();
     if (!name) {
@@ -252,8 +294,8 @@ export default function PrivateLessonFeesPanel() {
             Özel Ders Ücretleri
           </h2>
           <p className="mt-0.5 text-sm text-slate-600 dark:text-slate-400">
-            Tamamlanan özel ders saatlerinden hesaplanır. Sistem dışından öğrenci ekleyebilir; tahsilatın
-            hangi banka hesabına yattığını seçebilirsiniz. Öğretmen hakedişine dokunulmaz.
+            Tamamlanan özel ders saatlerinden hesaplanır. Dış öğrenci ekleyebilir, banka hesabı seçebilir,
+            kaydı silebilirsiniz. Öğretmen hakedişine dokunulmaz.
           </p>
         </div>
         <div className="flex flex-wrap items-end gap-2">
@@ -289,8 +331,7 @@ export default function PrivateLessonFeesPanel() {
           Sistem dışından öğrenci ekle
         </h3>
         <p className="mt-1 text-xs text-slate-500">
-          Öğrenci ödemelerindeki banka hesapları burada listelenir. Hesap yoksa önce Öğrenci Ödemeleri
-          ekranından ekleyin.
+          Öğrenci ödemelerindeki banka hesapları listelenir. Hesap yoksa önce Öğrenci Ödemeleri’nden ekleyin.
         </p>
         <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-6">
           <label className="text-xs text-slate-500 lg:col-span-2">
@@ -299,7 +340,7 @@ export default function PrivateLessonFeesPanel() {
               value={extName}
               onChange={(e) => setExtName(e.target.value)}
               placeholder="Ad Soyad"
-              className="mt-1 block w-full rounded-lg border border-slate-200 px-2.5 py-2 text-sm dark:border-slate-600 dark:bg-slate-950"
+              className={fieldCls}
             />
           </label>
           <label className="text-xs text-slate-500">
@@ -310,7 +351,7 @@ export default function PrivateLessonFeesPanel() {
               step={0.25}
               value={extHours}
               onChange={(e) => setExtHours(e.target.value)}
-              className="mt-1 block w-full rounded-lg border border-slate-200 px-2.5 py-2 text-sm dark:border-slate-600 dark:bg-slate-950"
+              className={fieldCls}
             />
           </label>
           <label className="text-xs text-slate-500">
@@ -321,7 +362,7 @@ export default function PrivateLessonFeesPanel() {
               step={1}
               value={extUnit}
               onChange={(e) => setExtUnit(e.target.value)}
-              className="mt-1 block w-full rounded-lg border border-slate-200 px-2.5 py-2 text-sm dark:border-slate-600 dark:bg-slate-950"
+              className={fieldCls}
             />
           </label>
           <label className="text-xs text-slate-500">
@@ -332,7 +373,7 @@ export default function PrivateLessonFeesPanel() {
               step={1}
               value={extCollected}
               onChange={(e) => setExtCollected(e.target.value)}
-              className="mt-1 block w-full rounded-lg border border-slate-200 px-2.5 py-2 text-sm dark:border-slate-600 dark:bg-slate-950"
+              className={fieldCls}
             />
           </label>
           <label className="text-xs text-slate-500">
@@ -340,7 +381,7 @@ export default function PrivateLessonFeesPanel() {
             <select
               value={extStatus}
               onChange={(e) => setExtStatus(e.target.value as PrivateLessonFeeStatus)}
-              className="mt-1 block w-full rounded-lg border border-slate-200 px-2.5 py-2 text-sm dark:border-slate-600 dark:bg-slate-950"
+              className={fieldCls}
             >
               {(Object.keys(PRIVATE_LESSON_FEE_STATUS_LABELS) as PrivateLessonFeeStatus[]).map((k) => (
                 <option key={k} value={k}>
@@ -354,7 +395,7 @@ export default function PrivateLessonFeesPanel() {
             <select
               value={extAccountId}
               onChange={(e) => setExtAccountId(e.target.value)}
-              className="mt-1 block w-full rounded-lg border border-slate-200 px-2.5 py-2 text-sm dark:border-slate-600 dark:bg-slate-950"
+              className={fieldCls}
             >
               <option value="">— Seçiniz —</option>
               {accounts.map((a) => (
@@ -371,11 +412,7 @@ export default function PrivateLessonFeesPanel() {
               onClick={() => void addExternalStudent()}
               className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
             >
-              {addingExternal ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Plus className="h-4 w-4" />
-              )}
+              {addingExternal ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
               Ekle
             </button>
           </div>
@@ -383,7 +420,7 @@ export default function PrivateLessonFeesPanel() {
       </div>
 
       <div className="grid gap-3 sm:grid-cols-3">
-        <div className="rounded-2xl border border-indigo-200 bg-indigo-50/70 p-4 dark:border-indigo-900 dark:bg-indigo-950/30">
+        <div className="rounded-2xl border border-indigo-200 bg-gradient-to-br from-indigo-50 to-white p-4 dark:border-indigo-900 dark:from-indigo-950/40 dark:to-slate-900">
           <p className="text-[11px] font-semibold uppercase tracking-wide text-indigo-700 dark:text-indigo-300">
             Aylık toplam özel ders tutarı
           </p>
@@ -394,7 +431,7 @@ export default function PrivateLessonFeesPanel() {
             {summary?.student_count ?? rows.length} öğrenci · {formatTryAmount(summary?.hours ?? 0)} saat
           </p>
         </div>
-        <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-4 dark:border-emerald-900 dark:bg-emerald-950/30">
+        <div className="rounded-2xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-white p-4 dark:border-emerald-900 dark:from-emerald-950/40 dark:to-slate-900">
           <p className="text-[11px] font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-300">
             Aylık toplam özel ders tahsilatı
           </p>
@@ -426,131 +463,150 @@ export default function PrivateLessonFeesPanel() {
           ekleyebilirsiniz.
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900">
-          <table className="min-w-full text-sm">
-            <thead className="bg-slate-50 text-left text-[11px] uppercase tracking-wide text-slate-500 dark:bg-slate-800">
-              <tr>
-                <th className="px-3 py-2.5">Öğrenci</th>
-                <th className="px-3 py-2.5">Öğretmen(ler)</th>
-                <th className="px-3 py-2.5">Ders saati</th>
-                <th className="px-3 py-2.5">Birim ücret</th>
-                <th className="px-3 py-2.5">Toplam</th>
-                <th className="px-3 py-2.5">Tahsilat</th>
-                <th className="px-3 py-2.5">Banka hesabı</th>
-                <th className="px-3 py-2.5">Durum</th>
-                <th className="px-3 py-2.5" />
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row) => {
-                const key = privateLessonFeeRowKey(row);
-                const draft = drafts[key] || draftFromRow(row);
-                const total = liveTotal(draft);
-                return (
-                  <tr key={key} className="border-t border-slate-100 dark:border-slate-800">
-                    <td className="px-3 py-2.5 font-medium text-slate-900 dark:text-slate-100">
+        <div className="space-y-3">
+          {rows.map((row) => {
+            const key = privateLessonFeeRowKey(row);
+            const draft = drafts[key] || draftFromRow(row);
+            const total = liveTotal(draft);
+            const teachers =
+              row.teachers.length > 0
+                ? row.teachers.map((t) => t.teacher_name).join(', ')
+                : '—';
+            const busy = savingId === key || deletingId === key;
+            const canDelete = Boolean(row.fee_row_id) || Boolean(row.is_external);
+            return (
+              <div
+                key={key}
+                className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-slate-900"
+              >
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="font-semibold text-slate-900 dark:text-slate-100">
                       {row.student_name}
                       {row.is_external ? (
                         <span className="ml-1.5 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800 dark:bg-amber-950 dark:text-amber-200">
                           Dış
                         </span>
                       ) : null}
-                    </td>
-                    <td className="px-3 py-2.5 text-slate-600 dark:text-slate-300">
-                      {row.teachers.length
-                        ? row.teachers.map((t) => t.teacher_name).join(', ')
-                        : '—'}
-                    </td>
-                    <td className="px-3 py-2.5">
-                      <input
-                        type="number"
-                        min={0}
-                        step={0.25}
-                        value={draft.hours}
-                        onChange={(e) => patchDraft(key, { hours: e.target.value })}
-                        className="w-24 rounded-lg border border-slate-200 px-2 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-950"
-                      />
-                      <p className="mt-0.5 text-[10px] text-slate-400">
-                        Otomatik: {formatTryAmount(row.system_hours)}
-                      </p>
-                    </td>
-                    <td className="px-3 py-2.5">
-                      <input
-                        type="number"
-                        min={0}
-                        step={1}
-                        value={draft.unit_price_tl}
-                        onChange={(e) => patchDraft(key, { unit_price_tl: e.target.value })}
-                        className="w-28 rounded-lg border border-slate-200 px-2 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-950"
-                      />
-                    </td>
-                    <td className="px-3 py-2.5 font-semibold tabular-nums text-slate-900 dark:text-white">
+                    </p>
+                    <p className="mt-0.5 truncate text-xs text-slate-500" title={teachers}>
+                      {teachers}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1.5">
+                    <button
+                      type="button"
+                      disabled={busy || !draft.dirty}
+                      onClick={() => void saveRow(row)}
+                      className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
+                    >
+                      {savingId === key ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Save className="h-3.5 w-3.5" />
+                      )}
+                      Kaydet
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busy || !canDelete}
+                      title={canDelete ? 'Sil' : 'Silinecek ücret kaydı yok'}
+                      onClick={() => void deleteRow(row)}
+                      className="inline-flex items-center gap-1 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-100 disabled:opacity-40 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-200"
+                    >
+                      {deletingId === key ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Trash2 className="h-3.5 w-3.5" />
+                      )}
+                      Sil
+                    </button>
+                  </div>
+                </div>
+
+                <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+                  <label className="text-[11px] font-medium text-slate-500">
+                    Ders saati
+                    <input
+                      type="number"
+                      min={0}
+                      step={0.25}
+                      value={draft.hours}
+                      onChange={(e) => patchDraft(key, { hours: e.target.value })}
+                      className={fieldCls}
+                    />
+                    <span className="mt-0.5 block text-[10px] font-normal text-slate-400">
+                      Otomatik: {formatTryAmount(row.system_hours)}
+                    </span>
+                  </label>
+                  <label className="text-[11px] font-medium text-slate-500">
+                    Birim ücret
+                    <input
+                      type="number"
+                      min={0}
+                      step={1}
+                      value={draft.unit_price_tl}
+                      onChange={(e) => patchDraft(key, { unit_price_tl: e.target.value })}
+                      className={fieldCls}
+                    />
+                  </label>
+                  <div className="text-[11px] font-medium text-slate-500">
+                    Toplam
+                    <p className="mt-1 rounded-lg bg-slate-50 px-2 py-1.5 text-sm font-bold tabular-nums text-slate-900 dark:bg-slate-800 dark:text-white">
                       {formatTryAmount(total)} ₺
-                    </td>
-                    <td className="px-3 py-2.5">
-                      <input
-                        type="number"
-                        min={0}
-                        step={1}
-                        value={draft.amount_collected_tl}
-                        onChange={(e) => patchDraft(key, { amount_collected_tl: e.target.value })}
-                        className="w-28 rounded-lg border border-slate-200 px-2 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-950"
-                      />
-                    </td>
-                    <td className="px-3 py-2.5">
-                      <select
-                        value={draft.payment_account_id}
-                        onChange={(e) => patchDraft(key, { payment_account_id: e.target.value })}
-                        className="min-w-[10rem] max-w-[14rem] rounded-lg border border-slate-200 px-2 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-950"
-                      >
-                        <option value="">— Seçiniz —</option>
-                        {accounts.map((a) => (
-                          <option key={a.id} value={a.id}>
-                            {accountOptionLabel(a)}
+                    </p>
+                  </div>
+                  <label className="text-[11px] font-medium text-slate-500">
+                    Tahsilat
+                    <input
+                      type="number"
+                      min={0}
+                      step={1}
+                      value={draft.amount_collected_tl}
+                      onChange={(e) => patchDraft(key, { amount_collected_tl: e.target.value })}
+                      className={fieldCls}
+                    />
+                  </label>
+                  <label className="text-[11px] font-medium text-slate-500 sm:col-span-2 lg:col-span-1">
+                    Banka hesabı
+                    <select
+                      value={draft.payment_account_id}
+                      onChange={(e) => patchDraft(key, { payment_account_id: e.target.value })}
+                      className={fieldCls}
+                    >
+                      <option value="">— Seçiniz —</option>
+                      {accounts.map((a) => (
+                        <option key={a.id} value={a.id}>
+                          {accountOptionLabel(a)}
+                        </option>
+                      ))}
+                    </select>
+                    {row.payment_account && !draft.dirty ? (
+                      <span className="mt-0.5 block truncate text-[10px] font-normal text-slate-400">
+                        {formatPaymentAccountLabel(row.payment_account)}
+                      </span>
+                    ) : null}
+                  </label>
+                  <label className="text-[11px] font-medium text-slate-500">
+                    Durum
+                    <select
+                      value={draft.collection_status}
+                      onChange={(e) => patchDraft(key, { collection_status: e.target.value })}
+                      className={fieldCls}
+                    >
+                      {(Object.keys(PRIVATE_LESSON_FEE_STATUS_LABELS) as PrivateLessonFeeStatus[]).map(
+                        (k) => (
+                          <option key={k} value={k}>
+                            {PRIVATE_LESSON_FEE_STATUS_LABELS[k]}
                           </option>
-                        ))}
-                      </select>
-                      {row.payment_account && !draft.dirty ? (
-                        <p className="mt-0.5 text-[10px] text-slate-400">
-                          {formatPaymentAccountLabel(row.payment_account)}
-                        </p>
-                      ) : null}
-                    </td>
-                    <td className="px-3 py-2.5">
-                      <select
-                        value={draft.collection_status}
-                        onChange={(e) => patchDraft(key, { collection_status: e.target.value })}
-                        className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-950"
-                      >
-                        {(Object.keys(PRIVATE_LESSON_FEE_STATUS_LABELS) as PrivateLessonFeeStatus[]).map(
-                          (k) => (
-                            <option key={k} value={k}>
-                              {PRIVATE_LESSON_FEE_STATUS_LABELS[k]}
-                            </option>
-                          )
-                        )}
-                      </select>
-                    </td>
-                    <td className="px-3 py-2.5 text-right">
-                      <button
-                        type="button"
-                        disabled={savingId === key || !draft.dirty}
-                        onClick={() => void saveRow(row)}
-                        className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
-                      >
-                        {savingId === key ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        ) : (
-                          <Save className="h-3.5 w-3.5" />
-                        )}
-                        Kaydet
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                        )
+                      )}
+                    </select>
+                  </label>
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
