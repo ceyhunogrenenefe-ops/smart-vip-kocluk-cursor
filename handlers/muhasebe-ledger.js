@@ -84,39 +84,23 @@ async function loadPaidPayrollSettlements(from, to) {
     total: 0
   };
 
-  // Önce ödeme tarihi (paid_at) seçili ay içinde olanlar — nakit bazlı genel bakış
-  let q = supabaseAdmin
+  // Dönem ayına göre: Ağustos hakedişi Eylül'de ödense bile Ağustos'ta görünür.
+  // (Nakit/paid_at bazlı filtre Ağustos giderini Eylül'e kaydırıyordu.)
+  const { data, error } = await supabaseAdmin
     .from('teacher_payroll_settlements')
     .select(
       'id, teacher_id, period_from, period_to, total_tl, lesson_gross_tl, extras_tl, status, expense_item_id, paid_at'
     )
     .eq('status', 'paid')
-    .gte('paid_at', `${from}T00:00:00`)
-    .lte('paid_at', `${to}T23:59:59.999`)
+    .lte('period_from', to)
+    .gte('period_to', from)
     .limit(2000);
 
-  let { data, error } = await q;
   if (error) {
     if (/teacher_payroll_settlements|does not exist|schema cache|PGRST205/i.test(errorMessage(error))) {
       return empty;
     }
-    // paid_at filtresi bazı ortamlarda sorun çıkarırsa dönem overlap'e düş
-    const fallback = await supabaseAdmin
-      .from('teacher_payroll_settlements')
-      .select(
-        'id, teacher_id, period_from, period_to, total_tl, lesson_gross_tl, extras_tl, status, expense_item_id, paid_at'
-      )
-      .eq('status', 'paid')
-      .lte('period_from', to)
-      .gte('period_to', from)
-      .limit(2000);
-    if (fallback.error) {
-      if (/teacher_payroll_settlements|does not exist|schema cache|PGRST205/i.test(errorMessage(fallback.error))) {
-        return empty;
-      }
-      throw fallback.error;
-    }
-    data = fallback.data;
+    throw error;
   }
 
   const paidTeacherIds = new Set();
@@ -143,6 +127,7 @@ async function loadPaidPayrollSettlements(from, to) {
 
 /**
  * Genel bakış öğretmen gideri: yalnızca ÖDENMİŞ hakedişler.
+ * Ay filtresi hakediş dönemine (period_from/to) göredir — ödeme gününe değil.
  * Tahakkuk (tamamlanan ders × birim ücret) yansıtılmaz.
  */
 async function loadTeacherExpense(from, to) {
@@ -157,17 +142,7 @@ async function loadTeacherExpense(from, to) {
 }
 
 async function loadStudentIncome(inst, from, to) {
-  // Nakit bazlı gelir: ödeme tarihi (paid_at) seçili aralıkta olanlar
-  let paidQ = supabaseAdmin
-    .from('student_payment_records')
-    .select('payment_type, amount_total, amount_paid, status, due_date, paid_at')
-    .neq('status', 'cancelled')
-    .gte('paid_at', from)
-    .lte('paid_at', to)
-    .limit(5000);
-  if (inst) paidQ = paidQ.eq('institution_id', inst);
-
-  // Vade bazlı tahakkuk / kalan (ödenmemiş veya kısmi)
+  // Vade ayına göre: Ağustos vadeli ödeme Eylül'de tahsil edilse bile Ağustos'ta görünür.
   let dueQ = supabaseAdmin
     .from('student_payment_records')
     .select('payment_type, amount_total, amount_paid, status, due_date, paid_at')
@@ -177,53 +152,34 @@ async function loadStudentIncome(inst, from, to) {
     .limit(5000);
   if (inst) dueQ = dueQ.eq('institution_id', inst);
 
-  const [{ data: paidRows, error: pe }, { data: dueRows, error: de }] = await Promise.all([paidQ, dueQ]);
-  if (pe || de) {
-    const err = pe || de;
-    if (schemaMissing(err)) {
+  const { data: dueRows, error: de } = await dueQ;
+  if (de) {
+    if (schemaMissing(de)) {
       return { student_sum: 0, other_sum: 0, total_sum: 0, paid_sum: 0, remaining_sum: 0, by_type: {} };
     }
-    throw err;
+    throw de;
   }
-
-  // Legacy: paid_at boş ama status=paid ve due_date ay içinde → hâlâ say
-  let legacyQ = supabaseAdmin
-    .from('student_payment_records')
-    .select('payment_type, amount_total, amount_paid, status, due_date, paid_at')
-    .eq('status', 'paid')
-    .is('paid_at', null)
-    .gte('due_date', from)
-    .lte('due_date', to)
-    .limit(2000);
-  if (inst) legacyQ = legacyQ.eq('institution_id', inst);
-  const { data: legacyRows } = await legacyQ;
 
   const byType = {};
   let studentSum = 0;
   let otherSum = 0;
   let paidSum = 0;
+  let remainingSum = 0;
+  let totalSum = 0;
 
-  const addPaid = (r) => {
+  for (const r of dueRows || []) {
     const type = String(r.payment_type || 'diger');
+    const total = Number(r.amount_total) || 0;
     const paid = Number(r.amount_paid) || 0;
-    if (paid <= 0) return;
+    totalSum += total;
+    remainingSum += Math.max(0, total - paid);
+
+    if (paid <= 0) continue;
     paidSum += paid;
     byType[type] = (byType[type] || 0) + paid;
     if (OTHER_INCOME_TYPES.has(type)) otherSum += paid;
     else if (STUDENT_INCOME_TYPES.has(type) || type === 'kurs') studentSum += paid;
     else otherSum += paid;
-  };
-
-  for (const r of paidRows || []) addPaid(r);
-  for (const r of legacyRows || []) addPaid(r);
-
-  let remainingSum = 0;
-  let totalSum = 0;
-  for (const r of dueRows || []) {
-    const total = Number(r.amount_total) || 0;
-    const paid = Number(r.amount_paid) || 0;
-    totalSum += total;
-    remainingSum += Math.max(0, total - paid);
   }
 
   return {
