@@ -564,6 +564,72 @@ export async function loadPrivateLessonFeeCollections(institutionId, from, to) {
   return { collected_sum: money(collected), row_count: (data || []).length };
 }
 
+async function handleDelete(req, res, actor, roleSet) {
+  const body = req.body || {};
+  const inst = scopeInstitution(actor, roleSet, body.institution_id || req.query?.institution_id);
+  if (!inst && !roleSetHasSuperAdmin(roleSet)) {
+    return jsonError(res, 400, 'institution_required');
+  }
+  if (inst && !hasInstitutionAccess(actor, inst) && !roleSetHasSuperAdmin(roleSet)) {
+    return jsonError(res, 403, 'forbidden');
+  }
+
+  const periodYm = String(body.month || body.period_ym || req.query?.month || '').trim();
+  const feeRowId = String(body.fee_row_id || req.query?.fee_row_id || '').trim() || null;
+  const studentId = String(body.student_id || req.query?.student_id || '').trim() || null;
+  const externalName = String(
+    body.external_student_name || req.query?.external_student_name || ''
+  ).trim() || null;
+
+  if (!feeRowId && !studentId && !externalName) {
+    return jsonError(res, 400, 'fee_row_id_or_student_required');
+  }
+  if (!feeRowId && !YM_RE.test(periodYm)) {
+    return jsonError(res, 400, 'invalid_month');
+  }
+
+  let existing;
+  try {
+    existing = await findExistingFee({
+      inst,
+      studentId: studentId || null,
+      externalName: externalName || null,
+      periodYm: periodYm || '',
+      feeRowId
+    });
+  } catch (findErr) {
+    if (feesSchemaMissing(findErr)) {
+      return jsonError(res, 400, 'schema_missing', { hint: SQL_HINT });
+    }
+    throw findErr;
+  }
+
+  if (!existing) {
+    return jsonError(res, 404, 'fee_row_not_found');
+  }
+
+  if (inst && existing.institution_id && String(existing.institution_id) !== String(inst)) {
+    return jsonError(res, 403, 'forbidden');
+  }
+
+  const { error } = await supabaseAdmin
+    .from('private_lesson_monthly_fees')
+    .delete()
+    .eq('id', existing.id);
+  if (error) {
+    if (feesSchemaMissing(error)) {
+      return jsonError(res, 400, 'schema_missing', { hint: SQL_HINT });
+    }
+    throw error;
+  }
+
+  return res.status(200).json({
+    ok: true,
+    deleted_id: existing.id,
+    was_external: !String(existing.student_id || '').trim()
+  });
+}
+
 export default async function handler(req, res) {
   try {
     const actor = requireAuthenticatedActor(req);
@@ -575,6 +641,7 @@ export default async function handler(req, res) {
     if (req.method === 'POST' || req.method === 'PUT' || req.method === 'PATCH') {
       return handleUpsert(req, res, actor, roleSet);
     }
+    if (req.method === 'DELETE') return handleDelete(req, res, actor, roleSet);
     return jsonError(res, 405, 'method_not_allowed');
   } catch (e) {
     const msg = errorMessage(e);

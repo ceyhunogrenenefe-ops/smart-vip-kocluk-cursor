@@ -1,5 +1,15 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Loader2, Plus, Trash2, TrendingDown, TrendingUp, Wallet } from 'lucide-react';
+import {
+  GraduationCap,
+  Loader2,
+  Plus,
+  Trash2,
+  TrendingDown,
+  TrendingUp,
+  UserRound,
+  Users,
+  Wallet
+} from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '../../context/AuthContext';
 import { useApp } from '../../context/AppContext';
@@ -128,6 +138,15 @@ export default function MuhasebeOverviewPanel({ onGoTab }: Props) {
       .sort((a, b) => Number(b[1]) - Number(a[1]));
   }, [pnl]);
 
+  const spotlight = useMemo(() => {
+    const ozel =
+      Number(pnl?.gelir?.ozel_ders_aylik) || Number(pnl?.gelir?.by_type?.ozel_ders_aylik) || 0;
+    const ogrenciToplam = Number(pnl?.gelir?.ogrenci) || 0;
+    const ogrenciOdeme = Math.max(0, Math.round((ogrenciToplam - ozel) * 100) / 100);
+    const ogretmenGider = Number(pnl?.gider?.ogretmen) || 0;
+    return { ozel, ogrenciOdeme, ogretmenGider };
+  }, [pnl]);
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-3">
@@ -163,6 +182,71 @@ export default function MuhasebeOverviewPanel({ onGoTab }: Props) {
         </p>
       ) : pnl ? (
         <>
+          <div className="grid gap-3 md:grid-cols-3">
+            <button
+              type="button"
+              onClick={() => onGoTab?.('ogrenci-odeme')}
+              className="rounded-2xl border border-emerald-200/80 bg-gradient-to-br from-emerald-50 via-white to-teal-50 p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md dark:border-emerald-900 dark:from-emerald-950/50 dark:via-slate-900 dark:to-slate-900"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-300">
+                  Öğrenci ödemeleri
+                </p>
+                <span className="rounded-xl bg-emerald-100 p-2 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-200">
+                  <Users className="h-4 w-4" />
+                </span>
+              </div>
+              <p className="mt-2 text-2xl font-bold tabular-nums text-emerald-900 dark:text-emerald-100">
+                {formatTryAmount(spotlight.ogrenciOdeme)} ₺
+              </p>
+              <p className="mt-1 text-xs text-emerald-800/80 dark:text-emerald-200/80">
+                Taksit / kurs tahsilatları · detay için tıkla
+              </p>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => onGoTab?.('ozel-ders-ucret')}
+              className="rounded-2xl border border-indigo-200/80 bg-gradient-to-br from-indigo-50 via-white to-violet-50 p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md dark:border-indigo-900 dark:from-indigo-950/50 dark:via-slate-900 dark:to-slate-900"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-indigo-700 dark:text-indigo-300">
+                  Özel ders gelir
+                </p>
+                <span className="rounded-xl bg-indigo-100 p-2 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-200">
+                  <GraduationCap className="h-4 w-4" />
+                </span>
+              </div>
+              <p className="mt-2 text-2xl font-bold tabular-nums text-indigo-900 dark:text-indigo-100">
+                {formatTryAmount(spotlight.ozel)} ₺
+              </p>
+              <p className="mt-1 text-xs text-indigo-800/80 dark:text-indigo-200/80">
+                Bu ay tahsil edilen özel ders · detay için tıkla
+              </p>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => onGoTab?.('ogretmen')}
+              className="rounded-2xl border border-rose-200/80 bg-gradient-to-br from-rose-50 via-white to-orange-50 p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md dark:border-rose-900 dark:from-rose-950/50 dark:via-slate-900 dark:to-slate-900"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-rose-700 dark:text-rose-300">
+                  Öğretmen gider
+                </p>
+                <span className="rounded-xl bg-rose-100 p-2 text-rose-700 dark:bg-rose-950 dark:text-rose-200">
+                  <UserRound className="h-4 w-4" />
+                </span>
+              </div>
+              <p className="mt-2 text-2xl font-bold tabular-nums text-rose-900 dark:text-rose-100">
+                {formatTryAmount(spotlight.ogretmenGider)} ₺
+              </p>
+              <p className="mt-1 text-xs text-rose-800/80 dark:text-rose-200/80">
+                Bu ay ödenen hakedişler · detay için tıkla
+              </p>
+            </button>
+          </div>
+
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-4 dark:border-emerald-900 dark:bg-emerald-950/30">
               <p className="text-[11px] font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-300">

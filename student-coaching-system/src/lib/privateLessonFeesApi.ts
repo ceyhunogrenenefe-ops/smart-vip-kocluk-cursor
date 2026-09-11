@@ -150,3 +150,25 @@ export async function upsertPrivateLessonFee(body: {
   }
   return j;
 }
+
+export async function deletePrivateLessonFee(body: {
+  fee_row_id?: string | null;
+  student_id?: string | null;
+  external_student_name?: string | null;
+  month?: string;
+  institution_id?: string | null;
+}) {
+  const res = await apiFetch('/api/private-lesson-fees', {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  const j = await parseJson(res);
+  if (!res.ok) {
+    if (j.error === 'schema_missing' && j.hint) {
+      throw new Error(`Şema eksik — Supabase’te \`${String(j.hint)}\` çalıştırın`);
+    }
+    throw new Error(String(j.error || 'Kayıt silinemedi'));
+  }
+  return j;
+}
