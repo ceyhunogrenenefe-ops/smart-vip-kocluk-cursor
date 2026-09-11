@@ -347,7 +347,7 @@ export default function MuhasebeOverviewPanel({ onGoTab }: Props) {
             <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
               <h3 className="text-sm font-bold text-slate-900 dark:text-white">Gider kırılımı</h3>
               <p className="mt-1 text-xs text-slate-500">
-                Öğretmen kalemi yalnızca bu ay ödenen hakedişleri gösterir; ödenmemiş tahakkuk dahil edilmez.
+                Öğretmen kalemi seçili ayın hakediş dönemine aittir (ödeme gününe değil); ödenmemiş tahakkuk dahil edilmez.
               </p>
               <ul className="mt-3 space-y-2 text-sm">
                 <li className="flex justify-between gap-2">
@@ -400,7 +400,7 @@ export default function MuhasebeOverviewPanel({ onGoTab }: Props) {
                 </div>
               ) : (
                 <p className="mt-3 rounded-lg border border-dashed border-slate-200 px-3 py-2 text-xs text-slate-500 dark:border-slate-700">
-                  Bu ay ödenen öğretmen hakedişi yok.
+                  Bu dönem için ödenmiş öğretmen hakedişi yok.
                 </p>
               )}
 
