@@ -21,7 +21,7 @@ import { CoachLessonsLockBanner } from '../components/coach/CoachLessonsLockBann
 import { copyGuestJoinShareText } from '../lib/bbbGuestJoin';
 import { copyTextToClipboard } from '../lib/copyToClipboard';
 import { toast } from 'sonner';
-import { Radio, Plus, Loader2, Filter, Clock, Pencil, Move, GripVertical, Trash2, FileDown, Copy } from 'lucide-react';
+import { Radio, Plus, Loader2, Filter, Clock, Pencil, Move, GripVertical, Trash2, FileDown, Copy, Image as ImageIcon, ClipboardCopy } from 'lucide-react';
 import {
   AppModal,
   AppModalBody,
@@ -33,6 +33,11 @@ import {
   downloadCalendarPdfWithSnapshot,
   formatDdMmYyyyDots as formatDdMmYyyyDotsGrid
 } from '../lib/pdfLiveWeekGrid';
+import {
+  copyPrivateLessonWeekSchedulePng,
+  downloadPrivateLessonWeekSchedulePng
+} from '../lib/privateLessonWeekSchedulePng';
+
 
 function startOfWeek(d: Date): Date {
   const x = new Date(d);
@@ -184,6 +189,7 @@ export default function LiveLessons({ hideCalendar = false }: { hideCalendar?: b
   const [deleteLessonBusy, setDeleteLessonBusy] = useState(false);
   const [editBusy, setEditBusy] = useState(false);
   const [pdfSnapBusy, setPdfSnapBusy] = useState(false);
+  const [schedulePngBusy, setSchedulePngBusy] = useState(false);
   const liveCalendarPdfRef = useRef<HTMLDivElement>(null);
   const [editTitle, setEditTitle] = useState('');
   const [editDateStr, setEditDateStr] = useState('');
@@ -587,6 +593,78 @@ export default function LiveLessons({ hideCalendar = false }: { hideCalendar?: b
       d.toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric' });
     return `${fmt(ws)} – ${fmt(we)}`;
   }, [calendarWeekAnchor]);
+
+  const selectedFilterStudent = useMemo(() => {
+    const id = filterStudentId.trim();
+    if (!id) return null;
+    return studentsForFilter.find((s) => s.id === id) || null;
+  }, [filterStudentId, studentsForFilter]);
+
+  const runStudentSchedulePng = useCallback(
+    async (mode: 'download' | 'copy') => {
+      if (!selectedFilterStudent) {
+        toast.error('Önce bir öğrenci seçin');
+        return;
+      }
+      if (weeklyLessonBuckets.length !== 7) {
+        toast.error('Haftalık takvim hazır değil');
+        return;
+      }
+      setSchedulePngBusy(true);
+      try {
+        const weekIsoSet = new Set(weeklyLessonBuckets.map((b) => b.key));
+        const staffMap = new Map(mergedStaff.map((u) => [u.id, u.name]));
+        const weekLessons = lessons
+          .filter(
+            (l) =>
+              l.status !== 'cancelled' &&
+              l.student_id === selectedFilterStudent.id &&
+              weekIsoSet.has(String(l.date || '').slice(0, 10))
+          )
+          .map((l) => ({
+            date: String(l.date || '').slice(0, 10),
+            start_time: l.start_time,
+            end_time: l.end_time || null,
+            duration_minutes: l.duration_minutes ?? null,
+            title: l.title,
+            teacher_id: l.teacher_id,
+            teacher_name: l.teacher_name || staffMap.get(l.teacher_id) || null,
+            status: l.status
+          }));
+        const payload = {
+          studentName: selectedFilterStudent.name,
+          weekStartIso: weeklyLessonBuckets[0].key,
+          lessons: weekLessons,
+          teacherNameById: staffMap,
+          branding: {
+            institutionName: institution?.name || 'Kurum',
+            logoUrl: institution?.logo?.trim() || null
+          }
+        };
+        if (mode === 'copy') {
+          await copyPrivateLessonWeekSchedulePng(payload);
+          toast.success('Ders programı görseli panoya kopyalandı');
+        } else {
+          const filename = await downloadPrivateLessonWeekSchedulePng(payload);
+          toast.success(`PNG indirildi: ${filename}`);
+        }
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'PNG oluşturulamadı';
+        toast.error(msg);
+      } finally {
+        setSchedulePngBusy(false);
+      }
+    },
+    [
+      selectedFilterStudent,
+      weeklyLessonBuckets,
+      lessons,
+      mergedStaff,
+      institution?.name,
+      institution?.logo
+    ]
+  );
+
 
   const deleteLessonSeries = async (seriesId: string) => {
     if (!window.confirm('Bu tekrarlayan ders serisindeki tüm planlı oturumlar silinsin mi?')) return;
@@ -1081,6 +1159,34 @@ export default function LiveLessons({ hideCalendar = false }: { hideCalendar?: b
             {pdfSnapBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileDown className="w-4 h-4" />}
             PDF görüntü + ders listesi
           </button>
+          <button
+            type="button"
+            disabled={schedulePngBusy || !filterStudentId.trim() || hideCalendar}
+            onClick={() => void runStudentSchedulePng('download')}
+            title={
+              filterStudentId.trim()
+                ? 'Seçili öğrencinin haftalık ders programını yüksek çözünürlüklü PNG olarak indir'
+                : 'PNG için önce öğrenci seçin'
+            }
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border-2 border-indigo-500/80 bg-white text-indigo-800 text-sm font-semibold hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {schedulePngBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <ImageIcon className="w-4 h-4" />}
+            Ders Programını İndir (PNG)
+          </button>
+          <button
+            type="button"
+            disabled={schedulePngBusy || !filterStudentId.trim() || hideCalendar}
+            onClick={() => void runStudentSchedulePng('copy')}
+            title={
+              filterStudentId.trim()
+                ? 'Seçili öğrencinin program görselini panoya kopyala'
+                : 'Kopyalamak için önce öğrenci seçin'
+            }
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-slate-300 bg-white text-slate-700 text-sm font-semibold hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {schedulePngBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <ClipboardCopy className="w-4 h-4" />}
+            Görseli Kopyala
+          </button>
         </div>
       )}
 
@@ -1325,7 +1431,44 @@ export default function LiveLessons({ hideCalendar = false }: { hideCalendar?: b
         <div className="rounded-lg bg-red-50 text-red-800 px-4 py-3 text-sm border border-red-100">{error}</div>
       )}
 
-      {!hideCalendar ? (
+            {!hideCalendar ? (
+      <>
+      {selectedFilterStudent ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-indigo-100 bg-indigo-50/70 px-3 py-2.5">
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-indigo-950 truncate">
+              {selectedFilterStudent.name} — haftalık ders programı
+            </p>
+            <p className="text-xs text-indigo-800/80">
+              Veliye gönderime uygun PNG: yalnızca program tablosu (düzenle/sil düğmeleri yok).
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              disabled={schedulePngBusy}
+              onClick={() => void runStudentSchedulePng('download')}
+              className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-indigo-700 disabled:opacity-60"
+            >
+              {schedulePngBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ImageIcon className="h-3.5 w-3.5" />}
+              Ders Programını İndir (PNG)
+            </button>
+            <button
+              type="button"
+              disabled={schedulePngBusy}
+              onClick={() => void runStudentSchedulePng('copy')}
+              className="inline-flex items-center gap-2 rounded-lg border border-indigo-300 bg-white px-3 py-1.5 text-xs font-semibold text-indigo-900 hover:bg-indigo-50 disabled:opacity-60"
+            >
+              {schedulePngBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ClipboardCopy className="h-3.5 w-3.5" />}
+              Görseli Kopyala
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+          Haftalık program PNG’si için yukarıdan bir öğrenci seçin.
+        </div>
+      )}
       <WeeklyLiveGridShell
         title="Haftalık canlı özel ders takvimi"
         subtitle="Sütunlar Pazartesi–Pazar (yerel tarih). WhatsApp hatırlatması: Meta şablonları lesson_reminder + lesson_reminder_parent; cron her 5 dk, varsayılan dersden en fazla 45 dk önce (LESSON_REMINDER_MAX_LEAD_MINUTES)."
@@ -1510,6 +1653,7 @@ export default function LiveLessons({ hideCalendar = false }: { hideCalendar?: b
         </div>
         )}
       </WeeklyLiveGridShell>
+      </>
       ) : null}
 
       {pendingDeleteLesson ? (
