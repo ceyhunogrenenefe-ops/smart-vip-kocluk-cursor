@@ -7,6 +7,7 @@ import {
   roleSetHasSuperAdmin
 } from '../api/_lib/actor-roles.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
+import { loadPrivateLessonFeeCollections } from './private-lesson-fees.js';
 
 const jsonError = (res, status, error, extra) => res.status(status).json({ error, ...extra });
 
@@ -268,12 +269,19 @@ async function handleGetSummary(req, res, actor, roleSet) {
   }
   const range = parseRange(req);
   const teacher = await loadTeacherExpense(range.from, range.to);
-  const [income, otherExp] = await Promise.all([
+  const [income, otherExp, privateFees] = await Promise.all([
     loadStudentIncome(inst, range.from, range.to),
-    loadOtherExpenses(inst, range.from, range.to, teacher.payroll_expense_ids)
+    loadOtherExpenses(inst, range.from, range.to, teacher.payroll_expense_ids),
+    loadPrivateLessonFeeCollections(inst, range.from, range.to)
   ]);
 
-  const gelirToplam = income.paid_sum;
+  const privateCollected = Number(privateFees?.collected_sum) || 0;
+  const byType = { ...(income.by_type || {}) };
+  if (privateCollected > 0) {
+    byType.ozel_ders_aylik = Math.round(((Number(byType.ozel_ders_aylik) || 0) + privateCollected) * 100) / 100;
+  }
+  const gelirToplam = Math.round((income.paid_sum + privateCollected) * 100) / 100;
+  const gelirOgrenci = Math.round((income.student_sum + privateCollected) * 100) / 100;
   const giderOgretmen = teacher.total;
   const giderDiger = otherExp.total;
   const giderToplam = Math.round((giderOgretmen + giderDiger) * 100) / 100;
@@ -305,12 +313,13 @@ async function handleGetSummary(req, res, actor, roleSet) {
     from: range.from,
     to: range.to,
     gelir: {
-      ogrenci: income.student_sum,
+      ogrenci: gelirOgrenci,
       diger: income.other_sum,
       toplam: gelirToplam,
       tahakkuk_toplam: income.total_sum,
       kalan_alacak: income.remaining_sum,
-      by_type: income.by_type
+      by_type: byType,
+      ozel_ders_aylik: privateCollected
     },
     gider: {
       ogretmen_ders: teacher.lesson_sum,

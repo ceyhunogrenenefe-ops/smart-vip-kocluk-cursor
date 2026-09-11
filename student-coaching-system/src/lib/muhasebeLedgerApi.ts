@@ -55,6 +55,8 @@ export type MuhasebePnL = {
     tahakkuk_toplam: number;
     kalan_alacak: number;
     by_type: Record<string, number>;
+    /** Özel ders ücretleri sekmesinden tahsil edilen (aylık) */
+    ozel_ders_aylik?: number;
   };
   gider: {
     ogretmen_ders: number;

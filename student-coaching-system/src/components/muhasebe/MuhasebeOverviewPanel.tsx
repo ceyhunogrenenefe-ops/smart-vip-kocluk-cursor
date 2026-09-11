@@ -21,7 +21,11 @@ function currentMonthYm() {
 }
 
 type Props = {
-  onGoTab?: (tab: 'ogrenci-odeme' | 'ogretmen' | 'sinif-rapor') => void;
+  onGoTab?: (tab: 'ogrenci-odeme' | 'ogretmen' | 'sinif-rapor' | 'ozel-ders-ucret') => void;
+};
+
+const EXTRA_INCOME_LABELS: Record<string, string> = {
+  ozel_ders_aylik: 'Özel ders ücretleri (aylık tahsilat)'
 };
 
 export default function MuhasebeOverviewPanel({ onGoTab }: Props) {
@@ -226,19 +230,32 @@ export default function MuhasebeOverviewPanel({ onGoTab }: Props) {
                 </li>
                 {typeBreakdown.map(([k, v]) => (
                   <li key={k} className="flex justify-between gap-2 text-xs text-slate-500">
-                    <span>{PAYMENT_TYPE_LABELS[k as keyof typeof PAYMENT_TYPE_LABELS] || k}</span>
+                    <span>
+                      {PAYMENT_TYPE_LABELS[k as keyof typeof PAYMENT_TYPE_LABELS] ||
+                        EXTRA_INCOME_LABELS[k] ||
+                        k}
+                    </span>
                     <span className="tabular-nums">{formatTryAmount(Number(v))} ₺</span>
                   </li>
                 ))}
               </ul>
               {onGoTab ? (
-                <button
-                  type="button"
-                  onClick={() => onGoTab('ogrenci-odeme')}
-                  className="mt-3 text-xs font-semibold text-emerald-700 hover:underline dark:text-emerald-300"
-                >
-                  Öğrenci ödemelerine git →
-                </button>
+                <div className="mt-3 flex flex-wrap gap-3">
+                  <button
+                    type="button"
+                    onClick={() => onGoTab('ogrenci-odeme')}
+                    className="text-xs font-semibold text-emerald-700 hover:underline dark:text-emerald-300"
+                  >
+                    Öğrenci ödemelerine git →
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onGoTab('ozel-ders-ucret')}
+                    className="text-xs font-semibold text-indigo-700 hover:underline dark:text-indigo-300"
+                  >
+                    Özel ders ücretlerine git →
+                  </button>
+                </div>
               ) : null}
             </div>
 
