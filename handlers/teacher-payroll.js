@@ -764,8 +764,14 @@ async function handleDeleteExtra(req, res, actor, roleSet) {
 }
 
 async function createPayrollExpense({ actor, institutionId, teacherName, period, totalTl, settlementId }) {
-  const today = new Date();
-  const itemDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  // Gider tarihi ödeme günü değil hakediş dönemi olmalı (Ağustos dönemi Eylül'de ödense bile Ağustos).
+  const periodStart = String(period?.from || '').slice(0, 10);
+  const itemDate = /^\d{4}-\d{2}-\d{2}$/.test(periodStart)
+    ? periodStart
+    : (() => {
+        const today = new Date();
+        return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+      })();
   const title = `${teacherName} - ${period.from} / ${period.to} Hakediş Ödemesi`;
   const row = {
     institution_id: institutionId || null,
