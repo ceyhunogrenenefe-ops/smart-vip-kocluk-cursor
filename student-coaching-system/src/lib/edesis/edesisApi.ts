@@ -789,10 +789,11 @@ export async function fetchSyncedEdesisExams(): Promise<{
   ok: boolean;
   items: EdesisSyncedExam[];
   schemaMissing?: boolean;
+  hint?: string | null;
 }> {
   const res = await apiFetch('/api/edesis-sync?op=list-synced-exams');
   const j = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(j.error || res.statusText);
+  if (!res.ok) throw new Error(j.hint || j.error || res.statusText);
   return j;
 }
 
@@ -800,6 +801,7 @@ export async function fetchEdesisExamAssignments(edesisExamId?: string): Promise
   ok: boolean;
   items: EdesisExamAssignmentRow[];
   schemaMissing?: boolean;
+  hint?: string | null;
 }> {
   const qs = new URLSearchParams({ op: 'list-exam-assignments' });
   if (edesisExamId) qs.set('edesisExamId', edesisExamId);

@@ -1,10 +1,241 @@
 /**
  * Edesis yerel deneme atama — katalog senkron + sınıf/öğrenci junction.
  * Öğrenci Sınava Gir listesi bu atamalara göre backend’de filtrelenir.
+ * Şema yoksa SUPABASE_DB_URL / DATABASE_URL / SUPABASE_DB_PASSWORD ile otomatik kurulur.
  */
 import { supabaseAdmin } from './supabase-admin.js';
 import { fetchEdesisExamsCatalog, pickEdesisCatalogExamId } from './edesis-client.js';
 import { errorMessage } from './error-msg.js';
+
+const EDESIS_ASSIGN_SCHEMA_SQL = `
+create table if not exists public.edesis_exams (
+  id uuid primary key default gen_random_uuid(),
+  institution_id text references public.institutions (id) on delete cascade,
+  edesis_exam_id text not null,
+  title text not null default '',
+  exam_date date,
+  exam_type text,
+  grade_name text,
+  is_online boolean not null default true,
+  status text,
+  duration_seconds integer,
+  raw jsonb not null default '{}'::jsonb,
+  synced_at timestamptz not null default now(),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+alter table public.edesis_exams add column if not exists institution_id text;
+alter table public.edesis_exams add column if not exists edesis_exam_id text;
+alter table public.edesis_exams add column if not exists title text not null default '';
+alter table public.edesis_exams add column if not exists exam_date date;
+alter table public.edesis_exams add column if not exists exam_type text;
+alter table public.edesis_exams add column if not exists grade_name text;
+alter table public.edesis_exams add column if not exists is_online boolean not null default true;
+alter table public.edesis_exams add column if not exists status text;
+alter table public.edesis_exams add column if not exists duration_seconds integer;
+alter table public.edesis_exams add column if not exists raw jsonb not null default '{}'::jsonb;
+alter table public.edesis_exams add column if not exists synced_at timestamptz not null default now();
+alter table public.edesis_exams add column if not exists created_at timestamptz not null default now();
+alter table public.edesis_exams add column if not exists updated_at timestamptz not null default now();
+do $$ begin
+  if not exists (
+    select 1 from pg_constraint
+    where conname = 'edesis_exams_institution_id_edesis_exam_id_key'
+      and conrelid = 'public.edesis_exams'::regclass
+  ) then
+    begin
+      alter table public.edesis_exams
+        add constraint edesis_exams_institution_id_edesis_exam_id_key
+        unique (institution_id, edesis_exam_id);
+    exception when others then null;
+    end;
+  end if;
+end $$;
+create index if not exists edesis_exams_institution_idx
+  on public.edesis_exams (institution_id, exam_date desc nulls last);
+create index if not exists edesis_exams_edesis_id_idx
+  on public.edesis_exams (edesis_exam_id);
+
+create table if not exists public.edesis_exam_assignments (
+  id uuid primary key default gen_random_uuid(),
+  institution_id text references public.institutions (id) on delete cascade,
+  edesis_exam_id text not null,
+  target_type text not null check (target_type in ('class', 'student')),
+  class_id text references public.classes (id) on delete cascade,
+  student_id text references public.students (id) on delete cascade,
+  assigned_by text references public.users (id) on delete set null,
+  starts_at timestamptz,
+  ends_at timestamptz,
+  notes text,
+  created_at timestamptz not null default now()
+);
+alter table public.edesis_exam_assignments add column if not exists institution_id text;
+alter table public.edesis_exam_assignments add column if not exists edesis_exam_id text;
+alter table public.edesis_exam_assignments add column if not exists target_type text;
+alter table public.edesis_exam_assignments add column if not exists class_id text;
+alter table public.edesis_exam_assignments add column if not exists student_id text;
+alter table public.edesis_exam_assignments add column if not exists assigned_by text;
+alter table public.edesis_exam_assignments add column if not exists starts_at timestamptz;
+alter table public.edesis_exam_assignments add column if not exists ends_at timestamptz;
+alter table public.edesis_exam_assignments add column if not exists notes text;
+alter table public.edesis_exam_assignments add column if not exists created_at timestamptz not null default now();
+do $$ begin
+  update public.edesis_exam_assignments
+  set target_type = case
+    when class_id is not null and student_id is null then 'class'
+    when student_id is not null and class_id is null then 'student'
+    else target_type
+  end
+  where target_type is null;
+  delete from public.edesis_exam_assignments
+  where target_type is null or target_type not in ('class', 'student');
+  begin
+    alter table public.edesis_exam_assignments alter column target_type set not null;
+  exception when others then null;
+  end;
+  begin
+    alter table public.edesis_exam_assignments
+      drop constraint if exists edesis_exam_assignments_target_type_check;
+    alter table public.edesis_exam_assignments
+      add constraint edesis_exam_assignments_target_type_check
+      check (target_type in ('class', 'student'));
+  exception when others then null;
+  end;
+  begin
+    alter table public.edesis_exam_assignments
+      drop constraint if exists edesis_exam_assignments_target_chk;
+    alter table public.edesis_exam_assignments
+      add constraint edesis_exam_assignments_target_chk check (
+        (target_type = 'class' and class_id is not null and student_id is null)
+        or (target_type = 'student' and student_id is not null and class_id is null)
+      );
+  exception when others then null;
+  end;
+end $$;
+create unique index if not exists edesis_exam_assignments_class_unq
+  on public.edesis_exam_assignments (institution_id, edesis_exam_id, class_id)
+  where target_type = 'class' and class_id is not null;
+create unique index if not exists edesis_exam_assignments_student_unq
+  on public.edesis_exam_assignments (institution_id, edesis_exam_id, student_id)
+  where target_type = 'student' and student_id is not null;
+create index if not exists edesis_exam_assignments_exam_idx
+  on public.edesis_exam_assignments (institution_id, edesis_exam_id);
+create index if not exists edesis_exam_assignments_student_idx
+  on public.edesis_exam_assignments (student_id)
+  where student_id is not null;
+create index if not exists edesis_exam_assignments_class_idx
+  on public.edesis_exam_assignments (class_id)
+  where class_id is not null;
+notify pgrst, 'reload schema';
+`.trim();
+
+/** Tek seferlik kurulum — her sınav için tablo yok; junction tablosu tüm denemeleri tutar. */
+const AUTO_SCHEMA_HINT =
+  'Tablolar otomatik kurulamadı. Vercel ortamına bir kez SUPABASE_DB_URL (veya DATABASE_URL / SUPABASE_DB_PASSWORD) ekleyip Redeploy edin; senkron/atama ilk kullanımda şemayı kendisi oluşturur.';
+
+let schemaReadyCache = null; // Promise | true
+let schemaEnsureInFlight = null;
+
+function supabaseProjectRef() {
+  const url = String(process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '').trim();
+  const m = url.match(/https:\/\/([^.]+)\.supabase\.co/);
+  return m?.[1] || '';
+}
+
+function buildDatabaseUrl() {
+  const direct = process.env.SUPABASE_DB_URL?.trim() || process.env.DATABASE_URL?.trim();
+  if (direct) return direct;
+  const password = process.env.SUPABASE_DB_PASSWORD?.trim();
+  const ref = supabaseProjectRef();
+  if (!password || !ref) return '';
+  return `postgresql://postgres:${encodeURIComponent(password)}@db.${ref}.supabase.co:5432/postgres`;
+}
+
+function isSchemaMissingError(error) {
+  const msg = errorMessage(error);
+  return /edesis_exams|edesis_exam_assignments|schema cache|PGRST|does not exist|relation/i.test(msg);
+}
+
+async function probeEdesisAssignSchema() {
+  const exams = await supabaseAdmin.from('edesis_exams').select('id').limit(1);
+  if (exams.error && isSchemaMissingError(exams.error)) return false;
+  if (exams.error) throw exams.error;
+  const assigns = await supabaseAdmin.from('edesis_exam_assignments').select('id, target_type').limit(1);
+  if (assigns.error && isSchemaMissingError(assigns.error)) return false;
+  if (assigns.error) throw assigns.error;
+  return true;
+}
+
+async function runEdesisAssignSchemaSql() {
+  const dbUrl = buildDatabaseUrl();
+  if (!dbUrl) {
+    return {
+      ok: false,
+      code: 'missing_db_url',
+      message: AUTO_SCHEMA_HINT
+    };
+  }
+  const postgres = (await import('postgres')).default;
+  const sql = postgres(dbUrl, { ssl: 'require', max: 1 });
+  try {
+    await sql.unsafe(EDESIS_ASSIGN_SCHEMA_SQL);
+    return { ok: true, via: 'postgres' };
+  } finally {
+    await sql.end({ timeout: 5 }).catch(() => {});
+  }
+}
+
+/**
+ * Tablolar yoksa bir kez otomatik oluşturur.
+ * Her sınav için değil; process içinde cache’lenir.
+ */
+export async function ensureEdesisExamAssignmentSchema({ force = false } = {}) {
+  if (!force && schemaReadyCache === true) {
+    return { ok: true, created: false, cached: true };
+  }
+  if (!force && schemaEnsureInFlight) return schemaEnsureInFlight;
+
+  schemaEnsureInFlight = (async () => {
+    try {
+      if (!force) {
+        const ready = await probeEdesisAssignSchema();
+        if (ready) {
+          schemaReadyCache = true;
+          return { ok: true, created: false };
+        }
+      }
+
+      const ran = await runEdesisAssignSchemaSql();
+      if (!ran.ok) {
+        throw Object.assign(new Error(ran.message || 'schema_auto_setup_failed'), {
+          code: 'SCHEMA_MISSING',
+          hint: ran.message,
+          setupCode: ran.code
+        });
+      }
+
+      // PostgREST şema cache yenilenene kadar kısa retry
+      let ready = false;
+      for (let i = 0; i < 6; i += 1) {
+        await new Promise((r) => setTimeout(r, 250 * (i + 1)));
+        ready = await probeEdesisAssignSchema().catch(() => false);
+        if (ready) break;
+      }
+      if (!ready) {
+        throw Object.assign(new Error('schema_created_but_not_visible'), {
+          code: 'SCHEMA_MISSING',
+          hint: 'Tablolar oluşturuldu; birkaç saniye sonra tekrar deneyin (PostgREST cache).'
+        });
+      }
+      schemaReadyCache = true;
+      return { ok: true, created: true, via: ran.via };
+    } finally {
+      schemaEnsureInFlight = null;
+    }
+  })();
+
+  return schemaEnsureInFlight;
+}
 
 function pickExamTitle(row) {
   return String(
@@ -72,6 +303,7 @@ function mapCatalogRowToExamUpsert(row, institutionId) {
 
 /** Edesis GET /exams → edesis_exams upsert */
 export async function syncEdesisExamCatalogToDb({ institutionId, cfg } = {}) {
+  await ensureEdesisExamAssignmentSchema();
   const inst = String(institutionId || '').trim() || null;
   const catalog = await fetchEdesisExamsCatalog(cfg || {}, {});
   const rows = Array.isArray(catalog.rows) ? catalog.rows : [];
@@ -83,16 +315,22 @@ export async function syncEdesisExamCatalogToDb({ institutionId, cfg } = {}) {
   const chunk = 80;
   for (let i = 0; i < upserts.length; i += chunk) {
     const slice = upserts.slice(i, i + chunk);
-    const { error } = await supabaseAdmin.from('edesis_exams').upsert(slice, {
+    let { error } = await supabaseAdmin.from('edesis_exams').upsert(slice, {
       onConflict: 'institution_id,edesis_exam_id',
       ignoreDuplicates: false
     });
+    if (error && isSchemaMissingError(error)) {
+      await ensureEdesisExamAssignmentSchema({ force: true });
+      ({ error } = await supabaseAdmin.from('edesis_exams').upsert(slice, {
+        onConflict: 'institution_id,edesis_exam_id',
+        ignoreDuplicates: false
+      }));
+    }
     if (error) {
-      // institution_id null unique davranışı farklı olabilir — tek tek dene
-      if (/edesis_exams|schema cache|PGRST/i.test(errorMessage(error))) {
+      if (isSchemaMissingError(error)) {
         throw Object.assign(new Error('edesis_exams_table_missing'), {
           code: 'SCHEMA_MISSING',
-          hint: 'sql/2026-09-12-edesis-exam-assignments.sql dosyasını Supabase’te çalıştırın'
+          hint: AUTO_SCHEMA_HINT
         });
       }
       throw error;
@@ -110,6 +348,12 @@ export async function syncEdesisExamCatalogToDb({ institutionId, cfg } = {}) {
 }
 
 export async function listSyncedEdesisExams({ institutionId, limit = 200 } = {}) {
+  let schemaHint = null;
+  try {
+    await ensureEdesisExamAssignmentSchema();
+  } catch (e) {
+    schemaHint = e?.hint || e?.message || AUTO_SCHEMA_HINT;
+  }
   let q = supabaseAdmin
     .from('edesis_exams')
     .select(
@@ -119,14 +363,22 @@ export async function listSyncedEdesisExams({ institutionId, limit = 200 } = {})
     .order('synced_at', { ascending: false })
     .limit(Math.min(500, Math.max(1, Number(limit) || 200)));
   if (institutionId) q = q.eq('institution_id', institutionId);
-  const { data, error } = await q;
+  let { data, error } = await q;
+  if (error && isSchemaMissingError(error)) {
+    try {
+      await ensureEdesisExamAssignmentSchema({ force: true });
+      ({ data, error } = await q);
+    } catch (e) {
+      schemaHint = e?.hint || e?.message || schemaHint || AUTO_SCHEMA_HINT;
+    }
+  }
   if (error) {
-    if (/edesis_exams|schema cache|PGRST/i.test(errorMessage(error))) {
-      return { items: [], schemaMissing: true };
+    if (isSchemaMissingError(error)) {
+      return { items: [], schemaMissing: true, schemaHint: schemaHint || AUTO_SCHEMA_HINT };
     }
     throw error;
   }
-  return { items: data || [], schemaMissing: false };
+  return { items: data || [], schemaMissing: false, schemaHint: null };
 }
 
 export async function listEdesisExamAssignments({
@@ -134,6 +386,12 @@ export async function listEdesisExamAssignments({
   edesisExamId,
   limit = 300
 } = {}) {
+  let schemaHint = null;
+  try {
+    await ensureEdesisExamAssignmentSchema();
+  } catch (e) {
+    schemaHint = e?.hint || e?.message || AUTO_SCHEMA_HINT;
+  }
   let q = supabaseAdmin
     .from('edesis_exam_assignments')
     .select(
@@ -143,15 +401,23 @@ export async function listEdesisExamAssignments({
     .limit(Math.min(1000, Math.max(1, Number(limit) || 300)));
   if (institutionId) q = q.eq('institution_id', institutionId);
   if (edesisExamId) q = q.eq('edesis_exam_id', String(edesisExamId));
-  const { data, error } = await q;
+  let { data, error } = await q;
+  if (error && isSchemaMissingError(error)) {
+    try {
+      await ensureEdesisExamAssignmentSchema({ force: true });
+      ({ data, error } = await q);
+    } catch (e) {
+      schemaHint = e?.hint || e?.message || schemaHint || AUTO_SCHEMA_HINT;
+    }
+  }
   if (error) {
-    if (/edesis_exam_assignments|schema cache|PGRST/i.test(errorMessage(error))) {
-      return { items: [], schemaMissing: true };
+    if (isSchemaMissingError(error)) {
+      return { items: [], schemaMissing: true, schemaHint: schemaHint || AUTO_SCHEMA_HINT };
     }
     throw error;
   }
   const items = await enrichEdesisExamAssignmentRows(data || []);
-  return { items, schemaMissing: false };
+  return { items, schemaMissing: false, schemaHint: null };
 }
 
 async function enrichEdesisExamAssignmentRows(rows) {
@@ -191,6 +457,7 @@ export async function createEdesisExamAssignments({
   endsAt = null,
   notes = null
 } = {}) {
+  await ensureEdesisExamAssignmentSchema();
   const examId = String(edesisExamId || '').trim();
   const type = String(targetType || '').trim();
   if (!examId) throw new Error('edesis_exam_id_required');
@@ -233,16 +500,23 @@ export async function createEdesisExamAssignments({
     }
   }
 
-  const { data, error } = await supabaseAdmin
-    .from('edesis_exam_assignments')
-    .upsert(rows, {
-      onConflict:
-        type === 'class'
-          ? 'institution_id,edesis_exam_id,class_id'
-          : 'institution_id,edesis_exam_id,student_id',
-      ignoreDuplicates: false
-    })
-    .select('id, edesis_exam_id, target_type, class_id, student_id');
+  const runUpsert = () =>
+    supabaseAdmin
+      .from('edesis_exam_assignments')
+      .upsert(rows, {
+        onConflict:
+          type === 'class'
+            ? 'institution_id,edesis_exam_id,class_id'
+            : 'institution_id,edesis_exam_id,student_id',
+        ignoreDuplicates: false
+      })
+      .select('id, edesis_exam_id, target_type, class_id, student_id');
+
+  let { data, error } = await runUpsert();
+  if (error && isSchemaMissingError(error)) {
+    await ensureEdesisExamAssignmentSchema({ force: true });
+    ({ data, error } = await runUpsert());
+  }
 
   if (error) {
     // Unique partial indexes may not map to onConflict — insert + ignore duplicates
@@ -256,10 +530,10 @@ export async function createEdesisExamAssignments({
           .maybeSingle();
         if (e2) {
           if (/duplicate|unique/i.test(errorMessage(e2))) continue;
-          if (/edesis_exam_assignments|schema cache|PGRST/i.test(errorMessage(e2))) {
+          if (isSchemaMissingError(e2)) {
             throw Object.assign(new Error('edesis_exam_assignments_table_missing'), {
               code: 'SCHEMA_MISSING',
-              hint: 'sql/2026-09-12-edesis-exam-assignments.sql dosyasını Supabase’te çalıştırın'
+              hint: AUTO_SCHEMA_HINT
             });
           }
           throw e2;
@@ -268,10 +542,10 @@ export async function createEdesisExamAssignments({
       }
       return { ok: true, assigned: inserted.length, items: inserted };
     }
-    if (/edesis_exam_assignments|schema cache|PGRST/i.test(errorMessage(error))) {
+    if (isSchemaMissingError(error)) {
       throw Object.assign(new Error('edesis_exam_assignments_table_missing'), {
         code: 'SCHEMA_MISSING',
-        hint: 'sql/2026-09-12-edesis-exam-assignments.sql dosyasını Supabase’te çalıştırın'
+        hint: AUTO_SCHEMA_HINT
       });
     }
     throw error;
