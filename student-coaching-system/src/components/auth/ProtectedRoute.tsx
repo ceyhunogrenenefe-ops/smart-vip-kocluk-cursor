@@ -7,7 +7,26 @@ import { userHasAnyRole } from '../../config/rolePermissions';
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
-  allowedRoles?: ('super_admin' | 'admin' | 'coach' | 'teacher' | 'student')[];
+  allowedRoles?: (
+    | 'super_admin'
+    | 'admin'
+    | 'coach'
+    | 'teacher'
+    | 'student'
+    | 'crm_agent'
+    | 'vendor_admin'
+  )[];
+}
+
+function isCrmAgentOnly(user: { role?: string; roles?: string[] } | null | undefined): boolean {
+  if (!user) return false;
+  const tags = new Set<string>([
+    String(user.role || '').toLowerCase(),
+    ...((user.roles || []).map((r) => String(r || '').toLowerCase()))
+  ]);
+  if (!tags.has('crm_agent')) return false;
+  const elevated = ['super_admin', 'admin', 'coach', 'teacher', 'student', 'vendor_admin'];
+  return !elevated.some((r) => tags.has(r));
 }
 
 export default function ProtectedRoute({ children, allowedRoles }: ProtectedRouteProps) {
@@ -29,9 +48,19 @@ export default function ProtectedRoute({ children, allowedRoles }: ProtectedRout
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
+  // CRM agent: yalnızca /crm/* — diğer tüm panelleri kilitle
+  if (isCrmAgentOnly(effectiveUser)) {
+    const path = location.pathname || '';
+    if (!path.startsWith('/crm')) {
+      return <Navigate to="/crm/inbox" replace />;
+    }
+  }
+
   // Rol kontrolü
   if (allowedRoles && !userHasAnyRole(effectiveUser, allowedRoles)) {
-    // Yetkisiz erişim - ana sayfaya yönlendir
+    if (isCrmAgentOnly(effectiveUser)) {
+      return <Navigate to="/crm/inbox" replace />;
+    }
     return <Navigate to="/" replace />;
   }
 
