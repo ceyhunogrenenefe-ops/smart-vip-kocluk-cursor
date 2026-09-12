@@ -6,6 +6,15 @@
 import { supabaseAdmin } from './supabase-admin.js';
 import { fetchEdesisExamsCatalog, pickEdesisCatalogExamId } from './edesis-client.js';
 import { errorMessage } from './error-msg.js';
+import {
+  ensureEdesisAssignStorageBackend,
+  storageCreateAssignments,
+  storageDeleteAssignment,
+  storageListAssignments,
+  storageListExams,
+  storageResolveExamIdsForStudent,
+  storageUpsertExams
+} from './edesis-exam-assignments-storage.js';
 
 const EDESIS_ASSIGN_SCHEMA_SQL = `
 create table if not exists public.edesis_exams (
@@ -133,8 +142,13 @@ notify pgrst, 'reload schema';
 const AUTO_SCHEMA_HINT =
   'Tablolar otomatik kurulamadı. Vercel ortamına bir kez SUPABASE_DB_URL / DATABASE_URL / POSTGRES_URL (veya SUPABASE_DB_PASSWORD) ekleyip Redeploy edin; senkron/atama veya /api/setup-edesis-exam-assignments-table ilk kullanımda şemayı kurar.';
 
-let schemaReadyCache = null; // Promise | true
+let schemaReadyCache = null; // true when sql or storage ready
+let schemaBackendMode = null; // 'sql' | 'storage'
 let schemaEnsureInFlight = null;
+
+export function getEdesisAssignBackendMode() {
+  return schemaBackendMode;
+}
 
 function supabaseProjectRef() {
   const url = String(process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '').trim();
@@ -197,11 +211,11 @@ async function runEdesisAssignSchemaSql() {
 
 /**
  * Tablolar yoksa bir kez otomatik oluşturur.
- * Her sınav için değil; process içinde cache’lenir.
+ * DB URL/password yoksa Supabase Storage JSON yedeğine düşer (service role yeter).
  */
 export async function ensureEdesisExamAssignmentSchema({ force = false } = {}) {
-  if (!force && schemaReadyCache === true) {
-    return { ok: true, created: false, cached: true };
+  if (!force && schemaReadyCache === true && schemaBackendMode) {
+    return { ok: true, created: false, cached: true, via: schemaBackendMode };
   }
   if (!force && schemaEnsureInFlight) return schemaEnsureInFlight;
 
@@ -211,34 +225,40 @@ export async function ensureEdesisExamAssignmentSchema({ force = false } = {}) {
         const ready = await probeEdesisAssignSchema();
         if (ready) {
           schemaReadyCache = true;
-          return { ok: true, created: false };
+          schemaBackendMode = 'sql';
+          return { ok: true, created: false, via: 'sql' };
         }
       }
 
       const ran = await runEdesisAssignSchemaSql();
-      if (!ran.ok) {
-        throw Object.assign(new Error(ran.message || 'schema_auto_setup_failed'), {
-          code: 'SCHEMA_MISSING',
-          hint: ran.message,
-          setupCode: ran.code
-        });
+      if (ran.ok) {
+        let ready = false;
+        for (let i = 0; i < 6; i += 1) {
+          await new Promise((r) => setTimeout(r, 250 * (i + 1)));
+          ready = await probeEdesisAssignSchema().catch(() => false);
+          if (ready) break;
+        }
+        if (ready) {
+          schemaReadyCache = true;
+          schemaBackendMode = 'sql';
+          return { ok: true, created: true, via: ran.via || 'postgres' };
+        }
       }
 
-      // PostgREST şema cache yenilenene kadar kısa retry
-      let ready = false;
-      for (let i = 0; i < 6; i += 1) {
-        await new Promise((r) => setTimeout(r, 250 * (i + 1)));
-        ready = await probeEdesisAssignSchema().catch(() => false);
-        if (ready) break;
-      }
-      if (!ready) {
-        throw Object.assign(new Error('schema_created_but_not_visible'), {
-          code: 'SCHEMA_MISSING',
-          hint: 'Tablolar oluşturuldu; birkaç saniye sonra tekrar deneyin (PostgREST cache).'
-        });
-      }
+      // SQL kurulamadı → Storage fallback (DB password gerekmez)
+      const storage = await ensureEdesisAssignStorageBackend();
       schemaReadyCache = true;
-      return { ok: true, created: true, via: ran.via };
+      schemaBackendMode = 'storage';
+      return {
+        ok: true,
+        created: Boolean(storage?.created),
+        via: 'storage',
+        sqlAttempt: ran?.ok ? 'created_but_invisible' : ran?.code || 'failed',
+        hint:
+          ran?.ok === false
+            ? 'SQL şeması kurulamadı; Storage JSON yedeği kullanılıyor (SUPABASE_DB_PASSWORD eklenince tablolara geçilebilir).'
+            : 'SQL tabloları henüz görünür değil; geçici olarak Storage kullanılıyor.'
+      };
     } finally {
       schemaEnsureInFlight = null;
     }
@@ -311,15 +331,27 @@ function mapCatalogRowToExamUpsert(row, institutionId) {
   };
 }
 
-/** Edesis GET /exams → edesis_exams upsert */
+/** Edesis GET /exams → edesis_exams upsert (veya Storage JSON) */
 export async function syncEdesisExamCatalogToDb({ institutionId, cfg } = {}) {
-  await ensureEdesisExamAssignmentSchema();
+  const ensured = await ensureEdesisExamAssignmentSchema();
   const inst = String(institutionId || '').trim() || null;
   const catalog = await fetchEdesisExamsCatalog(cfg || {}, {});
   const rows = Array.isArray(catalog.rows) ? catalog.rows : [];
   const upserts = rows
     .map((r) => mapCatalogRowToExamUpsert(r, inst))
     .filter(Boolean);
+
+  if (ensured?.via === 'storage' || schemaBackendMode === 'storage') {
+    const result = await storageUpsertExams(upserts);
+    return {
+      ok: true,
+      fetched: rows.length,
+      upserted: result.upserted,
+      cached: Boolean(catalog.cached),
+      totalCount: catalog.totalCount ?? rows.length,
+      backend: 'storage'
+    };
+  }
 
   let upserted = 0;
   const chunk = 80;
@@ -331,6 +363,17 @@ export async function syncEdesisExamCatalogToDb({ institutionId, cfg } = {}) {
     });
     if (error && isSchemaMissingError(error)) {
       await ensureEdesisExamAssignmentSchema({ force: true });
+      if (schemaBackendMode === 'storage') {
+        const result = await storageUpsertExams(upserts);
+        return {
+          ok: true,
+          fetched: rows.length,
+          upserted: result.upserted,
+          cached: Boolean(catalog.cached),
+          totalCount: catalog.totalCount ?? rows.length,
+          backend: 'storage'
+        };
+      }
       ({ error } = await supabaseAdmin.from('edesis_exams').upsert(slice, {
         onConflict: 'institution_id,edesis_exam_id',
         ignoreDuplicates: false
@@ -353,16 +396,23 @@ export async function syncEdesisExamCatalogToDb({ institutionId, cfg } = {}) {
     fetched: rows.length,
     upserted,
     cached: Boolean(catalog.cached),
-    totalCount: catalog.totalCount ?? rows.length
+    totalCount: catalog.totalCount ?? rows.length,
+    backend: 'sql'
   };
 }
 
+
 export async function listSyncedEdesisExams({ institutionId, limit = 200 } = {}) {
   let schemaHint = null;
+  let ensured = null;
   try {
-    await ensureEdesisExamAssignmentSchema();
+    ensured = await ensureEdesisExamAssignmentSchema();
   } catch (e) {
     schemaHint = e?.hint || e?.message || AUTO_SCHEMA_HINT;
+  }
+  if (ensured?.via === 'storage' || getEdesisAssignBackendMode() === 'storage') {
+    const items = await storageListExams({ institutionId, limit });
+    return { items, schemaMissing: false, schemaHint: null, backend: 'storage' };
   }
   let q = supabaseAdmin
     .from('edesis_exams')
@@ -376,7 +426,11 @@ export async function listSyncedEdesisExams({ institutionId, limit = 200 } = {})
   let { data, error } = await q;
   if (error && isSchemaMissingError(error)) {
     try {
-      await ensureEdesisExamAssignmentSchema({ force: true });
+      ensured = await ensureEdesisExamAssignmentSchema({ force: true });
+      if (getEdesisAssignBackendMode() === 'storage') {
+        const items = await storageListExams({ institutionId, limit });
+        return { items, schemaMissing: false, schemaHint: null, backend: 'storage' };
+      }
       ({ data, error } = await q);
     } catch (e) {
       schemaHint = e?.hint || e?.message || schemaHint || AUTO_SCHEMA_HINT;
@@ -388,8 +442,10 @@ export async function listSyncedEdesisExams({ institutionId, limit = 200 } = {})
     }
     throw error;
   }
-  return { items: data || [], schemaMissing: false, schemaHint: null };
+  return { items: data || [], schemaMissing: false, schemaHint: null, backend: 'sql' };
 }
+
+
 
 export async function listEdesisExamAssignments({
   institutionId,
@@ -397,10 +453,16 @@ export async function listEdesisExamAssignments({
   limit = 300
 } = {}) {
   let schemaHint = null;
+  let ensured = null;
   try {
-    await ensureEdesisExamAssignmentSchema();
+    ensured = await ensureEdesisExamAssignmentSchema();
   } catch (e) {
     schemaHint = e?.hint || e?.message || AUTO_SCHEMA_HINT;
+  }
+  if (ensured?.via === 'storage' || getEdesisAssignBackendMode() === 'storage') {
+    const items = await storageListAssignments({ institutionId, edesisExamId, limit });
+    const enriched = await enrichEdesisExamAssignmentRows(items);
+    return { items: enriched, schemaMissing: false, schemaHint: null, backend: 'storage' };
   }
   let q = supabaseAdmin
     .from('edesis_exam_assignments')
@@ -414,7 +476,12 @@ export async function listEdesisExamAssignments({
   let { data, error } = await q;
   if (error && isSchemaMissingError(error)) {
     try {
-      await ensureEdesisExamAssignmentSchema({ force: true });
+      ensured = await ensureEdesisExamAssignmentSchema({ force: true });
+      if (getEdesisAssignBackendMode() === 'storage') {
+        const items = await storageListAssignments({ institutionId, edesisExamId, limit });
+        const enriched = await enrichEdesisExamAssignmentRows(items);
+        return { items: enriched, schemaMissing: false, schemaHint: null, backend: 'storage' };
+      }
       ({ data, error } = await q);
     } catch (e) {
       schemaHint = e?.hint || e?.message || schemaHint || AUTO_SCHEMA_HINT;
@@ -427,8 +494,9 @@ export async function listEdesisExamAssignments({
     throw error;
   }
   const items = await enrichEdesisExamAssignmentRows(data || []);
-  return { items, schemaMissing: false, schemaHint: null };
+  return { items, schemaMissing: false, schemaHint: null, backend: 'sql' };
 }
+
 
 async function enrichEdesisExamAssignmentRows(rows) {
   if (!rows.length) return [];
@@ -456,6 +524,12 @@ async function enrichEdesisExamAssignmentRows(rows) {
  * targetType=class → classIds[]
  * targetType=student → studentIds[] (students.id)
  */
+
+/**
+ * Atama oluştur.
+ * targetType=class → classIds[]
+ * targetType=student → studentIds[] (students.id)
+ */
 export async function createEdesisExamAssignments({
   institutionId,
   edesisExamId,
@@ -467,7 +541,7 @@ export async function createEdesisExamAssignments({
   endsAt = null,
   notes = null
 } = {}) {
-  await ensureEdesisExamAssignmentSchema();
+  const ensured = await ensureEdesisExamAssignmentSchema();
   const examId = String(edesisExamId || '').trim();
   const type = String(targetType || '').trim();
   if (!examId) throw new Error('edesis_exam_id_required');
@@ -510,6 +584,11 @@ export async function createEdesisExamAssignments({
     }
   }
 
+  if (ensured?.via === 'storage' || getEdesisAssignBackendMode() === 'storage') {
+    const inserted = await storageCreateAssignments(rows);
+    return { ok: true, assigned: inserted.length, items: inserted, backend: 'storage' };
+  }
+
   const runUpsert = () =>
     supabaseAdmin
       .from('edesis_exam_assignments')
@@ -525,11 +604,14 @@ export async function createEdesisExamAssignments({
   let { data, error } = await runUpsert();
   if (error && isSchemaMissingError(error)) {
     await ensureEdesisExamAssignmentSchema({ force: true });
+    if (getEdesisAssignBackendMode() === 'storage') {
+      const inserted = await storageCreateAssignments(rows);
+      return { ok: true, assigned: inserted.length, items: inserted, backend: 'storage' };
+    }
     ({ data, error } = await runUpsert());
   }
 
   if (error) {
-    // Unique partial indexes may not map to onConflict — insert + ignore duplicates
     if (/no unique|ON CONFLICT|42P10/i.test(errorMessage(error))) {
       const inserted = [];
       for (const row of rows) {
@@ -561,16 +643,34 @@ export async function createEdesisExamAssignments({
     throw error;
   }
 
-  return { ok: true, assigned: (data || []).length, items: data || [] };
+  return { ok: true, assigned: (data || []).length, items: data || [], backend: 'sql' };
 }
+
+
 
 export async function deleteEdesisExamAssignment(assignmentId) {
   const id = String(assignmentId || '').trim();
   if (!id) throw new Error('assignment_id_required');
+  await ensureEdesisExamAssignmentSchema().catch(() => null);
+  if (getEdesisAssignBackendMode() === 'storage') {
+    return storageDeleteAssignment(id);
+  }
   const { error } = await supabaseAdmin.from('edesis_exam_assignments').delete().eq('id', id);
-  if (error) throw error;
+  if (error) {
+    if (isSchemaMissingError(error)) {
+      await ensureEdesisExamAssignmentSchema({ force: true });
+      if (getEdesisAssignBackendMode() === 'storage') return storageDeleteAssignment(id);
+    }
+    throw error;
+  }
   return { ok: true };
 }
+
+
+/**
+ * Öğrencinin (students.id) erişebileceği Edesis sınav ID seti.
+ * Doğrudan öğrenci ataması VEYA class_students üzerinden sınıf ataması.
+ */
 
 /**
  * Öğrencinin (students.id) erişebileceği Edesis sınav ID seti.
@@ -595,13 +695,28 @@ export async function resolveLocallyAssignedEdesisExamIdsForStudent({
     classIds = memberships.map((m) => String(m.class_id)).filter(Boolean);
   }
 
+  await ensureEdesisExamAssignmentSchema().catch(() => null);
+  if (getEdesisAssignBackendMode() === 'storage') {
+    const resolved = await storageResolveExamIdsForStudent({
+      studentId: sid,
+      classIds,
+      institutionId
+    });
+    return {
+      examIds: resolved.examIds,
+      classIds,
+      schemaMissing: false,
+      assignmentCount: resolved.assignmentCount,
+      backend: 'storage'
+    };
+  }
+
   let q = supabaseAdmin
     .from('edesis_exam_assignments')
     .select('id, edesis_exam_id, target_type, class_id, student_id, starts_at, ends_at')
     .limit(2000);
   if (institutionId) q = q.eq('institution_id', institutionId);
 
-  // (student_id = sid) OR (class_id in (...))
   if (classIds.length) {
     q = q.or(`student_id.eq.${sid},class_id.in.(${classIds.join(',')})`);
   } else {
@@ -611,6 +726,25 @@ export async function resolveLocallyAssignedEdesisExamIdsForStudent({
   const { data, error } = await q;
   if (error) {
     if (/edesis_exam_assignments|schema cache|PGRST/i.test(errorMessage(error))) {
+      try {
+        await ensureEdesisExamAssignmentSchema({ force: true });
+        if (getEdesisAssignBackendMode() === 'storage') {
+          const resolved = await storageResolveExamIdsForStudent({
+            studentId: sid,
+            classIds,
+            institutionId
+          });
+          return {
+            examIds: resolved.examIds,
+            classIds,
+            schemaMissing: false,
+            assignmentCount: resolved.assignmentCount,
+            backend: 'storage'
+          };
+        }
+      } catch (_) {
+        /* ignore */
+      }
       return { examIds: new Set(), classIds, schemaMissing: true, assignmentCount: 0 };
     }
     throw error;
@@ -629,9 +763,11 @@ export async function resolveLocallyAssignedEdesisExamIdsForStudent({
     examIds,
     classIds,
     schemaMissing: false,
-    assignmentCount: (data || []).length
+    assignmentCount: (data || []).length,
+    backend: 'sql'
   };
 }
+
 
 /** available-exams items → yalnızca yerel atananlar */
 export function filterExamItemsByLocalAssignment(items, allowedExamIds) {
