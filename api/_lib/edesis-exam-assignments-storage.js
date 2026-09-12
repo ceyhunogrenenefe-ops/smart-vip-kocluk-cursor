@@ -173,8 +173,11 @@ export async function storageResolveExamIdsForStudent({
   await ensureEdesisAssignStorageBackend();
   let list = await readJsonFile(ASSIGNMENTS_PATH, []);
   if (!Array.isArray(list)) list = [];
+  // institution_id null olan kayıtlar tüm kurumlar için geçerli
   if (institutionId) {
-    list = list.filter((r) => String(r.institution_id || '') === String(institutionId));
+    list = list.filter(
+      (r) => !r.institution_id || String(r.institution_id) === String(institutionId)
+    );
   }
   const sid = String(studentId || '');
   const classSet = new Set((classIds || []).map(String));
@@ -193,4 +196,18 @@ export async function storageResolveExamIdsForStudent({
     if (eid) examIds.add(eid);
   }
   return { examIds, assignmentCount };
+}
+
+
+/** Kurumdaki (veya global) toplam yerel atama sayısı — kapı aktivasyonu için */
+export async function storageCountAssignments({ institutionId = null } = {}) {
+  await ensureEdesisAssignStorageBackend();
+  let list = await readJsonFile(ASSIGNMENTS_PATH, []);
+  if (!Array.isArray(list)) list = [];
+  if (institutionId) {
+    list = list.filter(
+      (r) => !r.institution_id || String(r.institution_id) === String(institutionId)
+    );
+  }
+  return list.length;
 }
