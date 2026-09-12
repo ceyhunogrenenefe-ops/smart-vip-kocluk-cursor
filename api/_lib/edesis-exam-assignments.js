@@ -8,6 +8,7 @@ import { fetchEdesisExamsCatalog, pickEdesisCatalogExamId } from './edesis-clien
 import { errorMessage } from './error-msg.js';
 import {
   ensureEdesisAssignStorageBackend,
+  storageCountAssignments,
   storageCreateAssignments,
   storageDeleteAssignment,
   storageListAssignments,
@@ -666,15 +667,35 @@ export async function deleteEdesisExamAssignment(assignmentId) {
   return { ok: true };
 }
 
-
 /**
- * Öğrencinin (students.id) erişebileceği Edesis sınav ID seti.
- * Doğrudan öğrenci ataması VEYA class_students üzerinden sınıf ataması.
+ * Kurumda en az bir yerel platform ataması var mı?
+ * Yoksa kapı pasif → Edesis atamaları olduğu gibi gösterilir.
  */
+async function countInstitutionLocalAssignments(institutionId = null) {
+  const mode = getEdesisAssignBackendMode();
+  if (mode === 'storage') {
+    return storageCountAssignments({ institutionId });
+  }
+  let q = supabaseAdmin
+    .from('edesis_exam_assignments')
+    .select('id', { count: 'exact', head: true });
+  if (institutionId) {
+    q = q.or(`institution_id.eq.${institutionId},institution_id.is.null`);
+  }
+  const { count, error } = await q;
+  if (error) {
+    if (/edesis_exam_assignments|schema cache|PGRST|does not exist/i.test(errorMessage(error))) {
+      return 0;
+    }
+    throw error;
+  }
+  return Number(count || 0);
+}
 
 /**
  * Öğrencinin (students.id) erişebileceği Edesis sınav ID seti.
- * Doğrudan öğrenci ataması VEYA class_students üzerinden sınıf ataması.
+ * Kapı yalnızca kurumda gerçekten yerel atama varken aktif olur.
+ * Storage boş bootstrap → gateActive=false (Edesis listesi passthrough).
  */
 export async function resolveLocallyAssignedEdesisExamIdsForStudent({
   studentId,
@@ -682,7 +703,15 @@ export async function resolveLocallyAssignedEdesisExamIdsForStudent({
 } = {}) {
   const sid = String(studentId || '').trim();
   if (!sid) {
-    return { examIds: new Set(), classIds: [], schemaMissing: false, assignmentCount: 0 };
+    return {
+      examIds: new Set(),
+      classIds: [],
+      schemaMissing: true,
+      gateActive: false,
+      assignmentCount: 0,
+      institutionAssignmentCount: 0,
+      backend: null
+    };
   }
 
   let classIds = [];
@@ -695,8 +724,43 @@ export async function resolveLocallyAssignedEdesisExamIdsForStudent({
     classIds = memberships.map((m) => String(m.class_id)).filter(Boolean);
   }
 
-  await ensureEdesisExamAssignmentSchema().catch(() => null);
-  if (getEdesisAssignBackendMode() === 'storage') {
+  let backend = null;
+  try {
+    await ensureEdesisExamAssignmentSchema();
+    backend = getEdesisAssignBackendMode();
+  } catch (_) {
+    return {
+      examIds: new Set(),
+      classIds,
+      schemaMissing: true,
+      gateActive: false,
+      assignmentCount: 0,
+      institutionAssignmentCount: 0,
+      backend: null
+    };
+  }
+
+  let institutionAssignmentCount = 0;
+  try {
+    institutionAssignmentCount = await countInstitutionLocalAssignments(institutionId);
+  } catch (_) {
+    institutionAssignmentCount = 0;
+  }
+
+  // Platformda henüz atama yoksa kapıyı açma — Edesis atamaları görünsün
+  if (!institutionAssignmentCount) {
+    return {
+      examIds: new Set(),
+      classIds,
+      schemaMissing: false,
+      gateActive: false,
+      assignmentCount: 0,
+      institutionAssignmentCount: 0,
+      backend
+    };
+  }
+
+  if (backend === 'storage') {
     const resolved = await storageResolveExamIdsForStudent({
       studentId: sid,
       classIds,
@@ -706,16 +770,20 @@ export async function resolveLocallyAssignedEdesisExamIdsForStudent({
       examIds: resolved.examIds,
       classIds,
       schemaMissing: false,
+      gateActive: true,
       assignmentCount: resolved.assignmentCount,
+      institutionAssignmentCount,
       backend: 'storage'
     };
   }
 
   let q = supabaseAdmin
     .from('edesis_exam_assignments')
-    .select('id, edesis_exam_id, target_type, class_id, student_id, starts_at, ends_at')
+    .select('id, edesis_exam_id, target_type, class_id, student_id, starts_at, ends_at, institution_id')
     .limit(2000);
-  if (institutionId) q = q.eq('institution_id', institutionId);
+  if (institutionId) {
+    q = q.or(`institution_id.eq.${institutionId},institution_id.is.null`);
+  }
 
   if (classIds.length) {
     q = q.or(`student_id.eq.${sid},class_id.in.(${classIds.join(',')})`);
@@ -734,18 +802,29 @@ export async function resolveLocallyAssignedEdesisExamIdsForStudent({
             classIds,
             institutionId
           });
+          const instCount = await storageCountAssignments({ institutionId });
           return {
             examIds: resolved.examIds,
             classIds,
             schemaMissing: false,
+            gateActive: instCount > 0,
             assignmentCount: resolved.assignmentCount,
+            institutionAssignmentCount: instCount,
             backend: 'storage'
           };
         }
       } catch (_) {
         /* ignore */
       }
-      return { examIds: new Set(), classIds, schemaMissing: true, assignmentCount: 0 };
+      return {
+        examIds: new Set(),
+        classIds,
+        schemaMissing: true,
+        gateActive: false,
+        assignmentCount: 0,
+        institutionAssignmentCount: 0,
+        backend: null
+      };
     }
     throw error;
   }
@@ -763,11 +842,12 @@ export async function resolveLocallyAssignedEdesisExamIdsForStudent({
     examIds,
     classIds,
     schemaMissing: false,
+    gateActive: true,
     assignmentCount: (data || []).length,
+    institutionAssignmentCount,
     backend: 'sql'
   };
 }
-
 
 /** available-exams items → yalnızca yerel atananlar */
 export function filterExamItemsByLocalAssignment(items, allowedExamIds) {
@@ -780,7 +860,7 @@ export function filterExamItemsByLocalAssignment(items, allowedExamIds) {
 
 /**
  * Sınava giriş / booklet / structure için yetki.
- * schemaMissing → gate kapalı (eski davranış); aksi halde atama zorunlu.
+ * gateActive değilse Edesis ataması yeter (passthrough).
  */
 export async function assertStudentMayAccessEdesisExam({
   studentId,
@@ -793,8 +873,8 @@ export async function assertStudentMayAccessEdesisExam({
     studentId,
     institutionId
   });
-  if (resolved.schemaMissing) {
-    return { ok: true, gated: false, reason: 'schema_missing_passthrough' };
+  if (resolved.schemaMissing || resolved.gateActive === false) {
+    return { ok: true, gated: false, reason: 'local_gate_inactive_passthrough' };
   }
   if (!resolved.examIds.has(examId)) {
     return { ok: false, gated: true, reason: 'not_assigned' };

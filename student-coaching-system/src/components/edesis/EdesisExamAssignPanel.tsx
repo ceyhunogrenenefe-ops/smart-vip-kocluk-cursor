@@ -109,7 +109,7 @@ export function EdesisExamAssignPanel() {
         setSchemaHint(res.hint || null);
         throw new Error(
           res.hint ||
-            'Tablolar otomatik kurulamadı. Vercel’e SUPABASE_DB_URL ekleyip Redeploy edin.',
+            'Atama deposu kurulamadı; senkronu tekrar deneyin. Gerekirse Vercel’e SUPABASE_DB_URL ekleyin (Storage yedeği de çalışır).',
         );
       }
       setSchemaMissing(false);
@@ -250,16 +250,14 @@ export function EdesisExamAssignPanel() {
         <div className="flex gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
           <AlertCircle className="h-5 w-5 shrink-0" />
           <div>
-            <p className="font-semibold">Otomatik şema kurulumu bekleniyor</p>
+            <p className="font-semibold">Yerel atama deposu hazırlanıyor</p>
             <p className="mt-1">
-              Her sınav için ayrı tablo yok — tek seferlik{' '}
-              <code className="text-xs">edesis_exams</code> +{' '}
-              <code className="text-xs">edesis_exam_assignments</code> tabloları API tarafından
-              oluşturulur. Senkron veya atama sırasında otomatik kurulur.
+              Deneme atama SQL tabloları veya Storage yedeği ilk senkron/atamada otomatik kurulur. Bu
+              sırada öğrenciler Edesis’teki açık/atanmış denemeleri görmeye devam eder.
             </p>
             <p className="mt-1 text-amber-900/90">
               {schemaHint ||
-                'Kurulum başarısızsa Vercel’e bir kez SUPABASE_DB_URL (veya SUPABASE_DB_PASSWORD) ekleyip Redeploy edin.'}
+                'Kalıcı SQL için Vercel’e SUPABASE_DB_URL ekleyebilirsiniz; yoksa Storage yedeği yeterli.'}
             </p>
           </div>
         </div>
