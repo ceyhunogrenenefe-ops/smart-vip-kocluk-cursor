@@ -2053,9 +2053,12 @@ export default async function handler(req, res) {
         allowedExamIds: [...(localGate.examIds || [])].slice(0, 80),
         openOnlineFallback: Boolean(!items.length && !gateActive && openOnline.length)
       };
-      if (gateActive) {
-        gatedItems = filterExamItemsByLocalAssignment(gatedItems, localGate.examIds);
-        gatedExpired = filterExamItemsByLocalAssignment(expired, localGate.examIds);
+      // Yerel Deneme Atama kapısı Edesis tanımlı listeyi GİZLEMEZ.
+      // Kapı yalnızca meta/telemetri; öğrenci Edesis’te kendisine tanımlı tüm açık denemeleri görür.
+      // (Önceki subtractive filtre Safiye’de 1 denemeye düşürüyordu.)
+      if (gateActive && localGate.examIds instanceof Set && localGate.examIds.size) {
+        localAssignmentMeta.localAssignedExamIds = [...localGate.examIds].slice(0, 80);
+        localAssignmentMeta.gateFiltersList = false;
       }
 
       return res.status(200).json({
@@ -2087,9 +2090,6 @@ export default async function handler(req, res) {
           );
           if (getIdsEmpty && !meta?.abpAuth?.configured) {
             return 'GetOgrenciSinavIds boş/401 — ABP panel kullanıcısı + tenantId (3226) gerekli. op=configure-edesis ile kaydedin.';
-          }
-          if (gateActive && items.length && !gatedItems.length) {
-            return 'Edesis’te açık deneme var ancak size (veya sınıfınıza) platformdan atanmamış. Koçunuz Akademik Takip → Edesis → Deneme Atama ile tanımlamalı.';
           }
           if (items.length || openOnline.length) {
             return 'Girilmiş sonuçlarınız var; henüz girilmemiş açık deneme bulunamadı.';
