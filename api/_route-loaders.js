@@ -17,6 +17,8 @@ export const routeLoaders = {
   'auth-forgot-password': () => import('../handlers/auth-forgot-password.js'),
   'auth-reset-password': () => import('../handlers/auth-reset-password.js'),
   'setup-password-reset-table': () => import('../handlers/setup-password-reset-table.js'),
+  'setup-edesis-exam-assignments-table': () =>
+    import('../handlers/setup-edesis-exam-assignments-table.js'),
   students: () => import('../handlers/students.js'),
   'student-activity': () => import('../handlers/student-activity.js'),
   'my-student': () => import('../handlers/my-student.js'),
