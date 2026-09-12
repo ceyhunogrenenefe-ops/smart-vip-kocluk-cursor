@@ -1317,7 +1317,6 @@ async function handleStaffPerformance(institutionId) {
   return { by_user: byUser };
 }
 
-export default 
 async function handleSendChannelMessage(body, institutionId, actor) {
   const leadId = body.lead_id;
   const channel = String(body.channel || '').toLowerCase();
@@ -1472,7 +1471,7 @@ async function handleSendChannelMessage(body, institutionId, actor) {
 }
 
 
-async function handler(req, res) {
+export default async function handler(req, res) {
   if (req.method === 'OPTIONS') {
     res.setHeader('Allow', 'GET, POST, PATCH, OPTIONS');
     return res.status(204).end();
