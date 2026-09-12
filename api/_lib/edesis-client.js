@@ -1038,8 +1038,9 @@ export function catalogExamTakeableWithoutRosterProbe(exam, { programKeys, grade
 }
 
 /**
- * Sınava gir adayı: kademe+program uyumlu, açık pencere, boş veya ince roster.
- * İnce roster’da öğrenci yoksa overlay roster kontrolü eler.
+ * Sınava gir adayı: kademe+program uyumlu, açık pencere, boş/ince veya sınıf boyutu roster.
+ * Ready + şişman roster (eski analiz) probe edilmez; None/Processing sınıf atamaları
+ * GetOgrenciBySinavId ile doğrulanır (Safiye sınıf denemeleri 8’den büyük olabilir).
  */
 export function catalogExamOpenTakeableCandidate(exam, { programKeys, gradeName } = {}) {
   if (!exam) return false;
@@ -1049,7 +1050,10 @@ export function catalogExamOpenTakeableCandidate(exam, { programKeys, gradeName 
   if (!examCompatibleWithStudentProgramSoft(exam, programKeys || new Set())) return false;
   if (!isOpenEdesisCatalogExam(exam) || !examWindowStillOpen(exam)) return false;
   const sc = catalogExamStudentCount(exam);
-  if (sc > THIN_ONLINE_ROSTER_MAX) return false;
+  const status = catalogResultStatus(exam);
+  const classSizedOpen = /^(none|processing|pending)$/i.test(status);
+  const maxRoster = classSizedOpen ? Math.max(THIN_ONLINE_ROSTER_MAX, 48) : THIN_ONLINE_ROSTER_MAX;
+  if (sc > maxRoster) return false;
   return true;
 }
 
@@ -1447,14 +1451,22 @@ export async function fetchEdesisOgrenciAssignedSinavIdsDetailed(edesisStudentId
     record('SinavOgrencies.GetAll', '', null, [], e instanceof Error ? e.message : 'error');
   }
 
+  // GetOgrenciSinavIds çoğu zaman analiz geçmişidir; SinavOgrencies gerçek
+  // öğrenci–sınav bağlarıdır. Birini seçmek diğerini düşürüyordu (Safiye: tek deneme).
+  // Birleşik küme: tanımlı tüm sınavlar Sınava Gir’e aday olur; takeable filtre None/pencere ile daraltır.
   let ids = [];
   let preferredSource = null;
-  if (getOgrenciIds.length) {
-    ids = getOgrenciIds;
-    preferredSource = 'GetOgrenciSinavIds';
-  } else if (sinavOgrenciIds.length) {
-    ids = sinavOgrenciIds;
-    preferredSource = 'SinavOgrencies';
+  const unionIds = (...lists) =>
+    [...new Set(lists.flatMap((x) => (Array.isArray(x) ? x : [])).map((id) => String(id).trim()).filter(Boolean))];
+
+  if (getOgrenciIds.length || sinavOgrenciIds.length) {
+    ids = unionIds(getOgrenciIds, sinavOgrenciIds, checkedIds);
+    preferredSource =
+      getOgrenciIds.length && sinavOgrenciIds.length
+        ? 'GetOgrenciSinavIds+SinavOgrencies'
+        : getOgrenciIds.length
+          ? 'GetOgrenciSinavIds'
+          : 'SinavOgrencies';
   } else if (checkedIds.length) {
     ids = checkedIds;
     preferredSource = 'OgrenciSinavListesi.checked';
@@ -2506,13 +2518,14 @@ export async function resolveAssignedCatalogRowsForStudentAsync(params, cfgOverr
     assigned = overlayAssignedCatalogWithRaporViews(assigned, raporWithCatalog);
   }
 
-  // Yeni online deneme GetOgrenciSinavIds’te yok. Boş/ince roster + kademe + program +
+  // Yeni online deneme GetOgrenciSinavIds’te yok. Boş/ince/sınıf roster + kademe + program +
   // GetSinavForView penceresi ile Sınava gir’e alınır (kurum geneli dump değil).
+  // Sınıf boyutu adaylar çoğalabilir — en yeni 60 ile probe sınırla.
   const openCatalog = collectStudentTakeableOpenCatalogExams(catalogRows, {
     programKeys,
     gradeName,
     now: new Date()
-  });
+  }).slice(0, 60);
   const openWithWindow = [];
   const nowOpen = new Date();
   for (let i = 0; i < openCatalog.length; i += 6) {
