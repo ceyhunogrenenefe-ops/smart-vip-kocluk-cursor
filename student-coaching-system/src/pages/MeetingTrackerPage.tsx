@@ -113,11 +113,11 @@ function staffManagers(users: MtUser[]) {
   return users.filter((u) => ['super_admin', 'admin'].includes(String(u.role || '').toLowerCase()));
 }
 
-type PageTab = 'toplanti' | 'koc-takip' | 'kayit-takibi';
+type PageTab = 'toplanti' | 'koc-takip' | 'crm';
 
 function parsePageTab(raw: string | null): PageTab {
   if (raw === 'koc-takip') return 'koc-takip';
-  if (raw === 'kayit-takibi') return 'kayit-takibi';
+  if (raw === 'crm' || raw === 'kayit-takibi') return 'crm';
   return 'toplanti';
 }
 
@@ -128,15 +128,16 @@ export default function MeetingTrackerPage() {
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const meetingId = params.get('id') || '';
-  const isKayitRoute =
+  const isCrmRoute =
+    location.pathname === '/crm' ||
     location.pathname === '/kayit-takibi' ||
     location.pathname === '/super-admin/meetings/registration-tracking';
-  const pageTab = isKayitRoute ? 'kayit-takibi' : parsePageTab(params.get('tab'));
+  const pageTab = isCrmRoute ? 'crm' : parsePageTab(params.get('tab'));
 
   const setPageTab = useCallback(
     (next: PageTab) => {
-      if (next === 'kayit-takibi') {
-        navigate('/kayit-takibi');
+      if (next === 'crm') {
+        navigate('/crm');
         return;
       }
       const n = new URLSearchParams();
@@ -384,15 +385,15 @@ export default function MeetingTrackerPage() {
         </button>
         <button
           type="button"
-          onClick={() => setPageTab('kayit-takibi')}
+          onClick={() => setPageTab('crm')}
           className={`inline-flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold transition-colors ${
-            pageTab === 'kayit-takibi'
+            pageTab === 'crm'
               ? 'bg-white text-indigo-700 shadow-sm dark:bg-slate-900 dark:text-indigo-300'
               : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white'
           }`}
         >
           <Filter className="h-4 w-4" />
-          Kayıt Takibi
+          CRM
         </button>
         <button
           type="button"
@@ -408,7 +409,7 @@ export default function MeetingTrackerPage() {
         </button>
       </div>
 
-      {pageTab === 'kayit-takibi' ? (
+      {pageTab === 'crm' ? (
         <RegistrationTrackingPanel
           isManager={isManager}
           institutionId={effectiveUser?.institutionId || null}
