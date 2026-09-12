@@ -860,7 +860,8 @@ export function filterExamItemsByLocalAssignment(items, allowedExamIds) {
 
 /**
  * Sınava giriş / booklet / structure için yetki.
- * gateActive değilse Edesis ataması yeter (passthrough).
+ * Yerel Deneme Atama kapısı listeyi gizlemez ve take’i engellemez —
+ * kaynak Edesis tanımlı/atanmış denemelerdir (available-exams zaten filtreler).
  */
 export async function assertStudentMayAccessEdesisExam({
   studentId,
@@ -869,15 +870,10 @@ export async function assertStudentMayAccessEdesisExam({
 } = {}) {
   const examId = String(edesisExamId || '').trim();
   if (!examId) return { ok: false, reason: 'exam_id_required' };
-  const resolved = await resolveLocallyAssignedEdesisExamIdsForStudent({
+  // Telemetri için resolve et; sonucu yetki için kullanma (Edesis otoritesi).
+  await resolveLocallyAssignedEdesisExamIdsForStudent({
     studentId,
     institutionId
-  });
-  if (resolved.schemaMissing || resolved.gateActive === false) {
-    return { ok: true, gated: false, reason: 'local_gate_inactive_passthrough' };
-  }
-  if (!resolved.examIds.has(examId)) {
-    return { ok: false, gated: true, reason: 'not_assigned' };
-  }
-  return { ok: true, gated: true, reason: 'assigned' };
+  }).catch(() => null);
+  return { ok: true, gated: false, reason: 'edesis_assignment_authority' };
 }

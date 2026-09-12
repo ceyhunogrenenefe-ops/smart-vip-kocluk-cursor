@@ -176,6 +176,35 @@ describe('thin online roster + open catalog', () => {
     );
   });
 
+  it('Safiye-like: class-sized None is probe candidate; fat Ready is not', () => {
+    const keys = new Set(['lgs']);
+    const classNone = {
+      id: '1599001',
+      name: '8-F SINIF LGS DENEME',
+      examType: 'LGS',
+      resultStatus: 'None',
+      studentCount: 24,
+      examDate: '2026-09-05',
+      isOnlineSinavForStudent: true
+    };
+    const fatReady = {
+      ...classNone,
+      id: '1561040',
+      name: 'PARAF MOR 1',
+      resultStatus: 'Ready',
+      studentCount: 25,
+      examDate: '2026-08-15'
+    };
+    assert.equal(
+      catalogExamOpenTakeableCandidate(classNone, { programKeys: keys, gradeName: '8-F' }),
+      true
+    );
+    assert.equal(
+      catalogExamOpenTakeableCandidate(fatReady, { programKeys: keys, gradeName: '8-F' }),
+      false
+    );
+  });
+
   it('unpublished 7.SINIF / 5-6-7 KTT is not dumped to 8-F', () => {
     const keys = new Set(['lgs']);
     const ktt = {
