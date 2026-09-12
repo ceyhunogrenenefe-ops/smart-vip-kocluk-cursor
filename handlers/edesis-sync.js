@@ -296,18 +296,26 @@ async function loadAvailableEdesisExamsForStudent({
     })
   );
   const abpAuth = adminAssignment?.abpAuth || getEdesisAbpAuthStatus();
+  // Edesis atama boşsa açık online program denemelerini öğrenci listesine taşı
+  // (Sınava Gir + structure/submit aynı kaynak setini görsün).
+  const openOnlineFallback = !items.length && openOnline.length > 0;
+  const visibleItems = openOnlineFallback ? openOnline : items;
+  const visibleTakeableIds = visibleItems
+    .filter((x) => x.canTake && !x.hasStudentResult)
+    .map((x) => x.examId);
   return {
-    items,
+    items: visibleItems,
     expired,
     resultRows: studentResults.rows || [],
     openOnline,
     scope,
     meta: {
-      assignmentMode,
+      assignmentMode: openOnlineFallback ? 'open-online-fallback' : assignmentMode,
       assignedCount: hasAssignmentSignal ? assignedCatalogRows.length : 0,
       assignedExamIds: assignedExamIds.slice(0, 80),
-      takeableCount: takeableIds.length,
-      takeableExamIds: takeableIds.slice(0, 40),
+      openOnlineFallback,
+      takeableCount: visibleTakeableIds.length,
+      takeableExamIds: visibleTakeableIds.slice(0, 40),
       classroomId: scope.classroomId || null,
       studentCatalogCount: 0,
       classroomCatalogCount: 0,
@@ -1770,11 +1778,33 @@ export default async function handler(req, res) {
         });
         const assignedIdSet = new Set((loaded.meta?.assignedExamIds || []).map((id) => String(id)));
         const takeableIdSet = new Set((loaded.items || []).map((ex) => String(ex.examId)));
-        if (!assignedIdSet.has(examId) && !takeableIdSet.has(examId)) {
+        const openOnlineIdSet = new Set(
+          (loaded.openOnline || []).map((ex) => String(ex.examId || '').trim()).filter(Boolean)
+        );
+        if (
+          !assignedIdSet.has(examId) &&
+          !takeableIdSet.has(examId) &&
+          !openOnlineIdSet.has(examId)
+        ) {
           return res.status(403).json({
             error: 'exam_not_assigned',
             hint: 'Bu deneme size tanımlanmamış'
           });
+        }
+        const sidForGate = String(platformStudentId || studentSelf?.id || '').trim();
+        if (sidForGate) {
+          const access = await assertStudentMayAccessEdesisExam({
+            studentId: sidForGate,
+            edesisExamId: examId,
+            institutionId: actor?.institution_id || studentSelf?.institution_id || null
+          });
+          if (!access.ok) {
+            return res.status(403).json({
+              error: 'exam_not_locally_assigned',
+              reason: access.reason,
+              hint: 'Bu deneme size (veya sınıfınıza) platformda atanmamış.'
+            });
+          }
         }
       }
       const structure = await fetchEdesisExamStructure(examId, cfg);
@@ -1989,8 +2019,15 @@ export default async function handler(req, res) {
         actor?.institution_id || null
       );
 
-      // Yerel atama kapısı: öğrenci yalnızca kendisine veya sınıfına atanan denemeleri görür
-      let localGate = { schemaMissing: true, examIds: new Set(), assignmentCount: 0 };
+      // Yerel atama kapısı: yalnızca kurumda platform ataması varken filtreler.
+      // Storage/SQL boş bootstrap kapıyı AÇMAZ → Edesis atamaları görünür kalır.
+      let localGate = {
+        schemaMissing: true,
+        gateActive: false,
+        examIds: new Set(),
+        assignmentCount: 0,
+        institutionAssignmentCount: 0
+      };
       const platformSid = String(platformStudentId || studentSelf?.id || '').trim();
       if (platformSid) {
         localGate = await resolveLocallyAssignedEdesisExamIdsForStudent({
@@ -1998,16 +2035,26 @@ export default async function handler(req, res) {
           institutionId: actor?.institution_id || studentSelf?.institution_id || null
         });
       }
+      const gateActive = localGate.gateActive === true;
       let gatedItems = items;
       let gatedExpired = expired;
+      const openOnline = Array.isArray(loaded.openOnline) ? loaded.openOnline : [];
+      // Edesis atama listesi boşsa ve kapı pasifse, açık online denemelere düş
+      if (!gatedItems.length && !gateActive && openOnline.length) {
+        gatedItems = openOnline;
+      }
       let localAssignmentMeta = {
         deployMarker: EDESIS_LOCAL_ASSIGN_MARKER,
         schemaMissing: Boolean(localGate.schemaMissing),
+        gateActive,
         assignmentCount: localGate.assignmentCount || 0,
-        allowedExamIds: [...(localGate.examIds || [])].slice(0, 80)
+        institutionAssignmentCount: localGate.institutionAssignmentCount || 0,
+        backend: localGate.backend || null,
+        allowedExamIds: [...(localGate.examIds || [])].slice(0, 80),
+        openOnlineFallback: Boolean(!items.length && !gateActive && openOnline.length)
       };
-      if (!localGate.schemaMissing) {
-        gatedItems = filterExamItemsByLocalAssignment(items, localGate.examIds);
+      if (gateActive) {
+        gatedItems = filterExamItemsByLocalAssignment(gatedItems, localGate.examIds);
         gatedExpired = filterExamItemsByLocalAssignment(expired, localGate.examIds);
       }
 
@@ -2041,10 +2088,10 @@ export default async function handler(req, res) {
           if (getIdsEmpty && !meta?.abpAuth?.configured) {
             return 'GetOgrenciSinavIds boş/401 — ABP panel kullanıcısı + tenantId (3226) gerekli. op=configure-edesis ile kaydedin.';
           }
-          if (!localGate.schemaMissing && items.length && !gatedItems.length) {
+          if (gateActive && items.length && !gatedItems.length) {
             return 'Edesis’te açık deneme var ancak size (veya sınıfınıza) platformdan atanmamış. Koçunuz Akademik Takip → Edesis → Deneme Atama ile tanımlamalı.';
           }
-          if (items.length) {
+          if (items.length || openOnline.length) {
             return 'Girilmiş sonuçlarınız var; henüz girilmemiş açık deneme bulunamadı.';
           }
           return 'Size tanımlı açık Edesis denemesi yok. Edesis’te öğrenciye online deneme tanımlayıp Yenile’ye basın.';
@@ -2256,7 +2303,9 @@ export default async function handler(req, res) {
       const assigned = loaded.items || [];
       const assignedExam = assigned.find((ex) => String(ex.examId) === examId);
       const assignedIdSet = new Set((loaded.meta?.assignedExamIds || []).map((id) => String(id)));
-      const inAssigned = assignedIdSet.has(examId) || Boolean(assignedExam);
+      const openOnlineExam = (loaded.openOnline || []).find((ex) => String(ex.examId) === examId);
+      const inAssigned =
+        assignedIdSet.has(examId) || Boolean(assignedExam) || Boolean(openOnlineExam);
       if (!inAssigned) {
         return res.status(403).json({
           error: 'exam_not_assigned',
@@ -2264,7 +2313,7 @@ export default async function handler(req, res) {
         });
       }
 
-      // Yerel sınıf/öğrenci atama kapısı (tablo yoksa eski davranış)
+      // Yerel sınıf/öğrenci atama kapısı — gateActive değilse Edesis/openOnline yeter
       const sidForGate = String(platformStudentId || studentSelf?.id || '').trim();
       if (sidForGate) {
         const access = await assertStudentMayAccessEdesisExam({
