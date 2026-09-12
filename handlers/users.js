@@ -9,7 +9,7 @@ import { USER_LIST_COLUMNS, USER_LIST_OPTIONAL_COLUMNS } from '../api/_lib/list-
 import { selectWithOptionalColumns } from '../api/_lib/supabase-optional-moderator.js';
 import { ensureTeacherProfileForUser } from '../api/_lib/teacher-profile.js';
 
-const USER_ROLES = ['super_admin', 'admin', 'coach', 'teacher', 'student'];
+const USER_ROLES = ['super_admin', 'admin', 'coach', 'teacher', 'student', 'crm_agent'];
 const normalizeRoles = (raw, fallbackRole = 'student') => {
   const arr = Array.isArray(raw) ? raw : [];
   const cleaned = arr.map((x) => String(x || '').trim()).filter((x) => USER_ROLES.includes(x));
@@ -149,8 +149,8 @@ async function actorCanSeeUserRow(actor, row) {
 const actorMayAssignRole = (actor, newRole) => {
   if (!USER_ROLES.includes(newRole)) return false;
   if (newRole === 'super_admin') return false;
-  if (actor.role === 'super_admin') return ['admin', 'coach', 'teacher', 'student'].includes(newRole);
-  if (actor.role === 'admin') return ['coach', 'teacher', 'student'].includes(newRole);
+  if (actor.role === 'super_admin') return ['admin', 'coach', 'teacher', 'student', 'crm_agent'].includes(newRole);
+  if (actor.role === 'admin') return ['coach', 'teacher', 'student', 'crm_agent'].includes(newRole);
   if (actor.role === 'teacher') return newRole === 'student';
   if (actor.role === 'coach') return newRole === 'student';
   return false;

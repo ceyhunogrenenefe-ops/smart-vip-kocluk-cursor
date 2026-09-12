@@ -85,6 +85,10 @@ import CoachSoruAnalitikPage from './pages/questionHelp/CoachSoruAnalitikPage';
 import NotificationsPage from './pages/NotificationsPage';
 import EventsPage from './pages/EventsPage';
 import MeetingTrackerPage from './pages/MeetingTrackerPage';
+import CrmLayout from './pages/crm/CrmLayout';
+import CrmInboxPage from './pages/crm/CrmInboxPage';
+import CrmAgentsPage from './pages/crm/CrmAgentsPage';
+import CrmHome from './pages/crm/CrmHome';
 import OzelDersTalepleriPage from './pages/OzelDersTalepleriPage';
 import TeacherVitrineProfilePage from './pages/TeacherVitrineProfilePage';
 import TeacherAvailabilityPage from './pages/TeacherAvailabilityPage';
@@ -115,6 +119,14 @@ function HomeRedirect() {
   if (!effectiveUser) return <Navigate to="/login" replace />;
   const tags = userRoleTags(effectiveUser);
 
+  /** Yalnız CRM ajanı → izole inbox */
+  if (
+    tags.includes('crm_agent') &&
+    !tags.some((t) => ['super_admin', 'admin', 'coach', 'teacher', 'student', 'vendor_admin'].includes(t))
+  ) {
+    return <Navigate to="/crm/inbox" replace />;
+  }
+
   if (tags.includes('super_admin') || tags.includes('admin')) {
     return <Navigate to="/dashboard" replace />;
   }
@@ -126,6 +138,7 @@ function HomeRedirect() {
   if (tags.includes('coach')) return <Navigate to="/coach-dashboard" replace />;
   if (tags.includes('student')) return <Navigate to="/weekly-planner" replace />;
   if (tags.includes('vendor_admin')) return <Navigate to="/vendor-panel" replace />;
+  if (tags.includes('crm_agent')) return <Navigate to="/crm/inbox" replace />;
 
   return <Navigate to="/login" replace />;
 }
@@ -407,13 +420,25 @@ function App() {
               </ProtectedRoute>
             } />
 
-            <Route path="/crm" element={
-              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/crm')}>
-                <Layout>
-                  <MeetingTrackerPage />
-                </Layout>
-              </ProtectedRoute>
-            } />
+            <Route
+              path="/crm"
+              element={
+                <ProtectedRoute allowedRoles={rolesForProtectedRoute('/crm')}>
+                  <CrmLayout />
+                </ProtectedRoute>
+              }
+            >
+              <Route index element={<CrmHome />} />
+              <Route path="inbox" element={<CrmInboxPage />} />
+              <Route
+                path="agents"
+                element={
+                  <ProtectedRoute allowedRoles={rolesForProtectedRoute('/crm/agents')}>
+                    <CrmAgentsPage />
+                  </ProtectedRoute>
+                }
+              />
+            </Route>
             <Route path="/kayit-takibi" element={<Navigate to="/crm" replace />} />
             <Route path="/super-admin/meetings/registration-tracking" element={<Navigate to="/crm" replace />} />
 
