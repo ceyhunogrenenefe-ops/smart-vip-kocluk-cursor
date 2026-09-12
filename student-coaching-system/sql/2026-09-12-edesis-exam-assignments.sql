@@ -1,8 +1,11 @@
 -- Edesis deneme kataloğu + yerel atama (sınıf / öğrenci)
 -- Öğrenci "Sınava Gir" listesi yalnızca bu atamalara göre filtrelenir (backend).
 -- Idempotent: kısmi/eski tablo varsa kolonları ALTER ile tamamlar.
--- Not: Daha önce "target_type does not exist" aldıysanız
---      2026-09-12-edesis-exam-assignments-repair.sql dosyasını çalıştırın.
+--
+-- Not: Her sınav için ayrı tablo YOKTUR. Bu iki tablo tüm denemeler için ortaktır.
+-- Üretimde API (ensureEdesisExamAssignmentSchema) ilk senkron/atamada otomatik kurar;
+-- Vercel’de SUPABASE_DB_URL veya SUPABASE_DB_PASSWORD gerekir. Manuel çalıştırma yalnızca
+-- otomatik kurulum ortam değişkeni yoksa yedek yoldur.
 
 create table if not exists public.edesis_exams (
   id uuid primary key default gen_random_uuid(),
