@@ -83,9 +83,9 @@ const SCHEDULE_8E = [
     { start: '19:50', end: '20:30', subject: 'MATEMATİK' }
   ]),
   ...weekday(3, [
-    { start: '19:00', end: '19:40', subject: 'İNKILAP TARİHİ' },
+    { start: '19:00', end: '19:40', subject: 'İNGİLİZCE' },
     { start: '19:50', end: '20:30', subject: 'İNGİLİZCE' },
-    { start: '20:40', end: '21:20', subject: 'İNGİLİZCE' }
+    { start: '20:40', end: '21:20', subject: 'İNKILAP TARİHİ' }
   ]),
   ...weekday(4, [
     { start: '19:00', end: '19:40', subject: 'FEN BİLİMLERİ' },
@@ -111,9 +111,9 @@ const SCHEDULE_8F = [
     { start: '19:50', end: '20:30', subject: 'MATEMATİK' }
   ]),
   ...weekday(3, [
-    { start: '19:00', end: '19:40', subject: 'FEN BİLİMLERİ' },
+    { start: '19:00', end: '19:40', subject: 'İNKILAP TARİHİ' },
     { start: '19:50', end: '20:30', subject: 'FEN BİLİMLERİ' },
-    { start: '20:40', end: '21:20', subject: 'İNKILAP TARİHİ' }
+    { start: '20:40', end: '21:20', subject: 'FEN BİLİMLERİ' }
   ]),
   ...weekday(4, [
     { start: '19:00', end: '19:40', subject: 'MATEMATİK' },
