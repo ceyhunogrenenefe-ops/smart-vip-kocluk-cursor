@@ -131,7 +131,7 @@ notify pgrst, 'reload schema';
 
 /** Tek seferlik kurulum — her sınav için tablo yok; junction tablosu tüm denemeleri tutar. */
 const AUTO_SCHEMA_HINT =
-  'Tablolar otomatik kurulamadı. Vercel ortamına bir kez SUPABASE_DB_URL (veya DATABASE_URL / SUPABASE_DB_PASSWORD) ekleyip Redeploy edin; senkron/atama ilk kullanımda şemayı kendisi oluşturur.';
+  'Tablolar otomatik kurulamadı. Vercel ortamına bir kez SUPABASE_DB_URL / DATABASE_URL / POSTGRES_URL (veya SUPABASE_DB_PASSWORD) ekleyip Redeploy edin; senkron/atama veya /api/setup-edesis-exam-assignments-table ilk kullanımda şemayı kurar.';
 
 let schemaReadyCache = null; // Promise | true
 let schemaEnsureInFlight = null;
@@ -143,11 +143,21 @@ function supabaseProjectRef() {
 }
 
 function buildDatabaseUrl() {
-  const direct = process.env.SUPABASE_DB_URL?.trim() || process.env.DATABASE_URL?.trim();
+  const direct =
+    process.env.SUPABASE_DB_URL?.trim() ||
+    process.env.DATABASE_URL?.trim() ||
+    process.env.POSTGRES_URL?.trim() ||
+    process.env.POSTGRES_PRISMA_URL?.trim() ||
+    process.env.POSTGRES_URL_NON_POOLING?.trim() ||
+    process.env.SUPABASE_DATABASE_URL?.trim();
   if (direct) return direct;
-  const password = process.env.SUPABASE_DB_PASSWORD?.trim();
+  const password =
+    process.env.SUPABASE_DB_PASSWORD?.trim() ||
+    process.env.POSTGRES_PASSWORD?.trim() ||
+    process.env.SUPABASE_DATABASE_PASSWORD?.trim();
   const ref = supabaseProjectRef();
   if (!password || !ref) return '';
+  // Direct (session) connection — DDL için pooler (6543) yerine 5432
   return `postgresql://postgres:${encodeURIComponent(password)}@db.${ref}.supabase.co:5432/postgres`;
 }
 
