@@ -411,12 +411,11 @@ function App() {
               <ProtectedRoute allowedRoles={rolesForProtectedRoute('/crm')}>
                 <Layout>
                   <MeetingTrackerPage />
-                
-            <Route path="/kayit-takibi" element={<Navigate to="/crm" replace />} />
-            <Route path="/super-admin/meetings/registration-tracking" element={<Navigate to="/crm" replace />} />
-</Layout>
+                </Layout>
               </ProtectedRoute>
             } />
+            <Route path="/kayit-takibi" element={<Navigate to="/crm" replace />} />
+            <Route path="/super-admin/meetings/registration-tracking" element={<Navigate to="/crm" replace />} />
 
             <Route path="/toplantilarim" element={
               <ProtectedRoute allowedRoles={rolesForProtectedRoute('/toplantilarim')}>
