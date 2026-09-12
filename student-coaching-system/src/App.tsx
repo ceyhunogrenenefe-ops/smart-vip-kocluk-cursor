@@ -409,19 +409,14 @@ function App() {
               </ProtectedRoute>
             } />
 
-            <Route path="/kayit-takibi" element={
-              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/kayit-takibi')}>
+            <Route path="/crm" element={
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/crm')}>
                 <Layout>
                   <MeetingTrackerPage />
-                </Layout>
-              </ProtectedRoute>
-            } />
-
-            <Route path="/super-admin/meetings/registration-tracking" element={
-              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/kayit-takibi')}>
-                <Layout>
-                  <MeetingTrackerPage />
-                </Layout>
+                
+            <Route path="/kayit-takibi" element={<Navigate to="/crm" replace />} />
+            <Route path="/super-admin/meetings/registration-tracking" element={<Navigate to="/crm" replace />} />
+</Layout>
               </ProtectedRoute>
             } />
 

@@ -227,3 +227,17 @@ export function rtLookupPhone(phone: string) {
     };
   }>('lookup-phone', { method: 'GET', query: { phone } });
 }
+
+export function rtSendChannelMessage(body: {
+  lead_id: string;
+  channel: 'whatsapp' | 'instagram' | string;
+  body: string;
+}) {
+  return rtFetch<{
+    data: {
+      message: RegChannelMessage;
+      send: { ok: boolean; provider?: string | null; error?: string | null };
+      warning?: string | null;
+    };
+  }>('send-channel-message', { method: 'POST', body: JSON.stringify(body) });
+}

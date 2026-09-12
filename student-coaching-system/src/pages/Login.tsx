@@ -42,7 +42,8 @@ export default function Login() {
   // Zaten oturum varsa veya giriş başarılı olduktan sonra tek seferlik yönlendirme (çift navigate / throttling önlenir)
   useEffect(() => {
     if (user) {
-      if (returnTo && isGuestPublicPath(fromPath)) {
+      if (returnTo) {
+        // Paylaşılan /crm (ve diğer korumalı) linklere dönüş
         navigate(returnTo, { replace: true });
       } else {
         navigate('/', { replace: true });

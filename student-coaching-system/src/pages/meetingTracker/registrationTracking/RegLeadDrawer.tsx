@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Loader2, X } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -9,6 +9,8 @@ import {
   rtCompleteTask,
   rtConfirmLead,
   rtMarkLost,
+  rtSendChannelMessage,
+  type RegLead,
   type RegLeadDetail
 } from '../../../lib/registrationTrackingApi';
 import {
@@ -18,7 +20,8 @@ import {
   TEMPERATURE_LABELS,
   LOST_REASON_LABELS,
   formatIstanbul,
-  formatTry
+  formatTry,
+  CRM_MESSAGE_TEMPLATES
 } from '../../../lib/registrationTrackingConfig';
 
 type Props = {
@@ -131,7 +134,7 @@ export default function RegLeadDrawer({ leadId, isManager, onClose, onUpdated }:
         )}
 
         {!loading && tab === 'messages' && (
-          <MessagesTab items={detail?.channel_messages || []} />
+          <MessagesTab leadId={leadId!} lead={lead} items={detail?.channel_messages || []} onSent={load} />
         )}
 
         {!loading && tab === 'interactions' && (
@@ -420,43 +423,159 @@ function PricingForm({
   );
 }
 
-function MessagesTab({ items }: { items: Array<Record<string, unknown>> }) {
-  if (!items.length) {
-    return (
-      <p className="text-sm text-slate-500">
-        Henüz WhatsApp / Instagram mesajı yok. Meta webhook gelen mesajları buraya düşürür.
-      </p>
-    );
-  }
+function MessagesTab({
+  leadId,
+  lead,
+  items,
+  onSent
+}: {
+  leadId: string;
+  lead?: RegLead | null;
+  items: Array<Record<string, unknown>>;
+  onSent: () => void;
+}) {
+  const [channel, setChannel] = useState<'whatsapp' | 'instagram'>('whatsapp');
+  const [text, setText] = useState('');
+  const [sending, setSending] = useState(false);
+  const bottomRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [items.length]);
+
+  useEffect(() => {
+    if (lead?.last_inbound_channel === 'instagram') setChannel('instagram');
+    else setChannel('whatsapp');
+  }, [lead?.last_inbound_channel, leadId]);
+
+  const send = async () => {
+    const body = text.trim();
+    if (!body) return;
+    setSending(true);
+    try {
+      const res = await rtSendChannelMessage({ lead_id: leadId, channel, body });
+      setText('');
+      if (res.data?.warning) toast.warning(String(res.data.warning));
+      else toast.success(channel === 'instagram' ? 'Instagram mesajı işlendi' : 'WhatsApp mesajı gönderildi');
+      onSent();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Gönderilemedi');
+    } finally {
+      setSending(false);
+    }
+  };
 
   return (
-    <div className="space-y-2">
-      {items.map((m) => {
-        const inbound = String(m.direction || '') === 'inbound';
-        const channel = String(m.channel || '');
-        const channelLabel = channel === 'instagram' ? 'Instagram' : channel === 'whatsapp' ? 'WhatsApp' : channel;
-        return (
-          <div
-            key={String(m.id)}
-            className={`max-w-[90%] rounded-2xl px-3 py-2 text-sm ${
-              inbound
-                ? 'mr-auto rounded-bl-md bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-100'
-                : 'ml-auto rounded-br-md bg-emerald-600 text-white'
+    <div className="flex h-full min-h-[360px] flex-col gap-3">
+      <div className="flex-1 space-y-2 overflow-y-auto rounded-xl border border-slate-200 bg-slate-50/50 p-3 dark:border-slate-700 dark:bg-slate-900/40">
+        {!items.length && (
+          <p className="py-8 text-center text-sm text-slate-500">
+            Henüz WhatsApp / Instagram mesajı yok. Gelen webhook mesajları burada listelenir.
+          </p>
+        )}
+        {items.map((m) => {
+          const inbound = String(m.direction || '') === 'inbound';
+          const ch = String(m.channel || '');
+          const channelLabel = ch === 'instagram' ? 'Instagram' : ch === 'whatsapp' ? 'WhatsApp' : ch;
+          return (
+            <div
+              key={String(m.id)}
+              className={`max-w-[90%] rounded-2xl px-3 py-2 text-sm ${
+                inbound
+                  ? 'mr-auto rounded-bl-md bg-white text-slate-800 shadow-sm dark:bg-slate-800 dark:text-slate-100'
+                  : 'ml-auto rounded-br-md bg-emerald-600 text-white'
+              }`}
+            >
+              <div
+                className={`mb-0.5 flex items-center gap-1 text-[10px] ${
+                  inbound ? 'text-slate-500' : 'text-emerald-100'
+                }`}
+              >
+                <span className="font-medium">{channelLabel}</span>
+                <span>·</span>
+                <span>{inbound ? 'Gelen' : 'Giden'}</span>
+                <span className="ml-auto">{formatIstanbul(String(m.occurred_at || m.created_at || ''))}</span>
+              </div>
+              <p className="whitespace-pre-wrap leading-snug">
+                {String(m.body || `[${m.message_type || 'mesaj'}]`)}
+              </p>
+            </div>
+          );
+        })}
+        <div ref={bottomRef} />
+      </div>
+
+      <div className="space-y-2 rounded-xl border border-slate-200 p-3 dark:border-slate-700">
+        <div className="flex flex-wrap gap-1">
+          {CRM_MESSAGE_TEMPLATES.map((tpl) => (
+            <button
+              key={tpl.id}
+              type="button"
+              onClick={() => setText(tpl.body)}
+              className="rounded-full border border-slate-200 px-2.5 py-1 text-[11px] text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-300"
+            >
+              {tpl.label}
+            </button>
+          ))}
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setChannel('whatsapp')}
+            className={`rounded-lg px-2.5 py-1.5 text-xs font-medium ${
+              channel === 'whatsapp'
+                ? 'bg-emerald-600 text-white'
+                : 'bg-slate-100 text-slate-600 dark:bg-slate-800'
             }`}
           >
-            <div className={`mb-0.5 flex items-center gap-1 text-[10px] ${inbound ? 'text-slate-500' : 'text-emerald-100'}`}>
-              <span className="font-medium">{channelLabel}</span>
-              <span>·</span>
-              <span>{inbound ? 'Gelen' : 'Giden'}</span>
-              <span className="ml-auto">{formatIstanbul(String(m.occurred_at || m.created_at || ''))}</span>
-            </div>
-            <p className="whitespace-pre-wrap leading-snug">{String(m.body || `[${m.message_type || 'mesaj'}]`)}</p>
-          </div>
-        );
-      })}
+            WhatsApp
+          </button>
+          <button
+            type="button"
+            onClick={() => setChannel('instagram')}
+            className={`rounded-lg px-2.5 py-1.5 text-xs font-medium ${
+              channel === 'instagram'
+                ? 'bg-pink-600 text-white'
+                : 'bg-slate-100 text-slate-600 dark:bg-slate-800'
+            }`}
+          >
+            Instagram
+          </button>
+          {channel === 'instagram' && !lead?.instagram_scoped_id && (
+            <span className="self-center text-[10px] text-amber-600">IG id yok — önce gelen DM gerekir</span>
+          )}
+          {channel === 'whatsapp' && !(lead?.phone || lead?.normalized_phone) && (
+            <span className="self-center text-[10px] text-amber-600">Telefon yok</span>
+          )}
+        </div>
+        <div className="flex gap-2">
+          <textarea
+            className="min-h-[72px] flex-1 resize-y rounded-lg border border-slate-200 px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-800"
+            placeholder={`${channel === 'instagram' ? 'Instagram' : 'WhatsApp'} yanıtı yazın…`}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                e.preventDefault();
+                void send();
+              }
+            }}
+          />
+          <button
+            type="button"
+            disabled={sending || !text.trim()}
+            onClick={() => void send()}
+            className="self-end rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+          >
+            {sending ? '…' : 'Gönder'}
+          </button>
+        </div>
+        <p className="text-[10px] text-slate-400">Ctrl/Cmd + Enter ile gönder</p>
+      </div>
     </div>
   );
 }
+
 
 function InteractionsTab({
   items,
