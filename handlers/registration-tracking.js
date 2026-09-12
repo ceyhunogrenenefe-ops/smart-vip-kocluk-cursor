@@ -367,10 +367,7 @@ async function handleGetLead(leadId, institutionId, tags) {
       .limit(100),
     supabaseAdmin.from('registration_lead_tags').select('tag_id, registration_tags(id, name, color)').eq('lead_id', leadId),
     supabaseAdmin
-      .from('registration_channel_messages')
-      .select(
-        'id, channel, direction, body, message_type, contact_name, phone, occurred_at, external_message_id, created_at'
-      )
+      .from('registration_channel_messages').select('id, channel, direction, body, message_type, contact_name, phone, occurred_at, external_message_id, created_at')
       .eq('lead_id', leadId)
       .order('occurred_at', { ascending: true })
       .limit(200)
@@ -382,7 +379,18 @@ async function handleGetLead(leadId, institutionId, tags) {
       throw channelMsgs.error;
     }
   } else {
-    channelMessages = channelMsgs.data || [];
+    channelMessages = (channelMsgs.data || []).map((m) => ({
+      id: m.id,
+      channel: m.channel,
+      direction: m.direction,
+      body: m.body,
+      message_type: m.message_type,
+      contact_name: m.contact_name,
+      phone: m.phone,
+      occurred_at: m.occurred_at,
+      external_message_id: m.external_message_id,
+      created_at: m.created_at
+    }));
   }
 
   return {
@@ -1309,7 +1317,162 @@ async function handleStaffPerformance(institutionId) {
   return { by_user: byUser };
 }
 
-export default async function handler(req, res) {
+export default 
+async function handleSendChannelMessage(body, institutionId, actor) {
+  const leadId = body.lead_id;
+  const channel = String(body.channel || '').toLowerCase();
+  const text = String(body.body || '').trim();
+  if (!leadId) throw new Error('lead_id zorunlu');
+  if (!['whatsapp', 'instagram'].includes(channel)) throw new Error('channel whatsapp veya instagram olmalı');
+  if (!text) throw new Error('Mesaj boş olamaz');
+
+  const { data: lead, error: leadErr } = await supabaseAdmin
+    .from('registration_leads')
+    .select('*')
+    .eq('id', leadId)
+    .eq('institution_id', institutionId)
+    .is('deleted_at', null)
+    .maybeSingle();
+  if (leadErr) throw leadErr;
+  if (!lead) throw new Error('Lead bulunamadı');
+
+  let externalMessageId = null;
+  let sendMeta = { ok: false, provider: null, error: null };
+
+  if (channel === 'whatsapp') {
+    const phone = lead.normalized_phone || lead.phone;
+    if (!phone) throw new Error('Lead telefonu yok — WhatsApp gönderilemez');
+    try {
+      const { sendGatewayTextMessage, gatewaySendConfigured } = await import('../api/_lib/whatsapp-gateway-send.js');
+      const { sendMetaTextMessage, metaWhatsAppConfigured } = await import('../api/_lib/meta-whatsapp.js');
+      if (typeof gatewaySendConfigured === 'function' && gatewaySendConfigured()) {
+        const gw = await sendGatewayTextMessage({
+          phone,
+          message: text,
+          allowSharedFallback: true
+        });
+        sendMeta = {
+          ok: !gw?.error,
+          provider: 'gateway',
+          error: gw?.error || null,
+          raw: gw
+        };
+        externalMessageId = gw?.messageId || gw?.id || null;
+      } else if (typeof metaWhatsAppConfigured === 'function' && metaWhatsAppConfigured()) {
+        const meta = await sendMetaTextMessage({ toE164: phone, text });
+        sendMeta = { ok: true, provider: 'meta', error: null, raw: meta };
+        externalMessageId = meta?.messageId || null;
+      } else {
+        sendMeta = {
+          ok: false,
+          provider: 'none',
+          error: 'WhatsApp gönderim yapılandırması yok — mesaj yalnızca kaydedildi'
+        };
+      }
+    } catch (e) {
+      sendMeta = { ok: false, provider: 'error', error: e instanceof Error ? e.message : String(e) };
+    }
+  } else if (channel === 'instagram') {
+    const igsid = lead.instagram_scoped_id;
+    if (!igsid) throw new Error('Instagram scoped id yok — önce gelen DM gerekli');
+    try {
+      const token =
+        process.env.INSTAGRAM_PAGE_ACCESS_TOKEN ||
+        process.env.META_PAGE_ACCESS_TOKEN ||
+        '';
+      const pageId =
+        process.env.INSTAGRAM_BUSINESS_ACCOUNT_ID ||
+        process.env.META_IG_BUSINESS_ID ||
+        '';
+      if (!token || !pageId) {
+        sendMeta = {
+          ok: false,
+          provider: 'none',
+          error: 'Instagram API yapılandırması yok — mesaj yalnızca kaydedildi'
+        };
+      } else {
+        const url = `https://graph.facebook.com/v21.0/${pageId}/messages`;
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            recipient: { id: igsid },
+            messaging_type: 'RESPONSE',
+            message: { text }
+          })
+        });
+        const j = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          sendMeta = {
+            ok: false,
+            provider: 'meta_ig',
+            error: j?.error?.message || `HTTP ${res.status}`,
+            raw: j
+          };
+        } else {
+          sendMeta = { ok: true, provider: 'meta_ig', error: null, raw: j };
+          externalMessageId = j?.message_id || j?.id || null;
+        }
+      }
+    } catch (e) {
+      sendMeta = { ok: false, provider: 'error', error: e instanceof Error ? e.message : String(e) };
+    }
+  }
+
+  const insertRow = {
+    institution_id: institutionId,
+    lead_id: leadId,
+    channel,
+    direction: 'outbound',
+    phone: lead.phone || null,
+    normalized_phone: lead.normalized_phone || null,
+    external_contact_id: channel === 'instagram' ? lead.instagram_scoped_id || null : null,
+    contact_name: lead.parent_full_name || lead.full_name || null,
+    body: text,
+    message_type: 'text',
+    external_message_id: externalMessageId,
+    payload: { send: sendMeta, actor_user_id: actor.sub },
+    occurred_at: new Date().toISOString()
+  };
+
+  const { data: saved, error: insErr } = await supabaseAdmin
+    .from('registration_channel_messages')
+    .insert(insertRow)
+    .select('*')
+    .maybeSingle();
+  if (insErr) {
+    if (/registration_channel_messages|does not exist|schema cache/i.test(insErr.message || '')) {
+      throw new Error('Mesaj tablosu yok — SQL migration çalıştırın');
+    }
+    throw insErr;
+  }
+
+  try {
+    await supabaseAdmin.from('registration_interactions').insert({
+      lead_id: leadId,
+      institution_id: institutionId,
+      interaction_type: channel === 'instagram' ? 'other' : 'whatsapp',
+      interaction_at: insertRow.occurred_at,
+      title: channel === 'instagram' ? 'Giden Instagram' : 'Giden WhatsApp',
+      description: text,
+      created_by: actor.sub
+    });
+  } catch (_) {
+    /* optional */
+  }
+
+  return {
+    message: saved,
+    send: sendMeta,
+    warning: sendMeta.ok ? null : sendMeta.error
+  };
+}
+
+
+async function handler(req, res) {
   if (req.method === 'OPTIONS') {
     res.setHeader('Allow', 'GET, POST, PATCH, OPTIONS');
     return res.status(204).end();
@@ -1472,6 +1635,11 @@ export default async function handler(req, res) {
         const data = await handleImportCommit(body, institutionId, actor);
         return res.status(200).json({ data });
       }
+    }
+
+    if (req.method === 'POST' && (op === 'send-channel-message' || op === 'send-message')) {
+      const data = await handleSendChannelMessage(body, institutionId, actor);
+      return res.status(200).json({ data });
     }
 
     if (req.method === 'PATCH' && op === 'update') {

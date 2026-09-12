@@ -1,4 +1,4 @@
-/** Kayıt Takibi — merkezi config ve Türkçe etiketler */
+/** CRM — merkezi config ve Türkçe etiketler */
 
 export const GRADE_PROGRAMS = [
   { code: 'grade_2', label: '2. Sınıf', sortOrder: 10 },
@@ -82,30 +82,74 @@ export const INCOMING_STAGES = ['new_lead', 'first_contact_pending'] as const;
 export const CRM_PIPELINE_COLUMNS: {
   id: string;
   label: string;
+  /** Pipeline aşamaları; closed sütununda stages boş — primary_status ile ayrılır */
   stages: readonly string[];
+  /** closed: confirmed + lost kartları */
+  kind?: 'pipeline' | 'closed';
 }[] = [
-  { id: 'incoming', label: 'Gelen leadler', stages: INCOMING_STAGES },
+  { id: 'incoming', label: "Gelen Lead'ler", stages: INCOMING_STAGES },
   {
     id: 'contact',
-    label: 'Görüşülüyor',
+    label: "Görüşülen Lead'ler",
     stages: ['first_contact_completed', 'presentation_scheduled', 'offer_sent']
   },
-  { id: 'trial', label: 'Deneme dersi', stages: TRIAL_STAGES },
-  { id: 'thinking', label: 'Düşünüyor / takip', stages: ['considering', 'follow_up', 'postponed'] },
-  { id: 'payment', label: 'Ödeme bekleniyor', stages: ['payment_pending'] }
+  { id: 'trial', label: 'Deneme Dersi Planlanan / Yapılan', stages: TRIAL_STAGES },
+  { id: 'thinking', label: 'Düşünülüyor', stages: ['considering', 'follow_up', 'postponed'] },
+  { id: 'payment', label: 'Ödeme Bekleniyor', stages: ['payment_pending'] },
+  { id: 'closed', label: 'Kayıt Tamamlandı (Kazanıldı) / Kaybedildi', stages: [], kind: 'closed' }
 ];
 
-/**
- * Üst hızlı filtreler — kullanıcı localStorage ile sırayı/görünürlüğü düzenleyebilir.
- * key: API’ye giden rt_quick değeri
- */
+/** Sütun id → varsayılan stage (sürükle-bırak) */
+export const CRM_COLUMN_DEFAULT_STAGE: Record<string, string> = {
+  incoming: 'new_lead',
+  contact: 'first_contact_completed',
+  trial: 'trial_lesson_scheduled',
+  thinking: 'considering',
+  payment: 'payment_pending'
+};
+
+export function crmColumnIdForLead(lead: {
+  stage?: string;
+  primary_status?: string;
+}): string {
+  if (lead.primary_status === 'confirmed' || lead.primary_status === 'lost') return 'closed';
+  for (const col of CRM_PIPELINE_COLUMNS) {
+    if (col.kind === 'closed') continue;
+    if (col.stages.includes(lead.stage || '')) return col.id;
+  }
+  return 'incoming';
+}
+
+export const CRM_MESSAGE_TEMPLATES: { id: string; label: string; body: string }[] = [
+  {
+    id: 'greeting',
+    label: 'Karşılama',
+    body: 'Merhaba, Online VIP Dershane kayıt biriminden yazıyoruz. Size nasıl yardımcı olabiliriz?'
+  },
+  {
+    id: 'trial_invite',
+    label: 'Deneme daveti',
+    body: 'Ücretsiz deneme dersi planlamak ister misiniz? Uygun olduğunuz gün ve saati yazmanız yeterli.'
+  },
+  {
+    id: 'follow_up',
+    label: 'Takip',
+    body: 'Geçen görüşmemizi hatırlatmak istedik. Kararınız veya sorularınız için buradayız.'
+  },
+  {
+    id: 'payment',
+    label: 'Ödeme hatırlatma',
+    body: 'Kayıt işleminizi tamamlamak için ödeme bilgisini paylaşabiliriz. Yardımcı olmamı ister misiniz?'
+  }
+];
+
 export const CRM_QUICK_FILTERS: {
   key: string;
   label: string;
   defaultVisible: boolean;
 }[] = [
   { key: '', label: 'Aktif takip', defaultVisible: true },
-  { key: 'incoming', label: 'Gelen leadler', defaultVisible: true },
+  { key: 'incoming', label: "Gelen Lead'ler", defaultVisible: true },
   { key: 'trial', label: 'Deneme dersi', defaultVisible: true },
   { key: 'payment', label: 'Ödeme bekleyen', defaultVisible: true },
   { key: 'confirmed', label: 'Kesin kayıt', defaultVisible: true },
