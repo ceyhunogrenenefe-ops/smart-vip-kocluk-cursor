@@ -740,3 +740,111 @@ export async function fetchEdesisIngestStatus(params: {
   if (!res.ok) throw new Error(j.error || j.message || j.hint || res.statusText);
   return j;
 }
+
+
+/* ─── Yerel deneme atama (edesis_exams / edesis_exam_assignments) ─── */
+
+export type EdesisSyncedExam = {
+  id: string;
+  edesis_exam_id: string;
+  title: string;
+  exam_date?: string | null;
+  exam_type?: string | null;
+  grade_name?: string | null;
+  is_online?: boolean;
+  status?: string | null;
+  duration_seconds?: number | null;
+  synced_at?: string;
+};
+
+export type EdesisExamAssignmentRow = {
+  id: string;
+  edesis_exam_id: string;
+  target_type: 'class' | 'student';
+  class_id?: string | null;
+  student_id?: string | null;
+  class_name?: string | null;
+  student_name?: string | null;
+  assigned_by?: string | null;
+  starts_at?: string | null;
+  ends_at?: string | null;
+  notes?: string | null;
+  created_at?: string;
+};
+
+export async function syncEdesisExamCatalog(): Promise<{
+  ok: boolean;
+  fetched: number;
+  upserted: number;
+  schemaMissing?: boolean;
+  hint?: string;
+}> {
+  const res = await apiFetch('/api/edesis-sync?op=sync-exam-catalog', { method: 'POST' });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(j.hint || j.error || res.statusText);
+  return j;
+}
+
+export async function fetchSyncedEdesisExams(): Promise<{
+  ok: boolean;
+  items: EdesisSyncedExam[];
+  schemaMissing?: boolean;
+}> {
+  const res = await apiFetch('/api/edesis-sync?op=list-synced-exams');
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(j.error || res.statusText);
+  return j;
+}
+
+export async function fetchEdesisExamAssignments(edesisExamId?: string): Promise<{
+  ok: boolean;
+  items: EdesisExamAssignmentRow[];
+  schemaMissing?: boolean;
+}> {
+  const qs = new URLSearchParams({ op: 'list-exam-assignments' });
+  if (edesisExamId) qs.set('edesisExamId', edesisExamId);
+  const res = await apiFetch(`/api/edesis-sync?${qs}`);
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(j.error || res.statusText);
+  return j;
+}
+
+export async function assignEdesisExam(payload: {
+  edesisExamId: string;
+  targetType: 'class' | 'student';
+  classIds?: string[];
+  studentIds?: string[];
+  notes?: string;
+}): Promise<{ ok: boolean; assigned: number }> {
+  const res = await apiFetch('/api/edesis-sync?op=assign-exam', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(j.hint || j.error || res.statusText);
+  return j;
+}
+
+export async function unassignEdesisExam(assignmentId: string): Promise<{ ok: boolean }> {
+  const res = await apiFetch('/api/edesis-sync?op=unassign-exam', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ assignmentId })
+  });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(j.error || res.statusText);
+  return j;
+}
+
+export async function fetchEdesisAssignTargets(): Promise<{
+  ok: boolean;
+  classes: Array<{ id: string; name: string; class_level?: string | null }>;
+  students: Array<{ id: string; name: string; email?: string | null }>;
+  memberships: Array<{ class_id: string; student_id: string }>;
+}> {
+  const res = await apiFetch('/api/edesis-sync?op=list-assign-targets');
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(j.error || res.statusText);
+  return j;
+}

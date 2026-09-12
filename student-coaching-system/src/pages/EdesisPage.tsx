@@ -14,6 +14,7 @@ import {
   RefreshCw,
   Search,
   Sparkles,
+  UserPlus,
   Users
 } from 'lucide-react';
 import { Link, useSearchParams } from 'react-router-dom';
@@ -21,6 +22,7 @@ import { toast } from 'sonner';
 import { useAuth } from '../context/AuthContext';
 import { sortByFirstName } from '../lib/personNameSort';
 import EdesisSyncPanel from '../components/settings/EdesisSyncPanel';
+import EdesisExamAssignPanel from '../components/edesis/EdesisExamAssignPanel';
 import {
   createEdesisClassroomHub,
   createEdesisParentHub,
@@ -45,6 +47,7 @@ import {
 } from '../lib/edesis/edesisApi';
 import { shareEdesisKarneWithParent } from '../lib/edesis/shareEdesisKarneWhatsApp';
 
+type HubView = 'dosya' | 'atama';
 type DossierTab = 'girecek' | 'girdi' | 'kurum' | 'araclar';
 
 function fmtDate(raw?: string | null) {
@@ -98,6 +101,7 @@ export default function EdesisPage() {
 
   const [selectedPlatformId, setSelectedPlatformId] = useState(searchParams.get('studentId') || '');
   const [selectedEdesisId, setSelectedEdesisId] = useState('');
+  const [hubView, setHubView] = useState<HubView>('dosya');
   const [dossierTab, setDossierTab] = useState<DossierTab>('girecek');
   const [dossierLoading, setDossierLoading] = useState(false);
   const [dossier, setDossier] = useState<EdesisStudentDossier | null>(null);
@@ -536,6 +540,34 @@ export default function EdesisPage() {
         </div>
       </section>
 
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={() => setHubView('dosya')}
+          className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold ${
+            hubView === 'dosya' ? 'bg-indigo-600 text-white' : 'border border-slate-200 bg-white text-slate-700'
+          }`}
+        >
+          <Users className="h-4 w-4" />
+          Öğrenci dosyası
+        </button>
+        <button
+          type="button"
+          onClick={() => setHubView('atama')}
+          className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold ${
+            hubView === 'atama' ? 'bg-indigo-600 text-white' : 'border border-slate-200 bg-white text-slate-700'
+          }`}
+        >
+          <UserPlus className="h-4 w-4" />
+          Deneme Atama
+        </button>
+      </div>
+
+      {hubView === 'atama' ? (
+        <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+          <EdesisExamAssignPanel />
+        </section>
+      ) : (
       <div className="grid gap-6 lg:grid-cols-[340px_minmax(0,1fr)]">
         <aside className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
           <div className="mb-3 flex items-center justify-between">
@@ -981,6 +1013,7 @@ export default function EdesisPage() {
           )}
         </section>
       </div>
+      )}
     </div>
   );
 }
