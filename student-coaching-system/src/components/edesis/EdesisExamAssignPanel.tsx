@@ -49,6 +49,7 @@ export function EdesisExamAssignPanel() {
   const [error, setError] = useState<string | null>(null);
   const [okMsg, setOkMsg] = useState<string | null>(null);
   const [schemaMissing, setSchemaMissing] = useState(false);
+  const [schemaHint, setSchemaHint] = useState<string | null>(null);
   const [exams, setExams] = useState<EdesisSyncedExam[]>([]);
   const [query, setQuery] = useState('');
 
@@ -68,10 +69,14 @@ export function EdesisExamAssignPanel() {
     try {
       const res = await fetchSyncedEdesisExams();
       setSchemaMissing(Boolean(res.schemaMissing));
+      setSchemaHint(res.schemaMissing ? res.hint || null : null);
       setExams(Array.isArray(res.items) ? res.items : []);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      if (/şema|schema/i.test(msg)) setSchemaMissing(true);
+      if (/şema|schema|SUPABASE_DB/i.test(msg)) {
+        setSchemaMissing(true);
+        setSchemaHint(msg);
+      }
       setError(msg);
     } finally {
       setBusy(false);
@@ -101,13 +106,22 @@ export function EdesisExamAssignPanel() {
       const res = await syncEdesisExamCatalog();
       if (res.schemaMissing) {
         setSchemaMissing(true);
-        throw new Error(res.hint || 'Şema eksik — SQL migration çalıştırın');
+        setSchemaHint(res.hint || null);
+        throw new Error(
+          res.hint ||
+            'Tablolar otomatik kurulamadı. Vercel’e SUPABASE_DB_URL ekleyip Redeploy edin.',
+        );
       }
+      setSchemaMissing(false);
+      setSchemaHint(null);
       setOkMsg(`Katalog senkron: ${res.upserted ?? 0} kayıt · Edesis’ten ${res.fetched ?? 0} satır`);
       await loadExams();
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      if (/şema|schema/i.test(msg)) setSchemaMissing(true);
+      if (/şema|schema|SUPABASE_DB/i.test(msg)) {
+        setSchemaMissing(true);
+        setSchemaHint(msg);
+      }
       setError(msg);
     } finally {
       setSyncing(false);
@@ -236,10 +250,16 @@ export function EdesisExamAssignPanel() {
         <div className="flex gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
           <AlertCircle className="h-5 w-5 shrink-0" />
           <div>
-            <p className="font-semibold">Veritabanı şeması eksik</p>
+            <p className="font-semibold">Otomatik şema kurulumu bekleniyor</p>
             <p className="mt-1">
-              <code className="text-xs">sql/2026-09-12-edesis-exam-assignments.sql</code> dosyasını Supabase’te
-              çalıştırın.
+              Her sınav için ayrı tablo yok — tek seferlik{' '}
+              <code className="text-xs">edesis_exams</code> +{' '}
+              <code className="text-xs">edesis_exam_assignments</code> tabloları API tarafından
+              oluşturulur. Senkron veya atama sırasında otomatik kurulur.
+            </p>
+            <p className="mt-1 text-amber-900/90">
+              {schemaHint ||
+                'Kurulum başarısızsa Vercel’e bir kez SUPABASE_DB_URL (veya SUPABASE_DB_PASSWORD) ekleyip Redeploy edin.'}
             </p>
           </div>
         </div>

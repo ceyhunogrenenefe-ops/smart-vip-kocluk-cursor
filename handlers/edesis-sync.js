@@ -1320,7 +1320,9 @@ export default async function handler(req, res) {
         if (e?.code === 'SCHEMA_MISSING') {
           return res.status(503).json({
             error: 'schema_missing',
-            hint: e.hint || 'sql/2026-09-12-edesis-exam-assignments.sql çalıştırın'
+            hint:
+              e.hint ||
+              'Tablolar otomatik kurulamadı. Vercel’e SUPABASE_DB_URL veya SUPABASE_DB_PASSWORD ekleyip Redeploy edin.'
           });
         }
         throw e;
@@ -1338,7 +1340,8 @@ export default async function handler(req, res) {
         deployMarker: EDESIS_LOCAL_ASSIGN_MARKER,
         count: result.items.length,
         items: result.items,
-        schemaMissing: result.schemaMissing
+        schemaMissing: result.schemaMissing,
+        hint: result.schemaHint || null
       });
     }
 
@@ -1353,7 +1356,8 @@ export default async function handler(req, res) {
         ok: true,
         count: result.items.length,
         items: result.items,
-        schemaMissing: result.schemaMissing
+        schemaMissing: result.schemaMissing,
+        hint: result.schemaHint || null
       });
     }
 
@@ -1375,7 +1379,12 @@ export default async function handler(req, res) {
         return res.status(200).json({ ok: true, deployMarker: EDESIS_LOCAL_ASSIGN_MARKER, ...result });
       } catch (e) {
         if (e?.code === 'SCHEMA_MISSING') {
-          return res.status(503).json({ error: 'schema_missing', hint: e.hint });
+          return res.status(503).json({
+            error: 'schema_missing',
+            hint:
+              e.hint ||
+              'Tablolar otomatik kurulamadı. Vercel’e SUPABASE_DB_URL veya SUPABASE_DB_PASSWORD ekleyip Redeploy edin.'
+          });
         }
         return res.status(400).json({ error: errorMessage(e) });
       }
