@@ -1,6 +1,6 @@
 /**
  * Edesis deneme atama şemasını bir kez kurar (cron / x-vercel-cron).
- * Her sınav için tablo yok — edesis_exams + edesis_exam_assignments.
+ * Her sınav için tablo yok — SQL tabloları veya Storage JSON yedek.
  */
 import { authorizeVercelOrCronSecret } from '../api/_lib/cron-auth.js';
 import { ensureEdesisExamAssignmentSchema } from '../api/_lib/edesis-exam-assignments.js';
@@ -19,7 +19,7 @@ function envDiagnostics() {
       String(process.env.POSTGRES_URL_NON_POOLING || '').trim()
     ),
     has_supabase_db_password: Boolean(String(process.env.SUPABASE_DB_PASSWORD || '').trim()),
-    has_postgres_password: Boolean(String(process.env.POSTGRES_PASSWORD || '').trim()),
+    has_postgres_password: Boolean(String(process.env.POSTGRES_PASSWORD || '').trim())
   };
 }
 
@@ -36,16 +36,23 @@ export default async function handler(req, res) {
 
   try {
     const result = await ensureEdesisExamAssignmentSchema({ force });
+    const via = result?.via || null;
     return res.status(200).json({
       ok: true,
       created: Boolean(result?.created),
       cached: Boolean(result?.cached),
-      via: result?.via || null,
+      via,
       force,
       env: envDiagnostics(),
-      message: result?.created
-        ? 'Edesis deneme atama tabloları oluşturuldu.'
-        : 'Edesis deneme atama tabloları zaten hazır.',
+      backend: via,
+      message:
+        via === 'storage'
+          ? result?.created
+            ? 'Edesis atama Storage yedeği kuruldu (DB şifresi yok; JSON).'
+            : 'Edesis atama Storage yedeği hazır.'
+          : result?.created
+            ? 'Edesis deneme atama tabloları oluşturuldu.'
+            : 'Edesis deneme atama tabloları zaten hazır.'
     });
   } catch (e) {
     const code = e?.code || e?.setupCode || 'schema_setup_failed';
@@ -55,7 +62,7 @@ export default async function handler(req, res) {
       error: code,
       message: e?.hint || errorMessage(e),
       force,
-      env: envDiagnostics(),
+      env: envDiagnostics()
     });
   }
 }
