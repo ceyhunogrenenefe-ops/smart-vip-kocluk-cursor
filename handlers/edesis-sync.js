@@ -80,10 +80,21 @@ import {
   EDESIS_MATCHING_GUIDE
 } from '../api/_lib/edesis-student-match.js';
 import { enrollPlatformStudentsBatch, EDESIS_AUTO_ENROLL_MARKER, EDESIS_AUTO_ENROLL_INSTITUTION_ID } from '../api/_lib/edesis-auto-enroll.js';
+import {
+  syncEdesisExamCatalogToDb,
+  listSyncedEdesisExams,
+  listEdesisExamAssignments,
+  createEdesisExamAssignments,
+  deleteEdesisExamAssignment,
+  resolveLocallyAssignedEdesisExamIdsForStudent,
+  filterExamItemsByLocalAssignment,
+  assertStudentMayAccessEdesisExam
+} from '../api/_lib/edesis-exam-assignments.js';
 
 const STAFF = new Set(['super_admin', 'admin', 'coach']);
 const EDESIS_PDF_DURATION_MARKER = 'edesis-pdf-duration-2026-08-27';
 const EDESIS_ASSIGNED_ONLY_MARKER = 'edesis-student-isolate-2026-08-30';
+const EDESIS_LOCAL_ASSIGN_MARKER = 'edesis-local-assign-gate-2026-09-12';
 /** Aynı Hobby instance’ta üst üste op=sync 504 üretmesin */
 let syncInFlight = null;
 /** Öğrencinin kendi Edesis sonuç / karne / sınava giriş ops */
@@ -1294,6 +1305,135 @@ export default async function handler(req, res) {
       });
     }
 
+    /** Edesis katalog → edesis_exams (yerel atama için) */
+    if (op === 'sync-exam-catalog' && (req.method === 'POST' || req.method === 'GET')) {
+      if (!isStaff) return res.status(403).json({ error: 'forbidden' });
+      const cfg = getEdesisConfig();
+      if (!cfg.apiKey) return res.status(400).json({ error: 'EDESIS_API_KEY_missing' });
+      try {
+        const result = await syncEdesisExamCatalogToDb({
+          institutionId: actor?.institution_id || null,
+          cfg
+        });
+        return res.status(200).json({ ok: true, deployMarker: EDESIS_LOCAL_ASSIGN_MARKER, ...result });
+      } catch (e) {
+        if (e?.code === 'SCHEMA_MISSING') {
+          return res.status(503).json({
+            error: 'schema_missing',
+            hint: e.hint || 'sql/2026-09-12-edesis-exam-assignments.sql çalıştırın'
+          });
+        }
+        throw e;
+      }
+    }
+
+    if (op === 'list-synced-exams') {
+      if (!isStaff) return res.status(403).json({ error: 'forbidden' });
+      const result = await listSyncedEdesisExams({
+        institutionId: actor?.institution_id || null,
+        limit: Number(req.query?.limit || 300)
+      });
+      return res.status(200).json({
+        ok: true,
+        deployMarker: EDESIS_LOCAL_ASSIGN_MARKER,
+        count: result.items.length,
+        items: result.items,
+        schemaMissing: result.schemaMissing
+      });
+    }
+
+    if (op === 'list-exam-assignments') {
+      if (!isStaff) return res.status(403).json({ error: 'forbidden' });
+      const result = await listEdesisExamAssignments({
+        institutionId: actor?.institution_id || null,
+        edesisExamId: req.query?.edesisExamId || req.query?.examId || req.body?.edesisExamId || '',
+        limit: Number(req.query?.limit || 400)
+      });
+      return res.status(200).json({
+        ok: true,
+        count: result.items.length,
+        items: result.items,
+        schemaMissing: result.schemaMissing
+      });
+    }
+
+    if (op === 'assign-exam' && (req.method === 'POST' || req.method === 'PUT')) {
+      if (!isStaff) return res.status(403).json({ error: 'forbidden' });
+      const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : req.body || {};
+      try {
+        const result = await createEdesisExamAssignments({
+          institutionId: actor?.institution_id || null,
+          edesisExamId: body.edesisExamId || body.examId,
+          targetType: body.targetType || body.target_type,
+          classIds: body.classIds || body.class_ids || [],
+          studentIds: body.studentIds || body.student_ids || [],
+          assignedBy: actor?.sub || null,
+          startsAt: body.startsAt || body.starts_at || null,
+          endsAt: body.endsAt || body.ends_at || null,
+          notes: body.notes || null
+        });
+        return res.status(200).json({ ok: true, deployMarker: EDESIS_LOCAL_ASSIGN_MARKER, ...result });
+      } catch (e) {
+        if (e?.code === 'SCHEMA_MISSING') {
+          return res.status(503).json({ error: 'schema_missing', hint: e.hint });
+        }
+        return res.status(400).json({ error: errorMessage(e) });
+      }
+    }
+
+    if (op === 'unassign-exam' && (req.method === 'POST' || req.method === 'DELETE')) {
+      if (!isStaff) return res.status(403).json({ error: 'forbidden' });
+      const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : req.body || {};
+      const assignmentId = String(body.assignmentId || body.id || req.query?.id || '').trim();
+      await deleteEdesisExamAssignment(assignmentId);
+      return res.status(200).json({ ok: true });
+    }
+
+    /** Atama modalı için sınıf + aktif öğrenci listesi */
+    if (op === 'list-assign-targets') {
+      if (!isStaff) return res.status(403).json({ error: 'forbidden' });
+      const inst = actor?.institution_id || null;
+      let classQ = supabaseAdmin
+        .from('classes')
+        .select('id, name, class_level, institution_id')
+        .order('name', { ascending: true })
+        .limit(300);
+      if (inst && !actorIsSuper(actor, tags)) classQ = classQ.eq('institution_id', inst);
+      const { data: classes, error: cErr } = await classQ;
+      if (cErr) throw cErr;
+
+      let stuQ = supabaseAdmin
+        .from('students')
+        .select('id, name, email, institution_id, class_level, enrollment_status, deleted_at')
+        .is('deleted_at', null)
+        .order('name', { ascending: true })
+        .limit(800);
+      if (inst && !actorIsSuper(actor, tags)) stuQ = stuQ.eq('institution_id', inst);
+      const { data: studentsRaw, error: sErr } = await stuQ;
+      if (sErr) throw sErr;
+      const students = filterStudentsForActor(studentsRaw || [], actor, tags).filter(
+        (s) => !s.enrollment_status || s.enrollment_status === 'confirmed' || s.enrollment_status === 'trial'
+      );
+
+      const classIds = (classes || []).map((c) => c.id);
+      let memberships = [];
+      if (classIds.length) {
+        const { data: mem } = await supabaseAdmin
+          .from('class_students')
+          .select('class_id, student_id')
+          .in('class_id', classIds)
+          .limit(5000);
+        memberships = mem || [];
+      }
+
+      return res.status(200).json({
+        ok: true,
+        classes: classes || [],
+        students,
+        memberships
+      });
+    }
+
     if (op === 'student-results') {
       const cfg = getEdesisConfig();
       if (!cfg.apiKey) return res.status(400).json({ error: 'EDESIS_API_KEY_missing' });
@@ -1840,21 +1980,43 @@ export default async function handler(req, res) {
         actor?.institution_id || null
       );
 
+      // Yerel atama kapısı: öğrenci yalnızca kendisine veya sınıfına atanan denemeleri görür
+      let localGate = { schemaMissing: true, examIds: new Set(), assignmentCount: 0 };
+      const platformSid = String(platformStudentId || studentSelf?.id || '').trim();
+      if (platformSid) {
+        localGate = await resolveLocallyAssignedEdesisExamIdsForStudent({
+          studentId: platformSid,
+          institutionId: actor?.institution_id || studentSelf?.institution_id || null
+        });
+      }
+      let gatedItems = items;
+      let gatedExpired = expired;
+      let localAssignmentMeta = {
+        deployMarker: EDESIS_LOCAL_ASSIGN_MARKER,
+        schemaMissing: Boolean(localGate.schemaMissing),
+        assignmentCount: localGate.assignmentCount || 0,
+        allowedExamIds: [...(localGate.examIds || [])].slice(0, 80)
+      };
+      if (!localGate.schemaMissing) {
+        gatedItems = filterExamItemsByLocalAssignment(items, localGate.examIds);
+        gatedExpired = filterExamItemsByLocalAssignment(expired, localGate.examIds);
+      }
+
       return res.status(200).json({
         ok: true,
         deployMarker: EDESIS_ASSIGNED_ONLY_MARKER,
         edesisStudentId,
-        count: items.length,
-        items,
-        expired,
-        expiredCount: expired.length,
+        count: gatedItems.length,
+        items: gatedItems,
+        expired: gatedExpired,
+        expiredCount: gatedExpired.length,
         taken,
         takenCount: taken.length,
         scope: meta.assignmentMode || 'assigned',
-        assignmentMeta: meta,
-        takeableCount: items.filter((x) => x.canTake && !x.hasStudentResult).length,
+        assignmentMeta: { ...meta, localAssignment: localAssignmentMeta },
+        takeableCount: gatedItems.filter((x) => x.canTake && !x.hasStudentResult).length,
         hint: (() => {
-          const takeable = items.filter((x) => x.canTake && !x.hasStudentResult).length;
+          const takeable = gatedItems.filter((x) => x.canTake && !x.hasStudentResult).length;
           if (takeable > 0) return null;
           const attempts = meta.adminAssignmentAttempts || [];
           const getIds401 = attempts.some(
@@ -1869,6 +2031,9 @@ export default async function handler(req, res) {
           );
           if (getIdsEmpty && !meta?.abpAuth?.configured) {
             return 'GetOgrenciSinavIds boş/401 — ABP panel kullanıcısı + tenantId (3226) gerekli. op=configure-edesis ile kaydedin.';
+          }
+          if (!localGate.schemaMissing && items.length && !gatedItems.length) {
+            return 'Edesis’te açık deneme var ancak size (veya sınıfınıza) platformdan atanmamış. Koçunuz Akademik Takip → Edesis → Deneme Atama ile tanımlamalı.';
           }
           if (items.length) {
             return 'Girilmiş sonuçlarınız var; henüz girilmemiş açık deneme bulunamadı.';
@@ -2089,6 +2254,24 @@ export default async function handler(req, res) {
           hint: 'Bu deneme size tanımlanmamış'
         });
       }
+
+      // Yerel sınıf/öğrenci atama kapısı (tablo yoksa eski davranış)
+      const sidForGate = String(platformStudentId || studentSelf?.id || '').trim();
+      if (sidForGate) {
+        const access = await assertStudentMayAccessEdesisExam({
+          studentId: sidForGate,
+          edesisExamId: examId,
+          institutionId: actor?.institution_id || studentSelf?.institution_id || null
+        });
+        if (!access.ok) {
+          return res.status(403).json({
+            error: 'exam_not_locally_assigned',
+            reason: access.reason,
+            hint: 'Bu deneme size (veya sınıfınıza) platformda atanmamış. Koçunuz Akademik Takip → Edesis → Atama Yap ile tanımlamalı.'
+          });
+        }
+      }
+
       const submittedFromResults = (loaded.resultRows || []).some((row) => {
         if (String(pickEdesisResultExamId(row) || '') !== examId) return false;
         if (edesisStudentId && !resultRowBelongsToStudent(row, edesisStudentId)) return false;
