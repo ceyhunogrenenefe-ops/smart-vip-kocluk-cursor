@@ -42,6 +42,48 @@ function formatExamDurationLabel(seconds?: number | null) {
   return rm ? `${h} sa ${rm} dk` : `${h} sa`;
 }
 
+/** İstanbul takvimine göre bu haftanın (Pzt–Paz) sınav tarihi mi? */
+function isExamDateThisWeek(examDate: string | null | undefined, now = new Date()) {
+  if (!examDate) return false;
+  const raw = String(examDate).trim();
+  const ymd = raw.slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd)) {
+    const t = Date.parse(raw);
+    if (!Number.isFinite(t)) return false;
+    return isExamDateThisWeek(new Date(t).toISOString().slice(0, 10), now);
+  }
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Istanbul',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).formatToParts(now);
+  const y = parts.find((p) => p.type === 'year')?.value;
+  const m = parts.find((p) => p.type === 'month')?.value;
+  const d = parts.find((p) => p.type === 'day')?.value;
+  if (!y || !m || !d) return false;
+  const todayYmd = `${y}-${m}-${d}`;
+  // Pzt=0 … Paz=6 (TR iş haftası)
+  const dowSun0 = new Date(`${todayYmd}T12:00:00+03:00`).getUTCDay();
+  const mondayOffset = dowSun0 === 0 ? -6 : 1 - dowSun0;
+  const monday = new Date(`${todayYmd}T12:00:00+03:00`);
+  monday.setUTCDate(monday.getUTCDate() + mondayOffset);
+  const sunday = new Date(monday);
+  sunday.setUTCDate(monday.getUTCDate() + 6);
+  const toYmd = (dt: Date) =>
+    new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Europe/Istanbul',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    }).format(dt);
+  const start = toYmd(monday);
+  const end = toYmd(sunday);
+  return ymd >= start && ymd <= end;
+}
+
+type TakeDateFilter = 'all' | 'thisWeek';
+
 async function waitForIngestJob(examId: string, jobId: string) {
   for (let i = 0; i < 12; i += 1) {
     const s = await fetchEdesisIngestStatus({ examId, jobId });
@@ -84,6 +126,7 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
   );
 
   const [view, setView] = useState<View>('take');
+  const [takeDateFilter, setTakeDateFilter] = useState<TakeDateFilter>('all');
   const [loading, setLoading] = useState(true);
   const [exams, setExams] = useState<EdesisStudentResultsExam[]>([]);
   const [available, setAvailable] = useState<EdesisAvailableExam[]>([]);
@@ -514,12 +557,19 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
     )?.lessons ||
     booklets[0]?.lessons ||
     [];
-  const takeable = useMemo(
+  const takeableAll = useMemo(
     () => available.filter((exam) => !exam.hasStudentResult && exam.canTake !== false),
     [available]
   );
+  const takeableThisWeek = useMemo(
+    () => takeableAll.filter((exam) => isExamDateThisWeek(exam.examDate)),
+    [takeableAll]
+  );
+  const takeable = takeDateFilter === 'thisWeek' ? takeableThisWeek : takeableAll;
   const tabOn = 'bg-slate-900 text-white shadow-sm';
   const tabOff = 'border border-slate-200/80 bg-white text-slate-700 hover:bg-slate-50';
+  const filterOn = 'bg-emerald-700 text-white shadow-sm';
+  const filterOff = 'border border-slate-200/80 bg-white text-slate-600 hover:bg-slate-50';
 
   if (view === 'take' && activeExam) {
     return (
@@ -586,7 +636,7 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
         </button>
       </div>
 
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"
           onClick={() => {
@@ -599,7 +649,42 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
         >
           <ClipboardList className="h-4 w-4" />
           Sınava gir
+          {takeableAll.length ? (
+            <span className="rounded-md bg-white/20 px-1.5 py-0.5 text-[11px] font-bold tabular-nums">
+              {takeableAll.length}
+            </span>
+          ) : null}
         </button>
+        {view === 'take' ? (
+          <div
+            className="inline-flex items-center gap-1 rounded-lg border border-slate-200/90 bg-slate-50/80 p-0.5"
+            role="group"
+            aria-label="Sınav tarihi filtresi"
+          >
+            <button
+              type="button"
+              onClick={() => setTakeDateFilter('all')}
+              className={`rounded-md px-2.5 py-1.5 text-xs font-semibold ${
+                takeDateFilter === 'all' ? filterOn : filterOff
+              }`}
+            >
+              Tümü
+            </button>
+            <button
+              type="button"
+              onClick={() => setTakeDateFilter('thisWeek')}
+              className={`rounded-md px-2.5 py-1.5 text-xs font-semibold ${
+                takeDateFilter === 'thisWeek' ? filterOn : filterOff
+              }`}
+              title="Sınav tarihi bu hafta (Pzt–Paz) olan denemeler"
+            >
+              Bu hafta
+              {takeableThisWeek.length ? (
+                <span className="ml-1 tabular-nums opacity-90">({takeableThisWeek.length})</span>
+              ) : null}
+            </button>
+          </div>
+        ) : null}
         <button
           type="button"
           onClick={() => {
@@ -685,7 +770,13 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
                 </div>
               </div>
             ))}
-            {!takeable.length && available.length ? (
+            {!takeable.length && takeableAll.length && takeDateFilter === 'thisWeek' ? (
+              <p className="rounded-3xl border border-slate-200 bg-slate-50 p-5 text-sm text-slate-600 xl:col-span-2">
+                Bu haftaya ait girilecek deneme yok. Filtreyi <strong>Tümü</strong> yaparak diğer tanımlı
+                denemelere bakabilirsiniz.
+              </p>
+            ) : null}
+            {!takeableAll.length && available.length ? (
               <p className="rounded-3xl border border-slate-200 bg-slate-50 p-5 text-sm text-slate-600 xl:col-span-2">
                 Girilecek deneme kalmadı. Girdiğiniz sınavlar Sonuçlarım ve Analizlerim sekmelerinde.
               </p>
