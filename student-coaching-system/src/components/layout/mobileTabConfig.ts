@@ -84,7 +84,7 @@ const ADMIN_HUB_MATCH = [
 
   '/toplanti-takip',
 
-  '/kayit-takibi',
+  '/crm',
 
   '/kitap-pazaryeri',
 

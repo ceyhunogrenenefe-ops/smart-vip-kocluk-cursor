@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
-  FileSpreadsheet,
   Kanban,
   List,
   Loader2,
@@ -48,8 +47,9 @@ import {
 } from '../../lib/registrationTrackingConfig';
 import RegLeadCard from './registrationTracking/RegLeadCard';
 import RegLeadDrawer from './registrationTracking/RegLeadDrawer';
+import CrmKanbanBoard from './registrationTracking/CrmKanbanBoard';
 
-type ViewMode = 'excel' | 'kanban' | 'list';
+type ViewMode = 'kanban' | 'list';
 
 type Props = {
   isManager: boolean;
@@ -67,7 +67,8 @@ function useDebouncedValue<T>(value: T, ms = 350) {
 
 export default function RegistrationTrackingPanel({ isManager, institutionId }: Props) {
   const [params, setParams] = useSearchParams();
-  const viewMode = (params.get('rt_view') as ViewMode) || 'excel';
+  const rawView = params.get('rt_view');
+  const viewMode: ViewMode = rawView === 'list' ? 'list' : 'kanban'; // excel kaldırıldı
   const quickFilter = params.get('rt_quick') || '';
 
   const [loading, setLoading] = useState(true);
@@ -94,7 +95,7 @@ export default function RegistrationTrackingPanel({ isManager, institutionId }: 
   const setViewMode = (v: ViewMode) => {
     setParams((p) => {
       const n = new URLSearchParams(p);
-      if (v === 'excel') n.delete('rt_view');
+      if (v === 'kanban') n.delete('rt_view');
       else n.set('rt_view', v);
       return n;
     });
@@ -129,7 +130,10 @@ export default function RegistrationTrackingPanel({ isManager, institutionId }: 
     if (quickFilter === 'lost') q.primary_status = 'lost';
     if (quickFilter === 'incoming') q.stage_in = INCOMING_STAGES.join(',');
     if (quickFilter === 'trial') q.stage_in = TRIAL_STAGES.join(',');
-    if (quickFilter === '' || quickFilter === 'tracking') q.primary_status = 'tracking';
+    if (quickFilter === 'tracking') q.primary_status = 'tracking';
+    if (quickFilter === '') {
+      q.include_lost = '1';
+    }
     if (coachId) q.coach_id = coachId;
     if (dateFrom) q.date_from = dateFrom;
     if (dateTo) q.date_to = dateTo;
@@ -147,7 +151,7 @@ export default function RegistrationTrackingPanel({ isManager, institutionId }: 
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Veri yüklenemedi';
       if (/table_missing|henüz kurulmadı/i.test(msg)) {
-        toast.error('Kayıt Takibi tabloları henüz kurulmadı. SQL migration çalıştırın.');
+        toast.error('CRM tabloları henüz kurulmadı. SQL migration çalıştırın.');
       } else {
         toast.error(msg);
       }
@@ -232,8 +236,8 @@ export default function RegistrationTrackingPanel({ isManager, institutionId }: 
         }))
       );
       const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, 'Kayıt Takibi');
-      XLSX.writeFile(wb, `kayit-takibi-${new Date().toISOString().slice(0, 10)}.xlsx`);
+      XLSX.utils.book_append_sheet(wb, ws, 'CRM');
+      XLSX.writeFile(wb, `crm-${new Date().toISOString().slice(0, 10)}.xlsx`);
       toast.success('Excel indirildi');
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Dışa aktarılamadı');
@@ -252,6 +256,16 @@ export default function RegistrationTrackingPanel({ isManager, institutionId }: 
     if (id && from === 'tracking') {
       openDrawer(id);
       toast.info('Kesin kayıt için modal açıldı');
+    }
+  };
+
+  const copyCrmLink = async () => {
+    try {
+      const url = `${window.location.origin}/crm`;
+      await navigator.clipboard.writeText(url);
+      toast.success('CRM linki kopyalandı');
+    } catch {
+      toast.error('Link kopyalanamadı');
     }
   };
 
@@ -294,13 +308,7 @@ export default function RegistrationTrackingPanel({ isManager, institutionId }: 
         </div>
 
         <div className="flex rounded-lg border border-slate-200 p-0.5 dark:border-slate-600">
-          {(
-            [
-              ['excel', FileSpreadsheet, 'Excel'],
-              ['kanban', Kanban, 'Kanban'],
-              ['list', List, 'Liste']
-            ] as const
-          ).map(([mode, Icon, label]) => (
+          {([ ['kanban', Kanban, 'Kanban'], ['list', List, 'Liste'] ] as const).map(([mode, Icon, label]) => (
             <button
               key={mode}
               type="button"
@@ -393,6 +401,15 @@ export default function RegistrationTrackingPanel({ isManager, institutionId }: 
           <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
         </button>
 
+        <button
+          type="button"
+          onClick={() => void copyCrmLink()}
+          className="rounded-lg border px-3 py-2 text-sm"
+          title="Doğrudan CRM erişim linkini kopyala"
+        >
+          CRM Linki
+        </button>
+
         {isManager && (
           <>
             <button
@@ -418,29 +435,13 @@ export default function RegistrationTrackingPanel({ isManager, institutionId }: 
         </div>
       )}
 
-      {!loading && viewMode === 'excel' && (
-        <ExcelView
-          confirmedByGrade={confirmedByGrade}
-          trackingByGrade={trackingByGrade}
-          selected={selected}
-          onSelect={(id, checked) => {
-            setSelected((s) => {
-              const n = new Set(s);
-              if (checked) n.add(id);
-              else n.delete(id);
-              return n;
-            });
-          }}
+      {!loading && viewMode === 'kanban' && (
+        <CrmKanbanBoard
+          leads={leads}
           onOpen={openDrawer}
-          onDragStart={handleDragStart}
-          onDropConfirmed={handleDropConfirmed}
+          onLeadsChange={setLeads}
         />
       )}
-
-      {!loading && viewMode === 'kanban' && (
-        <KanbanView leads={leads.filter((l) => l.primary_status === 'tracking')} onOpen={openDrawer} />
-      )}
-
       {!loading && viewMode === 'list' && (
         <ListView
           leads={leads}
