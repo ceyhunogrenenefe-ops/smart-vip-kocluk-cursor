@@ -9,13 +9,13 @@
 - CTWA / IG / FB ad referral → `crm_conversations.ad_source_data`
 
 ## Instagram / Facebook DM (native Meta — Kommo köprüsü yok)
-- Vercel Production token (WhatsApp token **değil**):
-  - `INSTAGRAM_PAGE_ACCESS_TOKEN` veya `META_PAGE_ACCESS_TOKEN` (Page Access Token)
-  - isteğe bağlı `META_PAGE_ID`, `META_IG_BUSINESS_ID`
-- WhatsApp `META_WHATSAPP_TOKEN` IG/FB DM abone edemez; ayrı sayfa token kullanılır
+- **SmartKocluk-IG** Instagram Login app: `INSTAGRAM_APP_ID=1455769949705434` (Facebook App ID değildir; `client_credentials` çalışmaz)
+- Secret: Vercel `INSTAGRAM_APP_SECRET` veya Inbox’tan kaydet (git’e yazılmaz)
+- Yetki: Inbox → **Instagram ile bağla** → `GET /api/meta/instagram-oauth?start=1`
+- Meta panelde Valid OAuth Redirect URI: `https://www.dersonlinevipkocluk.com/api/meta/instagram-oauth`
+- Alternatif Page token: `INSTAGRAM_PAGE_ACCESS_TOKEN` / `META_PAGE_ACCESS_TOKEN`
+- WhatsApp `META_WHATSAPP_TOKEN` IG/FB DM abone edemez
 - Bind: `GET /api/whatsapp-health?ensure_meta_social=1` veya Inbox → Hattı bağla
-- Teşhis: `GET /api/whatsapp-health` → `meta_social_env.token_source` (token yazılmaz, yalnızca env adı + suffix)
-- Login for Business config id `1784538625891317` Page ID değildir
 
 ## Kommo (yalnızca hunı karşılaştırması — mesaj köprüsü değil)
 - URL: `https://onlinevipdershane.kommo.com/`

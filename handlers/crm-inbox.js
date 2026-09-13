@@ -20,6 +20,11 @@ import {
   ensureMetaSocialInbound,
   publicSocialStatus
 } from '../api/_lib/meta-social-inbound.js';
+import {
+  loadInstagramAppSecretsFromDb,
+  publicInstagramOauthStatus,
+  saveInstagramAppSecretsToDb
+} from '../api/_lib/instagram-login-oauth.js';
 
 function userHasRole(user, role) {
   const want = String(role || '').toLowerCase();
@@ -158,6 +163,7 @@ export default async function handler(req, res) {
     }
 
     if (op === 'inbound_status') {
+      await loadInstagramAppSecretsFromDb().catch(() => null);
       const [diag, inbound, social] = await Promise.all([
         diagnoseCrmInbox().catch(() => null),
         ensureMetaInboundDelivery({ apply: false }).catch(() => null),
@@ -167,6 +173,7 @@ export default async function handler(req, res) {
         data: {
           ...publicInboundStatus(inbound),
           social: { ...publicSocialStatus(social), env: describeSocialTokenEnv() },
+          instagram_oauth: publicInstagramOauthStatus(),
           real_inbound: diag?.real_inbound || null,
           real_inbound_seen: Boolean(diag?.e2e_ready?.real_inbound_seen),
           last_webhook_at: (diag?.recent_webhook_hits || [])[0]?.received_at || null
@@ -190,6 +197,23 @@ export default async function handler(req, res) {
         steps: inbound?.steps || [],
         social_steps: social?.steps || [],
         error: inbound?.error || social?.error || null
+      });
+    }
+
+    if (op === 'save_instagram_app' && req.method === 'POST') {
+      if (!isAdmin) {
+        return res.status(403).json({ error: 'forbidden', hint: 'Instagram app secret’ı yalnızca yönetici kaydeder.' });
+      }
+      const appId = String(body.app_id || body.instagram_app_id || '').trim();
+      const appSecret = String(body.app_secret || body.instagram_app_secret || '').trim();
+      if (!appSecret) return res.status(400).json({ error: 'app_secret_required' });
+      const saved = await saveInstagramAppSecretsToDb({
+        app_id: appId || undefined,
+        app_secret: appSecret
+      });
+      return res.status(200).json({
+        ok: true,
+        data: { instagram_oauth: { ...publicInstagramOauthStatus(), ...saved } }
       });
     }
 
