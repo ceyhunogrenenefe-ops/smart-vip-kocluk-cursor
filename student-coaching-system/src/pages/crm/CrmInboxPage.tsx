@@ -13,6 +13,8 @@ import { useAuth } from '../../context/AuthContext';
 import { userRoleTags } from '../../config/rolePermissions';
 import {
   crmAssignConversation,
+  crmEnsureInbound,
+  crmInboundStatus,
   crmListAgents,
   crmListConversations,
   crmListMessages,
@@ -21,6 +23,7 @@ import {
   crmSendMessage,
   crmUpdateStatus,
   type CrmConversation,
+  type CrmInboundStatus,
   type CrmMessage
 } from '../../lib/crmInboxApi';
 
@@ -70,6 +73,8 @@ export default function CrmInboxPage() {
   const [loadingMsgs, setLoadingMsgs] = useState(false);
   const [sending, setSending] = useState(false);
   const [agents, setAgents] = useState<Array<{ id: string; name: string; email: string }>>([]);
+  const [inbound, setInbound] = useState<CrmInboundStatus | null>(null);
+  const [binding, setBinding] = useState(false);
   const pollSinceRef = useRef(new Date().toISOString());
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
@@ -108,6 +113,12 @@ export default function CrmInboxPage() {
   useEffect(() => {
     void loadList();
   }, [loadList]);
+
+  useEffect(() => {
+    void crmInboundStatus()
+      .then((res) => setInbound(res.data || null))
+      .catch(() => undefined);
+  }, []);
 
   useEffect(() => {
     if (selectedId) void loadMessages(selectedId);
@@ -192,8 +203,51 @@ export default function CrmInboxPage() {
     return d as Record<string, unknown>;
   }, [selected]);
 
+  const lineLabel = inbound?.display_phone || inbound?.company_line || '0850 303 40 14';
+  const inboundOk = Boolean(inbound?.bound_to_production);
+
   return (
-    <div className="flex h-[calc(100vh-5.5rem)] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+    <div className="flex h-[calc(100vh-5.5rem)] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <div
+        className={`flex flex-wrap items-center justify-between gap-2 border-b px-3 py-2 text-xs ${
+          inboundOk
+            ? 'border-emerald-100 bg-emerald-50/90 text-emerald-900'
+            : 'border-amber-100 bg-amber-50/90 text-amber-950'
+        }`}
+      >
+        <p className="min-w-0 leading-snug">
+          <span className="font-semibold">Kurumsal WhatsApp {lineLabel}</span>
+          <span className="mx-1.5 text-current/50">·</span>
+          {inboundOk
+            ? 'Meta hattı production’a bağlı. Kişisel WhatsApp’tan yalnızca bu numaraya yazın.'
+            : inbound?.hint ||
+              'Meta henüz gerçek mesaj iletmiyor. Hattı bağlayın, ardından 0850 303 40 14’e yazın (QR/koç hattı değil).'}
+        </p>
+        {isAdmin && (
+          <button
+            type="button"
+            disabled={binding}
+            onClick={() => {
+              setBinding(true);
+              void crmEnsureInbound()
+                .then((res) => {
+                  setInbound(res.data || inbound);
+                  toast.success(
+                    res.data?.bound_to_production
+                      ? 'Kurumsal hat bağlandı — 0850’ye tekrar yazın'
+                      : res.data?.hint || 'Bağlama denendi'
+                  );
+                })
+                .catch((e) => toast.error(e instanceof Error ? e.message : 'Bağlanamadı'))
+                .finally(() => setBinding(false));
+            }}
+            className="shrink-0 rounded-lg border border-current/20 bg-white/80 px-2.5 py-1 text-[11px] font-semibold hover:bg-white disabled:opacity-60"
+          >
+            {binding ? 'Bağlanıyor…' : inboundOk ? 'Hattı yenile' : 'Hattı bağla'}
+          </button>
+        )}
+      </div>
+      <div className="flex min-h-0 flex-1 overflow-hidden">
       <aside className="flex w-full max-w-sm flex-col border-r border-slate-200 bg-slate-50/80 sm:w-80">
         <div className="space-y-2 border-b border-slate-200 p-3">
           <div className="relative">
@@ -453,6 +507,7 @@ export default function CrmInboxPage() {
           <p className="p-4 text-xs text-slate-400">Detay için konuşma seçin</p>
         )}
       </aside>
+      </div>
     </div>
   );
 }

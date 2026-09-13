@@ -11,6 +11,8 @@ import {
   sendCrmWhatsAppText,
   upsertCrmMessage
 } from '../api/_lib/crm-inbox.js';
+import { diagnoseCrmInbox } from '../api/_lib/crm-inbox-schema.js';
+import { ensureMetaInboundDelivery, publicInboundStatus } from '../api/_lib/meta-inbound-ensure.js';
 
 function userHasRole(user, role) {
   const want = String(role || '').toLowerCase();
@@ -144,6 +146,34 @@ export default async function handler(req, res) {
         throw error;
       }
       return res.status(200).json({ data: data || [], institution_id: institutionId });
+    }
+
+    if (op === 'inbound_status') {
+      const [diag, inbound] = await Promise.all([
+        diagnoseCrmInbox().catch(() => null),
+        ensureMetaInboundDelivery({ apply: false }).catch(() => null)
+      ]);
+      return res.status(200).json({
+        data: {
+          ...publicInboundStatus(inbound),
+          real_inbound: diag?.real_inbound || null,
+          real_inbound_seen: Boolean(diag?.e2e_ready?.real_inbound_seen),
+          last_webhook_at: (diag?.recent_webhook_hits || [])[0]?.received_at || null
+        }
+      });
+    }
+
+    if (op === 'ensure_inbound') {
+      if (!isAdmin) {
+        return res.status(403).json({ error: 'forbidden', hint: 'Meta hattını yalnızca yönetici bağlar.' });
+      }
+      const inbound = await ensureMetaInboundDelivery({ apply: true });
+      return res.status(200).json({
+        ok: Boolean(inbound?.ok),
+        data: publicInboundStatus(inbound),
+        steps: inbound?.steps || [],
+        error: inbound?.error || null
+      });
     }
 
     if (op === 'get_conversation') {

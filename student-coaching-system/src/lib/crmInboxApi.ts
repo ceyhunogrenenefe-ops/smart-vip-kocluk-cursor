@@ -129,6 +129,30 @@ export function crmPoll(since: string, conversationId?: string) {
   }>('poll', { since, conversation_id: conversationId });
 }
 
+export type CrmInboundStatus = {
+  ok: boolean;
+  bound_to_production: boolean;
+  company_line: string;
+  company_digits: string;
+  display_phone?: string | null;
+  verified_name?: string | null;
+  webhook_url?: string;
+  subscribed_app_name?: string | null;
+  hint?: string | null;
+  applied?: boolean;
+  callbacks_ours?: boolean;
+  real_inbound_seen?: boolean;
+  last_webhook_at?: string | null;
+};
+
+export function crmInboundStatus() {
+  return inboxGet<{ data: CrmInboundStatus }>('inbound_status');
+}
+
+export function crmEnsureInbound() {
+  return inboxPost<{ ok: boolean; data: CrmInboundStatus; error?: string | null }>('ensure_inbound');
+}
+
 export function crmListAgents(institutionId?: string) {
   return inboxGet<{
     data: {
