@@ -18,6 +18,7 @@ import {
   crmAssignConversation,
   crmEnsureInbound,
   crmInboundStatus,
+  crmSaveInstagramApp,
   crmListAgents,
   crmListCanned,
   crmListConversations,
@@ -89,6 +90,8 @@ export default function CrmInboxPage() {
   const [agents, setAgents] = useState<Array<{ id: string; name: string; email: string }>>([]);
   const [inbound, setInbound] = useState<CrmInboundStatus | null>(null);
   const [binding, setBinding] = useState(false);
+  const [igSecret, setIgSecret] = useState('');
+  const [savingIg, setSavingIg] = useState(false);
   const [canned, setCanned] = useState<Array<{ id: string; title: string; body: string }>>([]);
   const [notes, setNotes] = useState<Array<{ id: string; body: string; created_at: string }>>([]);
   const [noteDraft, setNoteDraft] = useState('');
@@ -139,6 +142,12 @@ export default function CrmInboxPage() {
     void crmListCanned()
       .then((res) => setCanned(res.data || []))
       .catch(() => undefined);
+    const q = new URLSearchParams(window.location.search);
+    if (q.get('ig') === 'ok') {
+      toast.success(`Instagram bağlandı${q.get('user') ? `: @${q.get('user')}` : ''}`);
+    } else if (q.get('ig') === 'fail') {
+      toast.error('Instagram bağlanamadı');
+    }
   }, []);
 
   useEffect(() => {
@@ -260,27 +269,74 @@ export default function CrmInboxPage() {
                 'FB/IG DM: Vercel INSTAGRAM_PAGE_ACCESS_TOKEN / META_PAGE_ACCESS_TOKEN + Hattı bağla.'}
         </p>
         {isAdmin && (
-          <button
-            type="button"
-            disabled={binding}
-            onClick={() => {
-              setBinding(true);
-              void crmEnsureInbound()
-                .then((res) => {
-                  setInbound(res.data || inbound);
-                  toast.success(
-                    res.data?.bound_to_production
-                      ? 'Kurumsal hat bağlandı — 0850’ye tekrar yazın'
-                      : res.data?.hint || 'Bağlama denendi'
-                  );
-                })
-                .catch((e) => toast.error(e instanceof Error ? e.message : 'Bağlanamadı'))
-                .finally(() => setBinding(false));
-            }}
-            className="shrink-0 rounded-lg border border-current/20 bg-white/80 px-2.5 py-1 text-[11px] font-semibold hover:bg-white disabled:opacity-60"
-          >
-            {binding ? 'Bağlanıyor…' : inboundOk ? 'Hattı yenile' : 'Hattı bağla'}
-          </button>
+          <div className="flex flex-wrap items-center gap-1.5">
+            {!inbound?.instagram_oauth?.has_secret && (
+              <form
+                className="flex items-center gap-1"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (!igSecret.trim()) return;
+                  setSavingIg(true);
+                  void crmSaveInstagramApp({
+                    app_id: inbound?.instagram_oauth?.app_id,
+                    app_secret: igSecret.trim()
+                  })
+                    .then(() => {
+                      toast.success('SmartKocluk-IG secret kaydedildi');
+                      setIgSecret('');
+                      return crmInboundStatus();
+                    })
+                    .then((res) => {
+                      if (res?.data) setInbound(res.data);
+                    })
+                    .catch((err) => toast.error(err instanceof Error ? err.message : 'Kayıt başarısız'))
+                    .finally(() => setSavingIg(false));
+                }}
+              >
+                <input
+                  type="password"
+                  value={igSecret}
+                  onChange={(e) => setIgSecret(e.target.value)}
+                  placeholder="IG app secret"
+                  className="w-36 rounded border border-current/20 bg-white/90 px-1.5 py-1 text-[11px]"
+                />
+                <button
+                  type="submit"
+                  disabled={savingIg || !igSecret.trim()}
+                  className="rounded border border-current/20 bg-white/80 px-2 py-1 text-[11px] font-semibold disabled:opacity-50"
+                >
+                  Kaydet
+                </button>
+              </form>
+            )}
+            <a
+              href="/api/meta/instagram-oauth?start=1"
+              className="shrink-0 rounded-lg border border-current/20 bg-white/80 px-2.5 py-1 text-[11px] font-semibold hover:bg-white"
+            >
+              Instagram ile bağla
+            </a>
+            <button
+              type="button"
+              disabled={binding}
+              onClick={() => {
+                setBinding(true);
+                void crmEnsureInbound()
+                  .then((res) => {
+                    setInbound(res.data || inbound);
+                    toast.success(
+                      res.data?.bound_to_production
+                        ? 'Kurumsal hat bağlandı — 0850’ye tekrar yazın'
+                        : res.data?.hint || 'Bağlama denendi'
+                    );
+                  })
+                  .catch((e) => toast.error(e instanceof Error ? e.message : 'Bağlanamadı'))
+                  .finally(() => setBinding(false));
+              }}
+              className="shrink-0 rounded-lg border border-current/20 bg-white/80 px-2.5 py-1 text-[11px] font-semibold hover:bg-white disabled:opacity-60"
+            >
+              {binding ? 'Bağlanıyor…' : inboundOk ? 'Hattı yenile' : 'Hattı bağla'}
+            </button>
+          </div>
         )}
       </div>
       <div className="flex min-h-0 flex-1 overflow-hidden">
