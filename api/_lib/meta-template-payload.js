@@ -49,6 +49,11 @@ export function exampleForNamedParam(name) {
   return EXAMPLE_BY_PARAM[key] || 'ornek';
 }
 
+export function extractPositionalTemplateCount(content) {
+  const nums = [...String(content || '').matchAll(/\{\{\s*(\d+)\s*\}\}/g)].map((m) => Number(m[1]));
+  return nums.reduce((max, n) => Math.max(max, n), 0);
+}
+
 export function buildMetaTemplateCreatePayload({
   name,
   language = 'tr',
@@ -61,7 +66,9 @@ export function buildMetaTemplateCreatePayload({
   const text = String(bodyText || '').trim();
   if (!text) throw new Error('template_body_empty');
   const params = extractNamedTemplateParams(text);
+  const positionalCount = extractPositionalTemplateCount(text);
   const body = { type: 'BODY', text };
+  let parameter_format = 'NAMED';
   if (params.length) {
     body.example = {
       body_text_named_params: params.map((param_name) => ({
@@ -69,12 +76,22 @@ export function buildMetaTemplateCreatePayload({
         example: String(examples[param_name] || exampleForNamedParam(param_name)).slice(0, 80) || 'ornek',
       })),
     };
+  } else if (positionalCount > 0) {
+    parameter_format = 'POSITIONAL';
+    body.example = {
+      body_text: [
+        Array.from({ length: positionalCount }, (_, i) => {
+          const key = String(i + 1);
+          return String(examples[key] || examples[i] || `ornek${i + 1}`).slice(0, 80) || `ornek${i + 1}`;
+        }),
+      ],
+    };
   }
   return {
     name: templateName,
     language: String(language || 'tr').trim() || 'tr',
     category: String(category || 'UTILITY').trim().toUpperCase() || 'UTILITY',
-    parameter_format: 'NAMED',
+    parameter_format,
     allow_category_change: true,
     components: [body],
   };

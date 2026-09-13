@@ -652,7 +652,8 @@ export function mapGraphTemplateToCrm(row) {
     variableFormat: vars.format,
     variableNames: vars.names,
     headerFormat: headerFormat || null,
-    sendable: !mediaHeader,
+    sendable: true,
+    mediaHeader,
     qualityScore: row?.quality_score?.score || null
   };
 }
@@ -702,6 +703,15 @@ export function fillCrmTemplateBody(bodyText, params, names) {
 let crmApprovedTplCache = { at: 0, payload: null };
 const CRM_TPL_CACHE_MS = 60_000;
 
+export function invalidateCrmTemplateCache() {
+  crmApprovedTplCache = { at: 0, payload: null };
+}
+
+export function isMetaTemplatePendingStatus(status) {
+  const s = String(status || '').trim().toUpperCase();
+  return s.includes('PENDING') || s.includes('IN_APPEAL') || s === 'PAUSED';
+}
+
 /**
  * 0850 hattının WABA'sındaki onaylı WhatsApp şablonları (CRM inbox).
  */
@@ -744,9 +754,14 @@ export async function listApprovedCrmWhatsAppTemplates({ force = false } = {}) {
     }
   }
 
-  const approved = (rows || [])
-    .filter((r) => isMetaTemplateSendableStatus(r.status) && String(r.name || '').trim())
-    .map(mapGraphTemplateToCrm)
+  const mapped = (rows || [])
+    .filter((r) => String(r.name || '').trim())
+    .map(mapGraphTemplateToCrm);
+  const approved = mapped
+    .filter((t) => isMetaTemplateSendableStatus(t.status))
+    .sort((a, b) => a.name.localeCompare(b.name, 'tr') || a.language.localeCompare(b.language));
+  const pending = mapped
+    .filter((t) => isMetaTemplatePendingStatus(t.status))
     .sort((a, b) => a.name.localeCompare(b.name, 'tr') || a.language.localeCompare(b.language));
 
   if (!approved.length) {
@@ -757,11 +772,12 @@ export async function listApprovedCrmWhatsAppTemplates({ force = false } = {}) {
   }
 
   const payload = {
-    ok: approved.length > 0 || !error,
+    ok: approved.length > 0 || pending.length > 0 || !error,
     source,
     error,
     hint,
-    templates: approved
+    templates: approved,
+    pending
   };
   crmApprovedTplCache = { at: Date.now(), payload };
   return payload;
