@@ -315,9 +315,11 @@ export async function ensureMetaSocialInbound({ apply = false } = {}) {
 
   out.page_id = pid || null;
   if (!pid) {
-    out.error = 'page_id_unresolved';
+    out.error = out.token_kind === 'user_no_pages' ? 'user_token_not_page_token' : 'page_id_unresolved';
     out.hint =
-      'Sayfa kimliği yok. Meta BM → Sayfa → Page ID’yi Vercel META_PAGE_ID veya panel commerce_settings.meta.page olarak kaydedin.';
+      out.token_kind === 'user_no_pages'
+        ? 'Vercel INSTAGRAM_PAGE_ACCESS_TOKEN şu an kişisel kullanıcı token’ı (sayfa listesi boş). Graph Explorer → SmartKocluk → pages_show_list + pages_messaging + instagram_manage_messages → listeden SAYFA Access Token alın, Vercel’e onu yazın ve Redeploy edin.'
+        : 'Sayfa kimliği yok. Meta BM → Sayfa → Page ID’yi Vercel META_PAGE_ID olarak kaydedin.';
     return out;
   }
 
