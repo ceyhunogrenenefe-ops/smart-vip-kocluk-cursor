@@ -6,7 +6,10 @@ import {
 } from './_lib/meta-whatsapp.js';
 import { diagnoseCrmInbox, ensureCrmInboxSchema } from './_lib/crm-inbox-schema.js';
 import { ensureMetaInboundDelivery } from './_lib/meta-inbound-ensure.js';
-import { ensureMetaSocialInbound } from './_lib/meta-social-inbound.js';
+import {
+  describeSocialTokenEnv,
+  ensureMetaSocialInbound
+} from './_lib/meta-social-inbound.js';
 import { getTwilioEnvStatus } from './_lib/whatsapp-twilio.js';
 import {
   fetchMetaTemplatesFromPhoneWaba,
@@ -286,6 +289,7 @@ export default async function handler(req, res) {
 
   const wantEnsureSocial =
     String(req.query?.ensure_meta_social || '').trim() === '1' || wantEnsureInbound || wantCrmSetup;
+  const meta_social_env = describeSocialTokenEnv();
   let meta_social = null;
   if (wantInboundInspect || wantEnsureSocial) {
     try {
@@ -431,6 +435,7 @@ export default async function handler(req, res) {
     crm_diag,
     crm_setup,
     meta_inbound,
+    meta_social_env,
     meta_social,
     twilio: {
       configured: twilio.configured,

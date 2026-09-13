@@ -17,15 +17,21 @@ function applyMetaPageSecrets(page = {}) {
     page.instagram_business_account_id || page.ig_business_id || page.igId || ''
   ).trim();
   const configId = String(page.configuration_id || page.config_id || '').trim();
+  // Vercel INSTAGRAM_PAGE_ACCESS_TOKEN / META_PAGE_ACCESS_TOKEN her zaman DB'den önce gelir.
   if (pageToken) {
-    process.env.META_PAGE_ACCESS_TOKEN = pageToken;
-    process.env.INSTAGRAM_PAGE_ACCESS_TOKEN = process.env.INSTAGRAM_PAGE_ACCESS_TOKEN || pageToken;
+    if (!String(process.env.META_PAGE_ACCESS_TOKEN || '').trim()) {
+      process.env.META_PAGE_ACCESS_TOKEN = pageToken;
+    }
+    if (!String(process.env.INSTAGRAM_PAGE_ACCESS_TOKEN || '').trim()) {
+      process.env.INSTAGRAM_PAGE_ACCESS_TOKEN = pageToken;
+    }
   }
-  if (pageId) process.env.META_PAGE_ID = pageId;
+  if (pageId && !String(process.env.META_PAGE_ID || '').trim()) process.env.META_PAGE_ID = pageId;
   if (igId) {
-    process.env.META_IG_BUSINESS_ID = igId;
-    process.env.INSTAGRAM_BUSINESS_ACCOUNT_ID =
-      process.env.INSTAGRAM_BUSINESS_ACCOUNT_ID || igId;
+    if (!String(process.env.META_IG_BUSINESS_ID || '').trim()) process.env.META_IG_BUSINESS_ID = igId;
+    if (!String(process.env.INSTAGRAM_BUSINESS_ACCOUNT_ID || '').trim()) {
+      process.env.INSTAGRAM_BUSINESS_ACCOUNT_ID = igId;
+    }
   }
   if (configId) process.env.META_CONFIGURATION_ID = configId;
 }
@@ -58,6 +64,14 @@ export async function loadMetaWhatsAppSecretsFromDb() {
     applyMetaWhatsAppSecrets(wa);
     const page = data?.meta?.page && typeof data.meta.page === 'object' ? data.meta.page : {};
     applyMetaPageSecrets(page);
+    const ig = data?.meta?.instagram && typeof data.meta.instagram === 'object' ? data.meta.instagram : {};
+    applyMetaPageSecrets({
+      token: ig.token || ig.access_token || ig.page_access_token,
+      page_id: ig.page_id || ig.facebook_page_id,
+      instagram_business_account_id:
+        ig.instagram_business_account_id || ig.ig_user_id || ig.ig_business_id,
+      configuration_id: ig.configuration_id
+    });
   } catch (e) {
     console.warn('[meta-whatsapp] secrets load failed:', e instanceof Error ? e.message : e);
   }

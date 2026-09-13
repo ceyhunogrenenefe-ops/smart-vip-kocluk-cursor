@@ -13,7 +13,13 @@ import {
 } from '../api/_lib/crm-inbox.js';
 import { diagnoseCrmInbox, ensureCrmInboxSchema } from '../api/_lib/crm-inbox-schema.js';
 import { ensureMetaInboundDelivery, publicInboundStatus } from '../api/_lib/meta-inbound-ensure.js';
-import { ensureMetaSocialInbound, publicSocialStatus } from '../api/_lib/meta-social-inbound.js';
+import {
+  bindMetaSocialFromPageToken,
+  bindMetaSocialFromUserToken,
+  describeSocialTokenEnv,
+  ensureMetaSocialInbound,
+  publicSocialStatus
+} from '../api/_lib/meta-social-inbound.js';
 
 function userHasRole(user, role) {
   const want = String(role || '').toLowerCase();
@@ -160,7 +166,7 @@ export default async function handler(req, res) {
       return res.status(200).json({
         data: {
           ...publicInboundStatus(inbound),
-          social: publicSocialStatus(social),
+          social: { ...publicSocialStatus(social), env: describeSocialTokenEnv() },
           real_inbound: diag?.real_inbound || null,
           real_inbound_seen: Boolean(diag?.e2e_ready?.real_inbound_seen),
           last_webhook_at: (diag?.recent_webhook_hits || [])[0]?.received_at || null
@@ -177,10 +183,34 @@ export default async function handler(req, res) {
       const social = await ensureMetaSocialInbound({ apply: true });
       return res.status(200).json({
         ok: Boolean(inbound?.ok),
-        data: { ...publicInboundStatus(inbound), social: publicSocialStatus(social) },
+        data: {
+          ...publicInboundStatus(inbound),
+          social: { ...publicSocialStatus(social), env: describeSocialTokenEnv() }
+        },
         steps: inbound?.steps || [],
         social_steps: social?.steps || [],
         error: inbound?.error || social?.error || null
+      });
+    }
+
+    if (op === 'save_page_token' && req.method === 'POST') {
+      if (!isAdmin) {
+        return res.status(403).json({ error: 'forbidden', hint: 'Sayfa token’ını yalnızca yönetici kaydeder.' });
+      }
+      const pageTok = String(body.page_access_token || body.token || '').trim();
+      const userTok = String(body.user_access_token || '').trim();
+      const pageId = String(body.page_id || '').trim();
+      const bound = userTok
+        ? await bindMetaSocialFromUserToken(userTok)
+        : await bindMetaSocialFromPageToken(pageTok, pageId);
+      return res.status(bound.ok ? 200 : 400).json({
+        ok: Boolean(bound.ok),
+        data: {
+          social: publicSocialStatus(bound.social || bound),
+          env: describeSocialTokenEnv()
+        },
+        error: bound.error || null,
+        hint: bound.hint || null
       });
     }
 

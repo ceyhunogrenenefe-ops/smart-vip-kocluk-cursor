@@ -8,13 +8,20 @@
 - Her inbound WA / IG / FB mesajı → `registration_*` **ve** `crm_conversations` / `crm_messages`
 - CTWA / IG / FB ad referral → `crm_conversations.ad_source_data`
 
-## Kommo hesabı (2026-09-13, yeni şifre ile okundu)
+## Instagram / Facebook DM (native Meta — Kommo köprüsü yok)
+- Vercel Production token (WhatsApp token **değil**):
+  - `INSTAGRAM_PAGE_ACCESS_TOKEN` veya `META_PAGE_ACCESS_TOKEN` (Page Access Token)
+  - isteğe bağlı `META_PAGE_ID`, `META_IG_BUSINESS_ID`
+- WhatsApp `META_WHATSAPP_TOKEN` IG/FB DM abone edemez; ayrı sayfa token kullanılır
+- Bind: `GET /api/whatsapp-health?ensure_meta_social=1` veya Inbox → Hattı bağla
+- Teşhis: `GET /api/whatsapp-health` → `meta_social_env.token_source` (token yazılmaz, yalnızca env adı + suffix)
+- Login for Business config id `1784538625891317` Page ID değildir
+
+## Kommo (yalnızca hunı karşılaştırması — mesaj köprüsü değil)
 - URL: `https://onlinevipdershane.kommo.com/`
-- Account: **Online VIP Dershane** · id `33570279` · TR / TRY · `Europe/Istanbul` · amojo `e21a59de-…`
-- Kullanıcılar: Ceyhun (admin), KAYIT EKİBİ, LATİFE KURAY
-- Chat: son konuşmalar `waba` + `instagram_business` (Facebook Messenger Kommo’da yok)
-- Aktif widget: `amocrm_whatsapp`, Zapier, Typeform, Google Sheets
-- Meta yapılandırma / IG kodu: `1784538625891317` → `META_IG_BUSINESS_ID` / `META_CONFIGURATION_ID`
+- Account: **Online VIP Dershane** · id `33570279`
+- Chat IG/FB Kommo’da durur; CRM inbox’a native Meta webhook ile gelir
+- Meta yapılandırma / Login config: `1784538625891317` → `META_CONFIGURATION_ID`
 
 ### Huniler
 1. **Pipeline** (ana): Gelen → Düşünme → Görüşülüyor → İptal/ilgisiz → Takip → Tekrar aranacak → Arandı açmadı → Kazan/Kayıp
