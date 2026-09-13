@@ -115,11 +115,15 @@ export function getMetaWhatsAppEnvStatus() {
 /** Meta webhook doğrulama token’ı — teslimat (delivered/failed) güncellemesi için zorunlu. */
 export function getMetaWebhookEnvStatus() {
   const verifyToken = String(
-    process.env.META_WEBHOOK_VERIFY_TOKEN || process.env.META_VERIFY_TOKEN || ''
+    process.env.META_WEBHOOK_VERIFY_TOKEN ||
+      process.env.META_VERIFY_TOKEN ||
+      process.env.META_WHATSAPP_WEBHOOK_VERIFY_TOKEN ||
+      ''
   ).trim();
   return {
     configured: Boolean(verifyToken),
     webhook_url: 'https://www.dersonlinevipkocluk.com/api/meta/webhook',
+    verify_env: 'META_WEBHOOK_VERIFY_TOKEN',
     hint: verifyToken
       ? 'Meta BM → Webhook URL bu adres + aynı Verify Token; messages alanına abone olun.'
       : 'Vercel Production’da META_WEBHOOK_VERIFY_TOKEN eksik — Meta kabul (wamid) görünür ama teslim/failed panelde güncellenmez.'
@@ -381,6 +385,11 @@ export async function sendMetaTextMessage({ toE164, text }) {
   }
   const body = String(text || '').slice(0, 4096);
   const url = `https://graph.facebook.com/${GRAPH()}/${pid}/messages`;
+  console.info('[meta-whatsapp] send text', {
+    phone_number_id_suffix: pid.length > 6 ? pid.slice(-6) : pid,
+    to_suffix: to.length > 4 ? to.slice(-4) : to,
+    text_len: body.length
+  });
   const payload = {
     messaging_product: 'whatsapp',
     recipient_type: 'individual',

@@ -20,7 +20,13 @@ import {
 } from '../api/_lib/crm-inbox.js';
 
 function verifyToken() {
-  return String(process.env.META_WEBHOOK_VERIFY_TOKEN || process.env.META_VERIFY_TOKEN || '').trim();
+  // Vercel’de tek kaynak: META_WEBHOOK_VERIFY_TOKEN (Meta BM Verify Token ile birebir)
+  return String(
+    process.env.META_WEBHOOK_VERIFY_TOKEN ||
+      process.env.META_VERIFY_TOKEN ||
+      process.env.META_WHATSAPP_WEBHOOK_VERIFY_TOKEN ||
+      ''
+  ).trim();
 }
 
 /** Meta gerçekten POST atıyor mu? (Supabase meta_webhook_hits — SQL migration gerekir) */
@@ -213,6 +219,10 @@ export default async function handler(req, res) {
 
   // Teşhis kaydı (tablo yoksa sessizce atlanır)
   void logWebhookHit(body);
+  console.info('[meta-webhook] POST received', {
+    object: String(body?.object || '').toLowerCase() || null,
+    entries: Array.isArray(body?.entry) ? body.entry.length : 0
+  });
 
   const objectType = String(body.object || '').toLowerCase();
   const entries = Array.isArray(body.entry) ? body.entry : [];
@@ -223,6 +233,8 @@ export default async function handler(req, res) {
   let statusOnly = true;
   /** @type {{ processed?: number; skipped?: number; issues?: string[] } | null} */
   let crmWaSync = null;
+  /** @type {{ processed?: number } | null} */
+  let crmIgSync = null;
 
   // Teşhis: Meta gerçekten messages mi yolluyor, yoksa sadece statuses mı?
   try {
@@ -255,12 +267,16 @@ export default async function handler(req, res) {
       for (const entry of entries) {
         const messaging = Array.isArray(entry?.messaging) ? entry.messaging : [];
         if (messaging.length) {
+          inboundMessageCount += messaging.filter((m) => m?.message && !m?.message?.is_echo).length;
+          statusOnly = false;
           const r = await ingestInstagramMessagingEvents(messaging);
           igIngested += Number(r?.processed || 0);
           try {
-            await syncInstagramMessagingToCrm(messaging);
+            crmIgSync = await syncInstagramMessagingToCrm(messaging);
+            console.info('[meta-webhook] crm ig synced', crmIgSync?.processed || 0);
           } catch (e) {
             console.warn('[meta-webhook] crm ig sync:', e instanceof Error ? e.message : e);
+            crmIgSync = { processed: 0 };
           }
         }
         // bazı IG abonelikleri changes[] ile gelir
@@ -272,15 +288,27 @@ export default async function handler(req, res) {
             for (const m of value.messages) {
               const from = String(m?.from || m?.sender?.id || '').trim();
               if (!from) continue;
-              const text = m?.text?.body != null ? String(m.text.body) : m?.message?.text != null ? String(m.message.text) : null;
-              const r = await ingestInstagramMessagingEvents([
-                {
-                  sender: { id: from },
-                  timestamp: m?.timestamp,
-                  message: { mid: m?.id || m?.mid, text }
-                }
-              ]);
+              const text =
+                m?.text?.body != null
+                  ? String(m.text.body)
+                  : m?.message?.text != null
+                    ? String(m.message.text)
+                    : null;
+              const evt = {
+                sender: { id: from },
+                timestamp: m?.timestamp,
+                message: { mid: m?.id || m?.mid, text }
+              };
+              const r = await ingestInstagramMessagingEvents([evt]);
               igIngested += Number(r?.processed || 0);
+              try {
+                const ig = await syncInstagramMessagingToCrm([evt]);
+                crmIgSync = {
+                  processed: Number(crmIgSync?.processed || 0) + Number(ig?.processed || 0)
+                };
+              } catch (e) {
+                console.warn('[meta-webhook] crm ig sync:', e instanceof Error ? e.message : e);
+              }
             }
           }
         }
@@ -289,6 +317,8 @@ export default async function handler(req, res) {
         ok: true,
         channel: 'instagram',
         ingested: igIngested,
+        inbound_messages_seen: inboundMessageCount,
+        crm_sync: crmIgSync,
         received: getIstanbulDateString()
       });
     }
@@ -297,10 +327,15 @@ export default async function handler(req, res) {
     for (const entry of entries) {
       const messaging = Array.isArray(entry?.messaging) ? entry.messaging : [];
       if (messaging.length && (objectType === 'page' || objectType === 'instagram')) {
+        inboundMessageCount += messaging.filter((m) => m?.message && !m?.message?.is_echo).length;
+        statusOnly = false;
         const r = await ingestInstagramMessagingEvents(messaging);
         igIngested += Number(r?.processed || 0);
         try {
-          await syncInstagramMessagingToCrm(messaging);
+          const ig = await syncInstagramMessagingToCrm(messaging);
+          crmIgSync = {
+            processed: Number(crmIgSync?.processed || 0) + Number(ig?.processed || 0)
+          };
         } catch (e) {
           console.warn('[meta-webhook] crm ig sync:', e instanceof Error ? e.message : e);
         }
@@ -346,13 +381,23 @@ export default async function handler(req, res) {
     );
   }
 
-  return res.status(200).json({
+  const response = {
     ok: true,
     received: getIstanbulDateString(),
     wa_ingested: waIngested,
     ig_ingested: igIngested,
     statuses: statusesApplied,
     inbound_messages_seen: inboundMessageCount,
-    crm_sync: crmWaSync
+    crm_sync: crmWaSync || crmIgSync
+  };
+  console.info('[meta-webhook] POST done', {
+    wa_ingested: waIngested,
+    ig_ingested: igIngested,
+    statuses: statusesApplied,
+    inbound_messages_seen: inboundMessageCount,
+    crm_processed: response.crm_sync?.processed ?? null,
+    crm_skipped: response.crm_sync?.skipped ?? null,
+    crm_issues: response.crm_sync?.issues || null
   });
+  return res.status(200).json(response);
 }
