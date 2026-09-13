@@ -15,7 +15,7 @@ describe('facebook login widget', () => {
     assert.match(url, /facebook\.com\/v21\.0\/dialog\/oauth/);
     assert.match(url, new RegExp(`config_id=${DEFAULT_META_CONFIGURATION_ID}`));
     assert.match(url, new RegExp(`client_id=${DEFAULT_META_APP_ID}`));
-    assert.match(url, /crm%2Fwidgetler/);
+    assert.match(url, /api%2Fmeta%2Ffacebook-oauth/);
     assert.match(url, /response_type=token/);
     assert.match(url, /override_default_response_type=true/);
   });

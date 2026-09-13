@@ -215,6 +215,7 @@ export type CrmFacebookLoginStart = {
   graph_version: string;
   widget_redirect_uri: string;
   oauth_redirect_uri: string;
+  whitelist_uris?: string[];
   authorize_url: string;
   code_authorize_url?: string | null;
   has_app_secret: boolean;
