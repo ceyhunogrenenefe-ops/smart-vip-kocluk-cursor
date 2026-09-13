@@ -44,13 +44,17 @@
 | DENEME DERSİ AYARLANDI | `trial_lesson_scheduled` |
 | Chat WA + Instagram | Inbox WA + IG + FB |
 | Unsorted / üzerine al | Havuz + **Üzerime al** |
-| İç not / şablon / etiket | not + hazır yanıt + `metadata.tags` |
+| İç not / şablon / etiket | not + hazır yanıt + **Meta onaylı WA şablonları** (`/` seçici) + `metadata.tags` |
 | Görev | Kayıt Takibi görevleri |
 
 ## Gönderim (CRM yanıt)
 - `META_WHATSAPP_TOKEN` + `META_PHONE_NUMBER_ID` (0850 Cloud API phone number id)
 - Panel kaydı: Ayarlar → Meta WhatsApp — CRM gönderimden önce DB’den yüklenir
 - Alıcı telefon Meta formatında saklanır: `9055…` (05… otomatik normalize)
+- Serbest metin: 24 saat penceresi içinde. Pencere kapalıysa onaylı **şablon** gerekir.
+- Inbox sağ panel + mesaj kutusunda `/` : WABA’daki **APPROVED** şablonlar (Graph, 0850 phone WABA öncelikli). `{{1}}` / adlı değişkenler için alan açılır.
+- `GET /api/crm-inbox?op=list_meta_templates` · `POST send_message` + `template_name` / `template_language` / `template_params`
+- Instagram / Facebook DM’ye WhatsApp şablonu gönderilmez.
 
 ## Schema
 Supabase SQL Editor (manuel):
@@ -70,7 +74,7 @@ Otomatik (Vercel’de `SUPABASE_DB_URL` / `DATABASE_URL` varsa):
 - Admin: `/crm` pipeline + `/crm/inbox` + `/crm/agents`
 
 ## APIs
-- `/api/crm-inbox?op=list_conversations|list_messages|send_message|assign_conversation|take_conversation|set_tags|list_notes|add_note|list_canned|poll|…`
+- `/api/crm-inbox?op=list_conversations|list_messages|send_message|assign_conversation|take_conversation|set_tags|list_notes|add_note|list_canned|list_meta_templates|poll|…`
 - `/api/crm-admin?op=create_crm_user|promote_agent|demote_agent|list_agents`
 
 ## Realtime

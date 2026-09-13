@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Facebook,
+  FileText,
   Instagram,
   Loader2,
   MessageCircle,
@@ -22,6 +23,7 @@ import {
   crmListCanned,
   crmListConversations,
   crmListMessages,
+  crmListMetaTemplates,
   crmListNotes,
   crmMarkRead,
   crmPoll,
@@ -31,7 +33,8 @@ import {
   crmUpdateStatus,
   type CrmConversation,
   type CrmInboundStatus,
-  type CrmMessage
+  type CrmMessage,
+  type CrmMetaTemplate
 } from '../../lib/crmInboxApi';
 
 function ChannelBadge({ channel }: { channel: string }) {
@@ -70,6 +73,31 @@ function formatTime(iso?: string | null) {
   }
 }
 
+function slashQuery(text: string): string | null {
+  const lastLine = text.split('\n').pop() ?? '';
+  const m = lastLine.match(/(^|\s)\/([^\s]*)$/);
+  if (!m) return null;
+  return m[2] ?? '';
+}
+
+function replaceSlashToken(text: string, replacement: string) {
+  return text.replace(/(^|\s)\/([^\s]*)$/, `$1${replacement}`);
+}
+
+function fillTemplatePreview(body: string, params: string[], names: string[]) {
+  let out = body || '';
+  names.forEach((n, i) => {
+    const key = String(n || '').trim();
+    if (!key) return;
+    const safe = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    out = out.replace(new RegExp(`\\{\\{\\s*${safe}\\s*\\}\\}`, 'g'), params[i] ?? '');
+  });
+  params.forEach((p, i) => {
+    out = out.replace(new RegExp(`\\{\\{\\s*${i + 1}\\s*\\}\\}`, 'g'), p ?? '');
+  });
+  return out;
+}
+
 export default function CrmInboxPage() {
   const { effectiveUser } = useAuth();
   const tags = userRoleTags(effectiveUser);
@@ -90,11 +118,32 @@ export default function CrmInboxPage() {
   const [inbound, setInbound] = useState<CrmInboundStatus | null>(null);
   const [binding, setBinding] = useState(false);
   const [canned, setCanned] = useState<Array<{ id: string; title: string; body: string }>>([]);
+  const [metaTemplates, setMetaTemplates] = useState<CrmMetaTemplate[]>([]);
+  const [metaTplHint, setMetaTplHint] = useState<string | null>(null);
+  const [metaTplLoading, setMetaTplLoading] = useState(false);
+  const [slashOpen, setSlashOpen] = useState(false);
+  const [slashHighlight, setSlashHighlight] = useState(0);
+  const [pendingTpl, setPendingTpl] = useState<CrmMetaTemplate | null>(null);
+  const [tplParams, setTplParams] = useState<string[]>([]);
   const [notes, setNotes] = useState<Array<{ id: string; body: string; created_at: string }>>([]);
   const [noteDraft, setNoteDraft] = useState('');
   const [tagDraft, setTagDraft] = useState('');
   const pollSinceRef = useRef(new Date().toISOString());
   const bottomRef = useRef<HTMLDivElement | null>(null);
+  const composeRef = useRef<HTMLTextAreaElement | null>(null);
+
+  const loadMetaTemplates = useCallback(async (refresh = false) => {
+    setMetaTplLoading(true);
+    try {
+      const res = await crmListMetaTemplates(refresh);
+      setMetaTemplates(res.data || []);
+      setMetaTplHint(res.hint || null);
+    } catch (e) {
+      setMetaTplHint(e instanceof Error ? e.message : 'Şablonlar yüklenemedi');
+    } finally {
+      setMetaTplLoading(false);
+    }
+  }, []);
 
   const loadList = useCallback(async () => {
     setLoadingList(true);
@@ -139,7 +188,8 @@ export default function CrmInboxPage() {
     void crmListCanned()
       .then((res) => setCanned(res.data || []))
       .catch(() => undefined);
-  }, []);
+    void loadMetaTemplates(false);
+  }, [loadMetaTemplates]);
 
   useEffect(() => {
     if (!selectedId) {
@@ -220,6 +270,7 @@ export default function CrmInboxPage() {
       const res = await crmSendMessage(selectedId, draft.trim());
       if (res.data) setMessages((prev) => [...prev, res.data]);
       setDraft('');
+      setSlashOpen(false);
       void loadList();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Gönderilemedi');
@@ -227,6 +278,91 @@ export default function CrmInboxPage() {
       setSending(false);
     }
   };
+
+  const onSendTemplate = async (tpl: CrmMetaTemplate, params: string[]) => {
+    if (!selectedId) return;
+    if (selected?.channel && selected.channel !== 'whatsapp') {
+      toast.error('Meta şablonları yalnızca WhatsApp konuşmasında gönderilir.');
+      return;
+    }
+    if (tpl.sendable === false) {
+      toast.error('Bu şablon medya başlığı istiyor; CRM’den şu an yalnızca metin şablonları gönderilir.');
+      return;
+    }
+    const names = tpl.variableNames || [];
+    if (tpl.variableCount > 0 && params.some((p) => !String(p || '').trim())) {
+      toast.error('Şablon değişkenlerini doldurun.');
+      return;
+    }
+    setSending(true);
+    try {
+      const res = await crmSendMessage(selectedId, '', {
+        template_name: tpl.name,
+        template_language: tpl.language,
+        template_params: params,
+        template_param_names: tpl.variableFormat === 'named' ? names : undefined,
+        template_body: tpl.body
+      });
+      if (res.data) setMessages((prev) => [...prev, res.data]);
+      setDraft('');
+      setPendingTpl(null);
+      setTplParams([]);
+      setSlashOpen(false);
+      toast.success(`Şablon gönderildi: ${tpl.name}`);
+      void loadList();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Şablon gönderilemedi');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const pickCanned = (body: string) => {
+    setDraft(slashQuery(draft) != null ? replaceSlashToken(draft, body) : body);
+    setSlashOpen(false);
+    composeRef.current?.focus();
+  };
+
+  const pickTemplate = (tpl: CrmMetaTemplate) => {
+    if (selected?.channel && selected.channel !== 'whatsapp') {
+      toast.error('Meta şablonları yalnızca WhatsApp konuşmasında gönderilir.');
+      return;
+    }
+    setDraft(replaceSlashToken(draft, '').replace(/\s+$/, ''));
+    setSlashOpen(false);
+    if (tpl.variableCount > 0 || tpl.sendable === false) {
+      setPendingTpl(tpl);
+      setTplParams(Array.from({ length: tpl.variableCount }, () => ''));
+      return;
+    }
+    void onSendTemplate(tpl, []);
+  };
+
+  const slashNeedle = slashQuery(draft);
+  const slashItems = useMemo(() => {
+    if (slashNeedle == null) return [];
+    const q = slashNeedle.toLocaleLowerCase('tr');
+    const tpls = metaTemplates
+      .filter((t) => {
+        if (!q) return true;
+        const hay = `${t.name} ${t.body} ${t.category || ''}`.toLocaleLowerCase('tr');
+        return hay.includes(q);
+      })
+      .map((t) => ({ kind: 'meta' as const, id: t.id, title: t.name, subtitle: t.body, tpl: t }));
+    const cans = canned
+      .filter((c) => {
+        if (!q) return true;
+        const hay = `${c.title} ${c.body}`.toLocaleLowerCase('tr');
+        return hay.includes(q);
+      })
+      .map((c) => ({ kind: 'canned' as const, id: c.id, title: c.title, subtitle: c.body, canned: c }));
+    return [...tpls, ...cans].slice(0, 12);
+  }, [slashNeedle, metaTemplates, canned]);
+
+  useEffect(() => {
+    setSlashOpen(slashNeedle != null && !pendingTpl);
+    setSlashHighlight(0);
+  }, [slashNeedle, pendingTpl]);
 
   const adSource = useMemo(() => {
     const d = selected?.ad_source_data;
@@ -467,19 +603,152 @@ export default function CrmInboxPage() {
               <div ref={bottomRef} />
             </div>
 
-            <div className="border-t border-slate-200 p-3">
+            <div className="relative border-t border-slate-200 p-3">
+              {slashOpen && slashNeedle != null ? (
+                <div
+                  className="absolute bottom-full left-3 right-3 z-20 mb-1 max-h-64 overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-lg"
+                  role="listbox"
+                >
+                  <p className="border-b border-slate-100 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                    / şablon ve hazır yanıt
+                  </p>
+                  {slashItems.length === 0 ? (
+                    <p className="px-3 py-2 text-xs text-slate-500">Eşleşen onaylı şablon veya hazır yanıt yok.</p>
+                  ) : null}
+                  {slashItems.map((item, idx) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      role="option"
+                      aria-selected={idx === slashHighlight}
+                      onMouseEnter={() => setSlashHighlight(idx)}
+                      onClick={() => {
+                        if (item.kind === 'meta') pickTemplate(item.tpl);
+                        else pickCanned(item.canned.body);
+                      }}
+                      className={`flex w-full flex-col gap-0.5 px-3 py-2 text-left text-sm ${
+                        idx === slashHighlight ? 'bg-emerald-50' : 'hover:bg-slate-50'
+                      }`}
+                    >
+                      <span className="flex items-center gap-2">
+                        <span
+                          className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${
+                            item.kind === 'meta'
+                              ? 'bg-emerald-100 text-emerald-800'
+                              : 'bg-slate-100 text-slate-600'
+                          }`}
+                        >
+                          {item.kind === 'meta' ? 'Meta' : 'Hazır'}
+                        </span>
+                        <span className="font-medium text-slate-900">{item.title}</span>
+                        {item.kind === 'meta' ? (
+                          <span className="text-[10px] text-slate-400">{item.tpl.language}</span>
+                        ) : null}
+                      </span>
+                      {item.subtitle ? (
+                        <span className="line-clamp-2 text-[11px] text-slate-500">{item.subtitle}</span>
+                      ) : null}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+
+              {pendingTpl ? (
+                <div className="mb-2 rounded-xl border border-emerald-200 bg-emerald-50/70 p-2.5">
+                  <div className="mb-1.5 flex items-start justify-between gap-2">
+                    <div>
+                      <p className="text-xs font-semibold text-emerald-900">
+                        Şablon: {pendingTpl.name}
+                        <span className="ml-1 font-normal text-emerald-700">· {pendingTpl.language}</span>
+                      </p>
+                      {pendingTpl.body ? (
+                        <p className="mt-0.5 whitespace-pre-wrap text-[11px] text-emerald-800">
+                          {fillTemplatePreview(pendingTpl.body, tplParams, pendingTpl.variableNames || [])}
+                        </p>
+                      ) : null}
+                      {pendingTpl.sendable === false ? (
+                        <p className="mt-1 text-[11px] text-amber-800">
+                          Medya başlığı gereken şablon — CRM’den gönderilemez.
+                        </p>
+                      ) : null}
+                    </div>
+                    <button
+                      type="button"
+                      className="text-[11px] font-medium text-slate-500 hover:text-slate-800"
+                      onClick={() => {
+                        setPendingTpl(null);
+                        setTplParams([]);
+                      }}
+                    >
+                      Vazgeç
+                    </button>
+                  </div>
+                  {pendingTpl.variableCount > 0 ? (
+                    <div className="mb-2 grid gap-1.5">
+                      {(pendingTpl.variableNames || []).map((name, i) => (
+                        <input
+                          key={`${pendingTpl.id}-${name}`}
+                          value={tplParams[i] || ''}
+                          onChange={(e) => {
+                            const next = [...tplParams];
+                            next[i] = e.target.value;
+                            setTplParams(next);
+                          }}
+                          placeholder={`{{${name}}}`}
+                          className="rounded-lg border border-emerald-200 bg-white px-2 py-1.5 text-xs outline-none focus:border-emerald-500"
+                        />
+                      ))}
+                    </div>
+                  ) : null}
+                  <button
+                    type="button"
+                    disabled={sending || pendingTpl.sendable === false}
+                    onClick={() => void onSendTemplate(pendingTpl, tplParams)}
+                    className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+                  >
+                    {sending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+                    Şablonu gönder
+                  </button>
+                </div>
+              ) : null}
+
               <div className="flex items-end gap-2">
                 <textarea
+                  ref={composeRef}
                   value={draft}
                   onChange={(e) => setDraft(e.target.value)}
                   onKeyDown={(e) => {
+                    if (slashOpen && slashItems.length) {
+                      if (e.key === 'ArrowDown') {
+                        e.preventDefault();
+                        setSlashHighlight((i) => (i + 1) % slashItems.length);
+                        return;
+                      }
+                      if (e.key === 'ArrowUp') {
+                        e.preventDefault();
+                        setSlashHighlight((i) => (i - 1 + slashItems.length) % slashItems.length);
+                        return;
+                      }
+                      if (e.key === 'Escape') {
+                        e.preventDefault();
+                        setSlashOpen(false);
+                        return;
+                      }
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        const item = slashItems[slashHighlight];
+                        if (item?.kind === 'meta') pickTemplate(item.tpl);
+                        else if (item?.kind === 'canned') pickCanned(item.canned.body);
+                        return;
+                      }
+                    }
                     if (e.key === 'Enter' && !e.shiftKey) {
                       e.preventDefault();
                       void onSend();
                     }
                   }}
                   rows={2}
-                  placeholder="Yanıt yazın… (Enter = gönder)"
+                  placeholder="Yanıt yazın…  / ile şablon · Enter = gönder"
                   className="min-h-[44px] flex-1 resize-none rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-emerald-500"
                 />
                 <button
@@ -498,6 +767,58 @@ export default function CrmInboxPage() {
       </section>
 
       <aside className="hidden w-72 flex-col border-l border-slate-200 bg-slate-50/60 lg:flex">
+        <div className="border-b border-slate-200 p-4">
+          <div className="mb-1 flex items-center justify-between gap-2">
+            <h3 className="flex items-center gap-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
+              <FileText className="h-3.5 w-3.5" />
+              Meta şablonları
+            </h3>
+            <button
+              type="button"
+              title="Yenile"
+              onClick={() => void loadMetaTemplates(true)}
+              className="rounded p-1 text-slate-400 hover:bg-white hover:text-slate-700"
+            >
+              {metaTplLoading ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <RefreshCw className="h-3.5 w-3.5" />
+              )}
+            </button>
+          </div>
+          <p className="mb-2 text-[10px] text-slate-400">
+            Onaylı WhatsApp şablonları. Mesaj kutusuna <span className="font-mono">/</span> yazın.
+          </p>
+          {metaTemplates.length ? (
+            <div className="flex max-h-56 flex-col gap-1 overflow-y-auto">
+              {metaTemplates.map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  disabled={!selectedId}
+                  onClick={() => pickTemplate(t)}
+                  className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-left hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <span className="flex items-center justify-between gap-1">
+                    <span className="truncate text-[11px] font-semibold text-slate-800">{t.name}</span>
+                    <span className="shrink-0 rounded bg-emerald-100 px-1 py-0.5 text-[9px] font-bold uppercase text-emerald-800">
+                      {t.status || 'onaylı'}
+                    </span>
+                  </span>
+                  {t.body ? (
+                    <span className="mt-0.5 line-clamp-2 text-[10px] text-slate-500">{t.body}</span>
+                  ) : (
+                    <span className="mt-0.5 text-[10px] text-slate-400">{t.language}</span>
+                  )}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <p className="text-[11px] text-slate-400">
+              {metaTplLoading ? 'Yükleniyor…' : metaTplHint || 'Onaylı şablon yok.'}
+            </p>
+          )}
+        </div>
         {selected ? (
           <div className="space-y-4 overflow-y-auto p-4 text-sm">
             <div>
@@ -562,7 +883,7 @@ export default function CrmInboxPage() {
             {canned.length > 0 && selectedId ? (
               <div>
                 <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  Hazır yanıtlar
+                  Hazır yanıtlar (serbest metin)
                 </h3>
                 <div className="flex flex-col gap-1">
                   {canned.map((c) => (

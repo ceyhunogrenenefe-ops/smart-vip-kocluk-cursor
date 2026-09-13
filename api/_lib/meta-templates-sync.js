@@ -592,6 +592,181 @@ export async function resolveLanguageTryOrderForSend(templateName, preferredLang
   return buildLanguageTryOrder(list.templates, templateName, preferredLang);
 }
 
+function extractBodyComponent(components) {
+  const comps = Array.isArray(components) ? components : [];
+  return comps.find((c) => String(c?.type || '').toUpperCase() === 'BODY') || null;
+}
+
+function extractHeaderComponent(components) {
+  const comps = Array.isArray(components) ? components : [];
+  return comps.find((c) => String(c?.type || '').toUpperCase() === 'HEADER') || null;
+}
+
+/**
+ * Graph BODY metninden {{1}} / {{name}} değişkenlerini çıkarır.
+ * @param {string} bodyText
+ * @param {object | null} bodyComp
+ */
+export function parseCrmTemplateVariables(bodyText, bodyComp = null) {
+  const text = String(bodyText || '');
+  const namedFromExample = [];
+  const ex = bodyComp?.example?.body_text_named_params;
+  if (Array.isArray(ex)) {
+    for (const p of ex) {
+      const n = String(p?.param_name || p?.parameter_name || '').trim();
+      if (n) namedFromExample.push(n);
+    }
+  }
+  const namedInText = [...text.matchAll(/\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}/g)].map((m) => m[1]);
+  const numbered = [...text.matchAll(/\{\{\s*(\d+)\s*\}\}/g)].map((m) => Number(m[1]));
+  const maxN = numbered.reduce((m, n) => Math.max(m, n), 0);
+
+  if (namedFromExample.length || (namedInText.length && !maxN)) {
+    const names = namedFromExample.length ? namedFromExample : [...new Set(namedInText)];
+    return { format: 'named', names, count: names.length };
+  }
+  return {
+    format: 'positional',
+    names: Array.from({ length: maxN }, (_, i) => String(i + 1)),
+    count: maxN
+  };
+}
+
+export function mapGraphTemplateToCrm(row) {
+  const comps = Array.isArray(row?.components) ? row.components : [];
+  const bodyComp = extractBodyComponent(comps);
+  const header = extractHeaderComponent(comps);
+  const bodyText = String(bodyComp?.text || '');
+  const vars = parseCrmTemplateVariables(bodyText, bodyComp);
+  const headerFormat = header ? String(header.format || '').toUpperCase() : '';
+  const mediaHeader = /^(IMAGE|VIDEO|DOCUMENT)$/.test(headerFormat);
+  return {
+    id: `meta:${String(row?.name || '').trim()}:${String(row?.language || 'tr').trim()}`,
+    kind: 'meta_template',
+    name: String(row?.name || '').trim(),
+    language: String(row?.language || 'tr').trim() || 'tr',
+    category: String(row?.category || '').trim(),
+    status: String(row?.status || '').trim(),
+    body: bodyText,
+    variableCount: vars.count,
+    variableFormat: vars.format,
+    variableNames: vars.names,
+    headerFormat: headerFormat || null,
+    sendable: !mediaHeader,
+    qualityScore: row?.quality_score?.score || null
+  };
+}
+
+export function mapDbTemplateToCrm(row) {
+  const bodyText = String(row?.content || '');
+  const vars = parseCrmTemplateVariables(bodyText, null);
+  const extraNames = Array.isArray(row?.variables)
+    ? row.variables.map((x) => String(x || '').trim()).filter(Boolean)
+    : [];
+  const names = vars.count ? vars.names : extraNames;
+  return {
+    id: `db:${row?.id || row?.meta_template_name}`,
+    kind: 'meta_template',
+    name: String(row?.meta_template_name || '').trim(),
+    language: String(row?.meta_template_language || 'tr').trim() || 'tr',
+    category: String(row?.type || '').trim(),
+    status: String(row?.whatsapp_template_status || 'APPROVED').trim() || 'APPROVED',
+    body: bodyText,
+    variableCount: names.length,
+    variableFormat: vars.format,
+    variableNames: names,
+    headerFormat: null,
+    sendable: true,
+    qualityScore: null
+  };
+}
+
+export function fillCrmTemplateBody(bodyText, params, names) {
+  let out = String(bodyText || '');
+  const texts = Array.isArray(params) ? params : [];
+  const keys = Array.isArray(names) ? names : [];
+  if (keys.length) {
+    keys.forEach((n, i) => {
+      const key = String(n || '').trim();
+      if (!key) return;
+      const safe = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      out = out.replace(new RegExp(`\\{\\{\\s*${safe}\\s*\\}\\}`, 'g'), String(texts[i] ?? ''));
+    });
+  }
+  texts.forEach((p, i) => {
+    out = out.replace(new RegExp(`\\{\\{\\s*${i + 1}\\s*\\}\\}`, 'g'), String(p ?? ''));
+  });
+  return out;
+}
+
+let crmApprovedTplCache = { at: 0, payload: null };
+const CRM_TPL_CACHE_MS = 60_000;
+
+/**
+ * 0850 hattının WABA'sındaki onaylı WhatsApp şablonları (CRM inbox).
+ */
+export async function listApprovedCrmWhatsAppTemplates({ force = false } = {}) {
+  if (!force && crmApprovedTplCache.payload && Date.now() - crmApprovedTplCache.at < CRM_TPL_CACHE_MS) {
+    return crmApprovedTplCache.payload;
+  }
+
+  const tok = process.env.META_WHATSAPP_TOKEN?.trim();
+  let rows = [];
+  let source = 'none';
+  let hint = null;
+  let error = null;
+
+  if (tok) {
+    const primary = await resolvePrimaryWabaId(tok);
+    if (primary.waba_id) {
+      const r = await fetchTemplatesForWaba(primary.waba_id, tok, { includeComponents: true });
+      if (r.ok && (r.templates || []).length) {
+        rows = r.templates;
+        source = 'phone_waba';
+      } else {
+        error = r.error || 'phone_waba_empty';
+      }
+    } else {
+      error = 'phone_waba_unresolved';
+    }
+  } else {
+    error = 'missing_meta_token';
+  }
+
+  if (!rows.length) {
+    const all = await fetchAllMetaMessageTemplates({ includeComponents: true });
+    if (all.ok && (all.templates || []).length) {
+      rows = all.templates;
+      source = 'all_waba';
+      error = null;
+    } else if (!error) {
+      error = all.error || 'no_templates_from_meta';
+    }
+  }
+
+  const approved = (rows || [])
+    .filter((r) => isMetaTemplateSendableStatus(r.status) && String(r.name || '').trim())
+    .map(mapGraphTemplateToCrm)
+    .sort((a, b) => a.name.localeCompare(b.name, 'tr') || a.language.localeCompare(b.language));
+
+  if (!approved.length) {
+    hint =
+      error === 'missing_meta_token'
+        ? 'META_WHATSAPP_TOKEN yok — onaylı şablonlar Graph’tan çekilemedi.'
+        : 'WABA’da APPROVED şablon bulunamadı. WhatsApp Manager’da şablon durumunu kontrol edin.';
+  }
+
+  const payload = {
+    ok: approved.length > 0 || !error,
+    source,
+    error,
+    hint,
+    templates: approved
+  };
+  crmApprovedTplCache = { at: Date.now(), payload };
+  return payload;
+}
+
 /** Panel tanı: unknown nedenini göstermek için (token/WABA/şablon adı). */
 export async function getMetaTemplateSyncDiagnostics(templateName, preferredLang) {
   const name = String(templateName || '').trim();
