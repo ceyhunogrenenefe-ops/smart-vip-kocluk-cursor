@@ -7,6 +7,7 @@ import {
   crmFacebookLoginStart,
   crmInboundStatus,
   crmSaveMetaAppSecret,
+  crmSaveMetaConfigurationId,
   crmSavePageToken,
   type CrmFacebookLoginStart,
   type CrmInboundStatus
@@ -37,6 +38,8 @@ export default function CrmWidgetsPage() {
   const [binding, setBinding] = useState(false);
   const [appSecret, setAppSecret] = useState('');
   const [savingSecret, setSavingSecret] = useState(false);
+  const [configId, setConfigId] = useState('');
+  const [savingConfig, setSavingConfig] = useState(false);
   const [q, setQ] = useState('');
   const [cat, setCat] = useState<(typeof CRM_WIDGET_CATEGORIES)[number]['id']>('all');
 
@@ -77,7 +80,7 @@ export default function CrmWidgetsPage() {
       const assetFail = /1349246|not granted|varlık/i.test(err);
       toast.error(
         assetFail
-          ? 'Facebook 3 ekstra varlığa izin veremedi. «Instagram’ı bağla» sayfa izinleriyle tekrar deneyin; popup’ta yalnızca Online VIP’i seçin.'
+          ? '1349246: Facebook 52570416778031 ve 23850842047630381 varlıklarına izin veremedi. Meta’da Login for Business yapılandırmasından bu iki varlığı silin; yalnızca Online VIP kalsın.'
           : err
       );
       setSearchParams({}, { replace: true });
@@ -127,8 +130,6 @@ export default function CrmWidgetsPage() {
 
   const connectSocial = () => startOAuth(login?.authorize_url || login?.code_authorize_url);
 
-  const connectLoginForBusiness = () => startOAuth(login?.config_authorize_url);
-
   const refreshWhatsApp = async () => {
     setBinding(true);
     try {
@@ -154,6 +155,21 @@ export default function CrmWidgetsPage() {
       toast.error(e instanceof Error ? e.message : 'Kaydedilemedi');
     } finally {
       setSavingSecret(false);
+    }
+  };
+
+  const saveConfig = async () => {
+    if (!configId.trim()) return;
+    setSavingConfig(true);
+    try {
+      await crmSaveMetaConfigurationId(configId.trim());
+      setConfigId('');
+      toast.success('Yeni yapılandırma kaydedildi — Instagram’ı bağla yalnızca bu listedeki varlıkları ister');
+      await refresh();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Kaydedilemedi');
+    } finally {
+      setSavingConfig(false);
     }
   };
 
@@ -315,20 +331,56 @@ export default function CrmWidgetsPage() {
             {binding ? 'Bağlanıyor…' : socialOk ? 'Facebook’u yenile' : 'Facebook’u bağla'}
           </button>
         </div>
-        <p className="mt-3 text-xs text-slate-600">
-          Hata <strong>1349246</strong> (varlıklar 52570416778031, 23850842047630381, 776451501294387):
-          Login for Business, yönetici olmadığınız sayfa/reklam/IG varlıklarına izin istiyor. Yukarıdaki
-          butonlar artık yalnızca <strong>Online VIP sayfası + Instagram</strong> izni ister. Popup’ta başka
-          sayfa işaretlemeyin.
-        </p>
-        <button
-          type="button"
-          disabled={binding}
-          onClick={() => connectLoginForBusiness()}
-          className="mt-2 text-xs font-medium text-slate-500 underline hover:text-slate-800 disabled:opacity-50"
-        >
-          Eski Login for Business (tüm BM varlıkları) — 1349246 verebilir
-        </button>
+        <div className="mt-3 rounded-xl bg-amber-50 p-3 text-xs leading-relaxed text-amber-950 ring-1 ring-amber-200">
+          <p className="font-semibold">1349246 — bu iki varlığı yapılandırmadan silin</p>
+          <p className="mt-1">
+            <code className="rounded bg-white px-1">
+              {login?.blocked_asset_ids?.[0] || '52570416778031'}
+            </code>{' '}
+            ve{' '}
+            <code className="rounded bg-white px-1">
+              {login?.blocked_asset_ids?.[1] || '23850842047630381'}
+            </code>{' '}
+            için yönetici değilsiniz. Popup’ta işareti kaldırmak yetmez — Facebook Login for Business
+            listedeki her varlığı zorunlu tutar.
+          </p>
+          <ol className="mt-2 list-decimal space-y-1 pl-4">
+            <li>developers.facebook.com → SmartKocluk → <strong>Facebook Login for Business</strong></li>
+            <li>
+              Configurations → <code>1784538625891317</code>: bu iki ID’yi <strong>Remove</strong>,
+              yalnızca Online VIP sayfası + bağlı Instagram kalsın.
+            </li>
+            <li>
+              Ya da <strong>Create configuration</strong>: sadece Online VIP + IG. Yeni config ID’yi
+              aşağıya yapıştırın (eski ID’yi kullanmayın).
+            </li>
+            <li>Kaydet. 1 dakika bekleyin. Sonra bu sayfada Instagram’ı bağla.</li>
+          </ol>
+          {login?.uses_slim_config ? (
+            <p className="mt-2 font-medium text-emerald-800">
+              Yeni yapılandırma kayıtlı: {login.config_id}
+            </p>
+          ) : (
+            <div className="mt-3 flex flex-wrap gap-2">
+              <input
+                value={configId}
+                onChange={(e) => setConfigId(e.target.value.replace(/\D/g, ''))}
+                placeholder="Yeni config ID (yalnızca Online VIP)"
+                className="min-w-[220px] flex-1 rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm"
+                inputMode="numeric"
+                autoComplete="off"
+              />
+              <button
+                type="button"
+                disabled={savingConfig || configId.length < 10}
+                onClick={() => void saveConfig()}
+                className="rounded-lg bg-amber-900 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50"
+              >
+                {savingConfig ? 'Kaydediliyor…' : 'Yeni config’i kaydet'}
+              </button>
+            </div>
+          )}
+        </div>
       </section>
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">

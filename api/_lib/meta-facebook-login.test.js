@@ -4,6 +4,7 @@ import {
   DEFAULT_META_APP_ID,
   DEFAULT_META_CONFIGURATION_ID,
   buildFacebookLoginUrl,
+  describeFacebookLoginWidget,
   parseFacebookRedirectHash,
   widgetRedirectUri,
   oauthRedirectUri
@@ -44,5 +45,19 @@ describe('facebook login widget', () => {
   it('uses production widget and oauth redirects', () => {
     assert.equal(widgetRedirectUri(), 'https://www.dersonlinevipkocluk.com/crm/widgetler');
     assert.equal(oauthRedirectUri(), 'https://www.dersonlinevipkocluk.com/api/meta/facebook-oauth');
+  });
+
+  it('uses slim config_id when META_CONFIGURATION_ID is not the default LfB config', () => {
+    const prev = process.env.META_CONFIGURATION_ID;
+    process.env.META_CONFIGURATION_ID = '9990001112223334';
+    try {
+      const d = describeFacebookLoginWidget();
+      assert.equal(d.uses_slim_config, true);
+      assert.match(d.authorize_url, /config_id=9990001112223334/);
+      assert.doesNotMatch(d.code_authorize_url, /config_id=/);
+    } finally {
+      if (prev == null) delete process.env.META_CONFIGURATION_ID;
+      else process.env.META_CONFIGURATION_ID = prev;
+    }
   });
 });

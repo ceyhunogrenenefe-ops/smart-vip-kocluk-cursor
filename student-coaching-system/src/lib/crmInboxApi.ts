@@ -212,6 +212,8 @@ export function crmSavePageToken(payload: {
 export type CrmFacebookLoginStart = {
   app_id: string;
   config_id: string;
+  uses_slim_config?: boolean;
+  blocked_asset_ids?: string[];
   graph_version: string;
   widget_redirect_uri: string;
   oauth_redirect_uri: string;
@@ -230,6 +232,15 @@ export function crmFacebookLoginStart() {
 export function crmSaveMetaAppSecret(appSecret: string) {
   return inboxPost<{ ok: boolean; data: { saved: boolean; suffix?: string } }>('save_meta_app_secret', {
     app_secret: appSecret
+  });
+}
+
+export function crmSaveMetaConfigurationId(configurationId: string) {
+  return inboxPost<{
+    ok: boolean;
+    data: { saved: boolean; configuration_id?: string; uses_slim_config?: boolean };
+  }>('save_meta_configuration_id', {
+    configuration_id: configurationId
   });
 }
 

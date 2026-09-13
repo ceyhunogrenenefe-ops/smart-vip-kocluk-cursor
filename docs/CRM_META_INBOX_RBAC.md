@@ -19,12 +19,13 @@
 - OAuth: `GET /api/meta/facebook-oauth` · redirect URI `/crm/widgetler`
 - Teşhis: `GET /api/whatsapp-health` → `meta_social_env.token_source` (token yazılmaz, yalnızca env adı + suffix)
 - Login for Business config id `1784538625891317` Page ID değildir
+- Hata **1349246** (`52570416778031`, `23850842047630381`): bu varlıklara admin değilsiniz. Meta → Facebook Login for Business → Configurations → ilgili yapılandırmadan **Remove**. İşareti kaldırmak yetmez. Alternatif: yalnızca Online VIP + IG içeren yeni config oluşturup Widgetler’de kaydedin.
 
 ## Kommo (yalnızca hunı karşılaştırması — mesaj köprüsü değil)
 - URL: `https://onlinevipdershane.kommo.com/`
 - Account: **Online VIP Dershane** · id `33570279`
 - Chat IG/FB Kommo’da durur; CRM inbox’a native Meta webhook ile gelir
-- Meta yapılandırma / Login config: `1784538625891317` → `META_CONFIGURATION_ID`
+- Meta yapılandırma / Login config: `1784538625891317` → `META_CONFIGURATION_ID` (1349246 verirse Widgetler’den yeni slim config kaydedin)
 
 ### Huniler
 1. **Pipeline** (ana): Gelen → Düşünme → Görüşülüyor → İptal/ilgisiz → Takip → Tekrar aranacak → Arandı açmadı → Kazan/Kayıp
