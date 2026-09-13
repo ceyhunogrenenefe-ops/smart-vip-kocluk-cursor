@@ -1,0 +1,20 @@
+---
+description: CRM / ürün PR’larını kullanıcı “merge ve deploy” demeden birleştir ve production’a al
+alwaysApply: true
+---
+
+# Otomatik merge + production deploy
+
+Ceyhun (repo sahibi) 13 Eyl 2026: **“merge ve deploy demeden de bundan sonrakiler için otomatik yap.”**
+
+Bu talimat sonraki tüm işler için geçerlidir. Kullanıcı tekrar “merge ve deploy” yazmak zorunda değildir.
+
+## Her özellik turu bittiğinde
+
+1. Dual PR aç (`main` + `feat/commerce-kitap-checkout` ikizi).
+2. CI yeşil olunca taslağı **ready** yap.
+3. Merge commit ile birleştir (`gh pr merge --merge`). Squash kullanma.
+4. `main` merge SHA için Vercel **Production – smart-kocluk-ceyhu** success olana kadar bekle.
+5. Kullanıcıya canlı URL + kısa kullanım notu ver.
+
+Bekleme: CI kırmızıysa merge etme, düzelt. Kullanıcı açıkça “merge etme / beklet” derse dur.
