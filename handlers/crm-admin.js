@@ -32,6 +32,23 @@ function normalizeRoles(primary, rolesArr) {
   return [...set];
 }
 
+
+function userHasRole(user, role) {
+  const want = String(role || '').toLowerCase();
+  if (!want) return false;
+  if (String(user?.role || '').toLowerCase() === want) return true;
+  const roles = user?.roles;
+  if (Array.isArray(roles)) return roles.some((r) => String(r || '').toLowerCase() === want);
+  return false;
+}
+
+function softInstitutionMatch(rowInst, filterInst) {
+  if (!filterInst) return true;
+  const a = String(rowInst || '').trim();
+  if (!a) return true; // kurum boş kullanıcıları da aday göster
+  return a === String(filterInst);
+}
+
 export default async function handler(req, res) {
   let actor;
   try {
@@ -218,37 +235,61 @@ export default async function handler(req, res) {
             'id, user_id, institution_id, can_access_unassigned_pool, is_active, notes, users:user_id(id, name, email, role, roles, is_active)'
           )
           .order('created_at', { ascending: false });
-        if (institutionId) aq = aq.eq('institution_id', institutionId);
-        const { data, error } = await aq;
+        // institution_id null atamaları da getir (filtreyi JS'te yumuşat)
+        const { data, error } = await aq.limit(300);
         if (error) throw error;
-        assignments = data || [];
+        assignments = (data || []).filter(
+          (a) => softInstitutionMatch(a.institution_id, institutionId) && a.is_active !== false
+        );
       } catch (e) {
         if (!/crm_user_assignments|does not exist/i.test(e?.message || '')) throw e;
       }
 
-      let q = supabaseAdmin
+      // PostgREST roles.cs.{"crm_agent"} jsonb'de kırılıyor → JS filtre
+      const { data: staffRows, error: staffErr } = await supabaseAdmin
         .from('users')
         .select('id, name, email, role, roles, institution_id, is_active')
-        .or('role.eq.crm_agent,roles.cs.{"crm_agent"}')
-        .limit(200);
-      if (institutionId) q = q.eq('institution_id', institutionId);
-      const { data: roleUsers } = await q;
+        .in('role', ['crm_agent', 'coach', 'admin', 'super_admin', 'teacher'])
+        .limit(500);
+      if (staffErr) throw staffErr;
 
-      // Candidate coaches for promotion
-      let coachesQ = supabaseAdmin
-        .from('users')
-        .select('id, name, email, role, roles, institution_id')
-        .eq('role', 'coach')
-        .eq('is_active', true)
-        .limit(100);
-      if (institutionId) coachesQ = coachesQ.eq('institution_id', institutionId);
-      const { data: coaches } = await coachesQ;
+      const roleUsersMap = new Map();
+      for (const u of staffRows || []) {
+        if (!userHasRole(u, 'crm_agent')) continue;
+        if (u.is_active === false) continue;
+        if (!softInstitutionMatch(u.institution_id, institutionId)) continue;
+        roleUsersMap.set(u.id, u);
+      }
+      // Atama tablosundan gelenleri de aktif ajan say
+      for (const a of assignments) {
+        const u = a.users;
+        if (u?.id && !roleUsersMap.has(u.id)) {
+          roleUsersMap.set(u.id, {
+            id: u.id,
+            name: u.name,
+            email: u.email,
+            role: u.role,
+            roles: u.roles,
+            institution_id: a.institution_id,
+            is_active: u.is_active !== false
+          });
+        }
+      }
+      const roleUsers = [...roleUsersMap.values()];
+
+      const coaches = (staffRows || []).filter((u) => {
+        if (u.is_active === false) return false;
+        if (!userHasRole(u, 'coach')) return false;
+        if (userHasRole(u, 'crm_agent')) return false; // zaten ajan
+        if (!softInstitutionMatch(u.institution_id, institutionId)) return false;
+        return true;
+      });
 
       return res.status(200).json({
         data: {
           assignments,
-          role_users: roleUsers || [],
-          coach_candidates: coaches || []
+          role_users: roleUsers,
+          coach_candidates: coaches
         }
       });
     }

@@ -320,9 +320,12 @@ export default async function handler(req, res) {
           waIngested += Number(r?.processed || 0);
           // Şirket hattı (META_PHONE_NUMBER_ID / 0850) gelenleri CRM inbox'a yaz
           try {
-            await syncWhatsAppValueToCrm(value);
+            const crm = await syncWhatsAppValueToCrm(value);
+            if (crm?.processed) {
+              console.info('[meta-webhook] crm wa synced', crm.processed);
+            }
           } catch (e) {
-            console.warn('[meta-webhook] crm wa sync:', e instanceof Error ? e.message : e);
+            console.error('[meta-webhook] crm wa sync FAILED:', e instanceof Error ? e.message : e);
           }
         }
       }

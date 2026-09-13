@@ -74,6 +74,9 @@ export function extractAdSourceData({ channel, message, messagingEvent } = {}) {
   return Object.keys(out).length ? out : null;
 }
 
+/** Panel / kayıt takibi ile aynı ana kurum (Online Vip Dershane) */
+const PRIMARY_CRM_INSTITUTION_ID = '73323d75-eea1-4552-8bba-d50555423589';
+
 async function resolveDefaultInstitutionId() {
   const envId = String(
     process.env.CRM_INBOUND_INSTITUTION_ID ||
@@ -83,12 +86,43 @@ async function resolveDefaultInstitutionId() {
       ''
   ).trim();
   if (envId) return envId;
+
+  // Env yoksa: kayıt takibi ile aynı PRIMARY kurum — aksi halde mesajlar yanlış
+  // institution_id altına düşüp CRM listesinde görünmez.
+  try {
+    const { data: primary } = await supabaseAdmin
+      .from('institutions')
+      .select('id')
+      .eq('id', PRIMARY_CRM_INSTITUTION_ID)
+      .maybeSingle();
+    if (primary?.id) return primary.id;
+  } catch {
+    /* fallback */
+  }
+
+  try {
+    const { data: byName } = await supabaseAdmin
+      .from('institutions')
+      .select('id, name')
+      .ilike('name', '%Online Vip%')
+      .limit(5);
+    const preferred =
+      (byName || []).find((r) => /dershane/i.test(String(r.name || ''))) || byName?.[0];
+    if (preferred?.id) return preferred.id;
+  } catch {
+    /* fallback */
+  }
+
   try {
     const { data } = await supabaseAdmin.from('institutions').select('id').limit(1);
     return data?.[0]?.id || null;
   } catch {
     return null;
   }
+}
+
+export async function getCrmInboundInstitutionId() {
+  return resolveDefaultInstitutionId();
 }
 
 /**
@@ -146,9 +180,9 @@ export async function upsertCrmMessage({
       .eq('contact_identifier', contact)
       .limit(1);
     if (instId) q = q.eq('institution_id', instId);
-    const { data, error } = await q.maybeSingle();
+    const { data, error } = await q;
     if (error && !/crm_conversations|does not exist|schema cache/i.test(error.message || '')) throw error;
-    conversation = data || null;
+    conversation = Array.isArray(data) ? data[0] || null : data || null;
   } catch (e) {
     if (/crm_conversations|does not exist|schema cache/i.test(e?.message || '')) {
       return { skipped: true, reason: 'table_missing' };
@@ -331,7 +365,7 @@ export async function sendCrmWhatsAppText({ phone, text }) {
   await loadMetaWhatsAppSecretsFromDb();
   if (!metaWhatsAppConfigured()) {
     const err = new Error(
-      'whatsapp_not_configured — META_WHATSAPP_TOKEN + META_PHONE_NUMBER_ID (şirket hattı 0850) gerekli'
+      'whatsapp_not_configured — META_WHATSAPP_TOKEN + META_PHONE_NUMBER_ID (0850 hattı) veya panel commerce_settings.meta.whatsapp gerekli'
     );
     err.code = 'ENV';
     throw err;

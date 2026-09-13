@@ -6,10 +6,20 @@ import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { actorRoleSet, actorIsAdminLike } from '../api/_lib/actor-roles.js';
 import {
   getCrmAgentAssignment,
+  getCrmInboundInstitutionId,
   sendCrmInstagramDm,
   sendCrmWhatsAppText,
   upsertCrmMessage
 } from '../api/_lib/crm-inbox.js';
+
+function userHasRole(user, role) {
+  const want = String(role || '').toLowerCase();
+  if (!want) return false;
+  if (String(user?.role || '').toLowerCase() === want) return true;
+  const roles = user?.roles;
+  if (Array.isArray(roles)) return roles.some((r) => String(r || '').toLowerCase() === want);
+  return false;
+}
 
 function parseBody(req) {
   const b = req.body;
@@ -35,13 +45,21 @@ function canUseCrm(roleSet) {
 async function resolveInstitutionId(actor, roleSet, queryInst) {
   const q = String(queryInst || '').trim();
   if (q && (roleSet.has('super_admin') || roleSet.has('admin'))) return q;
+  // super_admin: kurum filtresi yok (tüm CRM konuşmaları) — yanlış institution yüzünden WA kaybolmasın
+  if (roleSet.has('super_admin') && !q) return null;
   if (actor.institution_id) return String(actor.institution_id);
   const { data: u } = await supabaseAdmin
     .from('users')
     .select('institution_id')
     .eq('id', actor.sub)
     .maybeSingle();
-  return u?.institution_id ? String(u.institution_id) : null;
+  if (u?.institution_id) return String(u.institution_id);
+  // Admin/ajan kurum boşsa gelen WA mesajlarının yazıldığı PRIMARY kurumu kullan
+  try {
+    return await getCrmInboundInstitutionId();
+  } catch {
+    return null;
+  }
 }
 
 function applyAgentScope(query, actor, assignment, isAdmin) {
@@ -300,28 +318,55 @@ export default async function handler(req, res) {
     if (op === 'list_agents') {
       let agents = [];
       try {
-        let aq = supabaseAdmin
+        const { data, error } = await supabaseAdmin
           .from('crm_user_assignments')
           .select(
             'id, user_id, institution_id, can_access_unassigned_pool, is_active, users:user_id(id, name, email, role, roles)'
           )
-          .eq('is_active', true);
-        if (institutionId) aq = aq.eq('institution_id', institutionId);
-        const { data, error } = await aq;
+          .eq('is_active', true)
+          .limit(300);
         if (error) throw error;
-        agents = data || [];
+        agents = (data || []).filter((a) => {
+          if (!institutionId) return true;
+          const aInst = String(a.institution_id || '').trim();
+          return !aInst || aInst === String(institutionId);
+        });
       } catch (e) {
         if (!/crm_user_assignments|does not exist/i.test(e?.message || '')) throw e;
       }
 
-      const { data: roleUsers } = await supabaseAdmin
+      const { data: staffRows } = await supabaseAdmin
         .from('users')
-        .select('id, name, email, role, roles, institution_id')
-        .or('role.eq.crm_agent,roles.cs.{"crm_agent"}')
-        .limit(100);
+        .select('id, name, email, role, roles, institution_id, is_active')
+        .in('role', ['crm_agent', 'coach', 'admin', 'super_admin', 'teacher'])
+        .limit(500);
+
+      const roleUsersMap = new Map();
+      for (const u of staffRows || []) {
+        if (u.is_active === false) continue;
+        if (!userHasRole(u, 'crm_agent')) continue;
+        if (institutionId) {
+          const uInst = String(u.institution_id || '').trim();
+          if (uInst && uInst !== String(institutionId)) continue;
+        }
+        roleUsersMap.set(u.id, u);
+      }
+      for (const a of agents) {
+        const u = a.users;
+        if (u?.id && !roleUsersMap.has(u.id)) {
+          roleUsersMap.set(u.id, {
+            id: u.id,
+            name: u.name,
+            email: u.email,
+            role: u.role,
+            roles: u.roles,
+            institution_id: a.institution_id
+          });
+        }
+      }
 
       return res.status(200).json({
-        data: { assignments: agents, role_users: roleUsers || [] }
+        data: { assignments: agents, role_users: [...roleUsersMap.values()] }
       });
     }
 

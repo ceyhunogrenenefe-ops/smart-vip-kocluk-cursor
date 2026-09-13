@@ -32,7 +32,16 @@ export default function CrmAgentsPage() {
     setLoading(true);
     try {
       const res = await crmAdminListAgents();
-      setAgents(res.data?.role_users || []);
+      const fromRoles = res.data?.role_users || [];
+      const fromAssign = (res.data?.assignments || [])
+        .map((a: Record<string, unknown>) => {
+          const u = a.users as { id: string; name: string; email: string; role: string; roles?: string[] } | undefined;
+          return u ? { id: u.id, name: u.name, email: u.email, role: u.role, roles: u.roles } : null;
+        })
+        .filter(Boolean) as AgentRow[];
+      const map = new Map<string, AgentRow>();
+      for (const u of [...fromRoles, ...fromAssign]) map.set(u.id, u);
+      setAgents([...map.values()]);
       setCoaches(res.data?.coach_candidates || []);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Ajan listesi alınamadı');
