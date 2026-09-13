@@ -1,6 +1,6 @@
 /**
  * CRM Unified Inbox — conversations / messages / Meta send / ad-source extract
- * Şirket hattı (0850 303 40 14 / META_PHONE_NUMBER_ID) üzerinden WA Cloud + IG DM.
+ * Şirket hattı (0850 303 40 14) WA Cloud + Instagram DM + Facebook Messenger.
  */
 import { supabaseAdmin } from './supabase-admin.js';
 import {
@@ -13,6 +13,14 @@ import {
   normalizePhoneToE164,
   sendMetaTextMessage
 } from './meta-whatsapp.js';
+import { lookupSocialProfileName } from './meta-social-inbound.js';
+
+export function normalizeCrmChannel(channel) {
+  const c = String(channel || '').toLowerCase();
+  if (c === 'instagram' || c === 'ig') return 'instagram';
+  if (c === 'facebook' || c === 'messenger' || c === 'page' || c === 'fb') return 'facebook';
+  return 'whatsapp';
+}
 
 /**
  * Meta WhatsApp `from` / Graph `to` için rakam kimliği (örn. 90555…).
@@ -63,10 +71,14 @@ export function extractAdSourceData({ channel, message, messagingEvent } = {}) {
         if (ref.ctwa_clid) out.ctwa_clid = String(ref.ctwa_clid);
       }
     }
-    if (channel === 'instagram' && messagingEvent && typeof messagingEvent === 'object') {
+    if (
+      (channel === 'instagram' || channel === 'facebook') &&
+      messagingEvent &&
+      typeof messagingEvent === 'object'
+    ) {
       const ref = messagingEvent.referral || messagingEvent.postback?.referral || null;
       if (ref && typeof ref === 'object') {
-        out.source_type = ref.source || ref.type || 'instagram_ad';
+        out.source_type = ref.source || ref.type || (channel === 'facebook' ? 'facebook_ad' : 'instagram_ad');
         if (ref.ad_id) out.ad_id = String(ref.ad_id);
         if (ref.ads_context_data) out.ads_context_data = ref.ads_context_data;
         if (ref.ref) out.ref = String(ref.ref);
@@ -152,7 +164,7 @@ export async function upsertCrmMessage({
   deliveryStatus = null,
   _schemaRetried = false
 } = {}) {
-  const ch = channel === 'instagram' ? 'instagram' : 'whatsapp';
+  const ch = normalizeCrmChannel(channel);
   const rawContact = String(contactIdentifier || '').trim();
   const contact = ch === 'whatsapp' ? toMetaWaContactId(rawContact) || rawContact : rawContact;
   if (!contact) return { skipped: true, reason: 'missing_contact' };
@@ -422,7 +434,8 @@ export async function syncWhatsAppValueToCrm(value, { institutionId } = {}) {
   return { processed, skipped, issues };
 }
 
-export async function syncInstagramMessagingToCrm(events, { institutionId } = {}) {
+export async function syncInstagramMessagingToCrm(events, { institutionId, channel = 'instagram' } = {}) {
+  const ch = normalizeCrmChannel(channel) === 'whatsapp' ? 'instagram' : normalizeCrmChannel(channel);
   const list = Array.isArray(events) ? events : [];
   let processed = 0;
   for (const ev of list) {
@@ -431,9 +444,11 @@ export async function syncInstagramMessagingToCrm(events, { institutionId } = {}
     if (!senderId) continue;
     const text = ev?.message?.text != null ? String(ev.message.text) : null;
     if (!text && !ev?.message?.attachments) continue;
+    const contactName = await lookupSocialProfileName(senderId).catch(() => null);
     await upsertCrmMessage({
-      channel: 'instagram',
+      channel: ch,
       contactIdentifier: senderId,
+      contactName,
       body: text || '[medya / ek]',
       messageType: text ? 'text' : 'attachment',
       messageId: ev?.message?.mid ? String(ev.message.mid) : null,
@@ -441,7 +456,7 @@ export async function syncInstagramMessagingToCrm(events, { institutionId } = {}
       direction: 'inbound',
       senderType: 'lead',
       institutionId,
-      adSourceData: extractAdSourceData({ channel: 'instagram', messagingEvent: ev }),
+      adSourceData: extractAdSourceData({ channel: ch, messagingEvent: ev }),
       payload: ev
     });
     processed += 1;
@@ -473,18 +488,16 @@ export async function sendCrmWhatsAppText({ phone, text }) {
 }
 
 export async function sendCrmInstagramDm({ igScopedId, text }) {
+  await loadMetaWhatsAppSecretsFromDb();
   const token =
-    process.env.INSTAGRAM_PAGE_ACCESS_TOKEN ||
     process.env.META_PAGE_ACCESS_TOKEN ||
-    process.env.META_WHATSAPP_TOKEN ||
+    process.env.INSTAGRAM_PAGE_ACCESS_TOKEN ||
+    process.env.FACEBOOK_PAGE_ACCESS_TOKEN ||
+    process.env.INSTAGRAM_ACCESS_TOKEN ||
     '';
-  const pageId =
-    process.env.INSTAGRAM_BUSINESS_ACCOUNT_ID ||
-    process.env.META_IG_BUSINESS_ID ||
-    process.env.META_PAGE_ID ||
-    '';
+  const pageId = process.env.META_PAGE_ID || process.env.FACEBOOK_PAGE_ID || '';
   if (!token || !pageId) {
-    const err = new Error('instagram_not_configured');
+    const err = new Error('facebook_instagram_not_configured — META_PAGE_ACCESS_TOKEN + META_PAGE_ID');
     err.code = 'ENV';
     throw err;
   }

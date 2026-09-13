@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
+  Facebook,
   Instagram,
   Loader2,
   MessageCircle,
@@ -12,15 +14,20 @@ import { toast } from 'sonner';
 import { useAuth } from '../../context/AuthContext';
 import { userRoleTags } from '../../config/rolePermissions';
 import {
+  crmAddNote,
   crmAssignConversation,
   crmEnsureInbound,
   crmInboundStatus,
   crmListAgents,
+  crmListCanned,
   crmListConversations,
   crmListMessages,
+  crmListNotes,
   crmMarkRead,
   crmPoll,
   crmSendMessage,
+  crmSetTags,
+  crmTakeConversation,
   crmUpdateStatus,
   type CrmConversation,
   type CrmInboundStatus,
@@ -32,6 +39,13 @@ function ChannelBadge({ channel }: { channel: string }) {
     return (
       <span className="inline-flex items-center gap-1 rounded bg-gradient-to-r from-purple-500 to-pink-500 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-white">
         <Instagram className="h-3 w-3" /> IG
+      </span>
+    );
+  }
+  if (channel === 'facebook') {
+    return (
+      <span className="inline-flex items-center gap-1 rounded bg-blue-600 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-white">
+        <Facebook className="h-3 w-3" /> FB
       </span>
     );
   }
@@ -75,6 +89,10 @@ export default function CrmInboxPage() {
   const [agents, setAgents] = useState<Array<{ id: string; name: string; email: string }>>([]);
   const [inbound, setInbound] = useState<CrmInboundStatus | null>(null);
   const [binding, setBinding] = useState(false);
+  const [canned, setCanned] = useState<Array<{ id: string; title: string; body: string }>>([]);
+  const [notes, setNotes] = useState<Array<{ id: string; body: string; created_at: string }>>([]);
+  const [noteDraft, setNoteDraft] = useState('');
+  const [tagDraft, setTagDraft] = useState('');
   const pollSinceRef = useRef(new Date().toISOString());
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
@@ -118,7 +136,20 @@ export default function CrmInboxPage() {
     void crmInboundStatus()
       .then((res) => setInbound(res.data || null))
       .catch(() => undefined);
+    void crmListCanned()
+      .then((res) => setCanned(res.data || []))
+      .catch(() => undefined);
   }, []);
+
+  useEffect(() => {
+    if (!selectedId) {
+      setNotes([]);
+      return;
+    }
+    void crmListNotes(selectedId)
+      .then((res) => setNotes(res.data || []))
+      .catch(() => setNotes([]));
+  }, [selectedId]);
 
   useEffect(() => {
     if (selectedId) void loadMessages(selectedId);
@@ -219,9 +250,14 @@ export default function CrmInboxPage() {
           <span className="font-semibold">Kurumsal WhatsApp {lineLabel}</span>
           <span className="mx-1.5 text-current/50">·</span>
           {inboundOk
-            ? 'Meta hattı production’a bağlı. Kişisel WhatsApp’tan yalnızca bu numaraya yazın.'
-            : inbound?.hint ||
-              'Meta henüz gerçek mesaj iletmiyor. Hattı bağlayın, ardından 0850 303 40 14’e yazın (QR/koç hattı değil).'}
+            ? 'WhatsApp 0850 bağlı.'
+            : inbound?.hint || 'WhatsApp hattını bağlayın.'}{' '}
+          {inbound?.social?.ok
+            ? `Facebook/Instagram: ${inbound.social.page_name || 'sayfa bağlı'}.`
+            : inbound?.social?.env?.token_present
+              ? `IG/FB token Vercel’de var (${inbound.social.env.token_source || inbound.social.token_source || 'env'}) — Hattı bağla ile sayfa mesajlarına abone edin.`
+              : inbound?.social?.hint ||
+                'FB/IG DM: Vercel INSTAGRAM_PAGE_ACCESS_TOKEN / META_PAGE_ACCESS_TOKEN + Hattı bağla.'}
         </p>
         {isAdmin && (
           <button
@@ -268,6 +304,7 @@ export default function CrmInboxPage() {
               <option value="">Tüm kanallar</option>
               <option value="whatsapp">WhatsApp</option>
               <option value="instagram">Instagram</option>
+              <option value="facebook">Facebook</option>
             </select>
             <select
               value={statusFilter}
@@ -354,6 +391,24 @@ export default function CrmInboxPage() {
                 </div>
                 <p className="text-xs text-slate-500">{selected?.contact_identifier}</p>
               </div>
+              <div className="flex items-center gap-2">
+              {selected && !selected.assigned_user_id ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    void crmTakeConversation(selected.id)
+                      .then((r) => {
+                        setSelected(r.data);
+                        toast.success('Konuşma üzerinize alındı');
+                        void loadList();
+                      })
+                      .catch((err) => toast.error(err instanceof Error ? err.message : 'Alınamadı'));
+                  }}
+                  className="rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-800 hover:bg-emerald-100"
+                >
+                  Üzerime al
+                </button>
+              ) : null}
               <select
                 value={selected?.status || 'open'}
                 onChange={(e) => {
@@ -371,6 +426,7 @@ export default function CrmInboxPage() {
                 <option value="pending">Beklemede</option>
                 <option value="closed">Kapalı</option>
               </select>
+              </div>
             </div>
 
             <div className="flex-1 space-y-2 overflow-y-auto bg-gradient-to-b from-white to-slate-50 px-4 py-3">
@@ -497,9 +553,126 @@ export default function CrmInboxPage() {
               </div>
             )}
 
+            {canned.length > 0 && selectedId ? (
+              <div>
+                <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Hazır yanıtlar
+                </h3>
+                <div className="flex flex-col gap-1">
+                  {canned.map((c) => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => setDraft(c.body)}
+                      className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-left text-[11px] font-medium text-slate-700 hover:bg-slate-50"
+                    >
+                      {c.title}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            <div>
+              <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                İç not (ekip)
+              </h3>
+              <div className="mb-2 max-h-36 space-y-1 overflow-y-auto">
+                {notes.length ? (
+                  notes.map((n) => (
+                    <p key={n.id} className="rounded-md bg-white px-2 py-1 text-[11px] text-slate-700 ring-1 ring-slate-100">
+                      {n.body}
+                      <span className="mt-0.5 block text-[10px] text-slate-400">{formatTime(n.created_at)}</span>
+                    </p>
+                  ))
+                ) : (
+                  <p className="text-[11px] text-slate-400">Not yok</p>
+                )}
+              </div>
+              <div className="flex gap-1">
+                <input
+                  value={noteDraft}
+                  onChange={(e) => setNoteDraft(e.target.value)}
+                  placeholder="Not ekle…"
+                  className="min-w-0 flex-1 rounded-lg border border-slate-200 px-2 py-1 text-xs"
+                />
+                <button
+                  type="button"
+                  disabled={!selectedId || !noteDraft.trim()}
+                  onClick={() => {
+                    if (!selectedId || !noteDraft.trim()) return;
+                    void crmAddNote(selectedId, noteDraft.trim())
+                      .then((r) => {
+                        if (r.data) setNotes((prev) => [r.data, ...prev]);
+                        setNoteDraft('');
+                      })
+                      .catch((e) => toast.error(e instanceof Error ? e.message : 'Not eklenemedi'));
+                  }}
+                  className="rounded-lg bg-slate-800 px-2 py-1 text-[11px] font-semibold text-white disabled:opacity-40"
+                >
+                  Ekle
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Etiketler
+              </h3>
+              <div className="mb-2 flex flex-wrap gap-1">
+                {(selected.metadata?.tags || []).length ? (
+                  (selected.metadata?.tags || []).map((tag) => (
+                    <button
+                      key={tag}
+                      type="button"
+                      title="Kaldır"
+                      onClick={() => {
+                        const next = (selected.metadata?.tags || []).filter((t) => t !== tag);
+                        void crmSetTags(selected.id, next)
+                          .then((r) => setSelected(r.data))
+                          .catch((e) => toast.error(e instanceof Error ? e.message : 'Etiket silinemedi'));
+                      }}
+                      className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-semibold text-slate-700 hover:bg-rose-100"
+                    >
+                      {tag} ×
+                    </button>
+                  ))
+                ) : (
+                  <p className="text-[11px] text-slate-400">Etiket yok</p>
+                )}
+              </div>
+              <div className="flex gap-1">
+                <input
+                  value={tagDraft}
+                  onChange={(e) => setTagDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key !== 'Enter') return;
+                    e.preventDefault();
+                    const t = tagDraft.trim();
+                    if (!t) return;
+                    const next = [...new Set([...(selected.metadata?.tags || []), t])].slice(0, 12);
+                    void crmSetTags(selected.id, next)
+                      .then((r) => {
+                        setSelected(r.data);
+                        setTagDraft('');
+                      })
+                      .catch((err) => toast.error(err instanceof Error ? err.message : 'Eklenemedi'));
+                  }}
+                  placeholder="Etiket + Enter"
+                  className="min-w-0 flex-1 rounded-lg border border-slate-200 px-2 py-1 text-xs"
+                />
+              </div>
+            </div>
+
             {selected.lead_id && (
               <p className="text-xs text-slate-500">
-                Lead ID: <span className="font-mono text-slate-700">{selected.lead_id}</span>
+                Kayıt:{' '}
+                <Link
+                  to={`/crm?rt_lead=${encodeURIComponent(selected.lead_id)}`}
+                  className="font-medium text-emerald-700 underline"
+                >
+                  Hunide aç
+                </Link>
               </p>
             )}
           </div>
