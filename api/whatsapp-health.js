@@ -5,6 +5,7 @@ import {
   metaWhatsAppConfigured
 } from './_lib/meta-whatsapp.js';
 import { diagnoseCrmInbox, ensureCrmInboxSchema } from './_lib/crm-inbox-schema.js';
+import { ensureMetaInboundDelivery } from './_lib/meta-inbound-ensure.js';
 import { getTwilioEnvStatus } from './_lib/whatsapp-twilio.js';
 import {
   fetchMetaTemplatesFromPhoneWaba,
@@ -166,6 +167,7 @@ async function diagnoseAttendanceMetaTemplates() {
  * GET /api/whatsapp-health?test_coach_report=1&class=YKS&to=Tayyibe  → koç sınıf raporu testi
  * GET /api/whatsapp-health?crm_diag=1  → CRM tablo + webhook hit teşhisi
  * GET /api/whatsapp-health?crm_setup=1  → CRM tablolarını otomatik kur (DB URL gerekir)
+ * GET /api/whatsapp-health?ensure_meta_inbound=1  → WABA + 0850 webhook’u production’a bağla
  */
 export default async function handler(req, res) {
   if (req.method !== 'GET') {
@@ -239,6 +241,46 @@ export default async function handler(req, res) {
         crm_diag.e2e_ready.crm_tables_ok &&
         metaReady
     );
+  }
+
+  const wantEnsureInbound =
+    String(req.query?.ensure_meta_inbound || req.query?.bind_inbound || '').trim() === '1' ||
+    String(req.query?.fix || '').trim() === 'meta_inbound';
+  const wantInboundInspect =
+    wantEnsureInbound ||
+    wantCrmDiag ||
+    wantCrmSetup ||
+    String(req.query?.meta_inbound || '').trim() === '1';
+  let meta_inbound = null;
+  if (wantInboundInspect) {
+    try {
+      const inspect = await ensureMetaInboundDelivery({ apply: false });
+      const needBind =
+        wantEnsureInbound ||
+        wantCrmSetup ||
+        !inspect?.summary?.bound_to_production;
+      meta_inbound = needBind
+        ? await ensureMetaInboundDelivery({ apply: true })
+        : inspect;
+      if (crm_diag && typeof crm_diag === 'object') {
+        crm_diag.meta_inbound = {
+          bound_to_production: Boolean(meta_inbound?.summary?.bound_to_production),
+          display_phone: meta_inbound?.display_phone || null,
+          subscribed_app_name: meta_inbound?.summary?.subscribed_app_name || null,
+          hint: meta_inbound?.summary?.hint || null
+        };
+        if (crm_diag.e2e_ready) {
+          crm_diag.e2e_ready.meta_inbound_bound = Boolean(
+            meta_inbound?.summary?.bound_to_production
+          );
+        }
+      }
+    } catch (e) {
+      meta_inbound = {
+        ok: false,
+        error: e instanceof Error ? e.message : String(e)
+      };
+    }
   }
 
   const wantCoachReport =
@@ -376,6 +418,7 @@ export default async function handler(req, res) {
     webhook: getMetaWebhookEnvStatus(),
     crm_diag,
     crm_setup,
+    meta_inbound,
     twilio: {
       configured: twilio.configured,
       has_auth_token: twilio.has_auth_token,
