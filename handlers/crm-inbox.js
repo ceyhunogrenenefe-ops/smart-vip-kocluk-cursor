@@ -18,8 +18,10 @@ import {
   bindMetaSocialFromUserToken,
   describeSocialTokenEnv,
   ensureMetaSocialInbound,
-  publicSocialStatus
+  publicSocialStatus,
+  saveMetaPageSecretsToDb
 } from '../api/_lib/meta-social-inbound.js';
+import { describeFacebookLoginWidget } from '../api/_lib/meta-facebook-login.js';
 
 function userHasRole(user, role) {
   const want = String(role || '').toLowerCase();
@@ -191,6 +193,29 @@ export default async function handler(req, res) {
         social_steps: social?.steps || [],
         error: inbound?.error || social?.error || null
       });
+    }
+
+    if (op === 'facebook_login_start') {
+      if (!isAdmin) {
+        return res.status(403).json({ error: 'forbidden', hint: 'Widget bağlama yalnızca yönetici.' });
+      }
+      return res.status(200).json({ data: describeFacebookLoginWidget() });
+    }
+
+    if (op === 'save_meta_app_secret' && req.method === 'POST') {
+      if (!isAdmin) {
+        return res.status(403).json({ error: 'forbidden', hint: 'App secret yalnızca yönetici kaydeder.' });
+      }
+      const secret = String(body.app_secret || body.meta_app_secret || '').trim();
+      if (secret.length < 16) {
+        return res.status(400).json({
+          error: 'app_secret_invalid',
+          hint: 'SmartKocluk Facebook App Secret (Instagram Login secret değil).'
+        });
+      }
+      await saveMetaPageSecretsToDb({ app_secret: secret });
+      process.env.META_APP_SECRET = secret;
+      return res.status(200).json({ ok: true, data: { saved: true, suffix: secret.slice(-4) } });
     }
 
     if (op === 'save_page_token' && req.method === 'POST') {

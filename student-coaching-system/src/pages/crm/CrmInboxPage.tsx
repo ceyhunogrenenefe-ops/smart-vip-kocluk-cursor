@@ -254,12 +254,17 @@ export default function CrmInboxPage() {
             : inbound?.hint || 'WhatsApp hattını bağlayın.'}{' '}
           {inbound?.social?.ok
             ? `Facebook/Instagram: ${inbound.social.page_name || 'sayfa bağlı'}.`
-            : inbound?.social?.env?.token_present
-              ? `IG/FB token Vercel’de var (${inbound.social.env.token_source || inbound.social.token_source || 'env'}) — Hattı bağla ile sayfa mesajlarına abone edin.`
-              : inbound?.social?.hint ||
-                'FB/IG DM: Vercel INSTAGRAM_PAGE_ACCESS_TOKEN / META_PAGE_ACCESS_TOKEN + Hattı bağla.'}
+            : inbound?.social?.hint ||
+              'Instagram / Facebook için Widgetler’den bağlayın (Kommo gibi tek tık).'}
         </p>
         {isAdmin && (
+          <div className="flex shrink-0 items-center gap-1.5">
+          <Link
+            to="/crm/widgetler"
+            className="rounded-lg border border-current/20 bg-white/80 px-2.5 py-1 text-[11px] font-semibold hover:bg-white"
+          >
+            Widgetler
+          </Link>
           <button
             type="button"
             disabled={binding}
@@ -281,6 +286,7 @@ export default function CrmInboxPage() {
           >
             {binding ? 'Bağlanıyor…' : inboundOk ? 'Hattı yenile' : 'Hattı bağla'}
           </button>
+          </div>
         )}
       </div>
       <div className="flex min-h-0 flex-1 overflow-hidden">
