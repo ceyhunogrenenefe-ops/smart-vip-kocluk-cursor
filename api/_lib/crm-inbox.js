@@ -1,8 +1,31 @@
 /**
  * CRM Unified Inbox — conversations / messages / Meta send / ad-source extract
+ * Şirket hattı (0850 303 40 14 / META_PHONE_NUMBER_ID) üzerinden WA Cloud + IG DM.
  */
 import { supabaseAdmin } from './supabase-admin.js';
-import { metaWhatsAppConfigured, sendMetaTextMessage } from './meta-whatsapp.js';
+import {
+  loadMetaWhatsAppSecretsFromDb,
+  metaWhatsAppConfigured,
+  normalizePhoneToE164,
+  sendMetaTextMessage
+} from './meta-whatsapp.js';
+
+/**
+ * Meta WhatsApp `from` / Graph `to` için rakam kimliği (örn. 90555…).
+ * 05… / +90… / 90… hepsini Cloud API formatına çevirir.
+ */
+export function toMetaWaContactId(phoneOrWaId) {
+  const e164 = normalizePhoneToE164(phoneOrWaId);
+  if (e164) return e164.replace(/\D/g, '');
+  const d = String(phoneOrWaId || '')
+    .replace(/^whatsapp:/i, '')
+    .replace(/\D/g, '');
+  if (!d) return null;
+  if (d.startsWith('90') && d.length >= 12) return d;
+  if (d.startsWith('0') && d.length === 11) return `90${d.slice(1)}`;
+  if (d.length === 10 && d.startsWith('5')) return `90${d}`;
+  return d;
+}
 
 function snippet(text, max = 140) {
   const s = String(text || '')
@@ -91,7 +114,8 @@ export async function upsertCrmMessage({
   deliveryStatus = null
 } = {}) {
   const ch = channel === 'instagram' ? 'instagram' : 'whatsapp';
-  const contact = String(contactIdentifier || '').trim();
+  const rawContact = String(contactIdentifier || '').trim();
+  const contact = ch === 'whatsapp' ? toMetaWaContactId(rawContact) || rawContact : rawContact;
   if (!contact) return { skipped: true, reason: 'missing_contact' };
 
   const instId = institutionId || (await resolveDefaultInstitutionId());
@@ -303,12 +327,22 @@ export async function syncInstagramMessagingToCrm(events, { institutionId } = {}
 }
 
 export async function sendCrmWhatsAppText({ phone, text }) {
+  // Panel / commerce_settings üzerinden token + phone_number_id (0850 hattı) yükle
+  await loadMetaWhatsAppSecretsFromDb();
   if (!metaWhatsAppConfigured()) {
-    const err = new Error('whatsapp_not_configured');
+    const err = new Error(
+      'whatsapp_not_configured — META_WHATSAPP_TOKEN + META_PHONE_NUMBER_ID (şirket hattı 0850) gerekli'
+    );
     err.code = 'ENV';
     throw err;
   }
-  const result = await sendMetaTextMessage({ toE164: phone, text });
+  const e164 = normalizePhoneToE164(phone) || (toMetaWaContactId(phone) ? `+${toMetaWaContactId(phone)}` : null);
+  if (!e164) {
+    const err = new Error('invalid_phone');
+    err.code = 'PHONE';
+    throw err;
+  }
+  const result = await sendMetaTextMessage({ toE164: e164, text });
   return {
     messageId: result?.messages?.[0]?.id || result?.messageId || result?.id || null,
     raw: result

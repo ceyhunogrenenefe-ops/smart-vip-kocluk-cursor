@@ -3,7 +3,7 @@
  * Telefon (WA) veya Instagram scoped id ile lead eşler; yoksa yeni lead açabilir.
  */
 import { supabaseAdmin } from './supabase-admin.js';
-import { upsertCrmMessage, extractAdSourceData } from './crm-inbox.js';
+import { upsertCrmMessage, extractAdSourceData, toMetaWaContactId } from './crm-inbox.js';
 import { normalizeTrPhone, phoneLookupVariants } from './registration-tracking-utils.js';
 
 function snippetOf(text, max = 140) {
@@ -337,7 +337,11 @@ export async function ingestRegistrationChannelMessage(msg) {
     const contactIdentifier =
       channel === 'instagram'
         ? externalContactId || null
-        : normalizedPhone || phoneRaw || externalContactId || null;
+        : toMetaWaContactId(phoneRaw || normalizedPhone || externalContactId) ||
+          phoneRaw ||
+          normalizedPhone ||
+          externalContactId ||
+          null;
     if (contactIdentifier && direction === 'inbound') {
       await upsertCrmMessage({
         channel,
