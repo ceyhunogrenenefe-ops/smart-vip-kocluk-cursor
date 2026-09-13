@@ -11,6 +11,7 @@ import {
   loadMetaWhatsAppSecretsFromDb,
   metaWhatsAppConfigured,
   normalizePhoneToE164,
+  sendMetaTemplateMessage,
   sendMetaTextMessage
 } from './meta-whatsapp.js';
 import { lookupSocialProfileName } from './meta-social-inbound.js';
@@ -483,6 +484,41 @@ export async function sendCrmWhatsAppText({ phone, text }) {
   const result = await sendMetaTextMessage({ toE164: e164, text });
   return {
     messageId: result?.messages?.[0]?.id || result?.messageId || result?.id || null,
+    raw: result
+  };
+}
+
+export async function sendCrmWhatsAppTemplate({
+  phone,
+  templateName,
+  languageCode = 'tr',
+  bodyParameterTexts = [],
+  bodyParameterNames = null
+}) {
+  await loadMetaWhatsAppSecretsFromDb();
+  if (!metaWhatsAppConfigured()) {
+    const err = new Error(
+      'whatsapp_not_configured — META_WHATSAPP_TOKEN + META_PHONE_NUMBER_ID (0850 hattı) veya panel commerce_settings.meta.whatsapp gerekli'
+    );
+    err.code = 'ENV';
+    throw err;
+  }
+  const e164 = normalizePhoneToE164(phone) || (toMetaWaContactId(phone) ? `+${toMetaWaContactId(phone)}` : null);
+  if (!e164) {
+    const err = new Error('invalid_phone');
+    err.code = 'PHONE';
+    throw err;
+  }
+  const result = await sendMetaTemplateMessage({
+    toE164: e164,
+    templateName,
+    languageCode: languageCode || 'tr',
+    bodyParameterTexts: Array.isArray(bodyParameterTexts) ? bodyParameterTexts : [],
+    bodyParameterNames: Array.isArray(bodyParameterNames) ? bodyParameterNames : null
+  });
+  return {
+    messageId: result?.messageId || result?.messages?.[0]?.id || result?.id || null,
+    languageUsed: result?.languageUsed || languageCode || 'tr',
     raw: result
   };
 }
