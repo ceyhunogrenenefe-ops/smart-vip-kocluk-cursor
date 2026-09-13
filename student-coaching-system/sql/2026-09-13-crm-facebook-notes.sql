@@ -39,6 +39,7 @@ FROM (VALUES
   ('YKS bilgi', 'TYT–AYT programı için sınıf ve hedef bölümü paylaşın; kontenjan ve deneme dersini ayarlayalım.', 40),
   ('Fiyat yönlendirme', 'Ücret, grup ve kontenjanı netleştirmek için öğrencinin sınıfı ile iki zayıf dersini yazar mısınız?', 50),
   ('Randevu teyit', 'Görüşmeyi not aldım. Saatinden 10 dk önce Zoom / ders linkini ileteceğim.', 60),
-  ('Takip', 'Dün yazmıştım — uygun bir saatiniz oldu mu? 10 dakikalık kısa bir görüşme yeterli.', 70)
+  ('Takip', 'Dün yazmıştım — uygun bir saatiniz oldu mu? 10 dakikalık kısa bir görüşme yeterli.', 70),
+  ('Ulaşılamadı', 'Olduğunuz yerden olmak istediğiniz yere… Size ulaşamadık. Uygun bir saatte bizi arayabilir veya bu mesaja yanıt verebilirsiniz.', 80)
 ) AS v(title, body, sort_order)
 WHERE NOT EXISTS (SELECT 1 FROM public.crm_canned_replies LIMIT 1);

@@ -16,6 +16,7 @@ function applyMetaPageSecrets(page = {}) {
   const igId = String(
     page.instagram_business_account_id || page.ig_business_id || page.igId || ''
   ).trim();
+  const configId = String(page.configuration_id || page.config_id || '').trim();
   if (pageToken) {
     process.env.META_PAGE_ACCESS_TOKEN = pageToken;
     process.env.INSTAGRAM_PAGE_ACCESS_TOKEN = process.env.INSTAGRAM_PAGE_ACCESS_TOKEN || pageToken;
@@ -26,6 +27,7 @@ function applyMetaPageSecrets(page = {}) {
     process.env.INSTAGRAM_BUSINESS_ACCOUNT_ID =
       process.env.INSTAGRAM_BUSINESS_ACCOUNT_ID || igId;
   }
+  if (configId) process.env.META_CONFIGURATION_ID = configId;
 }
 
 function applyMetaWhatsAppSecrets(wa = {}) {
