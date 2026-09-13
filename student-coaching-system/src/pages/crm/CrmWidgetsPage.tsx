@@ -26,6 +26,7 @@ function widgetInstalled(id: string, inbound: CrmInboundStatus | null): boolean 
   if (id === 'whatsapp_business') return wa;
   if (id === 'instagram' || id === 'facebook') return social;
   if (id === 'facebook_lead_ads' || id === 'instagram_lead') return social;
+  if (id === 'website_form') return true;
   return false;
 }
 
@@ -216,6 +217,7 @@ export default function CrmWidgetsPage() {
   const buttonLabel = (w: CrmWidgetDef, installed: boolean) => {
     if (binding) return 'İşleniyor…';
     if (w.action === 'soon') return 'Sırada';
+    if (installed && w.id === 'website_form') return 'Pipeline';
     if (installed) return 'Yenile';
     if (w.action === 'facebook_login' || w.action === 'facebook_lead_ads') return 'Kur / Bağla';
     if (w.action === 'whatsapp_cloud') return 'Hattı bağla';

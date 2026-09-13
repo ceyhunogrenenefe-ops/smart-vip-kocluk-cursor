@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Inject wa-float / trial-float / assessment-cta into marketing HTML pages.
+# Inject wa-float / trial-float / assessment-cta / crm-lead into marketing HTML pages.
 set -euo pipefail
 ROOT="${1:-.}"
 ROOT="$(cd "$ROOT" && pwd)"
@@ -8,7 +8,7 @@ inject() {
   local file="$1"
   local scripts="$2"
   [[ -f "$file" ]] || return 0
-  if grep -q 'trial-float.js' "$file" && grep -q 'wa-float.js' "$file" && grep -q 'assessment-cta.js' "$file"; then
+  if grep -q 'trial-float.js' "$file" && grep -q 'wa-float.js' "$file" && grep -q 'assessment-cta.js' "$file" && grep -q 'crm-lead.js' "$file"; then
     echo "skip $file"
     return 0
   fi
@@ -18,7 +18,7 @@ path = pathlib.Path(sys.argv[1])
 scripts = sys.argv[2]
 text = path.read_text(encoding='utf-8')
 text = re.sub(
-    r'\s*<script src="(?:\.\./)?assets/(?:wa-float|trial-float|assessment-cta)\.js[^"]*" defer></script>\s*',
+    r'\s*<script src="(?:\.\./)?assets/(?:wa-float|trial-float|assessment-cta|crm-lead)\.js[^"]*" defer></script>\s*',
     '\n',
     text,
 )
@@ -32,11 +32,13 @@ PY
 ROOT_SCRIPTS='<script src="assets/wa-float.js" defer></script>
 <script src="assets/trial-float.js" defer></script>
 <script src="assets/assessment-cta.js" defer></script>
+<script src="assets/crm-lead.js" defer></script>
 '
 
 PROG_SCRIPTS='<script src="../assets/wa-float.js" defer></script>
 <script src="../assets/trial-float.js" defer></script>
 <script src="../assets/assessment-cta.js" defer></script>
+<script src="../assets/crm-lead.js" defer></script>
 '
 
 for f in basarilarimiz.html kayit.html iletisim.html blog.html kadromuz.html videolar.html \

@@ -169,7 +169,7 @@ export const CRM_WIDGET_CATALOG: CrmWidgetDef[] = [
   {
     id: 'website_form',
     name: 'Website formu',
-    blurb: 'Kommo WEBSİTESİ FORM — siteden gelen kayıt',
+    blurb: 'onlinevipdershane.com iletişim / analiz / reklam formu → CRM',
     category: 'lead',
     action: 'crm_pipeline',
     accent: 'bg-emerald-800',

@@ -62,6 +62,24 @@
     }
     btn.disabled = true;
     btn.textContent = 'Gönderiliyor…';
+    if (window.OVD_CRM_LEAD && OVD_CRM_LEAD.send) {
+      try {
+        OVD_CRM_LEAD.send(Object.assign({ form_kind: 'callback' }, payload));
+      } catch (crmErr) {}
+    } else {
+      try {
+        fetch('https://www.dersonlinevipkocluk.com/api/site-leads', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(Object.assign({ form_kind: 'callback' }, payload, {
+            page: location.href,
+            referrer: document.referrer || '',
+          })),
+          keepalive: true,
+          mode: 'cors',
+        }).catch(function () {});
+      } catch (crmErr) {}
+    }
     fetch('/api/iletisim', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

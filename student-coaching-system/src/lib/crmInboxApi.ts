@@ -226,6 +226,7 @@ export type CrmInboundStatus = {
       token_suffix?: string | null;
     };
   };
+  website_form?: { ok?: boolean; endpoint?: string };
 };
 
 export function crmListNotes(conversationId: string) {
