@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { Inbox, LayoutGrid, LogOut, Users } from 'lucide-react';
+import { Inbox, LayoutGrid, LogOut, Puzzle, Users } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { userRoleTags } from '../../config/rolePermissions';
 
@@ -38,6 +38,19 @@ export default function CrmLayout() {
                 <Inbox className="h-4 w-4" />
                 Gelen Kutusu
               </NavLink>
+              {isAdmin && (
+                <NavLink
+                  to="/crm/widgetler"
+                  className={({ isActive }) =>
+                    `inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition ${
+                      isActive ? 'bg-emerald-600 text-white' : 'text-slate-600 hover:bg-slate-100'
+                    }`
+                  }
+                >
+                  <Puzzle className="h-4 w-4" />
+                  Widgetler
+                </NavLink>
+              )}
               {isAdmin && (
                 <>
                   <NavLink

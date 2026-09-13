@@ -17,16 +17,25 @@ function applyMetaPageSecrets(page = {}) {
     page.instagram_business_account_id || page.ig_business_id || page.igId || ''
   ).trim();
   const configId = String(page.configuration_id || page.config_id || '').trim();
-  // Vercel INSTAGRAM_PAGE_ACCESS_TOKEN / META_PAGE_ACCESS_TOKEN her zaman DB'den önce gelir.
+  const boundVia = String(page.bound_via || page.source || '').trim();
+  const appSecret = String(page.app_secret || page.facebook_app_secret || '').trim();
+  const preferDb = Boolean(pageToken && pageId && boundVia);
+  // Widget/OAuth ile kaydedilen Sayfa token’ı Vercel’deki kullanıcı token’ını ezer.
   if (pageToken) {
-    if (!String(process.env.META_PAGE_ACCESS_TOKEN || '').trim()) {
+    process.env.META_BOUND_PAGE_TOKEN = pageToken;
+    if (preferDb || !String(process.env.META_PAGE_ACCESS_TOKEN || '').trim()) {
       process.env.META_PAGE_ACCESS_TOKEN = pageToken;
     }
-    if (!String(process.env.INSTAGRAM_PAGE_ACCESS_TOKEN || '').trim()) {
+    if (preferDb || !String(process.env.INSTAGRAM_PAGE_ACCESS_TOKEN || '').trim()) {
       process.env.INSTAGRAM_PAGE_ACCESS_TOKEN = pageToken;
     }
   }
-  if (pageId && !String(process.env.META_PAGE_ID || '').trim()) process.env.META_PAGE_ID = pageId;
+  if (pageId && (preferDb || !String(process.env.META_PAGE_ID || '').trim())) {
+    process.env.META_PAGE_ID = pageId;
+  }
+  if (appSecret && !String(process.env.META_APP_SECRET || '').trim()) {
+    process.env.META_APP_SECRET = appSecret;
+  }
   if (igId) {
     if (!String(process.env.META_IG_BUSINESS_ID || '').trim()) process.env.META_IG_BUSINESS_ID = igId;
     if (!String(process.env.INSTAGRAM_BUSINESS_ACCOUNT_ID || '').trim()) {
