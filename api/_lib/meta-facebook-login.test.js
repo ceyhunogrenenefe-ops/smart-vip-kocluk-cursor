@@ -10,13 +10,13 @@ import {
 } from './meta-facebook-login.js';
 
 describe('facebook login widget', () => {
-  it('builds Login for Business implicit URL with config_id', () => {
-    const url = buildFacebookLoginUrl({ responseType: 'token' });
+  it('builds Login for Business code URL by default (token unsupported)', () => {
+    const url = buildFacebookLoginUrl();
     assert.match(url, /facebook\.com\/v21\.0\/dialog\/oauth/);
     assert.match(url, new RegExp(`config_id=${DEFAULT_META_CONFIGURATION_ID}`));
     assert.match(url, new RegExp(`client_id=${DEFAULT_META_APP_ID}`));
     assert.match(url, /api%2Fmeta%2Ffacebook-oauth/);
-    assert.match(url, /response_type=token/);
+    assert.match(url, /response_type=code/);
     assert.match(url, /override_default_response_type=true/);
   });
 
