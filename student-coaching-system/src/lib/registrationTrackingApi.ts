@@ -204,14 +204,39 @@ export function rtImportCommit(body: Record<string, unknown>) {
 }
 
 export function rtStaffPerformance() {
-  return rtFetch<{ data: Record<string, unknown> }>('staff-performance', { method: 'GET' });
+  return rtFetch<{ data: { by_user?: Record<string, unknown>; agents?: RegAgentLoad[] } }>(
+    'staff-performance',
+    { method: 'GET' }
+  );
+}
+
+export function rtDeleteLead(leadId: string) {
+  return rtFetch<{ data: { ok: boolean; lead_id: string } }>('delete', {
+    method: 'POST',
+    body: JSON.stringify({ lead_id: leadId })
+  });
 }
 
 export function rtSuggestions() {
   return rtFetch<{ data: Record<string, RegLead[]> }>('suggestions', { method: 'GET' });
 }
 
-export type RegCoach = { id: string; name: string; email?: string | null };
+export type RegCoach = {
+  id: string;
+  name: string;
+  email?: string | null;
+  kind?: 'coach' | 'crm_agent' | 'admin' | string;
+};
+
+export type RegAgentLoad = {
+  id: string;
+  name: string;
+  kind?: string;
+  assigned: number;
+  tracking: number;
+  confirmed: number;
+  conversion_rate?: number;
+};
 
 export function rtListCoaches() {
   return rtFetch<{ data: RegCoach[] }>('coaches', { method: 'GET' });

@@ -26,9 +26,13 @@ import {
   rtBulk,
   rtListCoaches,
   rtLookupPhone,
+  rtUpdateLead,
+  rtDeleteLead,
+  rtStaffPerformance,
   type RegLead,
   type RegDashboard,
-  type RegCoach
+  type RegCoach,
+  type RegAgentLoad
 } from '../../lib/registrationTrackingApi';
 import {
   GRADE_PROGRAMS,
@@ -85,6 +89,7 @@ export default function RegistrationTrackingPanel({ isManager, institutionId }: 
   const dateFrom = params.get('rt_from') || '';
   const dateTo = params.get('rt_to') || '';
   const [coaches, setCoaches] = useState<RegCoach[]>([]);
+  const [agentLoads, setAgentLoads] = useState<RegAgentLoad[]>([]);
   const [filterPrefs, setFilterPrefs] = useState<CrmFilterPrefs>(() =>
     typeof window !== 'undefined' ? loadCrmFilterPrefs() : defaultCrmFilterPrefs()
   );
@@ -168,7 +173,51 @@ export default function RegistrationTrackingPanel({ isManager, institutionId }: 
     rtListCoaches()
       .then((r) => setCoaches(r.data || []))
       .catch(() => setCoaches([]));
+    rtStaffPerformance()
+      .then((r) => setAgentLoads(r.data?.agents || []))
+      .catch(() => setAgentLoads([]));
   }, [institutionId]);
+
+  const agentLoadMap = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const a of agentLoads) {
+      if (a.id && a.id !== '_unassigned') m[a.id] = a.tracking ?? 0;
+    }
+    return m;
+  }, [agentLoads]);
+
+  const assignLead = async (leadId: string, assignedUserId: string | null) => {
+    const snapshot = leads;
+    setLeads((cur) => cur.map((l) => (l.id === leadId ? { ...l, assigned_user_id: assignedUserId } : l)));
+    try {
+      await rtUpdateLead(leadId, { assigned_user_id: assignedUserId });
+      toast.success(assignedUserId ? 'Ajan atandı' : 'Atama kaldırıldı');
+      const perf = await rtStaffPerformance().catch(() => null);
+      if (perf?.data?.agents) setAgentLoads(perf.data.agents);
+    } catch (e) {
+      setLeads(snapshot);
+      toast.error(e instanceof Error ? e.message : 'Atanamadı');
+    }
+  };
+
+  const deleteLead = async (lead: RegLead) => {
+    const name = lead.full_name || `${lead.first_name} ${lead.last_name}`;
+    if (!window.confirm(`“${name}” kartı silinsin mi? Gereksiz gelen mesaj kartlarını buradan temizleyebilirsiniz.`)) {
+      return;
+    }
+    const snapshot = leads;
+    setLeads((cur) => cur.filter((l) => l.id !== lead.id));
+    try {
+      await rtDeleteLead(lead.id);
+      toast.success('Kart silindi');
+      if (drawerId === lead.id) closeDrawer();
+      const perf = await rtStaffPerformance().catch(() => null);
+      if (perf?.data?.agents) setAgentLoads(perf.data.agents);
+    } catch (e) {
+      setLeads(snapshot);
+      toast.error(e instanceof Error ? e.message : 'Silinemedi');
+    }
+  };
 
   useEffect(() => {
     setParams((p) => {
@@ -359,10 +408,11 @@ export default function RegistrationTrackingPanel({ isManager, institutionId }: 
             })
           }
         >
-          <option value="">Koç: Tümü</option>
+          <option value="">Ajan / koç: Tümü</option>
           {coaches.map((c) => (
             <option key={c.id} value={c.id}>
               {c.name}
+              {agentLoadMap[c.id] != null ? ` (${agentLoadMap[c.id]} takip)` : ''}
             </option>
           ))}
         </select>
@@ -435,11 +485,35 @@ export default function RegistrationTrackingPanel({ isManager, institutionId }: 
         </div>
       )}
 
+      {!loading && agentLoads.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {agentLoads.slice(0, 12).map((a) => (
+            <span
+              key={a.id}
+              className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${
+                a.id === '_unassigned'
+                  ? 'bg-amber-100 text-amber-800'
+                  : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200'
+              }`}
+            >
+              {a.name}: {a.tracking} takip
+              {a.confirmed ? ` · ${a.confirmed} kayıt` : ''}
+            </span>
+          ))}
+        </div>
+      )}
+
       {!loading && viewMode === 'kanban' && (
         <CrmKanbanBoard
           leads={leads}
           onOpen={openDrawer}
           onLeadsChange={setLeads}
+          agents={coaches}
+          agentLoad={agentLoadMap}
+          canAssign={isManager}
+          canDelete={isManager}
+          onAssign={assignLead}
+          onDelete={deleteLead}
         />
       )}
       {!loading && viewMode === 'list' && (
@@ -462,8 +536,14 @@ export default function RegistrationTrackingPanel({ isManager, institutionId }: 
         <RegLeadDrawer
           leadId={drawerId}
           isManager={isManager}
+          agents={coaches}
+          agentLoad={agentLoadMap}
           onClose={closeDrawer}
           onUpdated={reload}
+          onDeleted={(id) => {
+            setLeads((cur) => cur.filter((l) => l.id !== id));
+            closeDrawer();
+          }}
         />
       )}
 
