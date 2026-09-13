@@ -365,22 +365,63 @@ export async function diagnoseCrmInbox() {
     out.hints.push('META_WEBHOOK_VERIFY_TOKEN eksik — Meta webhook doğrulaması / teslimat güncellemesi sorunlu olabilir.');
   }
 
+  /** Gerçek müşteri mesajı mı, yoksa simülasyon / Meta Test butonu mu? */
+  function isSyntheticWebhookHit(h) {
+    const from = String(h?.wa_from || '');
+    const display = String(h?.display_phone || '');
+    const pnid = String(h?.phone_number_id || '');
+    const sample = h?.sample && typeof h.sample === 'object' ? h.sample : {};
+    const text = String(sample.first_text || sample.text || '').toLowerCase();
+    if (!from && Number(h?.message_count || 0) === 0) return true;
+    if (from.startsWith('1631') || display.startsWith('1650') || pnid === '123456123') return true; // Meta Graph test
+    if (/e2e|diag|canli crm|final e2e|audit ping|crm diag|meta-shape|livecheck/.test(text)) return true;
+    if (/^90555999|^90555111|^90555987|^90555988/.test(from)) return true; // bilinen simülasyon
+    if (
+      /^ig_sender_/i.test(from) ||
+      (String(h?.object_type || '').includes('instagram') && /ig e2e/i.test(text))
+    ) {
+      return true;
+    }
+    return false;
+  }
+
+  const inboundHits = (out.recent_webhook_hits || []).filter((h) => Number(h.message_count || 0) > 0);
+  const realHits = inboundHits.filter((h) => !isSyntheticWebhookHit(h));
+  const syntheticHits = inboundHits.filter((h) => isSyntheticWebhookHit(h));
+  out.real_inbound = {
+    last_hits_scanned: inboundHits.length,
+    real_message_hits: realHits.length,
+    synthetic_or_test_hits: syntheticHits.length,
+    last_real_from: realHits[0]?.wa_from || null,
+    last_real_at: realHits[0]?.received_at || null,
+    last_real_preview:
+      realHits[0]?.sample && typeof realHits[0].sample === 'object'
+        ? realHits[0].sample.first_text || null
+        : null
+  };
+
+  if (inboundHits.length > 0 && realHits.length === 0) {
+    out.hints.push(
+      'Webhook yalnızca test/simülasyon mesajı görüyor — dışarıdan gerçek WA gelmiyor. Meta’da: (1) SmartKocluk Live + WhatsApp Advanced Access, (2) gönderen numarayı Testers’a ekleyin veya App Review tamamlayın, (3) mesajı 0850 303 40 14 Cloud API numarasına atın (QR/Baileys hattı değil), (4) Webhook’da messages alanı abone ve yeşil tikli olsun.'
+    );
+  }
+
   const tablesOk = Boolean(out.tables.crm_conversations.ok && out.tables.crm_messages.ok);
-  const hasInbound =
-    Number(out.tables.crm_conversations.count || 0) > 0 ||
-    (out.recent_webhook_hits || []).some((h) => Number(h.message_count || 0) > 0);
+  const hasInbound = inboundHits.length > 0;
   out.e2e_ready = {
     webhook_verify_configured: Boolean(webhook.configured),
     webhook_url: webhook.webhook_url,
     crm_tables_ok: tablesOk,
     meta_send_configured: null, // health endpoint doldurur
     inbound_seen: hasInbound,
+    real_inbound_seen: realHits.length > 0,
     ready: Boolean(webhook.configured && tablesOk),
     checklist: [
       'GET /api/meta/webhook?hub.mode=subscribe&hub.verify_token=…&hub.challenge=… → 200 + challenge',
       'POST WA payload → wa_ingested≥1 ve crm_conversations artar',
       'CRM Inbox’tan yanıt → Graph /{phone_number_id}/messages (META_WHATSAPP_TOKEN + META_PHONE_NUMBER_ID)',
-      'IG DM: object=instagram + entry[].messaging[] → crm channel=instagram'
+      'IG DM: object=instagram + entry[].messaging[] → crm channel=instagram',
+      'Dışarıdan gerçek telefon → 0850 Cloud API; Meta Testers veya Advanced Access şart'
     ]
   };
 
