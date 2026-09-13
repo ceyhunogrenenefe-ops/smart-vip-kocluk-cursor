@@ -1547,7 +1547,7 @@ export default function LiveLessons({ hideCalendar = false }: { hideCalendar?: b
               </tr>
             </thead>
             <tbody className="bg-white">
-              {Array.from({ length: 15 }, (_, i) => 10 + i).map((hour) => {
+              {[...Array.from({ length: 14 }, (_, i) => 10 + i), 0, 1].map((hour) => {
                 const label = `${String(hour).padStart(2, '0')}:00`;
                 return (
                   <tr key={hour} className="border-t border-slate-100/90 transition-colors hover:bg-slate-50/50">

@@ -1730,7 +1730,7 @@ export function WeeklyPlannerCalendar({
         {/* Takvim */}
         <div
           className={cn(
-            'overflow-hidden rounded-2xl border bg-white dark:bg-slate-900',
+            'overflow-visible rounded-2xl border bg-white dark:bg-slate-900',
             vibrantMobileChrome
               ? 'border-violet-200/90 shadow-[0_24px_56px_-28px_rgb(139,92,246,0.38)] ring-2 ring-violet-100/70 dark:border-violet-900/55 dark:shadow-[0_20px_50px_-24px_rgb(0,0,0,0.5)] dark:ring-violet-900/40'
               : 'border-slate-200/95 shadow-[0_20px_50px_-24px_rgb(15,23,42,0.18)] ring-1 ring-slate-100/90 dark:border-slate-700 dark:shadow-none dark:ring-slate-800/80'
@@ -1758,9 +1758,9 @@ export function WeeklyPlannerCalendar({
                 ? 'Yükleniyor…'
                 : studentStudyLogUi
                   ? showMobileDayView
-                    ? 'Gün seç · Göreve dokun → çalışma kaydı'
-                    : 'Bloka tıkla → çalışma kaydı ve “Konuyu bitirdim” ile Konu Takibi güncellenir'
-                  : 'Blokları sürükleyerek taşı · Boş saate tıklayarak yeni görev ekle'}
+                    ? 'Gün seç · Göreve dokun → çalışma kaydı · 08:00–01:00'
+                    : 'Bloka tıkla → çalışma kaydı · takvim 08:00–01:00'
+                  : 'Blokları sürükle · boş saate tıkla · takvim 08:00–01:00'}
             </span>
             <div className="flex flex-wrap items-center gap-2 sm:justify-end">
               {canEditPlan ? (
@@ -1846,7 +1846,7 @@ export function WeeklyPlannerCalendar({
           </div>
           <div
             className={cn(
-              showMobileDayView ? '' : 'overflow-x-auto',
+              showMobileDayView ? '' : 'overflow-x-auto overflow-y-visible',
               vibrantMobileChrome
                 ? 'bg-gradient-to-b from-violet-50/50 via-white to-amber-50/30 dark:from-slate-950 dark:via-slate-950 dark:to-violet-950/20'
                 : 'bg-slate-50/40 dark:bg-slate-950/40'

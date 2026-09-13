@@ -1,12 +1,12 @@
 export const PLANNER_GRID_STEP_OPTIONS = [10, 15, 30, 60] as const;
 export type PlannerGridStepMinutes = (typeof PLANNER_GRID_STEP_OPTIONS)[number];
 
-/** Grid 08:00’dan ertesi gün 01:00’a kadar (22:00 satırından sonra 23 / 00 / 01). */
+/** Grid 08:00’dan son satır 01:00’a kadar (01:00–02:00 dilimi dahil). */
 export const PLANNER_START_HOUR = 8;
-export const PLANNER_END_HOUR = 25;
+export const PLANNER_END_HOUR = 26;
 const DAY_MINUTES = 24 * 60;
-/** 00:00–01:59 gece yarısından sonra sayılır (sabah 08:00 grid’i bozmaz). */
-const OVERNIGHT_HOUR_MAX = 1;
+/** 00:00–02:59 gece yarısından sonra (01:00 satırının bitişi 02:00). */
+const OVERNIGHT_HOUR_MAX = 2;
 
 const GRID_STEP_STORAGE_KEY = 'weekly-planner-grid-step-minutes';
 
@@ -80,7 +80,7 @@ export function buildPlannerTimeSlots(opts?: {
       endMinutes: endM,
       start: minutesToHhmm(m),
       end: minutesToHhmm(endM),
-      label: step >= 60 ? minutesToHhmm(m) : `${minutesToHhmm(m)}–${minutesToHhmm(endM)}`,
+      label: minutesToHhmm(m),
     });
     m = endM;
   }
