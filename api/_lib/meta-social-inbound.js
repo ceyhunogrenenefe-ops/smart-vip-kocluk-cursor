@@ -28,6 +28,7 @@ const PAGE_FIELDS = [
 
 /** WhatsApp WABA token asla kullanılmaz — IG/FB DM için ayrı Page/IG token gerekir. */
 const SOCIAL_TOKEN_ENVS = [
+  'META_BOUND_PAGE_TOKEN',
   'INSTAGRAM_PAGE_ACCESS_TOKEN',
   'META_PAGE_ACCESS_TOKEN',
   'FACEBOOK_PAGE_ACCESS_TOKEN',
@@ -36,6 +37,16 @@ const SOCIAL_TOKEN_ENVS = [
   'IG_ACCESS_TOKEN',
   'PAGE_ACCESS_TOKEN'
 ];
+
+/** /me/accounts sayfa dönerse env’deki kullanıcı id’sini ezer. */
+export function resolvePageIdFromIdentity({ envPageId, meId, accountIds = [] } = {}) {
+  const firstPage = String(accountIds[0] || '').trim();
+  if (firstPage && !looksLikeConfigurationId(firstPage)) return firstPage;
+  const env = String(envPageId || '').trim();
+  const me = String(meId || '').trim();
+  if (env && env !== me && !looksLikeConfigurationId(env)) return env;
+  return '';
+}
 
 export function resolveSocialToken() {
   for (const name of SOCIAL_TOKEN_ENVS) {
@@ -157,14 +168,21 @@ export async function saveMetaPageSecretsToDb(patch = {}) {
     next.instagram_business_account_id = String(patch.instagram_business_account_id).trim();
   }
   if (patch.configuration_id) next.configuration_id = String(patch.configuration_id).trim();
+  if (patch.bound_via) next.bound_via = String(patch.bound_via).trim();
+  if (patch.app_secret) next.app_secret = String(patch.app_secret).trim();
   next.updated_at = new Date().toISOString();
   const { error: writeErr } = await supabaseAdmin
     .from('commerce_settings')
     .update({ meta: { ...prevMeta, page: next }, updated_at: new Date().toISOString() })
     .eq('id', row.id);
   if (writeErr) throw new Error(writeErr.message);
-  if (next.token) process.env.META_PAGE_ACCESS_TOKEN = next.token;
+  if (next.token) {
+    process.env.META_BOUND_PAGE_TOKEN = next.token;
+    process.env.META_PAGE_ACCESS_TOKEN = next.token;
+    process.env.INSTAGRAM_PAGE_ACCESS_TOKEN = next.token;
+  }
   if (next.page_id) process.env.META_PAGE_ID = next.page_id;
+  if (next.app_secret) process.env.META_APP_SECRET = next.app_secret;
   return next;
 }
 
@@ -238,7 +256,11 @@ export async function ensureMetaSocialInbound({ apply = false } = {}) {
     });
     if (accounts[0]?.id) {
       out.token_kind = 'user_with_pages';
-      if (!pid) pid = String(accounts[0].id);
+      pid = resolvePageIdFromIdentity({
+        envPageId: pid,
+        meId: me.json?.id,
+        accountIds: accounts.map((a) => a?.id)
+      });
       if (accounts[0]?.access_token) {
         useTok = String(accounts[0].access_token);
         process.env.META_PAGE_ACCESS_TOKEN = useTok;
@@ -282,11 +304,12 @@ export async function ensureMetaSocialInbound({ apply = false } = {}) {
         out.page_name = out.page_name || me.json.name || null;
       } else {
         out.token_kind = 'user_no_pages';
+        if (pid && pid === String(me.json.id)) pid = '';
         out.steps.push({
           step: 'not_a_page_token',
           ok: false,
           error: graphErr(probe.json, `http_${probe.status}`),
-          hint: 'Vercel’deki token kullanıcı token’ı. Graph Explorer’da pages_show_list + pages_messaging ile SAYFA token’ı alın.'
+          hint: 'Vercel’deki token kullanıcı token’ı. CRM → Widgetler ile Facebook Login for Business yapın (Kommo gibi).'
         });
       }
     }
@@ -318,8 +341,8 @@ export async function ensureMetaSocialInbound({ apply = false } = {}) {
     out.error = out.token_kind === 'user_no_pages' ? 'user_token_not_page_token' : 'page_id_unresolved';
     out.hint =
       out.token_kind === 'user_no_pages'
-        ? 'Vercel INSTAGRAM_PAGE_ACCESS_TOKEN şu an kişisel kullanıcı token’ı (sayfa listesi boş). Graph Explorer → SmartKocluk → pages_show_list + pages_messaging + instagram_manage_messages → listeden SAYFA Access Token alın, Vercel’e onu yazın ve Redeploy edin.'
-        : 'Sayfa kimliği yok. Meta BM → Sayfa → Page ID’yi Vercel META_PAGE_ID olarak kaydedin.';
+        ? 'Kayıtlı token kişisel kullanıcı token’ı (sayfa listesi boş). CRM → Widgetler’den Instagram/Facebook’u Kommo gibi bağlayın.'
+        : 'Sayfa kimliği yok. CRM → Widgetler ile Facebook Login for Business yapın.';
     return out;
   }
 
@@ -358,7 +381,8 @@ export async function ensureMetaSocialInbound({ apply = false } = {}) {
         token: useTok,
         page_id: pid,
         instagram_business_account_id: out.instagram_business_id || undefined,
-        configuration_id: out.configuration_id || undefined
+        configuration_id: out.configuration_id || undefined,
+        bound_via: 'facebook_login'
       });
     } catch (e) {
       out.steps.push({
@@ -546,7 +570,8 @@ export async function bindMetaSocialFromUserToken(userAccessToken) {
       token: pageTok,
       page_id: pageId,
       instagram_business_account_id: igId && !looksLikeConfigurationId(igId) ? igId : undefined,
-      configuration_id: DEFAULT_META_CONFIGURATION_ID
+      configuration_id: DEFAULT_META_CONFIGURATION_ID,
+      bound_via: 'facebook_login'
     });
   } catch (e) {
     return {
@@ -578,7 +603,8 @@ export async function bindMetaSocialFromPageToken(pageAccessToken, pageIdHint = 
     await saveMetaPageSecretsToDb({
       token: tok,
       page_id: pid || undefined,
-      configuration_id: DEFAULT_META_CONFIGURATION_ID
+      configuration_id: DEFAULT_META_CONFIGURATION_ID,
+      bound_via: 'facebook_login'
     });
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };

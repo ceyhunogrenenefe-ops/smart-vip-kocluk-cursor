@@ -82,6 +82,7 @@ export const ROUTE_ALLOWED_ROLES = {
   '/toplanti-takip': ['super_admin', 'admin'],
   '/crm': ['super_admin', 'admin', 'crm_agent'],
   '/crm/inbox': ['super_admin', 'admin', 'crm_agent', 'coach'],
+  '/crm/widgetler': ['super_admin', 'admin'],
   '/crm/agents': ['super_admin', 'admin'],
   '/kayit-takibi': ['super_admin', 'admin'],
   '/toplantilarim': ['coach', 'teacher'],

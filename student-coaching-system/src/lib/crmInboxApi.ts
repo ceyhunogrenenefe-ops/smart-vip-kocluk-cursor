@@ -209,6 +209,28 @@ export function crmSavePageToken(payload: {
   );
 }
 
+export type CrmFacebookLoginStart = {
+  app_id: string;
+  config_id: string;
+  graph_version: string;
+  widget_redirect_uri: string;
+  oauth_redirect_uri: string;
+  authorize_url: string;
+  code_authorize_url?: string | null;
+  has_app_secret: boolean;
+  hint?: string;
+};
+
+export function crmFacebookLoginStart() {
+  return inboxGet<{ data: CrmFacebookLoginStart }>('facebook_login_start');
+}
+
+export function crmSaveMetaAppSecret(appSecret: string) {
+  return inboxPost<{ ok: boolean; data: { saved: boolean; suffix?: string } }>('save_meta_app_secret', {
+    app_secret: appSecret
+  });
+}
+
 export function crmListAgents(institutionId?: string) {
   return inboxGet<{
     data: {

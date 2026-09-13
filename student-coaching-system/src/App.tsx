@@ -89,6 +89,7 @@ import MeetingTrackerPage from './pages/MeetingTrackerPage';
 import CrmLayout from './pages/crm/CrmLayout';
 import CrmInboxPage from './pages/crm/CrmInboxPage';
 import CrmAgentsPage from './pages/crm/CrmAgentsPage';
+import CrmWidgetsPage from './pages/crm/CrmWidgetsPage';
 import CrmHome from './pages/crm/CrmHome';
 import OzelDersTalepleriPage from './pages/OzelDersTalepleriPage';
 import TeacherVitrineProfilePage from './pages/TeacherVitrineProfilePage';
@@ -432,6 +433,14 @@ function App() {
             >
               <Route index element={<CrmHome />} />
               <Route path="inbox" element={<CrmInboxPage />} />
+              <Route
+                path="widgetler"
+                element={
+                  <ProtectedRoute allowedRoles={rolesForProtectedRoute('/crm/widgetler')}>
+                    <CrmWidgetsPage />
+                  </ProtectedRoute>
+                }
+              />
               <Route
                 path="agents"
                 element={
