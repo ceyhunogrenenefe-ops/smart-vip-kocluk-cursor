@@ -53,8 +53,10 @@
 - Alıcı telefon Meta formatında saklanır: `9055…` (05… otomatik normalize)
 - Serbest metin: 24 saat penceresi içinde. Pencere kapalıysa onaylı **şablon** gerekir.
 - Inbox sağ panel + mesaj kutusunda `/` : WABA’daki **APPROVED** şablonlar (Graph, 0850 phone WABA öncelikli). `{{1}}` / adlı değişkenler için alan açılır.
+- WhatsApp: Cloud şablon API; başlık/görsel yoksa gövde metin olarak düşer (24s penceresi gerekir).
+- Instagram / Facebook: aynı şablon gövdesi **DM metni** olarak gider (Kommo gibi).
+- Inbox’tan şablon yazıp Meta’ya onaya gönderme: `POST create_meta_template` (gövde-only, UTILITY/MARKETING).
 - `GET /api/crm-inbox?op=list_meta_templates` · `POST send_message` + `template_name` / `template_language` / `template_params`
-- Instagram / Facebook DM’ye WhatsApp şablonu gönderilmez.
 
 ## Schema
 Supabase SQL Editor (manuel):
@@ -74,7 +76,7 @@ Otomatik (Vercel’de `SUPABASE_DB_URL` / `DATABASE_URL` varsa):
 - Admin: `/crm` pipeline + `/crm/inbox` + `/crm/agents`
 
 ## APIs
-- `/api/crm-inbox?op=list_conversations|list_messages|send_message|assign_conversation|take_conversation|set_tags|list_notes|add_note|list_canned|list_meta_templates|poll|…`
+- `/api/crm-inbox?op=list_conversations|list_messages|send_message|assign_conversation|take_conversation|set_tags|list_notes|add_note|list_canned|list_meta_templates|create_meta_template|poll|…`
 - `/api/crm-admin?op=create_crm_user|promote_agent|demote_agent|list_agents`
 
 ## Realtime

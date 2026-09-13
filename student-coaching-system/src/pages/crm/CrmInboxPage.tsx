@@ -5,6 +5,7 @@ import {
   FileText,
   Instagram,
   Loader2,
+  Plus,
   MessageCircle,
   RefreshCw,
   Search,
@@ -20,6 +21,7 @@ import {
   crmEnsureInbound,
   crmInboundStatus,
   crmListAgents,
+  crmCreateMetaTemplate,
   crmListCanned,
   crmListConversations,
   crmListMessages,
@@ -119,8 +121,14 @@ export default function CrmInboxPage() {
   const [binding, setBinding] = useState(false);
   const [canned, setCanned] = useState<Array<{ id: string; title: string; body: string }>>([]);
   const [metaTemplates, setMetaTemplates] = useState<CrmMetaTemplate[]>([]);
+  const [pendingMetaTemplates, setPendingMetaTemplates] = useState<CrmMetaTemplate[]>([]);
   const [metaTplHint, setMetaTplHint] = useState<string | null>(null);
   const [metaTplLoading, setMetaTplLoading] = useState(false);
+  const [showCreateTpl, setShowCreateTpl] = useState(false);
+  const [createTplName, setCreateTplName] = useState('');
+  const [createTplBody, setCreateTplBody] = useState('');
+  const [createTplCategory, setCreateTplCategory] = useState<'UTILITY' | 'MARKETING'>('UTILITY');
+  const [creatingTpl, setCreatingTpl] = useState(false);
   const [slashOpen, setSlashOpen] = useState(false);
   const [slashHighlight, setSlashHighlight] = useState(0);
   const [pendingTpl, setPendingTpl] = useState<CrmMetaTemplate | null>(null);
@@ -137,6 +145,7 @@ export default function CrmInboxPage() {
     try {
       const res = await crmListMetaTemplates(refresh);
       setMetaTemplates(res.data || []);
+      setPendingMetaTemplates(res.pending || []);
       setMetaTplHint(res.hint || null);
     } catch (e) {
       setMetaTplHint(e instanceof Error ? e.message : 'Şablonlar yüklenemedi');
@@ -281,14 +290,6 @@ export default function CrmInboxPage() {
 
   const onSendTemplate = async (tpl: CrmMetaTemplate, params: string[]) => {
     if (!selectedId) return;
-    if (selected?.channel && selected.channel !== 'whatsapp') {
-      toast.error('Meta şablonları yalnızca WhatsApp konuşmasında gönderilir.');
-      return;
-    }
-    if (tpl.sendable === false) {
-      toast.error('Bu şablon medya başlığı istiyor; CRM’den şu an yalnızca metin şablonları gönderilir.');
-      return;
-    }
     const names = tpl.variableNames || [];
     if (tpl.variableCount > 0 && params.some((p) => !String(p || '').trim())) {
       toast.error('Şablon değişkenlerini doldurun.');
@@ -308,7 +309,11 @@ export default function CrmInboxPage() {
       setPendingTpl(null);
       setTplParams([]);
       setSlashOpen(false);
-      toast.success(`Şablon gönderildi: ${tpl.name}`);
+      toast.success(
+        selected?.channel === 'whatsapp'
+          ? `Şablon gönderildi: ${tpl.name}`
+          : `Şablon metni ${selected?.channel === 'facebook' ? 'Facebook' : 'Instagram'}’a gönderildi: ${tpl.name}`
+      );
       void loadList();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Şablon gönderilemedi');
@@ -324,18 +329,43 @@ export default function CrmInboxPage() {
   };
 
   const pickTemplate = (tpl: CrmMetaTemplate) => {
-    if (selected?.channel && selected.channel !== 'whatsapp') {
-      toast.error('Meta şablonları yalnızca WhatsApp konuşmasında gönderilir.');
+    if (!selectedId) {
+      toast.error('Önce bir konuşma seçin.');
       return;
     }
     setDraft(replaceSlashToken(draft, '').replace(/\s+$/, ''));
     setSlashOpen(false);
-    if (tpl.variableCount > 0 || tpl.sendable === false) {
+    if (tpl.variableCount > 0) {
       setPendingTpl(tpl);
       setTplParams(Array.from({ length: tpl.variableCount }, () => ''));
       return;
     }
     void onSendTemplate(tpl, []);
+  };
+
+  const onCreateTemplate = async () => {
+    if (!createTplName.trim() || !createTplBody.trim()) {
+      toast.error('Şablon adı ve metin gerekli.');
+      return;
+    }
+    setCreatingTpl(true);
+    try {
+      const res = await crmCreateMetaTemplate({
+        name: createTplName.trim(),
+        body: createTplBody.trim(),
+        category: createTplCategory,
+        language: 'tr'
+      });
+      toast.success(res.message || `Onaya gönderildi: ${res.data?.status || 'PENDING'}`);
+      setCreateTplName('');
+      setCreateTplBody('');
+      setShowCreateTpl(false);
+      void loadMetaTemplates(true);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Şablon onaya gönderilemedi');
+    } finally {
+      setCreatingTpl(false);
+    }
   };
 
   const slashNeedle = slashQuery(draft);
@@ -666,9 +696,15 @@ export default function CrmInboxPage() {
                           {fillTemplatePreview(pendingTpl.body, tplParams, pendingTpl.variableNames || [])}
                         </p>
                       ) : null}
-                      {pendingTpl.sendable === false ? (
+                      {pendingTpl.mediaHeader ? (
                         <p className="mt-1 text-[11px] text-amber-800">
-                          Medya başlığı gereken şablon — CRM’den gönderilemez.
+                          Başlık/görsel yok — WhatsApp’ta mümkünse şablon, değilse metin; Instagram/Facebook’ta gövde
+                          metni gider.
+                        </p>
+                      ) : selected?.channel && selected.channel !== 'whatsapp' ? (
+                        <p className="mt-1 text-[11px] text-emerald-800">
+                          {selected.channel === 'facebook' ? 'Facebook' : 'Instagram'}’a şablon gövdesi metin olarak
+                          gider.
                         </p>
                       ) : null}
                     </div>
@@ -702,7 +738,7 @@ export default function CrmInboxPage() {
                   ) : null}
                   <button
                     type="button"
-                    disabled={sending || pendingTpl.sendable === false}
+                    disabled={sending}
                     onClick={() => void onSendTemplate(pendingTpl, tplParams)}
                     className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
                   >
@@ -787,8 +823,54 @@ export default function CrmInboxPage() {
             </button>
           </div>
           <p className="mb-2 text-[10px] text-slate-400">
-            Onaylı WhatsApp şablonları. Mesaj kutusuna <span className="font-mono">/</span> yazın.
+            WA / IG / FB. <span className="font-mono">/</span> ile seçin. Kommo gibi yeni şablon yazıp Meta’ya onaya
+            gönderebilirsiniz.
           </p>
+          <button
+            type="button"
+            onClick={() => setShowCreateTpl((v) => !v)}
+            className="mb-2 inline-flex w-full items-center justify-center gap-1 rounded-lg border border-emerald-200 bg-white px-2 py-1.5 text-[11px] font-semibold text-emerald-800 hover:bg-emerald-50"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            {showCreateTpl ? 'Formu kapat' : 'Şablon yaz · onaya gönder'}
+          </button>
+          {showCreateTpl ? (
+            <div className="mb-3 space-y-1.5 rounded-lg border border-slate-200 bg-white p-2">
+              <input
+                value={createTplName}
+                onChange={(e) => setCreateTplName(e.target.value)}
+                placeholder="Şablon adı (örn. hosgeldin_veli)"
+                className="w-full rounded-md border border-slate-200 px-2 py-1 text-xs outline-none focus:border-emerald-500"
+              />
+              <select
+                value={createTplCategory}
+                onChange={(e) => setCreateTplCategory(e.target.value as 'UTILITY' | 'MARKETING')}
+                className="w-full rounded-md border border-slate-200 px-2 py-1 text-xs"
+              >
+                <option value="UTILITY">UTILITY (işlem / bilgilendirme)</option>
+                <option value="MARKETING">MARKETING (kampanya)</option>
+              </select>
+              <textarea
+                value={createTplBody}
+                onChange={(e) => setCreateTplBody(e.target.value)}
+                rows={4}
+                placeholder={'Merhaba {{1}}, Online VIP Dershane.\nGorusme saati: {{2}}.'}
+                className="w-full resize-none rounded-md border border-slate-200 px-2 py-1 text-xs outline-none focus:border-emerald-500"
+              />
+              <p className="text-[10px] text-slate-400">
+                Gövde metni yeter. Değişken: {'{{1}}'} veya {'{{veli_adi}}'}. Başlık/görsel zorunlu değil.
+              </p>
+              <button
+                type="button"
+                disabled={creatingTpl || !createTplName.trim() || !createTplBody.trim()}
+                onClick={() => void onCreateTemplate()}
+                className="inline-flex w-full items-center justify-center gap-1 rounded-md bg-emerald-600 px-2 py-1.5 text-[11px] font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+              >
+                {creatingTpl ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+                Meta’ya onaya gönder
+              </button>
+            </div>
+          ) : null}
           {metaTemplates.length ? (
             <div className="flex max-h-56 flex-col gap-1 overflow-y-auto">
               {metaTemplates.map((t) => (
@@ -818,6 +900,19 @@ export default function CrmInboxPage() {
               {metaTplLoading ? 'Yükleniyor…' : metaTplHint || 'Onaylı şablon yok.'}
             </p>
           )}
+          {pendingMetaTemplates.length ? (
+            <div className="mt-2">
+              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-amber-700">Onay bekleyen</p>
+              <div className="flex max-h-28 flex-col gap-1 overflow-y-auto">
+                {pendingMetaTemplates.map((t) => (
+                  <div key={t.id} className="rounded-lg border border-amber-100 bg-amber-50 px-2 py-1.5">
+                    <p className="truncate text-[11px] font-semibold text-amber-950">{t.name}</p>
+                    <p className="text-[10px] text-amber-800">{t.status}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
         </div>
         {selected ? (
           <div className="space-y-4 overflow-y-auto p-4 text-sm">
