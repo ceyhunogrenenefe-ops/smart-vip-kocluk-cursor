@@ -95,11 +95,45 @@ export function crmListMessages(conversationId: string, since?: string) {
   });
 }
 
-export function crmSendMessage(conversationId: string, text: string) {
+export type CrmMetaTemplate = {
+  id: string;
+  kind: 'meta_template';
+  name: string;
+  language: string;
+  category?: string;
+  status: string;
+  body: string;
+  variableCount: number;
+  variableFormat?: 'named' | 'positional';
+  variableNames?: string[];
+  headerFormat?: string | null;
+  sendable?: boolean;
+  qualityScore?: string | null;
+};
+
+export function crmSendMessage(
+  conversationId: string,
+  text: string,
+  template?: {
+    template_name: string;
+    template_language?: string;
+    template_params?: string[];
+    template_param_names?: string[];
+    template_body?: string;
+  }
+) {
   return inboxPost<{ ok: boolean; data: CrmMessage }>('send_message', {
     conversation_id: conversationId,
-    body: text
+    body: text,
+    ...(template || {})
   });
+}
+
+export function crmListMetaTemplates(refresh = false) {
+  return inboxGet<{ data: CrmMetaTemplate[]; source?: string; hint?: string | null }>(
+    'list_meta_templates',
+    refresh ? { refresh: '1' } : {}
+  );
 }
 
 export function crmAssignConversation(conversationId: string, assignedUserId: string | null) {
