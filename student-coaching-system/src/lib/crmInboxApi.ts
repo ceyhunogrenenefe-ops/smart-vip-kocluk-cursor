@@ -214,6 +214,7 @@ export type CrmFacebookLoginStart = {
   config_id: string;
   uses_slim_config?: boolean;
   blocked_asset_ids?: string[];
+  config_permissions?: string[];
   graph_version: string;
   widget_redirect_uri: string;
   oauth_redirect_uri: string;

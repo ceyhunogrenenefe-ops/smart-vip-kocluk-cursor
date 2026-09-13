@@ -17,8 +17,10 @@ describe('facebook login widget', () => {
     assert.match(url, new RegExp(`client_id=${DEFAULT_META_APP_ID}`));
     assert.match(url, /api%2Fmeta%2Ffacebook-oauth/);
     assert.match(url, /response_type=code/);
-    assert.match(url, /pages_messaging/);
+    assert.match(url, /pages_show_list/);
     assert.match(url, /instagram_manage_messages/);
+    assert.doesNotMatch(url, /pages_messaging/);
+    assert.doesNotMatch(url, /pages_manage_metadata/);
     assert.doesNotMatch(url, /config_id=/);
   });
 

@@ -36,16 +36,28 @@ export function oauthRedirectUri(origin = PRODUCTION_ORIGIN) {
   return `${String(origin || PRODUCTION_ORIGIN).replace(/\/$/, '')}${OAUTH_PATH}`;
 }
 
-/** Sayfa + Instagram DM — Login for Business varlık listesi yok, 1349246 olmaz. */
+/**
+ * Klasik Facebook Login `scope=` — yalnızca bu izinler URL’de geçerli.
+ * pages_messaging / pages_manage_metadata Login for Business yapılandırmasında
+ * olmalı; scope’ta Invalid Scopes verir (yalnızca geliştiriciye gösterilir).
+ */
 export const PAGE_IG_OAUTH_SCOPES = [
   'pages_show_list',
-  'pages_messaging',
-  'pages_manage_metadata',
   'instagram_basic',
   'instagram_manage_messages',
   'instagram_manage_comments',
   'public_profile'
 ].join(',');
+
+/** Login for Business config’ine eklenecek DM izinleri — URL scope’una koyma. */
+export const LOGIN_FOR_BUSINESS_PAGE_PERMISSIONS = [
+  'pages_show_list',
+  'pages_messaging',
+  'pages_manage_metadata',
+  'instagram_basic',
+  'instagram_manage_messages',
+  'instagram_manage_comments'
+];
 
 /**
  * mode=scopes: klasik Facebook Login (önerilen — yalnızca Online VIP sayfası).
@@ -127,6 +139,7 @@ export function describeFacebookLoginWidget(origin = PRODUCTION_ORIGIN, { state 
     config_id: metaFacebookConfigId(),
     uses_slim_config: slim,
     blocked_asset_ids: BLOCKED_LFB_ASSET_IDS,
+    config_permissions: LOGIN_FOR_BUSINESS_PAGE_PERMISSIONS,
     graph_version: metaFacebookGraphVersion(),
     widget_redirect_uri: widgetRedirectUri(origin),
     oauth_redirect_uri: oauth,
@@ -137,8 +150,8 @@ export function describeFacebookLoginWidget(origin = PRODUCTION_ORIGIN, { state 
     has_app_secret: hasSecret,
     hint: hasSecret
       ? slim
-        ? 'Yeni Login for Business yapılandırması kullanılacak — yalnızca o listedeki varlıklar.'
-        : '1349246: yapılandırmadan 52570416778031 ve 23850842047630381 varlıklarını silin veya yalnızca Online VIP içeren yeni config_id kaydedin.'
+        ? 'Yeni Login for Business yapılandırması kullanılacak — pages_messaging bu config’te olmalı, URL’de değil.'
+        : 'Invalid Scopes: pages_messaging URL’de istenemez. Yeni LfB config oluşturun (yalnızca Online VIP + o izinler) ve ID’yi kaydedin.'
       : 'Önce SmartKocluk Facebook App Secret’ı kaydedin (Ayarlar → Temel → App secret). Instagram Login secret değil.'
   };
 }
