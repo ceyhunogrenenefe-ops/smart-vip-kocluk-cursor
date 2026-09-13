@@ -70,9 +70,11 @@ import {
   buildPlannerTimeSlots,
   entryMatchesPlannerSlot,
   loadPlannerGridStepMinutes,
+  PLANNER_END_HOUR,
+  PLANNER_START_HOUR,
   plannerGridRowMinHeight,
   savePlannerGridStepMinutes,
-  timeToMinutes,
+  timeToPlannerMinutes,
   type PlannerGridStepMinutes,
   type PlannerTimeSlot,
 } from '../../lib/weeklyPlannerTimeSlots';
@@ -117,10 +119,9 @@ function goalEffectiveSpan(goal: CoachWeeklyGoalRow, weekFallbackStart: string, 
 }
 
 function slotMinutes(start: string, end: string) {
-  const [sh, sm] = start.split(':').map((x) => parseInt(x, 10));
-  const [eh, em] = end.split(':').map((x) => parseInt(x, 10));
-  const a = sh * 60 + (sm || 0);
-  const b = eh * 60 + (em || 0);
+  const a = timeToPlannerMinutes(start);
+  const b = timeToPlannerMinutes(end);
+  if (a == null || b == null) return 0;
   return Math.max(0, b - a);
 }
 
@@ -707,7 +708,11 @@ export function WeeklyPlannerCalendar({
     if (!showMobileDayView) return;
     const now = new Date();
     const isToday = mobileDayDate === format(now, 'yyyy-MM-dd');
-    const fromClock = isToday ? Math.max(8 * 60, Math.min(22 * 60, now.getHours() * 60 + now.getMinutes())) : 9 * 60;
+    const rawClock = now.getHours() * 60 + now.getMinutes();
+    const clockM = now.getHours() <= 1 ? rawClock + 24 * 60 : rawClock;
+    const fromClock = isToday
+      ? Math.max(PLANNER_START_HOUR * 60, Math.min(PLANNER_END_HOUR * 60, clockM))
+      : 9 * 60;
     const freeIdx = timeSlots.findIndex(
       (slot) =>
         slot.startMinutes >= fromClock &&
@@ -996,7 +1001,7 @@ export function WeeklyPlannerCalendar({
     await runPlannerMutation(async () => {
       const start = formStartTime.slice(0, 5);
       const end = formEndTime.slice(0, 5);
-      if (!start || !end || (timeToMinutes(end) ?? 0) <= (timeToMinutes(start) ?? 0)) {
+      if (!start || !end || (timeToPlannerMinutes(end) ?? 0) <= (timeToPlannerMinutes(start) ?? 0)) {
         alert('Bitiş saati başlangıçtan sonra olmalı.');
         return;
       }
@@ -1114,7 +1119,7 @@ export function WeeklyPlannerCalendar({
       const nextStart = formStartTime.slice(0, 5);
       const nextEnd = formEndTime.slice(0, 5);
       if (nextStart !== origStart || nextEnd !== origEnd) {
-        if ((timeToMinutes(nextEnd) ?? 0) <= (timeToMinutes(nextStart) ?? 0)) {
+        if ((timeToPlannerMinutes(nextEnd) ?? 0) <= (timeToPlannerMinutes(nextStart) ?? 0)) {
           alert('Bitiş saati başlangıçtan sonra olmalı.');
           return;
         }
@@ -1291,7 +1296,7 @@ export function WeeklyPlannerCalendar({
   const entriesByCellKey = useMemo(() => {
     const map = new Map<string, WeeklyPlannerEntryRow[]>();
     for (const e of entries) {
-      const em = timeToMinutes(e.start_time);
+      const em = timeToPlannerMinutes(e.start_time);
       if (em == null) continue;
       const slot = timeSlots.find((s) => em >= s.startMinutes && em < s.endMinutes);
       if (!slot) continue;
@@ -2525,7 +2530,7 @@ export function WeeklyPlannerCalendar({
                     onChange={(e) => {
                       const v = e.target.value;
                       setFormStartTime(v);
-                      if ((timeToMinutes(formEndTime) ?? 0) <= (timeToMinutes(v) ?? 0)) {
+                      if ((timeToPlannerMinutes(formEndTime) ?? 0) <= (timeToPlannerMinutes(v) ?? 0)) {
                         setFormEndTime(addMinutesToTimeHhmm(v, gridSlotMinutes));
                       }
                     }}
