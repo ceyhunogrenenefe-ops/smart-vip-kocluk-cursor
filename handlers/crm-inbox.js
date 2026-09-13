@@ -184,6 +184,7 @@ export default async function handler(req, res) {
         data: {
           ...publicInboundStatus(inbound),
           social: { ...publicSocialStatus(social), env: describeSocialTokenEnv() },
+          website_form: { ok: true, endpoint: '/api/site-leads' },
           real_inbound: diag?.real_inbound || null,
           real_inbound_seen: Boolean(diag?.e2e_ready?.real_inbound_seen),
           last_webhook_at: (diag?.recent_webhook_hits || [])[0]?.received_at || null

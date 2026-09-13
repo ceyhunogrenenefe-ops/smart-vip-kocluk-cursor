@@ -1,4 +1,4 @@
-import { AlertTriangle, Clock, Flame, Snowflake, Sun, CheckCircle2, CreditCard, MessageCircle, Instagram, Facebook, Trash2 } from 'lucide-react';
+import { AlertTriangle, Clock, Flame, Snowflake, Sun, CheckCircle2, CreditCard, MessageCircle, Instagram, Facebook, Globe, Trash2 } from 'lucide-react';
 import type { RegCoach, RegLead } from '../../../lib/registrationTrackingApi';
 import {
   CARD_TONE_CLASS,
@@ -51,6 +51,13 @@ function ChannelBadge({ channel }: { channel?: string | null }) {
     return (
       <span className="inline-flex items-center gap-0.5 rounded bg-emerald-100 px-1.5 py-0.5 font-medium text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200">
         <MessageCircle className="h-3 w-3" /> WA
+      </span>
+    );
+  }
+  if (channel === 'website' || channel === 'website_form') {
+    return (
+      <span className="inline-flex items-center gap-0.5 rounded bg-teal-100 px-1.5 py-0.5 font-medium text-teal-800 dark:bg-teal-900/40 dark:text-teal-200">
+        <Globe className="h-3 w-3" /> Web
       </span>
     );
   }

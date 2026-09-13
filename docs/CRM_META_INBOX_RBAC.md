@@ -31,7 +31,7 @@
 ### Huniler
 1. **Pipeline** (ana): Gelen → Düşünme → Görüşülüyor → İptal/ilgisiz → Takip → Tekrar aranacak → Arandı açmadı → Kazan/Kayıp
 2. **SATIŞ SONRASI HİZMETLER**: Deneme dersi / Seminer / Özel ders / Grup / Kullanıcı bilgisi / Fatura
-3. **BURSLULUK** + **WEBSİTESİ FORM** (id `13764288`, İlk Temas `106196664`) — siteden form buraya düşer
+3. **BURSLULUK** + **WEBSİTESİ FORM** (id `13764288`, İlk Temas `106196664`) — Kommo’da durur; native CRM artık `POST /api/site-leads` ile aynı formları alır
 
 ### Kommo vs bizim CRM
 | Kommo | Bizim sistem |
@@ -77,9 +77,18 @@ Otomatik (Vercel’de `SUPABASE_DB_URL` / `DATABASE_URL` varsa):
 - `crm_agent`: yalnızca `/crm/*` (inbox)
 - Admin: `/crm` pipeline + `/crm/inbox` + `/crm/agents`
 
+## Website formu (onlinevipdershane.com)
+- `POST /api/site-leads` — CORS: `onlinevipdershane.com` (+ www). Telefon ile lead eşler / açar (`website_form` veya `website_form_ad`).
+- Form metni pipeline **Mesajlar** + Gelen Kutusu’na iner (kanal WhatsApp kimliği = telefon; sonraki WA sohbet aynı karta bağlanır).
+- İletişim, Sizi Arayalım, ücretsiz analiz (`op=submit`), UTM / `fbclid` reklam formu.
+- Site script: `https://www.dersonlinevipkocluk.com/crm-site-lead.js` (mevcut `/api/iletisim` ve `/api/assessment` gönderimini kopyalar).
+- Widgetler → **Website formu** kurulu; Kayıt Takibi’nde **Web** rozeti.
+- Site yaması: `site-patches/onlinevipdershane1/APPLY-SITE-LEADS.md`
+
 ## APIs
 - `/api/crm-inbox?op=list_conversations|list_messages|send_message|assign_conversation|take_conversation|set_tags|list_notes|add_note|list_canned|list_meta_templates|create_meta_template|poll|…`
 - `/api/crm-admin?op=create_crm_user|promote_agent|demote_agent|list_agents`
+- `/api/site-leads` — public website form ingest (GET ping / POST lead)
 
 ## Realtime
 Client polls `/api/crm-inbox?op=poll` ~4s.
