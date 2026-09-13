@@ -15,9 +15,14 @@ import {
 } from '../api/_lib/crm-inbox.js';
 import {
   fillCrmTemplateBody,
+  invalidateCrmTemplateCache,
   listApprovedCrmWhatsAppTemplates,
   mapDbTemplateToCrm
 } from '../api/_lib/meta-templates-sync.js';
+import {
+  buildMetaTemplateCreatePayload,
+  createOrReuseMetaMessageTemplate
+} from '../api/_lib/meta-template-create.js';
 import { diagnoseCrmInbox, ensureCrmInboxSchema } from '../api/_lib/crm-inbox-schema.js';
 import { ensureMetaInboundDelivery, publicInboundStatus } from '../api/_lib/meta-inbound-ensure.js';
 import {
@@ -340,9 +345,10 @@ export default async function handler(req, res) {
         String(req.query?.refresh || body.refresh || '').trim() === '1' ||
         String(req.query?.force || body.force || '').trim() === '1';
       const live = await listApprovedCrmWhatsAppTemplates({ force });
-      if (live.templates?.length) {
+      if (live.templates?.length || live.pending?.length) {
         return res.status(200).json({
-          data: live.templates,
+          data: live.templates || [],
+          pending: live.pending || [],
           source: live.source,
           hint: live.hint || null
         });
@@ -358,6 +364,7 @@ export default async function handler(req, res) {
       if (error && /message_templates|does not exist/i.test(error.message || '')) {
         return res.status(200).json({
           data: [],
+          pending: [],
           source: live.source || 'none',
           hint: live.hint || 'Onaylı Meta şablonu bulunamadı.',
           error: live.error || null
@@ -374,11 +381,70 @@ export default async function handler(req, res) {
         .sort((a, b) => a.name.localeCompare(b.name, 'tr'));
       return res.status(200).json({
         data: fallback,
+        pending: [],
         source: fallback.length ? 'db' : live.source || 'none',
         hint: fallback.length
           ? 'Graph listesi boş — kayıtlı onaylı şablonlar gösteriliyor.'
           : live.hint || 'Onaylı Meta şablonu bulunamadı.',
         error: live.error || null
+      });
+    }
+
+    if (op === 'create_meta_template' && req.method === 'POST') {
+      await loadMetaWhatsAppSecretsFromDb();
+      const displayName = String(body.name || body.title || '').trim();
+      const bodyText = String(body.body || body.content || '').trim();
+      const category = String(body.category || 'UTILITY').trim().toUpperCase() || 'UTILITY';
+      const language = String(body.language || 'tr').trim() || 'tr';
+      const examples =
+        body.examples && typeof body.examples === 'object' && !Array.isArray(body.examples) ? body.examples : {};
+      if (!displayName) return res.status(400).json({ error: 'name_required', message: 'Şablon adı gerekli.' });
+      if (!bodyText) return res.status(400).json({ error: 'body_required', message: 'Şablon metni gerekli.' });
+      if (!['UTILITY', 'MARKETING', 'AUTHENTICATION'].includes(category)) {
+        return res.status(400).json({ error: 'invalid_category', message: 'Kategori UTILITY, MARKETING veya AUTHENTICATION olmalı.' });
+      }
+      let payload;
+      try {
+        payload = buildMetaTemplateCreatePayload({
+          name: displayName,
+          language,
+          category,
+          bodyText,
+          examples
+        });
+      } catch (e) {
+        return res.status(400).json({
+          error: 'payload_invalid',
+          message: e instanceof Error ? e.message : String(e)
+        });
+      }
+      const submitted = await createOrReuseMetaMessageTemplate(payload);
+      invalidateCrmTemplateCache();
+      if (submitted.ok) {
+        try {
+          await supabaseAdmin.from('message_templates').insert({
+            name: displayName.slice(0, 120),
+            type: `crm_${payload.name}`.slice(0, 80),
+            content: bodyText.slice(0, 8000),
+            meta_template_name: submitted.name,
+            meta_template_language: submitted.language || language,
+            whatsapp_template_status: submitted.status,
+            meta_named_body_parameters: payload.parameter_format === 'NAMED',
+            updated_at: new Date().toISOString()
+          });
+        } catch {
+          /* tablo yok / unique — Graph gönderimi asıl kaynak */
+        }
+      }
+      return res.status(submitted.ok ? 200 : 400).json({
+        ok: submitted.ok,
+        data: submitted,
+        error: submitted.ok ? null : submitted.error,
+        message: submitted.ok
+          ? submitted.reused
+            ? `Şablon zaten var: ${submitted.status}`
+            : `Onaya gönderildi: ${submitted.status}`
+          : submitted.error || 'Şablon oluşturulamadı'
       });
     }
 
@@ -467,29 +533,52 @@ export default async function handler(req, res) {
         conv.assigned_user_id = actor.sub;
       }
 
-      if (templateName && conv.channel !== 'whatsapp') {
-        return res.status(400).json({
-          error: 'template_whatsapp_only',
-          message: 'Meta şablonları yalnızca WhatsApp konuşmasında gönderilir.'
-        });
-      }
-
       let sendResult = { ok: false, messageId: null, error: null };
       let outboundBody = text;
       try {
         if (templateName) {
-          const r = await sendCrmWhatsAppTemplate({
-            phone: conv.contact_identifier,
-            templateName,
-            languageCode: templateLanguage,
-            bodyParameterTexts: templateParams,
-            bodyParameterNames: templateParamNames
-          });
-          sendResult = { ok: true, messageId: r.messageId, error: null, languageUsed: r.languageUsed };
           outboundBody =
             fillCrmTemplateBody(templateBodyPreview, templateParams, templateParamNames) ||
             templateBodyPreview ||
             `[şablon] ${templateName}`;
+          if (conv.channel === 'whatsapp') {
+            try {
+              const r = await sendCrmWhatsAppTemplate({
+                phone: conv.contact_identifier,
+                templateName,
+                languageCode: templateLanguage,
+                bodyParameterTexts: templateParams,
+                bodyParameterNames: templateParamNames
+              });
+              sendResult = {
+                ok: true,
+                messageId: r.messageId,
+                error: null,
+                languageUsed: r.languageUsed,
+                mode: 'whatsapp_template'
+              };
+            } catch (tplErr) {
+              const r = await sendCrmWhatsAppText({ phone: conv.contact_identifier, text: outboundBody });
+              sendResult = {
+                ok: true,
+                messageId: r.messageId,
+                error: null,
+                mode: 'whatsapp_text_fallback',
+                templateError: tplErr instanceof Error ? tplErr.message : String(tplErr)
+              };
+            }
+          } else {
+            const r = await sendCrmInstagramDm({
+              igScopedId: conv.contact_identifier,
+              text: outboundBody
+            });
+            sendResult = {
+              ok: true,
+              messageId: r.messageId,
+              error: null,
+              mode: 'social_text'
+            };
+          }
         } else if (conv.channel === 'whatsapp') {
           const r = await sendCrmWhatsAppText({ phone: conv.contact_identifier, text });
           sendResult = { ok: true, messageId: r.messageId, error: null };
