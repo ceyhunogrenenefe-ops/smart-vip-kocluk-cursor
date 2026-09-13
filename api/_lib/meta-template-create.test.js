@@ -65,4 +65,14 @@ describe('meta-template-create', () => {
     expect(names).not.toContain('ucret_durumu');
     expect(payload.components[0].text).not.toMatch(/IBAN|Tutar|Ücret/i);
   });
+
+  it('builds POSITIONAL payload from {{1}} / {{2}} body', () => {
+    const payload = buildMetaTemplateCreatePayload({
+      name: 'crm hosgeldin',
+      bodyText: 'Merhaba {{1}}, Online VIP. Gorusme: {{2}}.',
+    });
+    expect(payload.name).toBe('crm_hosgeldin');
+    expect(payload.parameter_format).toBe('POSITIONAL');
+    expect(payload.components[0].example.body_text[0]).toEqual(['ornek1', 'ornek2']);
+  });
 });

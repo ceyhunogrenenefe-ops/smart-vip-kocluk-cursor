@@ -108,6 +108,7 @@ export type CrmMetaTemplate = {
   variableNames?: string[];
   headerFormat?: string | null;
   sendable?: boolean;
+  mediaHeader?: boolean;
   qualityScore?: string | null;
 };
 
@@ -130,10 +131,31 @@ export function crmSendMessage(
 }
 
 export function crmListMetaTemplates(refresh = false) {
-  return inboxGet<{ data: CrmMetaTemplate[]; source?: string; hint?: string | null }>(
-    'list_meta_templates',
-    refresh ? { refresh: '1' } : {}
-  );
+  return inboxGet<{
+    data: CrmMetaTemplate[];
+    pending?: CrmMetaTemplate[];
+    source?: string;
+    hint?: string | null;
+  }>('list_meta_templates', refresh ? { refresh: '1' } : {});
+}
+
+export function crmCreateMetaTemplate(payload: {
+  name: string;
+  body: string;
+  category?: 'UTILITY' | 'MARKETING' | 'AUTHENTICATION';
+  language?: string;
+}) {
+  return inboxPost<{
+    ok: boolean;
+    data: {
+      name?: string;
+      status?: string;
+      created?: boolean;
+      reused?: boolean;
+      approved?: boolean;
+    };
+    message?: string;
+  }>('create_meta_template', payload);
 }
 
 export function crmAssignConversation(conversationId: string, assignedUserId: string | null) {
