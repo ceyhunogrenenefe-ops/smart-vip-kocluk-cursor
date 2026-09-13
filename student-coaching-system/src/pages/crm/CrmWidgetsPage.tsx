@@ -219,9 +219,34 @@ export default function CrmWidgetsPage() {
         <p className="text-xs font-semibold uppercase tracking-wide text-pink-700">Şimdi bağla</p>
         <h3 className="mt-1 text-lg font-semibold text-slate-900">Instagram + Facebook</h3>
         <p className="mt-1 text-sm text-slate-600">
-          Sayfa seçme kutusu bu ekranda yok. Aşağıdaki butona basın; açılan <strong>Facebook
-          penceresinde</strong> Online VIP sayfasını işaretleyin.
+          «URL Engellendi» = Facebook bu adresi henüz kaydetmemiş. Aşağıdaki satırları SmartKocluk →
+          Facebook Login → <strong>Valid OAuth Redirect URIs</strong> alanına <em>aynen</em> yapıştırın
+          (www / slash değişmesin). Client OAuth Login ve Web OAuth Login açık olsun.
         </p>
+        <div className="mt-3 space-y-1.5 rounded-xl bg-white/90 p-3 ring-1 ring-amber-200">
+          {(
+            login?.whitelist_uris || [
+              'https://www.dersonlinevipkocluk.com/api/meta/facebook-oauth',
+              'https://www.dersonlinevipkocluk.com/crm/widgetler'
+            ]
+          ).map((uri) => (
+            <div key={uri} className="flex flex-wrap items-center gap-2">
+              <code className="min-w-0 flex-1 break-all rounded bg-amber-50 px-2 py-1 text-[12px] text-slate-800">
+                {uri}
+              </code>
+              <button
+                type="button"
+                className="shrink-0 rounded-md bg-slate-900 px-2 py-1 text-[11px] font-semibold text-white"
+                onClick={() => {
+                  void navigator.clipboard.writeText(uri);
+                  toast.success('URI kopyalandı — Meta’ya yapıştırın');
+                }}
+              >
+                Kopyala
+              </button>
+            </div>
+          ))}
+        </div>
         {socialOk ? (
           <p className="mt-2 text-sm font-medium text-emerald-700">Bağlı sayfa: {pageName || 'ok'}</p>
         ) : null}
@@ -348,14 +373,9 @@ export default function CrmWidgetsPage() {
             <code className="rounded bg-slate-100 px-1.5 py-0.5">https://www.dersonlinevipkocluk.com/</code>
           </li>
           <li>
-            Facebook Login → Settings → Valid OAuth Redirect URIs:
-            <code className="mx-1 rounded bg-slate-100 px-1.5 py-0.5 text-[12px]">
-              {login?.widget_redirect_uri || 'https://www.dersonlinevipkocluk.com/crm/widgetler'}
-            </code>
-            ve
-            <code className="mx-1 rounded bg-slate-100 px-1.5 py-0.5 text-[12px]">
-              {login?.oauth_redirect_uri || 'https://www.dersonlinevipkocluk.com/api/meta/facebook-oauth'}
-            </code>
+            Facebook Login → Settings: <strong>Client OAuth Login</strong> ve{' '}
+            <strong>Web OAuth Login</strong> açık. Valid OAuth Redirect URIs’ye yukarıdaki sarı
+            kutudaki adresleri birebir ekleyin. Login for Business yapılandırmasına da aynı URI.
           </li>
           <li>
             Aynı ekranda «Allowed domains for the JavaScript SDK» / ana domain:{' '}
