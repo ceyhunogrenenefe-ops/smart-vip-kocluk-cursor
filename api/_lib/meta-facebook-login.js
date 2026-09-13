@@ -44,7 +44,8 @@ export function buildFacebookLoginUrl({
   origin = PRODUCTION_ORIGIN
 } = {}) {
   const type = responseType === 'code' ? 'code' : 'token';
-  const uri = redirectUri || (type === 'code' ? oauthRedirectUri(origin) : widgetRedirectUri(origin));
+  // Token ve code aynı callback — Meta beyaz listesine tek adres yeter.
+  const uri = redirectUri || oauthRedirectUri(origin);
   const params = new URLSearchParams({
     client_id: metaFacebookAppId(),
     redirect_uri: uri,
@@ -68,19 +69,31 @@ export function parseFacebookRedirectHash(hash) {
   };
 }
 
+export function facebookOAuthWhitelistUris(origin = PRODUCTION_ORIGIN) {
+  const primary = oauthRedirectUri(origin);
+  const widget = widgetRedirectUri(origin);
+  const apexOauth = 'https://dersonlinevipkocluk.com/api/meta/facebook-oauth';
+  const apexWidget = 'https://dersonlinevipkocluk.com/crm/widgetler';
+  return [...new Set([primary, widget, apexOauth, apexWidget])];
+}
+
 export function describeFacebookLoginWidget(origin = PRODUCTION_ORIGIN) {
   const hasSecret = Boolean(metaFacebookAppSecret());
+  const oauth = oauthRedirectUri(origin);
   return {
     app_id: metaFacebookAppId(),
     config_id: metaFacebookConfigId(),
     graph_version: metaFacebookGraphVersion(),
     widget_redirect_uri: widgetRedirectUri(origin),
-    oauth_redirect_uri: oauthRedirectUri(origin),
+    oauth_redirect_uri: oauth,
+    whitelist_uris: facebookOAuthWhitelistUris(origin),
     authorize_url: buildFacebookLoginUrl({ responseType: 'token', origin }),
     code_authorize_url: hasSecret ? buildFacebookLoginUrl({ responseType: 'code', origin }) : null,
     has_app_secret: hasSecret,
     hint:
-      'SmartKocluk → App Domains: dersonlinevipkocluk.com · Facebook Login Redirect URI: /crm/widgetler. JS SDK kullanılmaz; Facebook dialog yönlendirir.'
+      'SmartKocluk → Facebook Login → Settings: Client OAuth Login + Web OAuth Login AÇIK. Valid OAuth Redirect URIs’ye TAM olarak ' +
+      oauth +
+      ' ekleyin (slash/www birebir). Login for Business config’e de aynı URI.'
   };
 }
 
