@@ -37,7 +37,8 @@ import {
   ClipboardCheck,
   UserCheck,
   ShoppingBag,
-  Store
+  Store,
+  Puzzle
 } from 'lucide-react';
 import type { UserRole } from '../../../types';
 
@@ -322,6 +323,7 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
       { path: '/events', icon: CalendarDays, label: 'Etkinlikler' },
       { path: '/toplanti-takip', icon: ClipboardCheck, label: 'Toplantı ve Gündem Takibi' },
       { path: '/crm/inbox', icon: ClipboardList, label: 'CRM Inbox' },
+      { path: '/crm/widgetler', icon: Puzzle, label: 'CRM Widgetler' },
       { path: '/crm', icon: ClipboardList, label: 'CRM Pipeline' },
       NAV_OZEL_DERS_TALEPLERI,
       NAV_TEACHER_PROFILE_APPROVALS,
@@ -410,6 +412,7 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
     { path: '/events', icon: CalendarDays, label: 'Etkinlikler' },
     { path: '/toplanti-takip', icon: ClipboardCheck, label: 'Toplantı ve Gündem Takibi' },
     { path: '/crm/inbox', icon: ClipboardList, label: 'CRM Inbox' },
+    { path: '/crm/widgetler', icon: Puzzle, label: 'CRM Widgetler' },
     { path: '/crm', icon: ClipboardList, label: 'CRM Pipeline' },
     { path: '/kitap-pazaryeri', icon: ShoppingBag, label: 'Kitap Pazaryeri' },
     { path: '/kitap-magazasi', icon: ShoppingBag, label: 'Kitap Mağazası' },
