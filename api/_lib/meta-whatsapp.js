@@ -8,6 +8,26 @@ const GRAPH = () => String(process.env.META_GRAPH_API_VERSION || 'v21.0').trim()
 
 let metaSecretsAppliedAt = 0;
 
+function applyMetaPageSecrets(page = {}) {
+  const pageToken = String(
+    page.token || page.access_token || page.page_access_token || ''
+  ).trim();
+  const pageId = String(page.page_id || page.pageId || page.id || '').trim();
+  const igId = String(
+    page.instagram_business_account_id || page.ig_business_id || page.igId || ''
+  ).trim();
+  if (pageToken) {
+    process.env.META_PAGE_ACCESS_TOKEN = pageToken;
+    process.env.INSTAGRAM_PAGE_ACCESS_TOKEN = process.env.INSTAGRAM_PAGE_ACCESS_TOKEN || pageToken;
+  }
+  if (pageId) process.env.META_PAGE_ID = pageId;
+  if (igId) {
+    process.env.META_IG_BUSINESS_ID = igId;
+    process.env.INSTAGRAM_BUSINESS_ACCOUNT_ID =
+      process.env.INSTAGRAM_BUSINESS_ACCOUNT_ID || igId;
+  }
+}
+
 function applyMetaWhatsAppSecrets(wa = {}) {
   const tokenVal = String(wa.token || wa.access_token || '').trim();
   const phoneVal = String(wa.phone_number_id || wa.phoneNumberId || '').trim();
@@ -34,6 +54,8 @@ export async function loadMetaWhatsAppSecretsFromDb() {
     }
     const wa = data?.meta?.whatsapp && typeof data.meta.whatsapp === 'object' ? data.meta.whatsapp : {};
     applyMetaWhatsAppSecrets(wa);
+    const page = data?.meta?.page && typeof data.meta.page === 'object' ? data.meta.page : {};
+    applyMetaPageSecrets(page);
   } catch (e) {
     console.warn('[meta-whatsapp] secrets load failed:', e instanceof Error ? e.message : e);
   }
