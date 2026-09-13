@@ -113,6 +113,7 @@ export const routeLoaders = {
   'solution-appointments': () => import('../handlers/solution-appointments.js'),
   'cron/solution-appointment-reminders': () => import('../handlers/cron-solution-appointment-reminders.js'),
   'ozel-ders-talepleri': () => import('../handlers/ozel-ders-talepleri.js'),
+  'site-leads': () => import('../handlers/site-leads.js'),
   'teacher-profile': () => import('../handlers/teacher-profile.js'),
   'teacher-profiles-admin': () => import('../handlers/teacher-profiles-admin.js'),
   'teacher-profile-media': () => import('../handlers/teacher-profile-media.js'),
