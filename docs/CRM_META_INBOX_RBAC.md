@@ -55,7 +55,9 @@
 - Inbox sağ panel + mesaj kutusunda `/` : WABA’daki **APPROVED** şablonlar (Graph, 0850 phone WABA öncelikli). `{{1}}` / adlı değişkenler için alan açılır.
 - WhatsApp: Cloud şablon API; başlık/görsel yoksa gövde metin olarak düşer (24s penceresi gerekir).
 - Instagram / Facebook: aynı şablon gövdesi **DM metni** olarak gider (Kommo gibi).
+- Inbox + pipeline **Mesajlar**: şablon seç → önizle → **Onayla ve gönder**. **Şablon ekle** Kommo tarzı (sol form / sağ önizleme) → Meta onaya.
 - Inbox’tan şablon yazıp Meta’ya onaya gönderme: `POST create_meta_template` (gövde-only, UTILITY/MARKETING).
+- Pipeline gönderim: `POST /api/registration-tracking?op=send-channel-message` + `template_name` / `template_params`.
 - `GET /api/crm-inbox?op=list_meta_templates` · `POST send_message` + `template_name` / `template_language` / `template_params`
 
 ## Schema
