@@ -105,7 +105,14 @@ export default function CrmWidgetsPage() {
   }, [refresh]);
 
   const connectSocial = () => {
-    const url = login?.authorize_url || login?.code_authorize_url;
+    if (!login?.has_app_secret) {
+      toast.error(
+        'Önce SmartKocluk Facebook App Secret’ı kaydedin (Instagram Login secret değil). Ayarlar → Temel → Göster.'
+      );
+      document.getElementById('meta-app-secret')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
+    }
+    const url = login?.code_authorize_url || login?.authorize_url;
     if (!url) {
       toast.error('Facebook giriş adresi yok — sayfayı yenileyin');
       return;
@@ -133,7 +140,7 @@ export default function CrmWidgetsPage() {
     try {
       await crmSaveMetaAppSecret(appSecret.trim());
       setAppSecret('');
-      toast.success('App secret kaydedildi — webhook aboneliği için kullanılır');
+      toast.success('App secret kaydedildi — şimdi Instagram’ı bağla’ya basın');
       await refresh();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Kaydedilemedi');
@@ -250,6 +257,38 @@ export default function CrmWidgetsPage() {
         {socialOk ? (
           <p className="mt-2 text-sm font-medium text-emerald-700">Bağlı sayfa: {pageName || 'ok'}</p>
         ) : null}
+        <div id="meta-app-secret" className="mt-3 rounded-xl bg-white p-3 ring-1 ring-slate-200">
+          <p className="text-sm font-semibold text-slate-900">
+            1. adım — SmartKocluk Facebook App Secret
+            {login?.has_app_secret ? (
+              <span className="ml-2 text-xs font-medium text-emerald-700">kayıtlı</span>
+            ) : (
+              <span className="ml-2 text-xs font-medium text-amber-700">zorunlu</span>
+            )}
+          </p>
+          <p className="mt-1 text-xs text-slate-600">
+            developers.facebook.com → SmartKocluk → Ayarlar → Temel → App secret → Göster. Instagram
+            Login secret (<code>b35d…</code>) değil.
+          </p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <input
+              type="password"
+              value={appSecret}
+              onChange={(e) => setAppSecret(e.target.value)}
+              placeholder="Facebook App Secret"
+              className="min-w-[220px] flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+              autoComplete="off"
+            />
+            <button
+              type="button"
+              disabled={savingSecret || !appSecret.trim()}
+              onClick={() => void saveSecret()}
+              className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50"
+            >
+              {savingSecret ? 'Kaydediliyor…' : 'Secret’ı kaydet'}
+            </button>
+          </div>
+        </div>
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
           <button
             type="button"
@@ -389,33 +428,6 @@ export default function CrmWidgetsPage() {
         {socialOk ? (
           <p className="mt-3 text-xs text-emerald-700">Sayfa bağlı: {pageName || 'ok'}</p>
         ) : null}
-
-        <details className="mt-4 rounded-xl border border-slate-100 bg-slate-50/80 p-3">
-          <summary className="cursor-pointer text-sm font-medium text-slate-800">
-            İsteğe bağlı: SmartKocluk Facebook App Secret
-          </summary>
-          <p className="mt-2 text-xs text-slate-600">
-            Instagram Login secret değil. App Dashboard → SmartKocluk → Ayarlar → App secret.
-          </p>
-          <div className="mt-2 flex flex-wrap gap-2">
-            <input
-              type="password"
-              value={appSecret}
-              onChange={(e) => setAppSecret(e.target.value)}
-              placeholder="Facebook App Secret"
-              className="min-w-[220px] flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
-              autoComplete="off"
-            />
-            <button
-              type="button"
-              disabled={savingSecret || !appSecret.trim()}
-              onClick={() => void saveSecret()}
-              className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50"
-            >
-              {savingSecret ? 'Kaydediliyor…' : 'Kaydet'}
-            </button>
-          </div>
-        </details>
       </section>
     </div>
   );

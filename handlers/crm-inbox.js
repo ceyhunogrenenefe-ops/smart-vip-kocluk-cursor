@@ -1,7 +1,8 @@
 /**
  * CRM Unified Inbox API — /api/crm-inbox?op=...
  */
-import { requireAuthenticatedActor } from '../api/_lib/auth.js';
+import { requireAuthenticatedActor, signAuthToken } from '../api/_lib/auth.js';
+import { loadMetaWhatsAppSecretsFromDb } from '../api/_lib/meta-whatsapp.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { actorRoleSet, actorIsAdminLike } from '../api/_lib/actor-roles.js';
 import {
@@ -199,7 +200,9 @@ export default async function handler(req, res) {
       if (!isAdmin) {
         return res.status(403).json({ error: 'forbidden', hint: 'Widget bağlama yalnızca yönetici.' });
       }
-      return res.status(200).json({ data: describeFacebookLoginWidget() });
+      await loadMetaWhatsAppSecretsFromDb();
+      const state = signAuthToken({ oauth_purpose: 'facebook_login_widget' });
+      return res.status(200).json({ data: describeFacebookLoginWidget(undefined, { state }) });
     }
 
     if (op === 'save_meta_app_secret' && req.method === 'POST') {

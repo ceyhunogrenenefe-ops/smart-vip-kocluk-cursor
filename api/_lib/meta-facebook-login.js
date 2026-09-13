@@ -1,7 +1,9 @@
 /**
  * Kommo widget eşdeğeri: Facebook Login for Business (SmartKocluk + config_id).
- * Popup / implicit token — META_APP_SECRET olmadan da Sayfa token üretir.
+ * Bu akış yalnızca response_type=code kabul eder (token enum değil).
+ * Code değişimi için META_APP_SECRET / SmartKocluk Facebook App Secret gerekir.
  */
+import { loadMetaWhatsAppSecretsFromDb } from './meta-whatsapp.js';
 export const DEFAULT_META_APP_ID = '1290015412657616';
 export const DEFAULT_META_CONFIGURATION_ID = '1784538625891317';
 export const PRODUCTION_ORIGIN = 'https://www.dersonlinevipkocluk.com';
@@ -33,17 +35,15 @@ export function oauthRedirectUri(origin = PRODUCTION_ORIGIN) {
 }
 
 /**
- * Facebook Login for Business dialog.
- * responseType=token → hash’te access_token (app secret gerekmez, Kommo popup gibi).
- * responseType=code → sunucu değişimi (META_APP_SECRET).
+ * Facebook Login for Business dialog — yalnızca code.
  */
 export function buildFacebookLoginUrl({
-  responseType = 'token',
+  responseType = 'code',
   redirectUri,
   state,
   origin = PRODUCTION_ORIGIN
 } = {}) {
-  const type = responseType === 'code' ? 'code' : 'token';
+  const type = responseType === 'token' ? 'token' : 'code';
   // Token ve code aynı callback — Meta beyaz listesine tek adres yeter.
   const uri = redirectUri || oauthRedirectUri(origin);
   const params = new URLSearchParams({
@@ -77,9 +77,10 @@ export function facebookOAuthWhitelistUris(origin = PRODUCTION_ORIGIN) {
   return [...new Set([primary, widget, apexOauth, apexWidget])];
 }
 
-export function describeFacebookLoginWidget(origin = PRODUCTION_ORIGIN) {
+export function describeFacebookLoginWidget(origin = PRODUCTION_ORIGIN, { state } = {}) {
   const hasSecret = Boolean(metaFacebookAppSecret());
   const oauth = oauthRedirectUri(origin);
+  const authorize = buildFacebookLoginUrl({ responseType: 'code', origin, state });
   return {
     app_id: metaFacebookAppId(),
     config_id: metaFacebookConfigId(),
@@ -87,17 +88,17 @@ export function describeFacebookLoginWidget(origin = PRODUCTION_ORIGIN) {
     widget_redirect_uri: widgetRedirectUri(origin),
     oauth_redirect_uri: oauth,
     whitelist_uris: facebookOAuthWhitelistUris(origin),
-    authorize_url: buildFacebookLoginUrl({ responseType: 'token', origin }),
-    code_authorize_url: hasSecret ? buildFacebookLoginUrl({ responseType: 'code', origin }) : null,
+    authorize_url: authorize,
+    code_authorize_url: authorize,
     has_app_secret: hasSecret,
-    hint:
-      'SmartKocluk → Facebook Login → Settings: Client OAuth Login + Web OAuth Login AÇIK. Valid OAuth Redirect URIs’ye TAM olarak ' +
-      oauth +
-      ' ekleyin (slash/www birebir). Login for Business config’e de aynı URI.'
+    hint: hasSecret
+      ? 'Instagram’ı bağla → Facebook sayfa seçimi → code callback. Redirect URI: ' + oauth
+      : 'Önce SmartKocluk Facebook App Secret’ı kaydedin (Ayarlar → Temel → App secret). Instagram Login secret değil. Login for Business yalnızca response_type=code kabul eder.'
   };
 }
 
 export async function exchangeFacebookOAuthCode(code, redirectUri) {
+  await loadMetaWhatsAppSecretsFromDb();
   const id = metaFacebookAppId();
   const secret = metaFacebookAppSecret();
   const trimmed = String(code || '').trim();
