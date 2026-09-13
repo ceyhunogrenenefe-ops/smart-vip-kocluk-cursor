@@ -14,9 +14,14 @@
 - Alıcı telefon Meta formatında saklanır: `9055…` (05… otomatik normalize)
 
 ## Schema
-Supabase SQL Editor:
+Supabase SQL Editor (manuel):
 1. `student-coaching-system/sql/2026-09-12-crm-inbox-rbac.sql`
 2. (opsiyonel) `student-coaching-system/sql/2026-09-13-crm-wa-contact-normalize.sql`
+
+Otomatik (Vercel’de `SUPABASE_DB_URL` / `DATABASE_URL` varsa):
+- `GET /api/setup-crm-inbox-schema` (CRON_SECRET veya Vercel cron)
+- `GET /api/whatsapp-health?crm_setup=1` (public — tablo kurmayı dener)
+- Teşhis: `GET /api/whatsapp-health?crm_diag=1`
 
 ## Roles
 - `crm_agent`: yalnızca `/crm/*` (inbox)

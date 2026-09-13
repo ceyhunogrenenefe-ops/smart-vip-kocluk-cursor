@@ -221,6 +221,8 @@ export default async function handler(req, res) {
   let statusesApplied = 0;
   let inboundMessageCount = 0;
   let statusOnly = true;
+  /** @type {{ processed?: number; skipped?: number; issues?: string[] } | null} */
+  let crmWaSync = null;
 
   // Teşhis: Meta gerçekten messages mi yolluyor, yoksa sadece statuses mı?
   try {
@@ -320,12 +322,15 @@ export default async function handler(req, res) {
           waIngested += Number(r?.processed || 0);
           // Şirket hattı (META_PHONE_NUMBER_ID / 0850) gelenleri CRM inbox'a yaz
           try {
-            const crm = await syncWhatsAppValueToCrm(value);
-            if (crm?.processed) {
-              console.info('[meta-webhook] crm wa synced', crm.processed);
+            crmWaSync = await syncWhatsAppValueToCrm(value);
+            if (crmWaSync?.processed) {
+              console.info('[meta-webhook] crm wa synced', crmWaSync.processed);
+            } else if (crmWaSync?.skipped || crmWaSync?.issues?.length) {
+              console.warn('[meta-webhook] crm wa skipped', crmWaSync);
             }
           } catch (e) {
             console.error('[meta-webhook] crm wa sync FAILED:', e instanceof Error ? e.message : e);
+            crmWaSync = { processed: 0, skipped: 1, issues: ['exception'] };
           }
         }
       }
@@ -347,6 +352,7 @@ export default async function handler(req, res) {
     wa_ingested: waIngested,
     ig_ingested: igIngested,
     statuses: statusesApplied,
-    inbound_messages_seen: inboundMessageCount
+    inbound_messages_seen: inboundMessageCount,
+    crm_sync: crmWaSync
   });
 }
