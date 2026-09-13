@@ -1,4 +1,10 @@
-import { getMetaWhatsAppEnvStatus, loadMetaWhatsAppSecretsFromDb, metaWhatsAppConfigured } from './_lib/meta-whatsapp.js';
+import {
+  getMetaWebhookEnvStatus,
+  getMetaWhatsAppEnvStatus,
+  loadMetaWhatsAppSecretsFromDb,
+  metaWhatsAppConfigured
+} from './_lib/meta-whatsapp.js';
+import { diagnoseCrmInbox, ensureCrmInboxSchema } from './_lib/crm-inbox-schema.js';
 import { getTwilioEnvStatus } from './_lib/whatsapp-twilio.js';
 import {
   fetchMetaTemplatesFromPhoneWaba,
@@ -158,6 +164,8 @@ async function diagnoseAttendanceMetaTemplates() {
  * GET /api/whatsapp-health?attendance_templates=1&ensure=1  → DB upsert + eksik şablonu Meta’ya gönder
  * GET /api/whatsapp-health?test_yoklama=1&class=8F  → 8F yoklama+kamera testini Doğan Aktürk’e gönder
  * GET /api/whatsapp-health?test_coach_report=1&class=YKS&to=Tayyibe  → koç sınıf raporu testi
+ * GET /api/whatsapp-health?crm_diag=1  → CRM tablo + webhook hit teşhisi
+ * GET /api/whatsapp-health?crm_setup=1  → CRM tablolarını otomatik kur (DB URL gerekir)
  */
 export default async function handler(req, res) {
   if (req.method !== 'GET') {
@@ -208,6 +216,21 @@ export default async function handler(req, res) {
         error: e instanceof Error ? e.message : String(e)
       };
     }
+  }
+
+  const wantCrmDiag =
+    String(req.query?.crm_diag || req.query?.crm || '').trim() === '1' ||
+    String(req.query?.diag || '').trim() === 'crm';
+  const wantCrmSetup = String(req.query?.crm_setup || '').trim() === '1';
+  let crm_diag = null;
+  let crm_setup = null;
+  if (wantCrmSetup) {
+    crm_setup = await ensureCrmInboxSchema({
+      force: String(req.query?.force || '').trim() === '1'
+    });
+    crm_diag = await diagnoseCrmInbox();
+  } else if (wantCrmDiag) {
+    crm_diag = await diagnoseCrmInbox();
   }
 
   const wantCoachReport =
@@ -342,6 +365,9 @@ export default async function handler(req, res) {
             : 'Gateway ve Meta yapılandırılmamış — mesaj gitmez.'
     },
     meta,
+    webhook: getMetaWebhookEnvStatus(),
+    crm_diag,
+    crm_setup,
     twilio: {
       configured: twilio.configured,
       has_auth_token: twilio.has_auth_token,
