@@ -254,7 +254,10 @@ export default function CrmInboxPage() {
             : inbound?.hint || 'WhatsApp hattını bağlayın.'}{' '}
           {inbound?.social?.ok
             ? `Facebook/Instagram: ${inbound.social.page_name || 'sayfa bağlı'}.`
-            : inbound?.social?.hint || 'FB/IG DM için sayfa token + messages aboneliği gerekir.'}
+            : inbound?.social?.env?.token_present
+              ? `IG/FB token Vercel’de var (${inbound.social.env.token_source || inbound.social.token_source || 'env'}) — Hattı bağla ile sayfa mesajlarına abone edin.`
+              : inbound?.social?.hint ||
+                'FB/IG DM: Vercel INSTAGRAM_PAGE_ACCESS_TOKEN / META_PAGE_ACCESS_TOKEN + Hattı bağla.'}
         </p>
         {isAdmin && (
           <button

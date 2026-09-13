@@ -159,8 +159,16 @@ export type CrmInboundStatus = {
   last_webhook_at?: string | null;
   social?: {
     ok?: boolean;
+    token_present?: boolean;
+    token_source?: string | null;
+    token_kind?: string | null;
     page_name?: string | null;
     hint?: string | null;
+    env?: {
+      token_present?: boolean;
+      token_source?: string | null;
+      token_suffix?: string | null;
+    };
   };
 };
 
@@ -188,6 +196,17 @@ export function crmInboundStatus() {
 
 export function crmEnsureInbound() {
   return inboxPost<{ ok: boolean; data: CrmInboundStatus; error?: string | null }>('ensure_inbound');
+}
+
+export function crmSavePageToken(payload: {
+  page_access_token?: string;
+  user_access_token?: string;
+  page_id?: string;
+}) {
+  return inboxPost<{ ok: boolean; data: CrmInboundStatus; error?: string | null; hint?: string | null }>(
+    'save_page_token',
+    payload
+  );
 }
 
 export function crmListAgents(institutionId?: string) {
