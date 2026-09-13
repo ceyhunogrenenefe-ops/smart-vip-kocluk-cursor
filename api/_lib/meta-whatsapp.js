@@ -66,12 +66,22 @@ export async function loadMetaWhatsAppSecretsFromDb() {
     applyMetaPageSecrets(page);
     const ig = data?.meta?.instagram && typeof data.meta.instagram === 'object' ? data.meta.instagram : {};
     applyMetaPageSecrets({
-      token: ig.token || ig.access_token || ig.page_access_token,
+      token: ig.user_token || ig.user_access_token || ig.token || ig.access_token || ig.page_access_token,
       page_id: ig.page_id || ig.facebook_page_id,
       instagram_business_account_id:
         ig.instagram_business_account_id || ig.ig_user_id || ig.ig_business_id,
       configuration_id: ig.configuration_id
     });
+    const igAppId = String(ig.app_id || ig.instagram_app_id || '').trim();
+    const igSecret = String(ig.app_secret || ig.instagram_app_secret || '').trim();
+    if (igAppId && !String(process.env.INSTAGRAM_APP_ID || '').trim()) process.env.INSTAGRAM_APP_ID = igAppId;
+    if (igSecret && !String(process.env.INSTAGRAM_APP_SECRET || '').trim()) {
+      process.env.INSTAGRAM_APP_SECRET = igSecret;
+    }
+    const igUserTok = String(ig.user_token || ig.user_access_token || '').trim();
+    if (igUserTok && !String(process.env.INSTAGRAM_ACCESS_TOKEN || '').trim()) {
+      process.env.INSTAGRAM_ACCESS_TOKEN = igUserTok;
+    }
   } catch (e) {
     console.warn('[meta-whatsapp] secrets load failed:', e instanceof Error ? e.message : e);
   }

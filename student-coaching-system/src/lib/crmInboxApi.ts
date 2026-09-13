@@ -170,6 +170,12 @@ export type CrmInboundStatus = {
       token_suffix?: string | null;
     };
   };
+  instagram_oauth?: {
+    app_id?: string;
+    has_secret?: boolean;
+    has_user_token?: boolean;
+    redirect_uri?: string;
+  };
 };
 
 export function crmListNotes(conversationId: string) {
@@ -196,6 +202,13 @@ export function crmInboundStatus() {
 
 export function crmEnsureInbound() {
   return inboxPost<{ ok: boolean; data: CrmInboundStatus; error?: string | null }>('ensure_inbound');
+}
+
+export function crmSaveInstagramApp(payload: { app_id?: string; app_secret: string }) {
+  return inboxPost<{ ok: boolean; data: { instagram_oauth?: CrmInboundStatus['instagram_oauth'] } }>(
+    'save_instagram_app',
+    payload
+  );
 }
 
 export function crmSavePageToken(payload: {
