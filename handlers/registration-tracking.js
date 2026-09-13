@@ -1489,10 +1489,26 @@ async function handleStaffPerformance(institutionId) {
 async function handleSendChannelMessage(body, institutionId, actor) {
   const leadId = body.lead_id;
   const channel = String(body.channel || '').toLowerCase();
-  const text = String(body.body || '').trim();
+  const templateName = String(body.template_name || body.templateName || '').trim();
+  const templateLanguage = String(body.template_language || body.language || 'tr').trim() || 'tr';
+  const templateParams = Array.isArray(body.template_params)
+    ? body.template_params.map((x) => String(x ?? ''))
+    : [];
+  const templateParamNames = Array.isArray(body.template_param_names)
+    ? body.template_param_names.map((x) => String(x ?? '').trim()).filter(Boolean)
+    : null;
+  const templateBodyPreview = String(body.template_body || '').trim();
+  let text = String(body.body || '').trim();
+  if (templateName && !text) {
+    const { fillCrmTemplateBody } = await import('../api/_lib/meta-templates-sync.js');
+    text =
+      fillCrmTemplateBody(templateBodyPreview, templateParams, templateParamNames) ||
+      templateBodyPreview ||
+      `[şablon] ${templateName}`;
+  }
   if (!leadId) throw new Error('lead_id zorunlu');
   if (!['whatsapp', 'instagram'].includes(channel)) throw new Error('channel whatsapp veya instagram olmalı');
-  if (!text) throw new Error('Mesaj boş olamaz');
+  if (!text && !templateName) throw new Error('Mesaj boş olamaz');
 
   const { data: lead, error: leadErr } = await supabaseAdmin
     .from('registration_leads')
@@ -1511,6 +1527,40 @@ async function handleSendChannelMessage(body, institutionId, actor) {
     const phone = lead.normalized_phone || lead.phone;
     if (!phone) throw new Error('Lead telefonu yok — WhatsApp gönderilemez');
     try {
+      if (templateName) {
+        const { sendCrmWhatsAppTemplate } = await import('../api/_lib/crm-inbox.js');
+        try {
+          const r = await sendCrmWhatsAppTemplate({
+            phone,
+            templateName,
+            languageCode: templateLanguage,
+            bodyParameterTexts: templateParams,
+            bodyParameterNames: templateParamNames
+          });
+          sendMeta = {
+            ok: true,
+            provider: 'meta_template',
+            error: null,
+            raw: r
+          };
+          externalMessageId = r?.messageId || null;
+        } catch (tplErr) {
+          const { sendMetaTextMessage, metaWhatsAppConfigured } = await import('../api/_lib/meta-whatsapp.js');
+          if (typeof metaWhatsAppConfigured === 'function' && metaWhatsAppConfigured()) {
+            const meta = await sendMetaTextMessage({ toE164: phone, text });
+            sendMeta = {
+              ok: true,
+              provider: 'meta_text_fallback',
+              error: null,
+              templateError: tplErr instanceof Error ? tplErr.message : String(tplErr),
+              raw: meta
+            };
+            externalMessageId = meta?.messageId || null;
+          } else {
+            throw tplErr;
+          }
+        }
+      } else {
       const { sendGatewayTextMessage, gatewaySendConfigured } = await import('../api/_lib/whatsapp-gateway-send.js');
       const { sendMetaTextMessage, metaWhatsAppConfigured } = await import('../api/_lib/meta-whatsapp.js');
       if (typeof gatewaySendConfigured === 'function' && gatewaySendConfigured()) {
@@ -1536,6 +1586,7 @@ async function handleSendChannelMessage(body, institutionId, actor) {
           provider: 'none',
           error: 'WhatsApp gönderim yapılandırması yok — mesaj yalnızca kaydedildi'
         };
+      }
       }
     } catch (e) {
       sendMeta = { ok: false, provider: 'error', error: e instanceof Error ? e.message : String(e) };
@@ -1600,9 +1651,15 @@ async function handleSendChannelMessage(body, institutionId, actor) {
     external_contact_id: channel === 'instagram' ? lead.instagram_scoped_id || null : null,
     contact_name: lead.parent_full_name || lead.full_name || null,
     body: text,
-    message_type: 'text',
+    message_type: templateName ? 'template' : 'text',
     external_message_id: externalMessageId,
-    payload: { send: sendMeta, actor_user_id: actor.sub },
+    payload: {
+      send: sendMeta,
+      actor_user_id: actor.sub,
+      template: templateName
+        ? { name: templateName, language: templateLanguage, params: templateParams }
+        : null
+    },
     occurred_at: new Date().toISOString()
   };
 
