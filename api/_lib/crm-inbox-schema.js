@@ -365,6 +365,25 @@ export async function diagnoseCrmInbox() {
     out.hints.push('META_WEBHOOK_VERIFY_TOKEN eksik — Meta webhook doğrulaması / teslimat güncellemesi sorunlu olabilir.');
   }
 
-  out.ok = Boolean(out.tables.crm_conversations.ok && out.tables.crm_messages.ok);
+  const tablesOk = Boolean(out.tables.crm_conversations.ok && out.tables.crm_messages.ok);
+  const hasInbound =
+    Number(out.tables.crm_conversations.count || 0) > 0 ||
+    (out.recent_webhook_hits || []).some((h) => Number(h.message_count || 0) > 0);
+  out.e2e_ready = {
+    webhook_verify_configured: Boolean(webhook.configured),
+    webhook_url: webhook.webhook_url,
+    crm_tables_ok: tablesOk,
+    meta_send_configured: null, // health endpoint doldurur
+    inbound_seen: hasInbound,
+    ready: Boolean(webhook.configured && tablesOk),
+    checklist: [
+      'GET /api/meta/webhook?hub.mode=subscribe&hub.verify_token=…&hub.challenge=… → 200 + challenge',
+      'POST WA payload → wa_ingested≥1 ve crm_conversations artar',
+      'CRM Inbox’tan yanıt → Graph /{phone_number_id}/messages (META_WHATSAPP_TOKEN + META_PHONE_NUMBER_ID)',
+      'IG DM: object=instagram + entry[].messaging[] → crm channel=instagram'
+    ]
+  };
+
+  out.ok = tablesOk;
   return out;
 }
