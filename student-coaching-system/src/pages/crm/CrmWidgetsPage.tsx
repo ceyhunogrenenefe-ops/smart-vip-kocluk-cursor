@@ -296,6 +296,39 @@ export default function CrmWidgetsPage() {
         </Link>
       </div>
 
+      <section
+        id="instagram-facebook-bagla"
+        className="rounded-2xl border-2 border-pink-200 bg-gradient-to-r from-purple-50 via-white to-blue-50 p-4 shadow-sm sm:p-5"
+      >
+        <p className="text-xs font-semibold uppercase tracking-wide text-pink-700">Şimdi bağla</p>
+        <h3 className="mt-1 text-lg font-semibold text-slate-900">Instagram + Facebook</h3>
+        <p className="mt-1 text-sm text-slate-600">
+          Sayfa seçme kutusu bu ekranda yok. Aşağıdaki butona basın; açılan <strong>Facebook
+          penceresinde</strong> Online VIP sayfasını işaretleyin.
+        </p>
+        {socialOk ? (
+          <p className="mt-2 text-sm font-medium text-emerald-700">Bağlı sayfa: {pageName || 'ok'}</p>
+        ) : null}
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <button
+            type="button"
+            disabled={binding}
+            onClick={() => void connectSocial()}
+            className="rounded-xl bg-gradient-to-r from-purple-600 to-pink-600 px-4 py-3 text-sm font-semibold text-white shadow hover:opacity-95 disabled:opacity-60"
+          >
+            {binding ? 'Bağlanıyor…' : socialOk ? 'Instagram’ı yenile' : 'Instagram’ı bağla'}
+          </button>
+          <button
+            type="button"
+            disabled={binding}
+            onClick={() => void connectSocial()}
+            className="rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white shadow hover:bg-blue-700 disabled:opacity-60"
+          >
+            {binding ? 'Bağlanıyor…' : socialOk ? 'Facebook’u yenile' : 'Facebook’u bağla'}
+          </button>
+        </div>
+      </section>
+
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
         <div className="relative flex-1">
           <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
@@ -386,7 +419,11 @@ export default function CrmWidgetsPage() {
       ) : null}
 
       <section className="rounded-2xl border border-slate-200 bg-white p-5 text-sm text-slate-700 shadow-sm">
-        <h3 className="font-semibold text-slate-900">Instagram / Facebook ilk kurulum (bir kez)</h3>
+        <h3 className="font-semibold text-slate-900">Meta Dashboard (yalnızca ilk sefer)</h3>
+        <p className="mt-1 text-xs text-slate-500">
+          Online VIP seçimi bizim formda değil — Facebook’un açtığı pencerede çıkar. Önce sayfanın
+          başındaki pembe / mavi butona basın.
+        </p>
         <ol className="mt-2 list-decimal space-y-1.5 pl-5">
           <li>
             Meta for Developers → uygulama <strong>SmartKocluk</strong> → Facebook Login → Settings
@@ -405,8 +442,8 @@ export default function CrmWidgetsPage() {
             App Domains: <code className="rounded bg-slate-100 px-1.5 py-0.5">dersonlinevipkocluk.com</code>
           </li>
           <li>
-            Yukarıdan Instagram veya Facebook’a tıklayın → popup’ta <strong>Online VIP</strong> sayfasını
-            seçin.
+            Bu sayfanın <strong>en üstündeki</strong> «Instagram’ı bağla» veya «Facebook’u bağla»
+            butonuna tıklayın. Facebook popup’ında sayfa listesinden Online VIP’i seçin.
           </li>
         </ol>
         {socialOk ? (
