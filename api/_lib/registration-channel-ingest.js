@@ -174,7 +174,12 @@ async function createLeadFromInbound({
   normalizedPhone,
   contactName,
   instagramScopedId,
-  firstMessage
+  firstMessage,
+  source,
+  gradeProgram,
+  email,
+  notes,
+  interestedPackage
 }) {
   const auto =
     String(process.env.REGISTRATION_INBOUND_AUTO_LEAD || '1').trim() !== '0' &&
@@ -198,17 +203,20 @@ async function createLeadFromInbound({
     parent_full_name: name.slice(0, 160),
     phone: phone || null,
     normalized_phone: normalizedPhone || null,
-    grade_program: 'lgs',
+    grade_program: gradeProgram || 'lgs',
     primary_status: 'tracking',
     stage: 'new_lead',
     temperature: 'warm',
     source:
-      channel === 'instagram'
+      source ||
+      (channel === 'instagram'
         ? 'instagram_inbound'
         : channel === 'facebook'
           ? 'facebook_inbound'
-          : 'whatsapp_inbound',
-    notes: firstMessage ? `İlk mesaj: ${snippetOf(firstMessage, 200)}` : null,
+          : 'whatsapp_inbound'),
+    email: email || null,
+    interested_package: interestedPackage || null,
+    notes: notes || (firstMessage ? `İlk mesaj: ${snippetOf(firstMessage, 200)}` : null),
     first_contact_at: now,
     last_contact_at: now
   };
@@ -219,6 +227,11 @@ async function createLeadFromInbound({
   }
 
   let { data, error } = await supabaseAdmin.from('registration_leads').insert(row).select('id, institution_id').maybeSingle();
+  if (error && /email|interested_package|column/i.test(error.message || '')) {
+    delete row.email;
+    delete row.interested_package;
+    ({ data, error } = await supabaseAdmin.from('registration_leads').insert(row).select('id, institution_id').maybeSingle());
+  }
   if (error && /facebook_psid|column/i.test(error.message || '') && channel === 'facebook') {
     delete row.facebook_psid;
     row.instagram_scoped_id = `fb:${instagramScopedId}`;
@@ -296,7 +309,12 @@ export async function ingestRegistrationChannelMessage(msg) {
           contactName,
           instagramScopedId:
             channel === 'instagram' || channel === 'facebook' ? externalContactId : null,
-          firstMessage: body
+          firstMessage: body,
+          source: msg.leadSource || null,
+          gradeProgram: msg.gradeProgram || null,
+          email: msg.email || null,
+          notes: msg.leadNotes || null,
+          interestedPackage: msg.interestedPackage || null
         });
       }
     }
@@ -346,7 +364,7 @@ export async function ingestRegistrationChannelMessage(msg) {
     const snip = snippetOf(body);
     const leadPatch = {
       last_contact_at: occurredAt,
-      last_inbound_channel: channel,
+      last_inbound_channel: msg.leadInboundChannel || channel,
       last_inbound_snippet: snip,
       last_inbound_at: occurredAt,
       updated_at: new Date().toISOString()
@@ -377,11 +395,13 @@ export async function ingestRegistrationChannelMessage(msg) {
         interaction_type: channel === 'whatsapp' ? 'whatsapp' : 'other',
         interaction_at: occurredAt,
         title:
-          channel === 'instagram'
-            ? 'Gelen Instagram'
-            : channel === 'facebook'
-              ? 'Gelen Facebook'
-              : 'Gelen WhatsApp',
+          String(msg.messageType || '') === 'website_form' || msg.leadInboundChannel === 'website'
+            ? 'Website formu'
+            : channel === 'instagram'
+              ? 'Gelen Instagram'
+              : channel === 'facebook'
+                ? 'Gelen Facebook'
+                : 'Gelen WhatsApp',
         description: body,
         result: null,
         created_by: null

@@ -639,13 +639,20 @@ function MessagesTab({
       <div className="flex-1 space-y-2 overflow-y-auto rounded-xl border border-slate-200 bg-slate-50/50 p-3 dark:border-slate-700 dark:bg-slate-900/40">
         {!items.length && (
           <p className="py-8 text-center text-sm text-slate-500">
-            Henüz WhatsApp / Instagram mesajı yok. Gelen webhook mesajları burada listelenir.
+            Henüz WhatsApp / Instagram / website formu mesajı yok. Gelen kayıtlar burada listelenir.
           </p>
         )}
         {items.map((m) => {
           const inbound = String(m.direction || '') === 'inbound';
           const ch = String(m.channel || '');
-          const channelLabel = ch === 'instagram' ? 'Instagram' : ch === 'whatsapp' ? 'WhatsApp' : ch;
+          const channelLabel =
+            String(m.message_type || '') === 'website_form' || ch === 'website'
+              ? 'Website formu'
+              : ch === 'instagram'
+                ? 'Instagram'
+                : ch === 'whatsapp'
+                  ? 'WhatsApp'
+                  : ch;
           return (
             <div
               key={String(m.id)}
