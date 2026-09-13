@@ -6,6 +6,8 @@
 import { loadMetaWhatsAppSecretsFromDb } from './meta-whatsapp.js';
 export const DEFAULT_META_APP_ID = '1290015412657616';
 export const DEFAULT_META_CONFIGURATION_ID = '1784538625891317';
+/** Login for Business config’inde kalırsa 1349246 — Ceyhun bu varlıklara admin değil. */
+export const BLOCKED_LFB_ASSET_IDS = ['52570416778031', '23850842047630381'];
 export const PRODUCTION_ORIGIN = 'https://www.dersonlinevipkocluk.com';
 export const WIDGET_PATH = '/crm/widgetler';
 export const OAUTH_PATH = '/api/meta/facebook-oauth';
@@ -34,16 +36,28 @@ export function oauthRedirectUri(origin = PRODUCTION_ORIGIN) {
   return `${String(origin || PRODUCTION_ORIGIN).replace(/\/$/, '')}${OAUTH_PATH}`;
 }
 
-/** Sayfa + Instagram DM — Login for Business varlık listesi yok, 1349246 olmaz. */
+/**
+ * Klasik Facebook Login `scope=` — yalnızca bu izinler URL’de geçerli.
+ * pages_messaging / pages_manage_metadata Login for Business yapılandırmasında
+ * olmalı; scope’ta Invalid Scopes verir (yalnızca geliştiriciye gösterilir).
+ */
 export const PAGE_IG_OAUTH_SCOPES = [
   'pages_show_list',
-  'pages_messaging',
-  'pages_manage_metadata',
   'instagram_basic',
   'instagram_manage_messages',
   'instagram_manage_comments',
   'public_profile'
 ].join(',');
+
+/** Login for Business config’ine eklenecek DM izinleri — URL scope’una koyma. */
+export const LOGIN_FOR_BUSINESS_PAGE_PERMISSIONS = [
+  'pages_show_list',
+  'pages_messaging',
+  'pages_manage_metadata',
+  'instagram_basic',
+  'instagram_manage_messages',
+  'instagram_manage_comments'
+];
 
 /**
  * mode=scopes: klasik Facebook Login (önerilen — yalnızca Online VIP sayfası).
@@ -93,10 +107,27 @@ export function facebookOAuthWhitelistUris(origin = PRODUCTION_ORIGIN) {
   return [...new Set([primary, widget, apexOauth, apexWidget])];
 }
 
+export function isSlimFacebookConfigId(id = metaFacebookConfigId()) {
+  const trimmed = String(id || '').trim();
+  return Boolean(trimmed) && trimmed !== DEFAULT_META_CONFIGURATION_ID;
+}
+
 export function describeFacebookLoginWidget(origin = PRODUCTION_ORIGIN, { state } = {}) {
   const hasSecret = Boolean(metaFacebookAppSecret());
   const oauth = oauthRedirectUri(origin);
-  const authorize = buildFacebookLoginUrl({ responseType: 'code', origin, state, mode: 'scopes' });
+  const slim = isSlimFacebookConfigId();
+  const authorize = buildFacebookLoginUrl({
+    responseType: 'code',
+    origin,
+    state,
+    mode: slim ? 'config' : 'scopes'
+  });
+  const scopesAuthorize = buildFacebookLoginUrl({
+    responseType: 'code',
+    origin,
+    state,
+    mode: 'scopes'
+  });
   const configAuthorize = buildFacebookLoginUrl({
     responseType: 'code',
     origin,
@@ -106,16 +137,21 @@ export function describeFacebookLoginWidget(origin = PRODUCTION_ORIGIN, { state 
   return {
     app_id: metaFacebookAppId(),
     config_id: metaFacebookConfigId(),
+    uses_slim_config: slim,
+    blocked_asset_ids: BLOCKED_LFB_ASSET_IDS,
+    config_permissions: LOGIN_FOR_BUSINESS_PAGE_PERMISSIONS,
     graph_version: metaFacebookGraphVersion(),
     widget_redirect_uri: widgetRedirectUri(origin),
     oauth_redirect_uri: oauth,
     whitelist_uris: facebookOAuthWhitelistUris(origin),
     authorize_url: authorize,
-    code_authorize_url: authorize,
+    code_authorize_url: scopesAuthorize,
     config_authorize_url: configAuthorize,
     has_app_secret: hasSecret,
     hint: hasSecret
-      ? 'Önerilen: sayfa izinleriyle bağla (config_id yok). 1349246 = Login for Business ekstra varlıklara izin isteyemez.'
+      ? slim
+        ? 'Yeni Login for Business yapılandırması kullanılacak — pages_messaging bu config’te olmalı, URL’de değil.'
+        : 'Invalid Scopes: pages_messaging URL’de istenemez. Yeni LfB config oluşturun (yalnızca Online VIP + o izinler) ve ID’yi kaydedin.'
       : 'Önce SmartKocluk Facebook App Secret’ı kaydedin (Ayarlar → Temel → App secret). Instagram Login secret değil.'
   };
 }
