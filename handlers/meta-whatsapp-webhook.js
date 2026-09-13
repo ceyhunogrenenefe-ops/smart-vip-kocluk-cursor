@@ -329,15 +329,17 @@ export default async function handler(req, res) {
       if (messaging.length && (objectType === 'page' || objectType === 'instagram')) {
         inboundMessageCount += messaging.filter((m) => m?.message && !m?.message?.is_echo).length;
         statusOnly = false;
-        const r = await ingestInstagramMessagingEvents(messaging);
+        const socialChannel = objectType === 'page' ? 'facebook' : 'instagram';
+        const r = await ingestInstagramMessagingEvents(messaging, { channel: socialChannel });
         igIngested += Number(r?.processed || 0);
         try {
-          const ig = await syncInstagramMessagingToCrm(messaging);
+          const ig = await syncInstagramMessagingToCrm(messaging, { channel: socialChannel });
           crmIgSync = {
-            processed: Number(crmIgSync?.processed || 0) + Number(ig?.processed || 0)
+            processed: Number(crmIgSync?.processed || 0) + Number(ig?.processed || 0),
+            channel: socialChannel
           };
         } catch (e) {
-          console.warn('[meta-webhook] crm ig sync:', e instanceof Error ? e.message : e);
+          console.warn('[meta-webhook] crm social sync:', e instanceof Error ? e.message : e);
         }
       }
 

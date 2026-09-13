@@ -8,6 +8,34 @@ const GRAPH = () => String(process.env.META_GRAPH_API_VERSION || 'v21.0').trim()
 
 let metaSecretsAppliedAt = 0;
 
+function applyMetaPageSecrets(page = {}) {
+  const pageToken = String(
+    page.token || page.access_token || page.page_access_token || ''
+  ).trim();
+  const pageId = String(page.page_id || page.pageId || page.id || '').trim();
+  const igId = String(
+    page.instagram_business_account_id || page.ig_business_id || page.igId || ''
+  ).trim();
+  const configId = String(page.configuration_id || page.config_id || '').trim();
+  // Vercel INSTAGRAM_PAGE_ACCESS_TOKEN / META_PAGE_ACCESS_TOKEN her zaman DB'den önce gelir.
+  if (pageToken) {
+    if (!String(process.env.META_PAGE_ACCESS_TOKEN || '').trim()) {
+      process.env.META_PAGE_ACCESS_TOKEN = pageToken;
+    }
+    if (!String(process.env.INSTAGRAM_PAGE_ACCESS_TOKEN || '').trim()) {
+      process.env.INSTAGRAM_PAGE_ACCESS_TOKEN = pageToken;
+    }
+  }
+  if (pageId && !String(process.env.META_PAGE_ID || '').trim()) process.env.META_PAGE_ID = pageId;
+  if (igId) {
+    if (!String(process.env.META_IG_BUSINESS_ID || '').trim()) process.env.META_IG_BUSINESS_ID = igId;
+    if (!String(process.env.INSTAGRAM_BUSINESS_ACCOUNT_ID || '').trim()) {
+      process.env.INSTAGRAM_BUSINESS_ACCOUNT_ID = igId;
+    }
+  }
+  if (configId) process.env.META_CONFIGURATION_ID = configId;
+}
+
 function applyMetaWhatsAppSecrets(wa = {}) {
   const tokenVal = String(wa.token || wa.access_token || '').trim();
   const phoneVal = String(wa.phone_number_id || wa.phoneNumberId || '').trim();
@@ -34,6 +62,16 @@ export async function loadMetaWhatsAppSecretsFromDb() {
     }
     const wa = data?.meta?.whatsapp && typeof data.meta.whatsapp === 'object' ? data.meta.whatsapp : {};
     applyMetaWhatsAppSecrets(wa);
+    const page = data?.meta?.page && typeof data.meta.page === 'object' ? data.meta.page : {};
+    applyMetaPageSecrets(page);
+    const ig = data?.meta?.instagram && typeof data.meta.instagram === 'object' ? data.meta.instagram : {};
+    applyMetaPageSecrets({
+      token: ig.token || ig.access_token || ig.page_access_token,
+      page_id: ig.page_id || ig.facebook_page_id,
+      instagram_business_account_id:
+        ig.instagram_business_account_id || ig.ig_user_id || ig.ig_business_id,
+      configuration_id: ig.configuration_id
+    });
   } catch (e) {
     console.warn('[meta-whatsapp] secrets load failed:', e instanceof Error ? e.message : e);
   }

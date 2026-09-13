@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS public.crm_conversations (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   institution_id text NULL REFERENCES public.institutions(id) ON DELETE SET NULL,
   contact_identifier text NOT NULL,
-  channel text NOT NULL CHECK (channel IN ('whatsapp', 'instagram')),
+  channel text NOT NULL CHECK (channel IN ('whatsapp', 'instagram', 'facebook')),
   contact_name text NULL,
   assigned_user_id text NULL REFERENCES public.users(id) ON DELETE SET NULL,
   status text NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'pending', 'closed')),

@@ -4,9 +4,43 @@
 - Primary: `GET|POST /api/meta/webhook`
 - Alias: `GET|POST /api/webhooks/meta`
 - Verify token env: `META_WEBHOOK_VERIFY_TOKEN` (veya `META_VERIFY_TOKEN`)
-- Ingest: WhatsApp Cloud (`entry.changes.value.messages`) + Instagram DM (`entry.messaging`)
-- Her inbound WA/IG mesajı → `registration_*` **ve** `crm_conversations` / `crm_messages`
-- CTWA / IG ad referral → `crm_conversations.ad_source_data`
+- Ingest: WhatsApp Cloud (`entry.changes.value.messages`) + Instagram DM (`object=instagram`) + Facebook Messenger (`object=page`)
+- Her inbound WA / IG / FB mesajı → `registration_*` **ve** `crm_conversations` / `crm_messages`
+- CTWA / IG / FB ad referral → `crm_conversations.ad_source_data`
+
+## Instagram / Facebook DM (native Meta — Kommo köprüsü yok)
+- Vercel Production token (WhatsApp token **değil**):
+  - `INSTAGRAM_PAGE_ACCESS_TOKEN` veya `META_PAGE_ACCESS_TOKEN` (Page Access Token)
+  - isteğe bağlı `META_PAGE_ID`, `META_IG_BUSINESS_ID`
+- WhatsApp `META_WHATSAPP_TOKEN` IG/FB DM abone edemez; ayrı sayfa token kullanılır
+- Bind: `GET /api/whatsapp-health?ensure_meta_social=1` veya Inbox → Hattı bağla
+- Teşhis: `GET /api/whatsapp-health` → `meta_social_env.token_source` (token yazılmaz, yalnızca env adı + suffix)
+- Login for Business config id `1784538625891317` Page ID değildir
+
+## Kommo (yalnızca hunı karşılaştırması — mesaj köprüsü değil)
+- URL: `https://onlinevipdershane.kommo.com/`
+- Account: **Online VIP Dershane** · id `33570279`
+- Chat IG/FB Kommo’da durur; CRM inbox’a native Meta webhook ile gelir
+- Meta yapılandırma / Login config: `1784538625891317` → `META_CONFIGURATION_ID`
+
+### Huniler
+1. **Pipeline** (ana): Gelen → Düşünme → Görüşülüyor → İptal/ilgisiz → Takip → Tekrar aranacak → Arandı açmadı → Kazan/Kayıp
+2. **SATIŞ SONRASI HİZMETLER**: Deneme dersi / Seminer / Özel ders / Grup / Kullanıcı bilgisi / Fatura
+3. **BURSLULUK** + **WEBSİTESİ FORM** (id `13764288`, İlk Temas `106196664`) — siteden form buraya düşer
+
+### Kommo vs bizim CRM
+| Kommo | Bizim sistem |
+| --- | --- |
+| GELEN LEADLER | Gelen Lead’ler (`new_lead`) |
+| GÖRÜŞÜLÜYOR | Görüşülen Lead’ler |
+| DÜŞÜNME AŞAMASINDA | Düşünülüyor (`considering`) |
+| TAKİP / TEKRAR ARANACAK | `follow_up` / `postponed` |
+| ARANDI AÇMADI | Kayıp nedeni `unreachable` |
+| DENEME DERSİ AYARLANDI | `trial_lesson_scheduled` |
+| Chat WA + Instagram | Inbox WA + IG + FB |
+| Unsorted / üzerine al | Havuz + **Üzerime al** |
+| İç not / şablon / etiket | not + hazır yanıt + `metadata.tags` |
+| Görev | Kayıt Takibi görevleri |
 
 ## Gönderim (CRM yanıt)
 - `META_WHATSAPP_TOKEN` + `META_PHONE_NUMBER_ID` (0850 Cloud API phone number id)
@@ -16,7 +50,10 @@
 ## Schema
 Supabase SQL Editor (manuel):
 1. `student-coaching-system/sql/2026-09-12-crm-inbox-rbac.sql`
-2. (opsiyonel) `student-coaching-system/sql/2026-09-13-crm-wa-contact-normalize.sql`
+2. `student-coaching-system/sql/2026-09-13-crm-facebook-notes.sql` (FB kanal + not + hazır yanıt)
+3. (opsiyonel) `student-coaching-system/sql/2026-09-13-crm-wa-contact-normalize.sql`
+
+Sosyal bağlama: `GET /api/whatsapp-health?ensure_meta_social=1`
 
 Otomatik (Vercel’de `SUPABASE_DB_URL` / `DATABASE_URL` varsa):
 - `GET /api/setup-crm-inbox-schema` (CRON_SECRET veya Vercel cron)
@@ -28,7 +65,7 @@ Otomatik (Vercel’de `SUPABASE_DB_URL` / `DATABASE_URL` varsa):
 - Admin: `/crm` pipeline + `/crm/inbox` + `/crm/agents`
 
 ## APIs
-- `/api/crm-inbox?op=list_conversations|list_messages|send_message|assign_conversation|poll|…`
+- `/api/crm-inbox?op=list_conversations|list_messages|send_message|assign_conversation|take_conversation|set_tags|list_notes|add_note|list_canned|poll|…`
 - `/api/crm-admin?op=create_crm_user|promote_agent|demote_agent|list_agents`
 
 ## Realtime
