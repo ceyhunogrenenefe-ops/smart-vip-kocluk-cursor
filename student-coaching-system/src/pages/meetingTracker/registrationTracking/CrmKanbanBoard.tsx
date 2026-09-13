@@ -17,6 +17,7 @@ import {
   rtConfirmLead,
   rtReopenLead,
   rtUpdateLead,
+  type RegCoach,
   type RegLead
 } from '../../../lib/registrationTrackingApi';
 import {
@@ -30,9 +31,33 @@ type Props = {
   leads: RegLead[];
   onOpen: (id: string) => void;
   onLeadsChange: (next: RegLead[]) => void;
+  agents?: RegCoach[];
+  agentLoad?: Record<string, number>;
+  canAssign?: boolean;
+  canDelete?: boolean;
+  onAssign?: (leadId: string, assignedUserId: string | null) => void;
+  onDelete?: (lead: RegLead) => void;
 };
 
-function DraggableCard({ lead, onOpen }: { lead: RegLead; onOpen: (id: string) => void }) {
+function DraggableCard({
+  lead,
+  onOpen,
+  agents,
+  agentLoad,
+  canAssign,
+  canDelete,
+  onAssign,
+  onDelete
+}: {
+  lead: RegLead;
+  onOpen: (id: string) => void;
+  agents?: RegCoach[];
+  agentLoad?: Record<string, number>;
+  canAssign?: boolean;
+  canDelete?: boolean;
+  onAssign?: (leadId: string, assignedUserId: string | null) => void;
+  onDelete?: (lead: RegLead) => void;
+}) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: lead.id,
     data: { lead }
@@ -45,7 +70,17 @@ function DraggableCard({ lead, onOpen }: { lead: RegLead; onOpen: (id: string) =
 
   return (
     <div ref={setNodeRef} style={style} className="touch-none" {...listeners} {...attributes}>
-      <RegLeadCard lead={lead} onClick={() => onOpen(lead.id)} />
+      <RegLeadCard
+        lead={lead}
+        onClick={() => onOpen(lead.id)}
+        agents={agents}
+        agentLoad={agentLoad}
+        canAssign={canAssign}
+        canDelete={canDelete}
+        onAssign={onAssign}
+        onDelete={onDelete}
+        assigneeName={agents?.find((a) => a.id === lead.assigned_user_id)?.name}
+      />
     </div>
   );
 }
@@ -89,7 +124,17 @@ function DropColumn({
   );
 }
 
-export default function CrmKanbanBoard({ leads, onOpen, onLeadsChange }: Props) {
+export default function CrmKanbanBoard({
+  leads,
+  onOpen,
+  onLeadsChange,
+  agents,
+  agentLoad,
+  canAssign,
+  canDelete,
+  onAssign,
+  onDelete
+}: Props) {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
@@ -135,7 +180,8 @@ export default function CrmKanbanBoard({ leads, onOpen, onLeadsChange }: Props) 
         patchLocal({ primary_status: 'confirmed', stage: 'confirmed' });
         await rtConfirmLead({
           lead_id: leadId,
-          grade_program: lead.grade_program
+          grade_program: lead.grade_program,
+          mode: 'kanban'
         });
         toast.success('Kayıt kazanıldı olarak işaretlendi');
       } else if (fromCol === 'closed') {
@@ -183,7 +229,17 @@ export default function CrmKanbanBoard({ leads, onOpen, onLeadsChange }: Props) 
                 <p className="py-8 text-center text-[10px] text-slate-400">Lead yok</p>
               ) : null}
               {items.map((l) => (
-                <DraggableCard key={l.id} lead={l} onOpen={onOpen} />
+                <DraggableCard
+                  key={l.id}
+                  lead={l}
+                  onOpen={onOpen}
+                  agents={agents}
+                  agentLoad={agentLoad}
+                  canAssign={canAssign}
+                  canDelete={canDelete}
+                  onAssign={onAssign}
+                  onDelete={onDelete}
+                />
               ))}
             </DropColumn>
           );
