@@ -4,6 +4,10 @@
  */
 import { supabaseAdmin } from './supabase-admin.js';
 import {
+  ensureCrmInboxSchema,
+  resolveCrmMessageIdColumn
+} from './crm-inbox-schema.js';
+import {
   loadMetaWhatsAppSecretsFromDb,
   metaWhatsAppConfigured,
   normalizePhoneToE164,
@@ -145,7 +149,8 @@ export async function upsertCrmMessage({
   leadId = null,
   adSourceData = null,
   payload = null,
-  deliveryStatus = null
+  deliveryStatus = null,
+  _schemaRetried = false
 } = {}) {
   const ch = channel === 'instagram' ? 'instagram' : 'whatsapp';
   const rawContact = String(contactIdentifier || '').trim();
@@ -158,15 +163,37 @@ export async function upsertCrmMessage({
 
   if (extId) {
     try {
+      const idCol = await resolveCrmMessageIdColumn();
       const { data: dup } = await supabaseAdmin
         .from('crm_messages')
         .select('id, conversation_id')
-        .eq('message_id', extId)
+        .eq(idCol, extId)
         .maybeSingle();
       if (dup?.id) return { skipped: true, reason: 'duplicate', conversation_id: dup.conversation_id };
     } catch (e) {
       if (/crm_messages|does not exist|schema cache/i.test(e?.message || '')) {
-        return { skipped: true, reason: 'table_missing' };
+        if (_schemaRetried) return { skipped: true, reason: 'table_missing' };
+        const ensured = await ensureCrmInboxSchema();
+        if (!ensured.ok) return { skipped: true, reason: 'table_missing', ensure: ensured };
+        return upsertCrmMessage({
+          channel,
+          contactIdentifier,
+          contactName,
+          body,
+          mediaUrl,
+          messageType,
+          messageId,
+          timestamp,
+          direction,
+          senderType,
+          senderId,
+          institutionId,
+          leadId,
+          adSourceData,
+          payload,
+          deliveryStatus,
+          _schemaRetried: true
+        });
       }
     }
   }
@@ -185,7 +212,28 @@ export async function upsertCrmMessage({
     conversation = Array.isArray(data) ? data[0] || null : data || null;
   } catch (e) {
     if (/crm_conversations|does not exist|schema cache/i.test(e?.message || '')) {
-      return { skipped: true, reason: 'table_missing' };
+      if (_schemaRetried) return { skipped: true, reason: 'table_missing' };
+      const ensured = await ensureCrmInboxSchema();
+      if (!ensured.ok) return { skipped: true, reason: 'table_missing', ensure: ensured };
+      return upsertCrmMessage({
+        channel,
+        contactIdentifier,
+        contactName,
+        body,
+        mediaUrl,
+        messageType,
+        messageId,
+        timestamp,
+        direction,
+        senderType,
+        senderId,
+        institutionId,
+        leadId,
+        adSourceData,
+        payload,
+        deliveryStatus,
+        _schemaRetried: true
+      });
     }
     throw e;
   }
@@ -252,6 +300,7 @@ export async function upsertCrmMessage({
 
   const resolvedSenderType = senderType || (direction === 'outbound' ? 'agent' : 'lead');
 
+  const idCol = await resolveCrmMessageIdColumn();
   const msgRow = {
     conversation_id: conversation.id,
     institution_id: conversation.institution_id || instId,
@@ -260,11 +309,11 @@ export async function upsertCrmMessage({
     body: body != null ? String(body) : null,
     media_url: mediaUrl || null,
     message_type: String(messageType || 'text').slice(0, 40),
-    message_id: extId,
     delivery_status: deliveryStatus || (direction === 'outbound' ? 'sent' : 'received'),
     payload: payload || null,
     created_at: occurredAt
   };
+  if (extId) msgRow[idCol] = extId;
 
   const { data: saved, error: msgErr } = await supabaseAdmin
     .from('crm_messages')
@@ -275,6 +324,34 @@ export async function upsertCrmMessage({
     if (/duplicate|unique/i.test(msgErr.message || '')) {
       return { skipped: true, reason: 'duplicate', conversation_id: conversation.id };
     }
+    if (/column|does not exist|schema cache/i.test(msgErr.message || '')) {
+      if (_schemaRetried) {
+        return { skipped: true, reason: 'column_mismatch', error: msgErr.message };
+      }
+      const ensured = await ensureCrmInboxSchema({ force: true });
+      if (ensured.ok) {
+        return upsertCrmMessage({
+          channel,
+          contactIdentifier,
+          contactName,
+          body,
+          mediaUrl,
+          messageType,
+          messageId,
+          timestamp,
+          direction,
+          senderType,
+          senderId,
+          institutionId,
+          leadId,
+          adSourceData,
+          payload,
+          deliveryStatus,
+          _schemaRetried: true
+        });
+      }
+      return { skipped: true, reason: 'column_mismatch', error: msgErr.message, ensure: ensured };
+    }
     throw msgErr;
   }
 
@@ -284,7 +361,10 @@ export async function upsertCrmMessage({
 /** Bridge from Meta WA Cloud value.messages */
 export async function syncWhatsAppValueToCrm(value, { institutionId } = {}) {
   const messages = Array.isArray(value?.messages) ? value.messages : [];
-  if (!messages.length) return { processed: 0 };
+  if (!messages.length) return { processed: 0, skipped: 0, issues: [] };
+
+  await ensureCrmInboxSchema().catch(() => null);
+
   const contacts = Array.isArray(value?.contacts) ? value.contacts : [];
   const nameByWa = new Map();
   for (const c of contacts) {
@@ -293,6 +373,8 @@ export async function syncWhatsAppValueToCrm(value, { institutionId } = {}) {
     if (waId && name) nameByWa.set(waId, name);
   }
   let processed = 0;
+  let skipped = 0;
+  const issues = [];
   for (const m of messages) {
     const from = String(m?.from || '').trim();
     if (!from) continue;
@@ -313,7 +395,7 @@ export async function syncWhatsAppValueToCrm(value, { institutionId } = {}) {
     } else {
       textBody = `[${type}]`;
     }
-    await upsertCrmMessage({
+    const payload = {
       channel: 'whatsapp',
       contactIdentifier: from,
       contactName: nameByWa.get(from) || null,
@@ -327,10 +409,17 @@ export async function syncWhatsAppValueToCrm(value, { institutionId } = {}) {
       institutionId,
       adSourceData: extractAdSourceData({ channel: 'whatsapp', message: m }),
       payload: m
-    });
-    processed += 1;
+    };
+    const r = await upsertCrmMessage(payload);
+    if (r?.ok) {
+      processed += 1;
+    } else {
+      skipped += 1;
+      const reason = String(r?.reason || 'unknown');
+      if (!issues.includes(reason)) issues.push(reason);
+    }
   }
-  return { processed };
+  return { processed, skipped, issues };
 }
 
 export async function syncInstagramMessagingToCrm(events, { institutionId } = {}) {

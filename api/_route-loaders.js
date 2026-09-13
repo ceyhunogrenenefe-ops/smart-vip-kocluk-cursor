@@ -11,6 +11,7 @@ export const routeLoaders = {
   'setup-password-reset-table': () => import('../handlers/setup-password-reset-table.js'),
   'setup-edesis-exam-assignments-table': () =>
     import('../handlers/setup-edesis-exam-assignments-table.js'),
+  'setup-crm-inbox-schema': () => import('../handlers/setup-crm-inbox-schema.js'),
   students: () => import('../handlers/students.js'),
   'student-activity': () => import('../handlers/student-activity.js'),
   'my-student': () => import('../handlers/my-student.js'),
