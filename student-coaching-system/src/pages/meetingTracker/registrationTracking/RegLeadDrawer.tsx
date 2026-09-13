@@ -10,6 +10,8 @@ import {
   rtConfirmLead,
   rtMarkLost,
   rtSendChannelMessage,
+  rtDeleteLead,
+  type RegCoach,
   type RegLead,
   type RegLeadDetail
 } from '../../../lib/registrationTrackingApi';
@@ -27,13 +29,24 @@ import {
 type Props = {
   leadId: string | null;
   isManager: boolean;
+  agents?: RegCoach[];
+  agentLoad?: Record<string, number>;
   onClose: () => void;
   onUpdated: () => void;
+  onDeleted?: (leadId: string) => void;
 };
 
 type Tab = 'general' | 'messages' | 'interactions' | 'tasks' | 'meetings' | 'pricing' | 'audit';
 
-export default function RegLeadDrawer({ leadId, isManager, onClose, onUpdated }: Props) {
+export default function RegLeadDrawer({
+  leadId,
+  isManager,
+  agents,
+  agentLoad,
+  onClose,
+  onUpdated,
+  onDeleted
+}: Props) {
   const [tab, setTab] = useState<Tab>('general');
   const [loading, setLoading] = useState(false);
   const [detail, setDetail] = useState<RegLeadDetail | null>(null);
@@ -130,7 +143,14 @@ export default function RegLeadDrawer({ leadId, isManager, onClose, onUpdated }:
         )}
 
         {!loading && lead && tab === 'general' && (
-          <GeneralForm lead={lead} saving={saving} onSave={saveGeneral} isManager={isManager} />
+          <GeneralForm
+            lead={lead}
+            saving={saving}
+            onSave={saveGeneral}
+            isManager={isManager}
+            agents={agents}
+            agentLoad={agentLoad}
+          />
         )}
 
         {!loading && tab === 'messages' && (
@@ -190,21 +210,42 @@ export default function RegLeadDrawer({ leadId, isManager, onClose, onUpdated }:
         )}
       </div>
 
-      {lead?.primary_status === 'tracking' && isManager && (
+      {lead && isManager && (
         <div className="flex flex-wrap gap-2 border-t border-slate-200 p-4 dark:border-slate-700">
+          {lead.primary_status === 'tracking' && (
+            <>
+              <button
+                type="button"
+                onClick={() => setShowConfirm(true)}
+                className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
+              >
+                Kesin Kayda Dönüştür
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowLost(true)}
+                className="rounded-lg border border-slate-300 px-4 py-2 text-sm hover:bg-slate-50 dark:border-slate-600"
+              >
+                Olumsuz Sonuçlandır
+              </button>
+            </>
+          )}
           <button
             type="button"
-            onClick={() => setShowConfirm(true)}
-            className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
+            onClick={() => {
+              const name = lead.full_name || `${lead.first_name} ${lead.last_name}`;
+              if (!window.confirm(`“${name}” kartı silinsin mi?`)) return;
+              void rtDeleteLead(lead.id)
+                .then(() => {
+                  toast.success('Kart silindi');
+                  onDeleted?.(lead.id);
+                  onUpdated();
+                })
+                .catch((e) => toast.error(e instanceof Error ? e.message : 'Silinemedi'));
+            }}
+            className="rounded-lg border border-red-200 px-4 py-2 text-sm text-red-700 hover:bg-red-50"
           >
-            Kesin Kayda Dönüştür
-          </button>
-          <button
-            type="button"
-            onClick={() => setShowLost(true)}
-            className="rounded-lg border border-slate-300 px-4 py-2 text-sm hover:bg-slate-50 dark:border-slate-600"
-          >
-            Olumsuz Sonuçlandır
+            Kartı sil
           </button>
         </div>
       )}
@@ -240,12 +281,16 @@ function GeneralForm({
   lead,
   saving,
   onSave,
-  isManager
+  isManager,
+  agents,
+  agentLoad
 }: {
   lead: RegLeadDetail['lead'];
   saving: boolean;
   onSave: (p: Record<string, unknown>) => void;
   isManager: boolean;
+  agents?: RegCoach[];
+  agentLoad?: Record<string, number>;
 }) {
   const [form, setForm] = useState({ ...lead });
 
@@ -323,6 +368,24 @@ function GeneralForm({
           ))}
         </select>
       </label>
+      {isManager && agents && agents.length > 0 && (
+        <label className="block">
+          <span className="text-xs text-slate-500">Sorumlu ajan</span>
+          <select
+            className="mt-0.5 w-full rounded border px-2 py-1.5 dark:border-slate-600 dark:bg-slate-800"
+            value={form.assigned_user_id || ''}
+            onChange={(e) => setForm({ ...form, assigned_user_id: e.target.value || null })}
+          >
+            <option value="">Atanmamış</option>
+            {agents.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.name}
+                {agentLoad?.[a.id] != null ? ` (${agentLoad[a.id]} takip)` : ''}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
       <label className="block">
         <span className="text-xs text-slate-500">Sıcaklık</span>
         <select

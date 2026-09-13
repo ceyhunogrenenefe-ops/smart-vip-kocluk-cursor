@@ -1,5 +1,5 @@
-import { AlertTriangle, Clock, Flame, Snowflake, Sun, CheckCircle2, CreditCard, MessageCircle, Instagram } from 'lucide-react';
-import type { RegLead } from '../../../lib/registrationTrackingApi';
+import { AlertTriangle, Clock, Flame, Snowflake, Sun, CheckCircle2, CreditCard, MessageCircle, Instagram, Facebook, Trash2 } from 'lucide-react';
+import type { RegCoach, RegLead } from '../../../lib/registrationTrackingApi';
 import {
   CARD_TONE_CLASS,
   GRADE_LABEL,
@@ -13,9 +13,15 @@ import {
 type Props = {
   lead: RegLead;
   assigneeName?: string;
+  agents?: RegCoach[];
+  agentLoad?: Record<string, number>;
+  canAssign?: boolean;
+  canDelete?: boolean;
   selected?: boolean;
   onSelect?: (id: string, checked: boolean) => void;
   onClick?: () => void;
+  onAssign?: (leadId: string, assignedUserId: string | null) => void;
+  onDelete?: (lead: RegLead) => void;
   draggable?: boolean;
   onDragStart?: (e: React.DragEvent) => void;
 };
@@ -34,6 +40,13 @@ function ChannelBadge({ channel }: { channel?: string | null }) {
       </span>
     );
   }
+  if (channel === 'facebook') {
+    return (
+      <span className="inline-flex items-center gap-0.5 rounded bg-blue-100 px-1.5 py-0.5 font-medium text-blue-800 dark:bg-blue-900/40 dark:text-blue-200">
+        <Facebook className="h-3 w-3" /> FB
+      </span>
+    );
+  }
   if (channel === 'whatsapp') {
     return (
       <span className="inline-flex items-center gap-0.5 rounded bg-emerald-100 px-1.5 py-0.5 font-medium text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200">
@@ -47,9 +60,15 @@ function ChannelBadge({ channel }: { channel?: string | null }) {
 export default function RegLeadCard({
   lead,
   assigneeName,
+  agents,
+  agentLoad,
+  canAssign,
+  canDelete,
   selected,
   onSelect,
   onClick,
+  onAssign,
+  onDelete,
   draggable,
   onDragStart
 }: Props) {
@@ -116,7 +135,7 @@ export default function RegLeadCard({
             <p className="mt-0.5 line-clamp-2 text-[11px] leading-snug text-slate-700 dark:text-slate-200">{inboundSnippet}</p>
           </div>
         )}
-        {assigneeName && (
+        {assigneeName && !canAssign && (
           <div className="mt-1 text-[10px] text-slate-600 dark:text-slate-400">Sorumlu: {assigneeName}</div>
         )}
         <div className="mt-1 flex items-center gap-1 text-[10px] text-slate-500">
@@ -127,6 +146,35 @@ export default function RegLeadCard({
           <p className="mt-1 line-clamp-2 text-[10px] text-slate-600 dark:text-slate-400">{lead.notes}</p>
         )}
       </button>
+      {(canAssign && agents && onAssign) || (canDelete && onDelete) ? (
+        <div className="mt-2 flex items-center gap-1" onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}>
+          {canAssign && agents && onAssign ? (
+            <select
+              className="min-w-0 flex-1 rounded border border-slate-200 bg-white px-1.5 py-1 text-[10px] dark:border-slate-600 dark:bg-slate-900"
+              value={lead.assigned_user_id || ''}
+              onChange={(e) => onAssign(lead.id, e.target.value || null)}
+            >
+              <option value="">Ajan ata</option>
+              {agents.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name}
+                  {agentLoad?.[a.id] != null ? ` (${agentLoad[a.id]} takip)` : ''}
+                </option>
+              ))}
+            </select>
+          ) : null}
+          {canDelete && onDelete ? (
+            <button
+              type="button"
+              title="Kartı sil"
+              onClick={() => onDelete(lead)}
+              className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }

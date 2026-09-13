@@ -70,7 +70,28 @@ function isManager(tags) {
 
 function canAccessModule(tags) {
   if (isManager(tags)) return true;
-  return tags.includes('coach') || tags.includes('teacher');
+  return tags.includes('coach') || tags.includes('teacher') || tags.includes('crm_agent');
+}
+
+function canDeleteLead(tags) {
+  return isManager(tags) || tags.includes('crm_agent');
+}
+
+function userRoleTags(user) {
+  const tags = [String(user?.role || '').toLowerCase()];
+  if (Array.isArray(user?.roles)) {
+    for (const x of user.roles) {
+      const t = String(x || '').toLowerCase();
+      if (t) tags.push(t);
+    }
+  }
+  return tags;
+}
+
+function isAssignableRole(tags) {
+  return tags.some((t) =>
+    ['super_admin', 'admin', 'crm_agent', 'coach', 'teacher'].includes(t)
+  );
 }
 
 function canSeeFinancial(tags) {
@@ -469,23 +490,38 @@ async function lookupCoachByParentPhone(institutionId, phoneRaw) {
 }
 
 async function handleListCoaches(institutionId) {
-  let q = supabaseAdmin.from('coaches').select('id, name, email').order('name').limit(400);
-  if (institutionId) q = q.eq('institution_id', institutionId);
-  const { data, error } = await q;
-  if (!error) {
-    return (data || []).map((c) => ({ id: String(c.id), name: c.name || 'Koç', email: c.email || null }));
+  const seen = new Map();
+  try {
+    let q = supabaseAdmin.from('coaches').select('id, name, email').order('name').limit(400);
+    if (institutionId) q = q.eq('institution_id', institutionId);
+    const { data, error } = await q;
+    if (!error) {
+      for (const c of data || []) {
+        const id = String(c.id);
+        seen.set(id, { id, name: c.name || 'Koç', email: c.email || null, kind: 'coach' });
+      }
+    }
+  } catch {
+    /* coaches tablosu yoksa users */
   }
   const { data: users } = await supabaseAdmin
     .from('users')
     .select('id, name, email, role, roles')
     .eq('institution_id', institutionId)
     .limit(400);
-  return (users || [])
-    .filter((u) => {
-      const tags = [String(u.role || '').toLowerCase(), ...(Array.isArray(u.roles) ? u.roles.map((x) => String(x).toLowerCase()) : [])];
-      return tags.includes('coach');
-    })
-    .map((u) => ({ id: String(u.id), name: u.name || 'Koç', email: u.email || null }));
+  for (const u of users || []) {
+    const tags = userRoleTags(u);
+    if (!isAssignableRole(tags)) continue;
+    const id = String(u.id);
+    if (seen.has(id)) continue;
+    const kind = tags.includes('crm_agent')
+      ? 'crm_agent'
+      : tags.includes('admin') || tags.includes('super_admin')
+        ? 'admin'
+        : 'coach';
+    seen.set(id, { id, name: u.name || u.email || 'Ajan', email: u.email || null, kind });
+  }
+  return [...seen.values()].sort((a, b) => String(a.name).localeCompare(String(b.name), 'tr'));
 }
 
 async function handleCreateLead(body, institutionId, actor) {
@@ -599,6 +635,7 @@ async function handleUpdateLead(leadId, body, institutionId, actor, tags) {
   for (const k of allowed) {
     if (body[k] !== undefined) patch[k] = body[k];
   }
+  if (patch.assigned_user_id === '') patch.assigned_user_id = null;
 
   if (patch.phone !== undefined) {
     patch.normalized_phone = normalizeTrPhone(patch.phone);
@@ -652,7 +689,103 @@ async function handleUpdateLead(leadId, body, institutionId, actor, tags) {
   return data;
 }
 
+async function handleMarkWon(body, institutionId, actor) {
+  const leadId = body.lead_id;
+  if (!leadId) throw new Error('lead_id zorunlu');
+  const nowIso = new Date().toISOString();
+  const { data: existing, error: exErr } = await supabaseAdmin
+    .from('registration_leads')
+    .select('*')
+    .eq('id', leadId)
+    .eq('institution_id', institutionId)
+    .is('deleted_at', null)
+    .maybeSingle();
+  if (exErr) throw exErr;
+  if (!existing) throw new Error('Kayıt bulunamadı');
+
+  const { data, error } = await supabaseAdmin
+    .from('registration_leads')
+    .update({
+      primary_status: 'confirmed',
+      stage: 'confirmed',
+      confirmed_at: body.confirmed_at || nowIso,
+      confirmed_by: actor.sub,
+      updated_by: actor.sub,
+      updated_at: nowIso
+    })
+    .eq('id', leadId)
+    .eq('institution_id', institutionId)
+    .select('*')
+    .single();
+  if (error) throw error;
+
+  try {
+    await supabaseAdmin.from('registration_stage_history').insert({
+      lead_id: leadId,
+      old_primary_status: existing.primary_status,
+      new_primary_status: 'confirmed',
+      old_stage: existing.stage,
+      new_stage: 'confirmed',
+      reason: body.notes || 'Kanban: kayıt kazanıldı',
+      changed_by: actor.sub
+    });
+  } catch {
+    /* geçmiş tablosu yoksa kart yine kazanıldı olsun */
+  }
+
+  await auditLog({
+    institutionId,
+    leadId,
+    action: 'confirmed',
+    actorUserId: actor.sub,
+    oldValue: { primary_status: existing.primary_status, stage: existing.stage },
+    newValue: { primary_status: 'confirmed', lightweight: true }
+  });
+
+  return { ok: true, lightweight: true, lead_id: leadId, lead: data };
+}
+
+async function handleDeleteLead(body, institutionId, actor, tags) {
+  if (!canDeleteLead(tags)) throw new Error('Kart silme yetkisi yok');
+  const leadId = body.lead_id;
+  if (!leadId) throw new Error('lead_id zorunlu');
+  const nowIso = new Date().toISOString();
+  const { data: existing } = await supabaseAdmin
+    .from('registration_leads')
+    .select('id, full_name, primary_status')
+    .eq('id', leadId)
+    .eq('institution_id', institutionId)
+    .is('deleted_at', null)
+    .maybeSingle();
+  if (!existing) throw new Error('Kayıt bulunamadı');
+
+  const { error } = await supabaseAdmin
+    .from('registration_leads')
+    .update({
+      deleted_at: nowIso,
+      updated_by: actor.sub,
+      updated_at: nowIso
+    })
+    .eq('id', leadId)
+    .eq('institution_id', institutionId);
+  if (error) throw error;
+
+  await auditLog({
+    institutionId,
+    leadId,
+    action: 'deleted',
+    actorUserId: actor.sub,
+    oldValue: { primary_status: existing.primary_status, full_name: existing.full_name },
+    newValue: { deleted_at: nowIso }
+  });
+  return { ok: true, lead_id: leadId };
+}
+
 async function handleConfirm(body, institutionId, actor) {
+  const wantStudent = Boolean(body.create_student || body.link_existing_student_id);
+  if (!wantStudent) {
+    return handleMarkWon(body, institutionId, actor);
+  }
   const { data, error } = await supabaseAdmin.rpc('registration_confirm_lead', {
     p_lead_id: body.lead_id,
     p_actor_user_id: actor.sub,
@@ -675,7 +808,12 @@ async function handleConfirm(body, institutionId, actor) {
     p_parent_informed: Boolean(body.parent_informed),
     p_notes: body.notes || null
   });
-  if (error) throw error;
+  if (error) {
+    if (/registration_confirm_lead|does not exist|function/i.test(error.message || '')) {
+      return handleMarkWon(body, institutionId, actor);
+    }
+    throw error;
+  }
   if (!data?.ok) throw new Error(data?.error || 'Kesin kayıt başarısız');
 
   await notifyUser({
@@ -1295,9 +1433,17 @@ async function handleStaffPerformance(institutionId) {
   for (const l of leads || []) {
     const uid = l.assigned_user_id || '_unassigned';
     if (!byUser[uid]) {
-      byUser[uid] = { assigned: 0, confirmed: 0, contacted: 0, tasks_done: 0, tasks_overdue: 0 };
+      byUser[uid] = {
+        assigned: 0,
+        tracking: 0,
+        confirmed: 0,
+        contacted: 0,
+        tasks_done: 0,
+        tasks_overdue: 0
+      };
     }
     byUser[uid].assigned++;
+    if (l.primary_status === 'tracking') byUser[uid].tracking++;
     if (l.primary_status === 'confirmed') byUser[uid].confirmed++;
     if (l.last_contact_at) byUser[uid].contacted++;
   }
@@ -1305,16 +1451,39 @@ async function handleStaffPerformance(institutionId) {
   const now = new Date();
   for (const t of tasks || []) {
     const uid = t.assigned_to || '_unassigned';
-    if (!byUser[uid]) byUser[uid] = { assigned: 0, confirmed: 0, contacted: 0, tasks_done: 0, tasks_overdue: 0 };
+    if (!byUser[uid]) {
+      byUser[uid] = {
+        assigned: 0,
+        tracking: 0,
+        confirmed: 0,
+        contacted: 0,
+        tasks_done: 0,
+        tasks_overdue: 0
+      };
+    }
     if (t.status === 'completed') byUser[uid].tasks_done++;
     else if (t.due_at && new Date(t.due_at) < now) byUser[uid].tasks_overdue++;
   }
 
-  for (const u of Object.values(byUser)) {
-    u.conversion_rate = u.assigned ? Math.round((u.confirmed / u.assigned) * 1000) / 10 : 0;
-  }
+  const assignees = await handleListCoaches(institutionId);
+  const nameById = Object.fromEntries(assignees.map((a) => [a.id, a]));
+  const agents = Object.entries(byUser).map(([id, stats]) => {
+    const meta = nameById[id] || {};
+    return {
+      id,
+      name: id === '_unassigned' ? 'Atanmamış' : meta.name || 'Ajan',
+      kind: id === '_unassigned' ? 'unassigned' : meta.kind || 'coach',
+      ...stats,
+      conversion_rate: stats.assigned ? Math.round((stats.confirmed / stats.assigned) * 1000) / 10 : 0
+    };
+  });
+  agents.sort((a, b) => {
+    if (a.id === '_unassigned') return 1;
+    if (b.id === '_unassigned') return -1;
+    return (b.tracking || 0) - (a.tracking || 0);
+  });
 
-  return { by_user: byUser };
+  return { by_user: byUser, agents };
 }
 
 async function handleSendChannelMessage(body, institutionId, actor) {
@@ -1554,7 +1723,7 @@ export default async function handler(req, res) {
     }
 
     if (op === 'staff-performance') {
-      if (!isManager(tags)) return res.status(403).json({ error: 'forbidden' });
+      if (!canAccessModule(tags)) return res.status(403).json({ error: 'forbidden' });
       const data = await handleStaffPerformance(institutionId);
       return res.status(200).json({ data });
     }
@@ -1588,6 +1757,10 @@ export default async function handler(req, res) {
       }
       if (op === 'confirm') {
         const data = await handleConfirm(body, institutionId, actor);
+        return res.status(200).json({ data });
+      }
+      if (op === 'delete') {
+        const data = await handleDeleteLead(body, institutionId, actor, tags);
         return res.status(200).json({ data });
       }
       if (op === 'mark-lost') {
