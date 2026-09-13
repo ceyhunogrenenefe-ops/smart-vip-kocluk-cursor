@@ -10,13 +10,20 @@ import {
 } from './meta-facebook-login.js';
 
 describe('facebook login widget', () => {
-  it('builds Login for Business code URL by default (token unsupported)', () => {
+  it('builds page+IG scope login by default (no config_id)', () => {
     const url = buildFacebookLoginUrl();
     assert.match(url, /facebook\.com\/v21\.0\/dialog\/oauth/);
-    assert.match(url, new RegExp(`config_id=${DEFAULT_META_CONFIGURATION_ID}`));
     assert.match(url, new RegExp(`client_id=${DEFAULT_META_APP_ID}`));
     assert.match(url, /api%2Fmeta%2Ffacebook-oauth/);
     assert.match(url, /response_type=code/);
+    assert.match(url, /pages_messaging/);
+    assert.match(url, /instagram_manage_messages/);
+    assert.doesNotMatch(url, /config_id=/);
+  });
+
+  it('builds Login for Business URL only in config mode', () => {
+    const url = buildFacebookLoginUrl({ mode: 'config' });
+    assert.match(url, new RegExp(`config_id=${DEFAULT_META_CONFIGURATION_ID}`));
     assert.match(url, /override_default_response_type=true/);
   });
 

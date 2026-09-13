@@ -74,7 +74,12 @@ export default function CrmWidgetsPage() {
       setSearchParams({}, { replace: true });
       void refresh();
     } else if (err) {
-      toast.error(err);
+      const assetFail = /1349246|not granted|varlık/i.test(err);
+      toast.error(
+        assetFail
+          ? 'Facebook 3 ekstra varlığa izin veremedi. «Instagram’ı bağla» sayfa izinleriyle tekrar deneyin; popup’ta yalnızca Online VIP’i seçin.'
+          : err
+      );
       setSearchParams({}, { replace: true });
     }
   }, [refresh, searchParams, setSearchParams]);
@@ -104,7 +109,7 @@ export default function CrmWidgetsPage() {
       .finally(() => setBinding(false));
   }, [refresh]);
 
-  const connectSocial = () => {
+  const startOAuth = (url?: string | null) => {
     if (!login?.has_app_secret) {
       toast.error(
         'Önce SmartKocluk Facebook App Secret’ı kaydedin (Instagram Login secret değil). Ayarlar → Temel → Göster.'
@@ -112,7 +117,6 @@ export default function CrmWidgetsPage() {
       document.getElementById('meta-app-secret')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
       return;
     }
-    const url = login?.code_authorize_url || login?.authorize_url;
     if (!url) {
       toast.error('Facebook giriş adresi yok — sayfayı yenileyin');
       return;
@@ -120,6 +124,10 @@ export default function CrmWidgetsPage() {
     setBinding(true);
     window.location.assign(url);
   };
+
+  const connectSocial = () => startOAuth(login?.authorize_url || login?.code_authorize_url);
+
+  const connectLoginForBusiness = () => startOAuth(login?.config_authorize_url);
 
   const refreshWhatsApp = async () => {
     setBinding(true);
@@ -307,6 +315,20 @@ export default function CrmWidgetsPage() {
             {binding ? 'Bağlanıyor…' : socialOk ? 'Facebook’u yenile' : 'Facebook’u bağla'}
           </button>
         </div>
+        <p className="mt-3 text-xs text-slate-600">
+          Hata <strong>1349246</strong> (varlıklar 52570416778031, 23850842047630381, 776451501294387):
+          Login for Business, yönetici olmadığınız sayfa/reklam/IG varlıklarına izin istiyor. Yukarıdaki
+          butonlar artık yalnızca <strong>Online VIP sayfası + Instagram</strong> izni ister. Popup’ta başka
+          sayfa işaretlemeyin.
+        </p>
+        <button
+          type="button"
+          disabled={binding}
+          onClick={() => connectLoginForBusiness()}
+          className="mt-2 text-xs font-medium text-slate-500 underline hover:text-slate-800 disabled:opacity-50"
+        >
+          Eski Login for Business (tüm BM varlıkları) — 1349246 verebilir
+        </button>
       </section>
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
