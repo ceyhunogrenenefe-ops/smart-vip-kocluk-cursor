@@ -13,7 +13,8 @@
   - `INSTAGRAM_PAGE_ACCESS_TOKEN` veya `META_PAGE_ACCESS_TOKEN` (Page Access Token)
   - isteğe bağlı `META_PAGE_ID`, `META_IG_BUSINESS_ID`
 - WhatsApp `META_WHATSAPP_TOKEN` IG/FB DM abone edemez; ayrı sayfa token kullanılır
-- Bind: CRM → **Widgetler** (`/crm/widgetler`) — Kommo widget gibi Facebook Login for Business
+- Bind: CRM → **Widgetler** (`/crm/widgetler`) — Kommo katalogu (WA / IG / FB / Telegram / chat / e-posta / lead ads / Google / form…)
+- Instagram + Facebook + WhatsApp Cloud bağlanır; diğer kartlar Kommo listesinin karşılığı (sıradaki native bağlar)
 - Alternatif: `GET /api/whatsapp-health?ensure_meta_social=1` veya Inbox → Hattı bağla
 - OAuth: `GET /api/meta/facebook-oauth` · redirect URI `/crm/widgetler`
 - Teşhis: `GET /api/whatsapp-health` → `meta_social_env.token_source` (token yazılmaz, yalnızca env adı + suffix)
