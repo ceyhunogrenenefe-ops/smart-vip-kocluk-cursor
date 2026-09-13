@@ -78,10 +78,13 @@ export default function CrmWidgetsPage() {
       void refresh();
     } else if (err) {
       const assetFail = /1349246|not granted|varlık/i.test(err);
+      const invalidScopes = /invalid scopes|pages_messaging|pages_manage_metadata/i.test(err);
       toast.error(
         assetFail
           ? '1349246: Facebook 52570416778031 ve 23850842047630381 varlıklarına izin veremedi. Meta’da Login for Business yapılandırmasından bu iki varlığı silin; yalnızca Online VIP kalsın.'
-          : err
+          : invalidScopes
+            ? 'Invalid Scopes: pages_messaging ve pages_manage_metadata URL’de istenemez. Yeni Login for Business yapılandırmasına ekleyin (yalnızca Online VIP), ID’yi kaydedin, tekrar bağlayın.'
+            : err
       );
       setSearchParams({}, { replace: true });
     }
@@ -332,8 +335,16 @@ export default function CrmWidgetsPage() {
           </button>
         </div>
         <div className="mt-3 rounded-xl bg-amber-50 p-3 text-xs leading-relaxed text-amber-950 ring-1 ring-amber-200">
-          <p className="font-semibold">1349246 — bu iki varlığı yapılandırmadan silin</p>
+          <p className="font-semibold">Invalid Scopes / 1349246 — izinler yapılandırmada, URL’de değil</p>
           <p className="mt-1">
+            SmartKocluk bir <strong>Login for Business</strong> uygulaması.{' '}
+            <code className="rounded bg-white px-1">pages_messaging</code> ve{' '}
+            <code className="rounded bg-white px-1">pages_manage_metadata</code> klasik Facebook
+            Login <code className="rounded bg-white px-1">scope</code> satırında geçersiz. DM için
+            bunları yeni yapılandırmanın izin listesine ekleyin.
+          </p>
+          <p className="mt-1">
+            Eski config’teki{' '}
             <code className="rounded bg-white px-1">
               {login?.blocked_asset_ids?.[0] || '52570416778031'}
             </code>{' '}
@@ -341,20 +352,28 @@ export default function CrmWidgetsPage() {
             <code className="rounded bg-white px-1">
               {login?.blocked_asset_ids?.[1] || '23850842047630381'}
             </code>{' '}
-            için yönetici değilsiniz. Popup’ta işareti kaldırmak yetmez — Facebook Login for Business
-            listedeki her varlığı zorunlu tutar.
+            varlıklarını eklemeyin — 1349246 verir.
           </p>
           <ol className="mt-2 list-decimal space-y-1 pl-4">
             <li>developers.facebook.com → SmartKocluk → <strong>Facebook Login for Business</strong></li>
             <li>
-              Configurations → <code>1784538625891317</code>: bu iki ID’yi <strong>Remove</strong>,
-              yalnızca Online VIP sayfası + bağlı Instagram kalsın.
+              <strong>Create configuration</strong> (User access token). Assets: yalnızca Online VIP
+              sayfası + bağlı Instagram.
             </li>
             <li>
-              Ya da <strong>Create configuration</strong>: sadece Online VIP + IG. Yeni config ID’yi
-              aşağıya yapıştırın (eski ID’yi kullanmayın).
+              Permissions:{' '}
+              <code className="rounded bg-white px-1">
+                {(login?.config_permissions || [
+                  'pages_show_list',
+                  'pages_messaging',
+                  'pages_manage_metadata',
+                  'instagram_basic',
+                  'instagram_manage_messages',
+                  'instagram_manage_comments'
+                ]).join(', ')}
+              </code>
             </li>
-            <li>Kaydet. 1 dakika bekleyin. Sonra bu sayfada Instagram’ı bağla.</li>
+            <li>Kaydet → config ID’yi aşağıya yapıştırın → Instagram’ı bağla.</li>
           </ol>
           {login?.uses_slim_config ? (
             <p className="mt-2 font-medium text-emerald-800">

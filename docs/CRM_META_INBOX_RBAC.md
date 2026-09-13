@@ -19,7 +19,8 @@
 - OAuth: `GET /api/meta/facebook-oauth` · redirect URI `/crm/widgetler`
 - Teşhis: `GET /api/whatsapp-health` → `meta_social_env.token_source` (token yazılmaz, yalnızca env adı + suffix)
 - Login for Business config id `1784538625891317` Page ID değildir
-- Hata **1349246** (`52570416778031`, `23850842047630381`): bu varlıklara admin değilsiniz. Meta → Facebook Login for Business → Configurations → ilgili yapılandırmadan **Remove**. İşareti kaldırmak yetmez. Alternatif: yalnızca Online VIP + IG içeren yeni config oluşturup Widgetler’de kaydedin.
+- Hata **Invalid Scopes** (`pages_messaging`, `pages_manage_metadata`): SmartKocluk Login for Business uygulaması; bu izinler OAuth `scope=` satırında geçersiz. Yeni LfB config’in izin listesine ekleyin, config ID’yi Widgetler’de kaydedin.
+- Hata **1349246** (`52570416778031`, `23850842047630381`): bu varlıklara admin değilsiniz. Yeni config’e eklemeyin; eski yapılandırmadan **Remove**. İşareti kaldırmak yetmez.
 
 ## Kommo (yalnızca hunı karşılaştırması — mesaj köprüsü değil)
 - URL: `https://onlinevipdershane.kommo.com/`
