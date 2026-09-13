@@ -1,0 +1,375 @@
+/**
+ * CRM Unified Inbox API — /api/crm-inbox?op=...
+ */
+import { requireAuthenticatedActor } from '../api/_lib/auth.js';
+import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
+import { actorRoleSet, actorIsAdminLike } from '../api/_lib/actor-roles.js';
+import {
+  getCrmAgentAssignment,
+  sendCrmInstagramDm,
+  sendCrmWhatsAppText,
+  upsertCrmMessage
+} from '../api/_lib/crm-inbox.js';
+
+function parseBody(req) {
+  const b = req.body;
+  if (b && typeof b === 'object') return b;
+  if (typeof b === 'string') {
+    try {
+      return JSON.parse(b || '{}');
+    } catch {
+      return {};
+    }
+  }
+  return {};
+}
+
+function isCrmAgent(roleSet) {
+  return roleSet.has('crm_agent');
+}
+
+function canUseCrm(roleSet) {
+  return actorIsAdminLike(null, roleSet) || isCrmAgent(roleSet) || roleSet.has('coach');
+}
+
+async function resolveInstitutionId(actor, roleSet, queryInst) {
+  const q = String(queryInst || '').trim();
+  if (q && (roleSet.has('super_admin') || roleSet.has('admin'))) return q;
+  if (actor.institution_id) return String(actor.institution_id);
+  const { data: u } = await supabaseAdmin
+    .from('users')
+    .select('institution_id')
+    .eq('id', actor.sub)
+    .maybeSingle();
+  return u?.institution_id ? String(u.institution_id) : null;
+}
+
+function applyAgentScope(query, actor, assignment, isAdmin) {
+  if (isAdmin) return query;
+  const canPool = !assignment || assignment.can_access_unassigned_pool !== false;
+  if (canPool) {
+    return query.or(`assigned_user_id.eq.${actor.sub},assigned_user_id.is.null`);
+  }
+  return query.eq('assigned_user_id', actor.sub);
+}
+
+async function assertConversationAccess(conversation, actor, roleSet, assignment) {
+  if (!conversation) return false;
+  if (actorIsAdminLike(actor, roleSet)) return true;
+  if (conversation.assigned_user_id && String(conversation.assigned_user_id) === String(actor.sub)) {
+    return true;
+  }
+  if (!conversation.assigned_user_id && (!assignment || assignment.can_access_unassigned_pool !== false)) {
+    return true;
+  }
+  return false;
+}
+
+export default async function handler(req, res) {
+  let actor;
+  try {
+    actor = requireAuthenticatedActor(req);
+  } catch {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+
+  const roleSet = await actorRoleSet(actor);
+  if (!canUseCrm(roleSet)) {
+    return res.status(403).json({ error: 'forbidden', hint: 'CRM erişimi yok' });
+  }
+
+  const isAdmin = actorIsAdminLike(actor, roleSet);
+  const agentOnly = isCrmAgent(roleSet) && !isAdmin;
+  const body = req.method === 'GET' ? {} : parseBody(req);
+  const op = String(req.query?.op || body.op || 'list_conversations').trim();
+  const institutionId = await resolveInstitutionId(
+    actor,
+    roleSet,
+    req.query?.institution_id || body.institution_id
+  );
+  const assignment = agentOnly ? await getCrmAgentAssignment(actor.sub, institutionId) : null;
+
+  try {
+    if (op === 'list_conversations') {
+      const status = String(req.query?.status || body.status || '').trim();
+      const channel = String(req.query?.channel || body.channel || '').trim();
+      const q = String(req.query?.q || body.q || '').trim();
+      const limit = Math.min(100, Math.max(1, Number(req.query?.limit || body.limit || 50) || 50));
+
+      let query = supabaseAdmin
+        .from('crm_conversations')
+        .select(
+          'id, institution_id, contact_identifier, channel, contact_name, assigned_user_id, status, lead_id, ad_source_data, last_message_at, last_message_preview, unread_count, created_at, updated_at'
+        )
+        .order('last_message_at', { ascending: false, nullsFirst: false })
+        .limit(limit);
+
+      if (institutionId) query = query.eq('institution_id', institutionId);
+      if (status) query = query.eq('status', status);
+      if (channel === 'whatsapp' || channel === 'instagram') query = query.eq('channel', channel);
+      if (q) {
+        query = query.or(
+          `contact_name.ilike.%${q}%,contact_identifier.ilike.%${q}%,last_message_preview.ilike.%${q}%`
+        );
+      }
+      query = applyAgentScope(query, actor, assignment, isAdmin);
+
+      const { data, error } = await query;
+      if (error) {
+        if (/crm_conversations|does not exist|schema cache/i.test(error.message || '')) {
+          return res.status(503).json({
+            error: 'table_missing',
+            message: 'CRM tabloları yok — sql/2026-09-12-crm-inbox-rbac.sql çalıştırın',
+            sql_file: 'student-coaching-system/sql/2026-09-12-crm-inbox-rbac.sql'
+          });
+        }
+        throw error;
+      }
+      return res.status(200).json({ data: data || [], institution_id: institutionId });
+    }
+
+    if (op === 'get_conversation') {
+      const id = String(req.query?.id || body.id || '').trim();
+      if (!id) return res.status(400).json({ error: 'id_required' });
+      const { data: conv, error } = await supabaseAdmin.from('crm_conversations').select('*').eq('id', id).maybeSingle();
+      if (error) throw error;
+      if (!(await assertConversationAccess(conv, actor, roleSet, assignment))) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+      return res.status(200).json({ data: conv });
+    }
+
+    if (op === 'list_messages') {
+      const conversationId = String(req.query?.conversation_id || body.conversation_id || '').trim();
+      if (!conversationId) return res.status(400).json({ error: 'conversation_id_required' });
+      const { data: conv } = await supabaseAdmin
+        .from('crm_conversations')
+        .select('*')
+        .eq('id', conversationId)
+        .maybeSingle();
+      if (!(await assertConversationAccess(conv, actor, roleSet, assignment))) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+      const since = String(req.query?.since || body.since || '').trim();
+      let mq = supabaseAdmin
+        .from('crm_messages')
+        .select('*')
+        .eq('conversation_id', conversationId)
+        .order('created_at', { ascending: true })
+        .limit(500);
+      if (since) mq = mq.gt('created_at', since);
+      const { data, error } = await mq;
+      if (error) throw error;
+      return res.status(200).json({ data: data || [], conversation: conv });
+    }
+
+    if (op === 'mark_read' && req.method === 'POST') {
+      const conversationId = String(body.conversation_id || '').trim();
+      if (!conversationId) return res.status(400).json({ error: 'conversation_id_required' });
+      const { data: conv } = await supabaseAdmin
+        .from('crm_conversations')
+        .select('*')
+        .eq('id', conversationId)
+        .maybeSingle();
+      if (!(await assertConversationAccess(conv, actor, roleSet, assignment))) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+      await supabaseAdmin
+        .from('crm_conversations')
+        .update({ unread_count: 0, updated_at: new Date().toISOString() })
+        .eq('id', conversationId);
+      return res.status(200).json({ ok: true });
+    }
+
+    if (op === 'send_message' && req.method === 'POST') {
+      const conversationId = String(body.conversation_id || '').trim();
+      const text = String(body.body || body.text || '').trim();
+      if (!conversationId) return res.status(400).json({ error: 'conversation_id_required' });
+      if (!text) return res.status(400).json({ error: 'body_required' });
+
+      const { data: conv } = await supabaseAdmin
+        .from('crm_conversations')
+        .select('*')
+        .eq('id', conversationId)
+        .maybeSingle();
+      if (!(await assertConversationAccess(conv, actor, roleSet, assignment))) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+
+      if (!conv.assigned_user_id && agentOnly) {
+        await supabaseAdmin
+          .from('crm_conversations')
+          .update({ assigned_user_id: actor.sub, updated_at: new Date().toISOString() })
+          .eq('id', conversationId);
+        conv.assigned_user_id = actor.sub;
+      }
+
+      let sendResult = { ok: false, messageId: null, error: null };
+      try {
+        if (conv.channel === 'whatsapp') {
+          const r = await sendCrmWhatsAppText({ phone: conv.contact_identifier, text });
+          sendResult = { ok: true, messageId: r.messageId, error: null };
+        } else {
+          const r = await sendCrmInstagramDm({ igScopedId: conv.contact_identifier, text });
+          sendResult = { ok: true, messageId: r.messageId, error: null };
+        }
+      } catch (e) {
+        sendResult = {
+          ok: false,
+          messageId: null,
+          error: e instanceof Error ? e.message : String(e)
+        };
+      }
+
+      const saved = await upsertCrmMessage({
+        channel: conv.channel,
+        contactIdentifier: conv.contact_identifier,
+        contactName: conv.contact_name,
+        body: text,
+        messageType: 'text',
+        messageId: sendResult.messageId,
+        timestamp: Date.now(),
+        direction: 'outbound',
+        senderType: 'agent',
+        senderId: actor.sub,
+        institutionId: conv.institution_id,
+        leadId: conv.lead_id,
+        payload: { send: sendResult },
+        deliveryStatus: sendResult.ok ? 'sent' : 'failed'
+      });
+
+      if (!sendResult.ok) {
+        return res.status(502).json({
+          error: 'send_failed',
+          message: sendResult.error,
+          data: saved?.message || null,
+          conversation_id: conversationId
+        });
+      }
+      return res.status(200).json({ ok: true, data: saved?.message || null, send: sendResult });
+    }
+
+    if (op === 'assign_conversation' && req.method === 'POST') {
+      if (!isAdmin) return res.status(403).json({ error: 'admin_only' });
+      const conversationId = String(body.conversation_id || '').trim();
+      const assignedUserId =
+        body.assigned_user_id === null || body.assigned_user_id === ''
+          ? null
+          : String(body.assigned_user_id || '').trim();
+      if (!conversationId) return res.status(400).json({ error: 'conversation_id_required' });
+      const patch = {
+        assigned_user_id: assignedUserId,
+        updated_at: new Date().toISOString()
+      };
+      if (body.status) patch.status = String(body.status);
+      const { data, error } = await supabaseAdmin
+        .from('crm_conversations')
+        .update(patch)
+        .eq('id', conversationId)
+        .select('*')
+        .maybeSingle();
+      if (error) throw error;
+      return res.status(200).json({ data });
+    }
+
+    if (op === 'update_status' && req.method === 'POST') {
+      const conversationId = String(body.conversation_id || '').trim();
+      const status = String(body.status || '').trim();
+      if (!conversationId) return res.status(400).json({ error: 'conversation_id_required' });
+      if (!['open', 'pending', 'closed'].includes(status)) {
+        return res.status(400).json({ error: 'invalid_status' });
+      }
+      const { data: conv } = await supabaseAdmin
+        .from('crm_conversations')
+        .select('*')
+        .eq('id', conversationId)
+        .maybeSingle();
+      if (!(await assertConversationAccess(conv, actor, roleSet, assignment))) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+      const { data, error } = await supabaseAdmin
+        .from('crm_conversations')
+        .update({ status, updated_at: new Date().toISOString() })
+        .eq('id', conversationId)
+        .select('*')
+        .maybeSingle();
+      if (error) throw error;
+      return res.status(200).json({ data });
+    }
+
+    if (op === 'list_agents') {
+      let agents = [];
+      try {
+        let aq = supabaseAdmin
+          .from('crm_user_assignments')
+          .select(
+            'id, user_id, institution_id, can_access_unassigned_pool, is_active, users:user_id(id, name, email, role, roles)'
+          )
+          .eq('is_active', true);
+        if (institutionId) aq = aq.eq('institution_id', institutionId);
+        const { data, error } = await aq;
+        if (error) throw error;
+        agents = data || [];
+      } catch (e) {
+        if (!/crm_user_assignments|does not exist/i.test(e?.message || '')) throw e;
+      }
+
+      const { data: roleUsers } = await supabaseAdmin
+        .from('users')
+        .select('id, name, email, role, roles, institution_id')
+        .or('role.eq.crm_agent,roles.cs.{"crm_agent"}')
+        .limit(100);
+
+      return res.status(200).json({
+        data: { assignments: agents, role_users: roleUsers || [] }
+      });
+    }
+
+    if (op === 'poll') {
+      const since = String(req.query?.since || body.since || '').trim();
+      const conversationId = String(req.query?.conversation_id || body.conversation_id || '').trim();
+      if (!since) return res.status(400).json({ error: 'since_required' });
+
+      if (conversationId) {
+        const { data: conv } = await supabaseAdmin
+          .from('crm_conversations')
+          .select('*')
+          .eq('id', conversationId)
+          .maybeSingle();
+        if (!(await assertConversationAccess(conv, actor, roleSet, assignment))) {
+          return res.status(403).json({ error: 'forbidden' });
+        }
+        const { data: messages } = await supabaseAdmin
+          .from('crm_messages')
+          .select('*')
+          .eq('conversation_id', conversationId)
+          .gt('created_at', since)
+          .order('created_at', { ascending: true })
+          .limit(100);
+        return res.status(200).json({
+          data: { messages: messages || [], server_time: new Date().toISOString() }
+        });
+      }
+
+      let cq = supabaseAdmin
+        .from('crm_conversations')
+        .select(
+          'id, last_message_at, last_message_preview, unread_count, assigned_user_id, status, channel, contact_name, contact_identifier, updated_at'
+        )
+        .gt('updated_at', since)
+        .order('updated_at', { ascending: false })
+        .limit(50);
+      if (institutionId) cq = cq.eq('institution_id', institutionId);
+      cq = applyAgentScope(cq, actor, assignment, isAdmin);
+      const { data: conversations } = await cq;
+      return res.status(200).json({
+        data: { conversations: conversations || [], server_time: new Date().toISOString() }
+      });
+    }
+
+    return res.status(400).json({ error: 'unknown_op', op });
+  } catch (e) {
+    console.error('[crm-inbox]', e);
+    return res.status(500).json({ error: e instanceof Error ? e.message : 'server_error' });
+  }
+}

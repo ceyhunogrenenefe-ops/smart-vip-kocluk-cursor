@@ -14,6 +14,10 @@ import {
   ingestWhatsAppCloudMessages,
   ingestInstagramMessagingEvents
 } from '../api/_lib/registration-channel-ingest.js';
+import {
+  syncWhatsAppValueToCrm,
+  syncInstagramMessagingToCrm
+} from '../api/_lib/crm-inbox.js';
 
 function verifyToken() {
   return String(process.env.META_WEBHOOK_VERIFY_TOKEN || process.env.META_VERIFY_TOKEN || '').trim();
@@ -251,6 +255,11 @@ export default async function handler(req, res) {
         if (messaging.length) {
           const r = await ingestInstagramMessagingEvents(messaging);
           igIngested += Number(r?.processed || 0);
+          try {
+            await syncInstagramMessagingToCrm(messaging);
+          } catch (e) {
+            console.warn('[meta-webhook] crm ig sync:', e instanceof Error ? e.message : e);
+          }
         }
         // bazı IG abonelikleri changes[] ile gelir
         const changes = Array.isArray(entry?.changes) ? entry.changes : [];
@@ -288,6 +297,11 @@ export default async function handler(req, res) {
       if (messaging.length && (objectType === 'page' || objectType === 'instagram')) {
         const r = await ingestInstagramMessagingEvents(messaging);
         igIngested += Number(r?.processed || 0);
+        try {
+          await syncInstagramMessagingToCrm(messaging);
+        } catch (e) {
+          console.warn('[meta-webhook] crm ig sync:', e instanceof Error ? e.message : e);
+        }
       }
 
       const changes = Array.isArray(entry?.changes) ? entry.changes : [];
@@ -304,6 +318,12 @@ export default async function handler(req, res) {
         if (Array.isArray(value.messages) && value.messages.length) {
           const r = await ingestWhatsAppCloudMessages(value);
           waIngested += Number(r?.processed || 0);
+          // Şirket hattı (META_PHONE_NUMBER_ID / 0850) gelenleri CRM inbox'a yaz
+          try {
+            await syncWhatsAppValueToCrm(value);
+          } catch (e) {
+            console.warn('[meta-webhook] crm wa sync:', e instanceof Error ? e.message : e);
+          }
         }
       }
     }

@@ -3,6 +3,7 @@
  * Telefon (WA) veya Instagram scoped id ile lead eşler; yoksa yeni lead açabilir.
  */
 import { supabaseAdmin } from './supabase-admin.js';
+import { upsertCrmMessage, extractAdSourceData, toMetaWaContactId } from './crm-inbox.js';
 import { normalizeTrPhone, phoneLookupVariants } from './registration-tracking-utils.js';
 
 function snippetOf(text, max = 140) {
@@ -328,6 +329,58 @@ export async function ingestRegistrationChannelMessage(msg) {
     } catch (e) {
       console.warn('[channel-ingest] interaction insert:', e instanceof Error ? e.message : e);
     }
+  }
+
+
+  // Mirror into CRM unified inbox (best-effort; table may be absent)
+  try {
+    const contactIdentifier =
+      channel === 'instagram'
+        ? externalContactId || null
+        : toMetaWaContactId(phoneRaw || normalizedPhone || externalContactId) ||
+          phoneRaw ||
+          normalizedPhone ||
+          externalContactId ||
+          null;
+    if (contactIdentifier && direction === 'inbound') {
+      await upsertCrmMessage({
+        channel,
+        contactIdentifier,
+        contactName,
+        body,
+        messageType: String(msg.messageType || 'text'),
+        messageId: externalMessageId,
+        timestamp: msg.timestamp,
+        direction: 'inbound',
+        senderType: 'lead',
+        institutionId,
+        leadId: lead?.id || null,
+        adSourceData: extractAdSourceData({
+          channel,
+          message: channel === 'whatsapp' ? msg.payload : null,
+          messagingEvent: channel === 'instagram' ? msg.payload : null
+        }),
+        payload: msg.payload || null
+      });
+    } else if (contactIdentifier && direction === 'outbound') {
+      await upsertCrmMessage({
+        channel,
+        contactIdentifier,
+        contactName,
+        body,
+        messageType: String(msg.messageType || 'text'),
+        messageId: externalMessageId,
+        timestamp: msg.timestamp,
+        direction: 'outbound',
+        senderType: 'agent',
+        senderId: msg.senderId || null,
+        institutionId,
+        leadId: lead?.id || null,
+        payload: msg.payload || null
+      });
+    }
+  } catch (e) {
+    console.warn('[channel-ingest] crm mirror:', e instanceof Error ? e.message : e);
   }
 
   return { ok: true, lead_id: lead?.id || null, message: saved };
