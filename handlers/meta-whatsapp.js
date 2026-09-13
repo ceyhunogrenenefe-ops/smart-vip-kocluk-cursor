@@ -12,6 +12,7 @@ import {
   sendMetaTextMessage
 } from '../api/_lib/meta-whatsapp.js';
 import { sendParentPdfToWhatsapp } from '../api/_lib/parent-pdf-meta-send.js';
+import { ensureMetaInboundDelivery, publicInboundStatus } from '../api/_lib/meta-inbound-ensure.js';
 
 function parseBody(req) {
   const raw = req.body;
@@ -83,10 +84,33 @@ export default async function handler(req, res) {
         });
       }
       await saveMetaWhatsAppSecretsToDb({ token, phone_number_id: phoneNumberId, waba_id: wabaId });
+      const inbound = await ensureMetaInboundDelivery({ apply: true }).catch((e) => ({
+        ok: false,
+        error: e instanceof Error ? e.message : String(e)
+      }));
       return res.status(200).json({
         ok: true,
         data: getMetaWhatsAppEnvStatus(),
-        display_phone_number: phones.find((p) => String(p?.id || '') === phoneNumberId)?.display_phone_number || null
+        display_phone_number: phones.find((p) => String(p?.id || '') === phoneNumberId)?.display_phone_number || null,
+        inbound: publicInboundStatus(inbound)
+      });
+    }
+    if (String(b.op || '').trim() === 'ensure_inbound') {
+      if (role !== 'super_admin' && role !== 'admin') {
+        return res.status(403).json({ error: 'forbidden', hint: 'Webhook bağlamayı yalnızca yönetici çalıştırır.' });
+      }
+      const inbound = await ensureMetaInboundDelivery({ apply: true });
+      return res.status(200).json({
+        ok: Boolean(inbound?.ok),
+        data: getMetaWhatsAppEnvStatus(),
+        inbound: publicInboundStatus(inbound),
+        detail: {
+          steps: inbound?.steps || [],
+          display_phone: inbound?.display_phone || null,
+          verified_name: inbound?.verified_name || null,
+          subscribed_apps: inbound?.subscribed_apps || [],
+          error: inbound?.error || null
+        }
       });
     }
     const to = typeof b.to === 'string' ? b.to.trim() : '';

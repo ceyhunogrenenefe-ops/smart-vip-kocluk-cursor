@@ -373,6 +373,7 @@ export async function diagnoseCrmInbox() {
     const sample = h?.sample && typeof h.sample === 'object' ? h.sample : {};
     const text = String(sample.first_text || sample.text || '').toLowerCase();
     if (!from && Number(h?.message_count || 0) === 0) return true;
+    if (!from && String(h?.object_type || '').includes('instagram')) return true;
     if (from.startsWith('1631') || display.startsWith('1650') || pnid === '123456123') return true; // Meta Graph test
     if (/e2e|diag|canli crm|final e2e|audit ping|crm diag|meta-shape|livecheck/.test(text)) return true;
     if (/^90555999|^90555111|^90555987|^90555988/.test(from)) return true; // bilinen simülasyon
