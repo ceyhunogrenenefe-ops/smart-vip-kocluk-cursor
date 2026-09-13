@@ -321,7 +321,8 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
       { path: '/notifications', icon: Bell, label: 'Bildirimler' },
       { path: '/events', icon: CalendarDays, label: 'Etkinlikler' },
       { path: '/toplanti-takip', icon: ClipboardCheck, label: 'Toplantı ve Gündem Takibi' },
-      { path: '/crm', icon: ClipboardList, label: 'CRM' },
+      { path: '/crm/inbox', icon: ClipboardList, label: 'CRM Inbox' },
+      { path: '/crm', icon: ClipboardList, label: 'CRM Pipeline' },
       NAV_OZEL_DERS_TALEPLERI,
       NAV_TEACHER_PROFILE_APPROVALS,
       { path: '/edesis', icon: CloudDownload, label: 'Edesis' },
@@ -347,6 +348,14 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
       { path: '/vendor-panel/tekliflerim', icon: Store, label: 'Tekliflerim' },
       { path: '/vendor-panel/siparislerim', icon: ShoppingBag, label: 'Siparişlerim' },
       { path: '/vendor-panel/hakedislerim', icon: Wallet, label: 'Hakedişlerim' },
+    ];
+  }
+
+
+  // CRM ajanı (yalnız inbox)
+  if (tags.includes('crm_agent') && !tags.some((t) => ['super_admin', 'admin', 'coach', 'teacher', 'student', 'vendor_admin'].includes(t as string))) {
+    return [
+      { path: '/crm/inbox', icon: ClipboardList, label: 'CRM Gelen Kutusu' },
     ];
   }
 
@@ -400,7 +409,8 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
     { path: '/notifications', icon: Bell, label: 'Bildirimler' },
     { path: '/events', icon: CalendarDays, label: 'Etkinlikler' },
     { path: '/toplanti-takip', icon: ClipboardCheck, label: 'Toplantı ve Gündem Takibi' },
-    { path: '/crm', icon: ClipboardList, label: 'CRM' },
+    { path: '/crm/inbox', icon: ClipboardList, label: 'CRM Inbox' },
+    { path: '/crm', icon: ClipboardList, label: 'CRM Pipeline' },
     { path: '/kitap-pazaryeri', icon: ShoppingBag, label: 'Kitap Pazaryeri' },
     { path: '/kitap-magazasi', icon: ShoppingBag, label: 'Kitap Mağazası' },
     NAV_OZEL_DERS_TALEPLERI,

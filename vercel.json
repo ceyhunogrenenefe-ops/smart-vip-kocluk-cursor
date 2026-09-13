@@ -161,6 +161,22 @@
       "destination": "/api/deep-api?path=meta/$1"
     },
     {
+      "source": "/api/webhooks/meta",
+      "destination": "/api/deep-api?path=webhooks/meta"
+    },
+    {
+      "source": "/api/webhooks/(.*)",
+      "destination": "/api/deep-api?path=webhooks/$1"
+    },
+    {
+      "source": "/api/crm-inbox",
+      "destination": "/api/deep-api?path=crm-inbox"
+    },
+    {
+      "source": "/api/crm-admin",
+      "destination": "/api/deep-api?path=crm-admin"
+    },
+    {
       "source": "/api/whatsapp/(.*)",
       "destination": "/api/deep-api?path=whatsapp/$1"
     },

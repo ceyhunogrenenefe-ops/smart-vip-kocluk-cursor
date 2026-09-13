@@ -31,9 +31,9 @@ export interface SystemUser {
   name: string;
   email: string;
   phone?: string;
-  role: 'super_admin' | 'admin' | 'coach' | 'teacher' | 'student';
+  role: 'super_admin' | 'admin' | 'coach' | 'teacher' | 'student' | 'crm_agent' | 'vendor_admin';
   /** Sunucuda `users.roles`; arayüzde çoklu yetki için (ör. öğretmen + koç) */
-  roles?: ('super_admin' | 'admin' | 'coach' | 'teacher' | 'student')[];
+  roles?: ('super_admin' | 'admin' | 'coach' | 'teacher' | 'student' | 'crm_agent' | 'vendor_admin')[];
   studentId?: string;
   coachId?: string;
   institutionId?: string;
