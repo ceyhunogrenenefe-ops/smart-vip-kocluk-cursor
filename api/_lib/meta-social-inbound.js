@@ -214,23 +214,30 @@ export async function ensureMetaSocialInbound({ apply = false } = {}) {
 
   let pid = pageIdEnv();
   let useTok = tok;
-  const me = await graphGet(
-    'me?fields=id,name,username,account_type,instagram_business_account,accounts{name,id,access_token,instagram_business_account}',
+  const me = await graphGet('me?fields=id,name', tok);
+  const accountsRes = await graphGet(
+    'me/accounts?fields=name,id,access_token,instagram_business_account&limit=25',
     tok
   );
+  const accounts = accountsRes.ok && Array.isArray(accountsRes.json?.data) ? accountsRes.json.data : [];
+  const igMe = await graphGet('me?fields=id,username,instagram_business_account', tok);
+
   if (me.ok) {
-    const accounts = Array.isArray(me.json?.accounts?.data) ? me.json.accounts.data : [];
-    const username = me.json?.username ? String(me.json.username) : null;
-    out.token_kind = accounts.length ? 'user' : username ? 'instagram' : 'page';
+    const username = igMe.ok && igMe.json?.username ? String(igMe.json.username) : null;
+    if (accounts.length) out.token_kind = 'user_with_pages';
+    else if (username) out.token_kind = 'instagram';
+    else out.token_kind = 'user_or_page';
     out.steps.push({
       step: 'token_identity',
       ok: true,
       kind: out.token_kind,
       name: me.json?.name || username || null,
       id_suffix: String(me.json?.id || '').slice(-6),
+      accounts: accounts.length,
       source: resolved.source
     });
     if (accounts[0]?.id) {
+      out.token_kind = 'user_with_pages';
       if (!pid) pid = String(accounts[0].id);
       if (accounts[0]?.access_token) {
         useTok = String(accounts[0].access_token);
@@ -242,18 +249,19 @@ export async function ensureMetaSocialInbound({ apply = false } = {}) {
         out.instagram_business_id = String(ig);
         process.env.META_IG_BUSINESS_ID = String(ig);
       }
-    } else if (username && me.json?.id) {
-      out.instagram_business_id = String(me.json.id);
-      process.env.META_IG_BUSINESS_ID = String(me.json.id);
+    } else if (username && igMe.json?.id) {
+      out.token_kind = 'instagram';
+      out.instagram_business_id = String(igMe.json.id);
+      process.env.META_IG_BUSINESS_ID = String(igMe.json.id);
       const igPage = await graphGet(
-        `${encodeURIComponent(me.json.id)}?fields=id,username,name,connected_facebook_page`,
+        `${encodeURIComponent(igMe.json.id)}?fields=id,username,name,connected_facebook_page`,
         tok
       );
       const connected = igPage.json?.connected_facebook_page;
       const cpid = connected?.id || (typeof connected === 'string' ? connected : null);
       if (igPage.ok && cpid && !looksLikeConfigurationId(cpid)) {
         pid = String(cpid);
-        out.page_name = out.page_name || connected?.name || me.json?.name || username;
+        out.page_name = out.page_name || connected?.name || igMe.json?.name || username;
         out.steps.push({ step: 'ig_connected_page', ok: true, page_id_suffix: pid.slice(-6) });
       } else {
         out.steps.push({
@@ -262,10 +270,27 @@ export async function ensureMetaSocialInbound({ apply = false } = {}) {
           error: igPage.ok ? 'connected_facebook_page_missing' : graphErr(igPage.json, `http_${igPage.status}`)
         });
       }
-    } else if (me.json?.name) {
-      out.page_name = String(me.json.name);
+    } else {
+      // Page token: me.id is the page. User token without pages_show_list: me.id is the person — abone edilemez.
+      const probe = await graphGet(
+        `${encodeURIComponent(me.json.id)}/subscribed_apps?fields=id,name,subscribed_fields`,
+        tok
+      );
+      if (probe.ok) {
+        out.token_kind = 'page';
+        if (!pid) pid = String(me.json.id);
+        out.page_name = out.page_name || me.json.name || null;
+      } else {
+        out.token_kind = 'user_no_pages';
+        out.steps.push({
+          step: 'not_a_page_token',
+          ok: false,
+          error: graphErr(probe.json, `http_${probe.status}`),
+          hint: 'Vercel’deki token kullanıcı token’ı. Graph Explorer’da pages_show_list + pages_messaging ile SAYFA token’ı alın.'
+        });
+      }
     }
-    const directIg = me.json?.instagram_business_account?.id;
+    const directIg = igMe.ok ? igMe.json?.instagram_business_account?.id : null;
     if (directIg && !looksLikeConfigurationId(directIg)) {
       out.instagram_business_id = String(directIg);
       process.env.META_IG_BUSINESS_ID = String(directIg);
@@ -277,14 +302,6 @@ export async function ensureMetaSocialInbound({ apply = false } = {}) {
       source: resolved.source,
       error: graphErr(me.json, `http_${me.status}`)
     });
-  }
-
-  if (!pid) {
-    const pageLookup = await graphGet('me?fields=id,name', tok);
-    if (pageLookup.ok && pageLookup.json?.id) {
-      pid = String(pageLookup.json.id);
-      out.page_name = out.page_name || pageLookup.json.name || null;
-    }
   }
 
   if (looksLikeConfigurationId(pid)) {
