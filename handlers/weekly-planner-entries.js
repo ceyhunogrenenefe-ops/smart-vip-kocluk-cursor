@@ -22,7 +22,7 @@ const toPlannerMinutes = (t) => {
   const m = toMinutes(t);
   if (m == null) return null;
   const h = Math.floor(m / 60);
-  if (h <= 1) return m + 24 * 60;
+  if (h <= 2) return m + 24 * 60;
   return m;
 };
 

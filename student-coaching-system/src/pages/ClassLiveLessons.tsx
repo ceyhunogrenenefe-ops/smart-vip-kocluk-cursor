@@ -607,7 +607,9 @@ export default function ClassLiveLessons() {
 
   const calendarHours = useMemo(() => {
     const hours = new Set<number>();
-    for (let h = 8; h <= 22; h++) hours.add(h);
+    for (let h = 8; h <= 23; h++) hours.add(h);
+    hours.add(0);
+    hours.add(1);
     for (const s of classSlots) {
       const h = Number(String(s.start_time || '').slice(0, 2));
       if (Number.isFinite(h)) hours.add(h);
@@ -617,7 +619,8 @@ export default function ClassLiveLessons() {
       const h = Number(String(s.start_time || '').slice(0, 2));
       if (Number.isFinite(h)) hours.add(h);
     }
-    return [...hours].sort((a, b) => a - b);
+    const hourKey = (h: number) => (h <= 1 ? h + 24 : h);
+    return [...hours].sort((a, b) => hourKey(a) - hourKey(b));
   }, [classSlots, weekSessions, selectedClassId]);
 
   const weekColumnDates = useMemo(() => Array.from({ length: 7 }, (_, i) => addDaysIso(calendarWeekMondayIso, i)), [calendarWeekMondayIso]);
