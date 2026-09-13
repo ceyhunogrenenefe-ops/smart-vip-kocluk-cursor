@@ -10,7 +10,12 @@ import {
   rasterizeHtmlElementForPdf,
   type WeekGridColumn,
 } from './pdfLiveWeekGrid';
-import { buildPlannerTimeSlots, entryMatchesPlannerSlot, timeToMinutes } from './weeklyPlannerTimeSlots';
+import {
+  PLANNER_END_HOUR,
+  buildPlannerTimeSlots,
+  entryMatchesPlannerSlot,
+  timeToPlannerMinutes,
+} from './weeklyPlannerTimeSlots';
 import {
   buildWeeklyMotivationMessages,
   evaluatePreviousWeekPlanner,
@@ -135,16 +140,16 @@ function pdfPlannerHoursRange(entries: WeeklyPlannerEntryRow[]): { startHour: nu
   let maxM = -Infinity;
   let has = false;
   for (const e of entries) {
-    const m = timeToMinutes(String(e.start_time || ''));
+    const m = timeToPlannerMinutes(String(e.start_time || ''));
     if (m == null) continue;
     has = true;
     minM = Math.min(minM, m);
-    const endM = timeToMinutes(String(e.end_time || '')) ?? m + 60;
+    const endM = timeToPlannerMinutes(String(e.end_time || '')) ?? m + 60;
     maxM = Math.max(maxM, endM);
   }
   if (!has) return { startHour: 8, endHour: 18 };
   const startHour = Math.max(7, Math.floor((minM - 30) / 60));
-  const endHour = Math.min(22, Math.ceil((maxM + 30) / 60));
+  const endHour = Math.min(PLANNER_END_HOUR, Math.ceil((maxM + 30) / 60));
   return { startHour, endHour: Math.max(endHour, startHour + 3) };
 }
 

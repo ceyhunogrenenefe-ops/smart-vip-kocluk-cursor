@@ -17,14 +17,23 @@ const toMinutes = (t) => {
   return h * 60 + (Number.isNaN(m) ? 0 : m);
 };
 
+/** 00:00–01:59 gece yarısından sonra (23:00–01:00 blokları geçerli). */
+const toPlannerMinutes = (t) => {
+  const m = toMinutes(t);
+  if (m == null) return null;
+  const h = Math.floor(m / 60);
+  if (h <= 1) return m + 24 * 60;
+  return m;
+};
+
 /** Overlap inclusive intervals [start, end] in minutes — both ends inclusive for whole-hour UX */
 function timeRangesOverlap(s1, e1, s2, e2) {
   return s1 < e2 && s2 < e1;
 }
 
 async function findOverlapConflict(studentId, plannerDate, startTime, endTime, excludeId) {
-  const a1 = toMinutes(startTime);
-  const b1 = toMinutes(endTime);
+  const a1 = toPlannerMinutes(startTime);
+  const b1 = toPlannerMinutes(endTime);
   if (a1 == null || b1 == null) return null;
   if (b1 <= a1) return { error: 'invalid_time_range' };
 
@@ -36,8 +45,8 @@ async function findOverlapConflict(studentId, plannerDate, startTime, endTime, e
   if (error) throw error;
   for (const row of data || []) {
     if (excludeId && row.id === excludeId) continue;
-    const ca = toMinutes(row.start_time);
-    const cb = toMinutes(row.end_time);
+    const ca = toPlannerMinutes(row.start_time);
+    const cb = toPlannerMinutes(row.end_time);
     if (ca == null || cb == null) continue;
     if (cb <= ca) continue;
     if (timeRangesOverlap(a1, b1, ca, cb)) return { conflictingId: row.id };
