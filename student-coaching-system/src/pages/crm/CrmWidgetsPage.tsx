@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
-import { CheckCircle2, Facebook, Instagram, Loader2, MessageCircle, Puzzle } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { CheckCircle2, Loader2, Puzzle, Search } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   crmEnsureInbound,
@@ -11,6 +11,13 @@ import {
   type CrmFacebookLoginStart,
   type CrmInboundStatus
 } from '../../lib/crmInboxApi';
+import {
+  CRM_WIDGET_CATALOG,
+  CRM_WIDGET_CATEGORIES,
+  type CrmWidgetAction,
+  type CrmWidgetCategory,
+  type CrmWidgetDef
+} from './crmWidgetCatalog';
 
 declare global {
   interface Window {
@@ -59,20 +66,17 @@ function loadFacebookSdk(appId: string, version: string): Promise<void> {
   });
 }
 
-function StatusPill({ ok, label }: { ok: boolean; label: string }) {
-  return (
-    <span
-      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ${
-        ok ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-900'
-      }`}
-    >
-      {ok ? <CheckCircle2 className="h-3 w-3" /> : null}
-      {label}
-    </span>
-  );
+function widgetInstalled(id: string, inbound: CrmInboundStatus | null): boolean {
+  const social = Boolean(inbound?.social?.ok);
+  const wa = Boolean(inbound?.bound_to_production);
+  if (id === 'whatsapp_business') return wa;
+  if (id === 'instagram' || id === 'facebook') return social;
+  if (id === 'facebook_lead_ads' || id === 'instagram_lead') return social;
+  return false;
 }
 
 export default function CrmWidgetsPage() {
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [inbound, setInbound] = useState<CrmInboundStatus | null>(null);
   const [login, setLogin] = useState<CrmFacebookLoginStart | null>(null);
@@ -80,9 +84,10 @@ export default function CrmWidgetsPage() {
   const [binding, setBinding] = useState(false);
   const [appSecret, setAppSecret] = useState('');
   const [savingSecret, setSavingSecret] = useState(false);
+  const [q, setQ] = useState('');
+  const [cat, setCat] = useState<(typeof CRM_WIDGET_CATEGORIES)[number]['id']>('all');
 
   const socialOk = Boolean(inbound?.social?.ok);
-  const waOk = Boolean(inbound?.bound_to_production);
   const pageName = inbound?.social?.page_name || '';
 
   const refresh = useCallback(async () => {
@@ -221,20 +226,66 @@ export default function CrmWidgetsPage() {
     }
   };
 
+  const runAction = async (action: CrmWidgetAction) => {
+    if (action === 'whatsapp_cloud') return refreshWhatsApp();
+    if (action === 'facebook_login' || action === 'facebook_lead_ads') return connectSocial();
+    if (action === 'whatsapp_gateway') {
+      navigate('/coach-whatsapp-settings');
+      return;
+    }
+    if (action === 'google_calendar') {
+      navigate('/settings');
+      return;
+    }
+    if (action === 'crm_pipeline') {
+      navigate('/crm');
+      return;
+    }
+    if (action === 'meetings') {
+      navigate('/meetings');
+      return;
+    }
+    if (action === 'webhooks') {
+      navigate('/webhooks');
+      return;
+    }
+    toast.message('Bu widget sıradaki turda native bağlanacak — önce Instagram / Facebook / WhatsApp’ı kurun.');
+  };
+
+  const visible = useMemo(() => {
+    const needle = q.trim().toLocaleLowerCase('tr');
+    return CRM_WIDGET_CATALOG.filter((w) => {
+      const installed = widgetInstalled(w.id, inbound);
+      if (cat === 'installed' && !installed) return false;
+      if (cat !== 'all' && cat !== 'installed' && w.category !== (cat as CrmWidgetCategory)) return false;
+      if (!needle) return true;
+      return `${w.name} ${w.blurb} ${w.id}`.toLocaleLowerCase('tr').includes(needle);
+    });
+  }, [cat, inbound, q]);
+
+  const buttonLabel = (w: CrmWidgetDef, installed: boolean) => {
+    if (binding) return 'İşleniyor…';
+    if (w.action === 'soon') return 'Sırada';
+    if (installed) return 'Yenile';
+    if (w.action === 'facebook_login' || w.action === 'facebook_lead_ads') return 'Kur / Bağla';
+    if (w.action === 'whatsapp_cloud') return 'Hattı bağla';
+    return 'Aç';
+  };
+
   return (
-    <div className="mx-auto max-w-5xl space-y-5 px-1 pb-10">
+    <div className="mx-auto max-w-6xl space-y-5 px-1 pb-10">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-700">
-            CRM · Kanallar
+            CRM · Ayarlar
           </p>
           <h2 className="mt-1 flex items-center gap-2 font-serif text-2xl font-semibold text-slate-900">
             <Puzzle className="h-6 w-6 text-emerald-700" />
             Widgetler
           </h2>
           <p className="mt-1 max-w-2xl text-sm text-slate-600">
-            Kommo’daki gibi Instagram ve Facebook’u tek tıkla bağlayın. Mesajlar doğrudan bizim Gelen
-            Kutusu’na düşer — Kommo köprüsü yok.
+            Kommo’daki entegrasyon listesinin tamamı. Instagram, Facebook ve WhatsApp tek tıkla bağlanır;
+            mesajlar bizim Gelen Kutusu’na düşer.
           </p>
         </div>
         <Link
@@ -245,90 +296,97 @@ export default function CrmWidgetsPage() {
         </Link>
       </div>
 
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+        <div className="relative flex-1">
+          <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Widget ara — Instagram, Telegram, Gmail…"
+            className="w-full rounded-xl border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm outline-none focus:border-emerald-500"
+          />
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          {CRM_WIDGET_CATEGORIES.map((c) => (
+            <button
+              key={c.id}
+              type="button"
+              onClick={() => setCat(c.id)}
+              className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                cat === c.id ? 'bg-slate-900 text-white' : 'bg-white text-slate-600 ring-1 ring-slate-200'
+              }`}
+            >
+              {c.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {loading ? (
         <div className="flex justify-center py-16 text-slate-400">
           <Loader2 className="h-8 w-8 animate-spin" />
         </div>
       ) : (
-        <div className="grid gap-4 md:grid-cols-3">
-          <article className="flex flex-col rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <div className="flex items-start justify-between gap-2">
-              <span className="inline-flex h-11 w-11 items-center justify-center rounded-xl bg-emerald-600 text-white">
-                <MessageCircle className="h-5 w-5" />
-              </span>
-              <StatusPill ok={waOk} label={waOk ? 'Kurulu' : 'Bekliyor'} />
-            </div>
-            <h3 className="mt-4 text-lg font-semibold text-slate-900">WhatsApp</h3>
-            <p className="mt-1 flex-1 text-sm text-slate-600">
-              Kurumsal hat 0850 303 40 14 · Cloud API. Inbox’a gelen yazışmalar burada.
-            </p>
-            <p className="mt-3 text-xs text-slate-500">
-              {inbound?.display_phone || inbound?.company_line || '0850 303 40 14'}
-              {inbound?.verified_name ? ` · ${inbound.verified_name}` : ''}
-            </p>
-            <button
-              type="button"
-              disabled={binding}
-              onClick={() => void refreshWhatsApp()}
-              className="mt-4 w-full rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
-            >
-              {binding ? 'İşleniyor…' : waOk ? 'Yenile' : 'Hattı bağla'}
-            </button>
-          </article>
-
-          <article className="flex flex-col rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <div className="flex items-start justify-between gap-2">
-              <span className="inline-flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-purple-500 to-pink-500 text-white">
-                <Instagram className="h-5 w-5" />
-              </span>
-              <StatusPill ok={socialOk} label={socialOk ? 'Kurulu' : 'Kurulmadı'} />
-            </div>
-            <h3 className="mt-4 text-lg font-semibold text-slate-900">Instagram</h3>
-            <p className="mt-1 flex-1 text-sm text-slate-600">
-              Direkt mesajlar (DM). Facebook Login for Business ile sayfayı seçin — Kommo Instagram
-              widget’ı ile aynı akış.
-            </p>
-            <p className="mt-3 text-xs text-slate-500">
-              {socialOk ? pageName || 'Sayfa bağlı' : 'Sayfa seçilmedi'}
-            </p>
-            <button
-              type="button"
-              disabled={binding}
-              onClick={() => void connectSocial()}
-              className="mt-4 w-full rounded-lg bg-gradient-to-r from-purple-600 to-pink-600 px-3 py-2 text-sm font-semibold text-white hover:opacity-95 disabled:opacity-60"
-            >
-              {binding ? 'Bağlanıyor…' : socialOk ? 'Yeniden bağla' : 'Instagram’ı bağla'}
-            </button>
-          </article>
-
-          <article className="flex flex-col rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <div className="flex items-start justify-between gap-2">
-              <span className="inline-flex h-11 w-11 items-center justify-center rounded-xl bg-blue-600 text-white">
-                <Facebook className="h-5 w-5" />
-              </span>
-              <StatusPill ok={socialOk} label={socialOk ? 'Kurulu' : 'Kurulmadı'} />
-            </div>
-            <h3 className="mt-4 text-lg font-semibold text-slate-900">Facebook</h3>
-            <p className="mt-1 flex-1 text-sm text-slate-600">
-              Messenger. Instagram ile aynı sayfa token’ı kullanılır; bir kez bağlamanız yeter.
-            </p>
-            <p className="mt-3 text-xs text-slate-500">
-              {socialOk ? pageName || 'Sayfa bağlı' : 'Sayfa seçilmedi'}
-            </p>
-            <button
-              type="button"
-              disabled={binding}
-              onClick={() => void connectSocial()}
-              className="mt-4 w-full rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
-            >
-              {binding ? 'Bağlanıyor…' : socialOk ? 'Yeniden bağla' : 'Facebook’u bağla'}
-            </button>
-          </article>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          {visible.map((w) => {
+            const installed = widgetInstalled(w.id, inbound);
+            return (
+              <article
+                key={w.id}
+                className="flex flex-col rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <span
+                    className={`inline-flex h-10 w-10 items-center justify-center rounded-xl text-[11px] font-bold text-white ${w.accent}`}
+                  >
+                    {w.mark}
+                  </span>
+                  {installed ? (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-800">
+                      <CheckCircle2 className="h-3 w-3" /> Kurulu
+                    </span>
+                  ) : (
+                    <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500">
+                      {w.action === 'soon' ? 'Sırada' : 'Kurulmadı'}
+                    </span>
+                  )}
+                </div>
+                <h3 className="mt-3 text-sm font-semibold text-slate-900">{w.name}</h3>
+                <p className="mt-1 min-h-[40px] flex-1 text-xs leading-relaxed text-slate-600">{w.blurb}</p>
+                {installed && (w.id === 'instagram' || w.id === 'facebook') && pageName ? (
+                  <p className="mt-1 truncate text-[11px] text-slate-500">{pageName}</p>
+                ) : null}
+                {installed && w.id === 'whatsapp_business' ? (
+                  <p className="mt-1 truncate text-[11px] text-slate-500">
+                    {inbound?.display_phone || inbound?.company_line || '0850 303 40 14'}
+                  </p>
+                ) : null}
+                <button
+                  type="button"
+                  disabled={binding}
+                  onClick={() => void runAction(w.action)}
+                  className={`mt-3 w-full rounded-lg px-3 py-1.5 text-xs font-semibold disabled:opacity-60 ${
+                    w.action === 'soon'
+                      ? 'bg-slate-100 text-slate-500'
+                      : installed
+                        ? 'bg-white text-slate-800 ring-1 ring-slate-200 hover:bg-slate-50'
+                        : 'bg-slate-900 text-white hover:bg-slate-800'
+                  }`}
+                >
+                  {buttonLabel(w, installed)}
+                </button>
+              </article>
+            );
+          })}
         </div>
       )}
 
+      {!loading && visible.length === 0 ? (
+        <p className="text-center text-sm text-slate-500">Bu filtrede widget yok.</p>
+      ) : null}
+
       <section className="rounded-2xl border border-slate-200 bg-white p-5 text-sm text-slate-700 shadow-sm">
-        <h3 className="font-semibold text-slate-900">İlk kurulum (bir kez)</h3>
+        <h3 className="font-semibold text-slate-900">Instagram / Facebook ilk kurulum (bir kez)</h3>
         <ol className="mt-2 list-decimal space-y-1.5 pl-5">
           <li>
             Meta for Developers → uygulama <strong>SmartKocluk</strong> → Facebook Login → Settings
@@ -343,21 +401,24 @@ export default function CrmWidgetsPage() {
               {login?.oauth_redirect_uri || 'https://www.dersonlinevipkocluk.com/api/meta/facebook-oauth'}
             </code>
           </li>
-          <li>App Domains: <code className="rounded bg-slate-100 px-1.5 py-0.5">dersonlinevipkocluk.com</code></li>
+          <li>
+            App Domains: <code className="rounded bg-slate-100 px-1.5 py-0.5">dersonlinevipkocluk.com</code>
+          </li>
           <li>
             Yukarıdan Instagram veya Facebook’a tıklayın → popup’ta <strong>Online VIP</strong> sayfasını
             seçin.
           </li>
         </ol>
-        {login?.hint ? <p className="mt-3 text-xs text-slate-500">{login.hint}</p> : null}
+        {socialOk ? (
+          <p className="mt-3 text-xs text-emerald-700">Sayfa bağlı: {pageName || 'ok'}</p>
+        ) : null}
 
         <details className="mt-4 rounded-xl border border-slate-100 bg-slate-50/80 p-3">
           <summary className="cursor-pointer text-sm font-medium text-slate-800">
             İsteğe bağlı: SmartKocluk Facebook App Secret
           </summary>
           <p className="mt-2 text-xs text-slate-600">
-            Instagram Login secret değil. App Dashboard → SmartKocluk → Ayarlar → App secret. Webhook
-            alanlarını (page + instagram) otomatik işaretlemek için kullanılır.
+            Instagram Login secret değil. App Dashboard → SmartKocluk → Ayarlar → App secret.
           </p>
           <div className="mt-2 flex flex-wrap gap-2">
             <input
