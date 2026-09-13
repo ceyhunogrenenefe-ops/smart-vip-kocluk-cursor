@@ -232,6 +232,14 @@ export default async function handler(req, res) {
   } else if (wantCrmDiag) {
     crm_diag = await diagnoseCrmInbox();
   }
+  if (crm_diag?.e2e_ready) {
+    crm_diag.e2e_ready.meta_send_configured = Boolean(metaReady);
+    crm_diag.e2e_ready.ready = Boolean(
+      crm_diag.e2e_ready.webhook_verify_configured &&
+        crm_diag.e2e_ready.crm_tables_ok &&
+        metaReady
+    );
+  }
 
   const wantCoachReport =
     String(req.query?.test_coach_report || '').trim() === '1' ||
