@@ -257,6 +257,11 @@ export function rtSendChannelMessage(body: {
   lead_id: string;
   channel: 'whatsapp' | 'instagram' | string;
   body: string;
+  template_name?: string;
+  template_language?: string;
+  template_params?: string[];
+  template_param_names?: string[];
+  template_body?: string;
 }) {
   return rtFetch<{
     data: {
