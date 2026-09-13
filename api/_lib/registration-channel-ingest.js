@@ -137,6 +137,36 @@ async function findLeadByInstagramId(igId, institutionId) {
   return data?.[0] || null;
 }
 
+async function findLeadByFacebookId(psid, institutionId) {
+  if (!psid) return null;
+  const id = String(psid);
+  try {
+    let q = supabaseAdmin
+      .from('registration_leads')
+      .select('id, institution_id, full_name, primary_status, stage')
+      .is('deleted_at', null)
+      .eq('facebook_psid', id)
+      .order('updated_at', { ascending: false })
+      .limit(3);
+    if (institutionId) q = q.eq('institution_id', institutionId);
+    const { data, error } = await q;
+    if (error) {
+      if (/facebook_psid|column/i.test(error.message || '')) {
+        return findLeadByInstagramId(`fb:${id}`, institutionId);
+      }
+      throw error;
+    }
+    if (data?.[0]) return data[0];
+    if (institutionId) return findLeadByFacebookId(psid, null);
+  } catch (e) {
+    if (/facebook_psid|column/i.test(e?.message || '')) {
+      return findLeadByInstagramId(`fb:${id}`, institutionId);
+    }
+    throw e;
+  }
+  return findLeadByInstagramId(`fb:${id}`, institutionId);
+}
+
 async function createLeadFromInbound({
   institutionId,
   channel,
@@ -151,10 +181,14 @@ async function createLeadFromInbound({
     String(process.env.REGISTRATION_INBOUND_AUTO_LEAD || '1').toLowerCase() !== 'false';
   if (!auto || !institutionId) return null;
 
-  const name = String(contactName || '').trim() || (channel === 'instagram' ? 'Instagram Lead' : 'WhatsApp Lead');
+  const name =
+    String(contactName || '').trim() ||
+    (channel === 'instagram' ? 'Instagram Lead' : channel === 'facebook' ? 'Facebook Lead' : 'WhatsApp Lead');
   const parts = name.split(/\s+/).filter(Boolean);
   const firstName = parts[0] || 'Lead';
-  const lastName = parts.slice(1).join(' ') || (channel === 'instagram' ? 'IG' : 'WA');
+  const lastName =
+    parts.slice(1).join(' ') ||
+    (channel === 'instagram' ? 'IG' : channel === 'facebook' ? 'FB' : 'WA');
   const now = new Date().toISOString();
 
   const row = {
@@ -168,14 +202,28 @@ async function createLeadFromInbound({
     primary_status: 'tracking',
     stage: 'new_lead',
     temperature: 'warm',
-    source: channel === 'instagram' ? 'instagram_inbound' : 'whatsapp_inbound',
+    source:
+      channel === 'instagram'
+        ? 'instagram_inbound'
+        : channel === 'facebook'
+          ? 'facebook_inbound'
+          : 'whatsapp_inbound',
     notes: firstMessage ? `İlk mesaj: ${snippetOf(firstMessage, 200)}` : null,
     first_contact_at: now,
     last_contact_at: now
   };
   if (instagramScopedId) row.instagram_scoped_id = String(instagramScopedId);
+  if (channel === 'facebook' && instagramScopedId) {
+    row.facebook_psid = String(instagramScopedId);
+    delete row.instagram_scoped_id;
+  }
 
-  const { data, error } = await supabaseAdmin.from('registration_leads').insert(row).select('id, institution_id').maybeSingle();
+  let { data, error } = await supabaseAdmin.from('registration_leads').insert(row).select('id, institution_id').maybeSingle();
+  if (error && /facebook_psid|column/i.test(error.message || '') && channel === 'facebook') {
+    delete row.facebook_psid;
+    row.instagram_scoped_id = `fb:${instagramScopedId}`;
+    ({ data, error } = await supabaseAdmin.from('registration_leads').insert(row).select('id, institution_id').maybeSingle());
+  }
   if (error) {
     console.warn('[channel-ingest] auto lead create failed:', error.message || error);
     return null;
@@ -198,7 +246,8 @@ async function createLeadFromInbound({
  * @param {string} [msg.institutionId]
  */
 export async function ingestRegistrationChannelMessage(msg) {
-  const channel = msg.channel === 'instagram' ? 'instagram' : 'whatsapp';
+  const channel =
+    msg.channel === 'instagram' || msg.channel === 'facebook' ? msg.channel : 'whatsapp';
   const direction = msg.direction === 'outbound' ? 'outbound' : 'inbound';
   const body = msg.body != null ? String(msg.body) : null;
   const externalMessageId = msg.externalMessageId ? String(msg.externalMessageId) : null;
@@ -231,7 +280,9 @@ export async function ingestRegistrationChannelMessage(msg) {
     lead =
       channel === 'whatsapp'
         ? await findLeadByPhone(normalizedPhone, institutionId)
-        : await findLeadByInstagramId(externalContactId, institutionId);
+        : channel === 'facebook'
+          ? await findLeadByFacebookId(externalContactId, institutionId)
+          : await findLeadByInstagramId(externalContactId, institutionId);
 
     if (!lead && direction === 'inbound') {
       if (!institutionId) {
@@ -243,7 +294,8 @@ export async function ingestRegistrationChannelMessage(msg) {
           phone: phoneRaw,
           normalizedPhone,
           contactName,
-          instagramScopedId: channel === 'instagram' ? externalContactId : null,
+          instagramScopedId:
+            channel === 'instagram' || channel === 'facebook' ? externalContactId : null,
           firstMessage: body
         });
       }
@@ -302,10 +354,13 @@ export async function ingestRegistrationChannelMessage(msg) {
     if (channel === 'instagram' && externalContactId) {
       leadPatch.instagram_scoped_id = externalContactId;
     }
+    if (channel === 'facebook' && externalContactId) {
+      leadPatch.facebook_psid = externalContactId;
+    }
     try {
       await supabaseAdmin.from('registration_leads').update(leadPatch).eq('id', lead.id);
     } catch (e) {
-      if (/last_inbound_|instagram_scoped/i.test(e?.message || '')) {
+      if (/last_inbound_|instagram_scoped|facebook_psid/i.test(e?.message || '')) {
         await supabaseAdmin
           .from('registration_leads')
           .update({ last_contact_at: occurredAt, updated_at: new Date().toISOString() })
@@ -319,9 +374,14 @@ export async function ingestRegistrationChannelMessage(msg) {
       await supabaseAdmin.from('registration_interactions').insert({
         lead_id: lead.id,
         institution_id: institutionId,
-        interaction_type: channel === 'instagram' ? 'other' : 'whatsapp',
+        interaction_type: channel === 'whatsapp' ? 'whatsapp' : 'other',
         interaction_at: occurredAt,
-        title: channel === 'instagram' ? 'Gelen Instagram' : 'Gelen WhatsApp',
+        title:
+          channel === 'instagram'
+            ? 'Gelen Instagram'
+            : channel === 'facebook'
+              ? 'Gelen Facebook'
+              : 'Gelen WhatsApp',
         description: body,
         result: null,
         created_by: null
@@ -335,7 +395,7 @@ export async function ingestRegistrationChannelMessage(msg) {
   // Mirror into CRM unified inbox (best-effort; table may be absent)
   try {
     const contactIdentifier =
-      channel === 'instagram'
+      channel === 'instagram' || channel === 'facebook'
         ? externalContactId || null
         : toMetaWaContactId(phoneRaw || normalizedPhone || externalContactId) ||
           phoneRaw ||
@@ -358,7 +418,7 @@ export async function ingestRegistrationChannelMessage(msg) {
         adSourceData: extractAdSourceData({
           channel,
           message: channel === 'whatsapp' ? msg.payload : null,
-          messagingEvent: channel === 'instagram' ? msg.payload : null
+          messagingEvent: channel === 'instagram' || channel === 'facebook' ? msg.payload : null
         }),
         payload: msg.payload || null
       });
@@ -436,9 +496,10 @@ export async function ingestWhatsAppCloudMessages(value) {
   return { processed };
 }
 
-/** Instagram Messaging API entry.messaging[] → ingest */
-export async function ingestInstagramMessagingEvents(messagingEvents) {
+/** Instagram / Facebook Messaging API entry.messaging[] → ingest */
+export async function ingestInstagramMessagingEvents(messagingEvents, { channel = 'instagram' } = {}) {
   const events = Array.isArray(messagingEvents) ? messagingEvents : [];
+  const ch = channel === 'facebook' ? 'facebook' : 'instagram';
   let processed = 0;
   for (const ev of events) {
     if (ev?.message?.is_echo) continue;
@@ -450,7 +511,7 @@ export async function ingestInstagramMessagingEvents(messagingEvents) {
     const body = text || '[medya / ek]';
 
     await ingestRegistrationChannelMessage({
-      channel: 'instagram',
+      channel: ch,
       direction: 'inbound',
       externalContactId: senderId,
       contactName: null,
@@ -506,7 +567,7 @@ export async function diagnoseRegistrationInbound(institutionId) {
       .from('registration_leads')
       .select('id, full_name, stage, source, phone, last_inbound_snippet, last_inbound_at, institution_id')
       .is('deleted_at', null)
-      .or('source.ilike.%whatsapp%,source.ilike.%instagram%,last_inbound_at.not.is.null')
+      .or('source.ilike.%whatsapp%,source.ilike.%instagram%,source.ilike.%facebook%,last_inbound_at.not.is.null')
       .order('created_at', { ascending: false })
       .limit(10);
     if (resolvedInstitutionId) q = q.eq('institution_id', resolvedInstitutionId);
@@ -565,10 +626,15 @@ export async function simulateRegistrationInbound({
   const text = body || `Panel test inbound ${new Date().toISOString()}`;
   const externalMessageId = `wamid.PANEL_TEST_${Date.now()}`;
   const result = await ingestRegistrationChannelMessage({
-    channel: channel === 'instagram' ? 'instagram' : 'whatsapp',
+    channel: channel === 'instagram' || channel === 'facebook' ? channel : 'whatsapp',
     direction: 'inbound',
     phone: digits,
-    externalContactId: channel === 'instagram' ? `ig_test_${Date.now()}` : digits,
+    externalContactId:
+      channel === 'instagram'
+        ? `ig_test_${Date.now()}`
+        : channel === 'facebook'
+          ? `fb_test_${Date.now()}`
+          : digits,
     contactName: contactName || 'Panel Test Lead',
     body: text,
     messageType: 'text',

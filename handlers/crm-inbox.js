@@ -11,8 +11,9 @@ import {
   sendCrmWhatsAppText,
   upsertCrmMessage
 } from '../api/_lib/crm-inbox.js';
-import { diagnoseCrmInbox } from '../api/_lib/crm-inbox-schema.js';
+import { diagnoseCrmInbox, ensureCrmInboxSchema } from '../api/_lib/crm-inbox-schema.js';
 import { ensureMetaInboundDelivery, publicInboundStatus } from '../api/_lib/meta-inbound-ensure.js';
+import { ensureMetaSocialInbound, publicSocialStatus } from '../api/_lib/meta-social-inbound.js';
 
 function userHasRole(user, role) {
   const want = String(role || '').toLowerCase();
@@ -119,14 +120,16 @@ export default async function handler(req, res) {
       let query = supabaseAdmin
         .from('crm_conversations')
         .select(
-          'id, institution_id, contact_identifier, channel, contact_name, assigned_user_id, status, lead_id, ad_source_data, last_message_at, last_message_preview, unread_count, created_at, updated_at'
+          'id, institution_id, contact_identifier, channel, contact_name, assigned_user_id, status, lead_id, ad_source_data, last_message_at, last_message_preview, unread_count, metadata, created_at, updated_at'
         )
         .order('last_message_at', { ascending: false, nullsFirst: false })
         .limit(limit);
 
       if (institutionId) query = query.eq('institution_id', institutionId);
       if (status) query = query.eq('status', status);
-      if (channel === 'whatsapp' || channel === 'instagram') query = query.eq('channel', channel);
+      if (channel === 'whatsapp' || channel === 'instagram' || channel === 'facebook') {
+        query = query.eq('channel', channel);
+      }
       if (q) {
         query = query.or(
           `contact_name.ilike.%${q}%,contact_identifier.ilike.%${q}%,last_message_preview.ilike.%${q}%`
@@ -149,13 +152,15 @@ export default async function handler(req, res) {
     }
 
     if (op === 'inbound_status') {
-      const [diag, inbound] = await Promise.all([
+      const [diag, inbound, social] = await Promise.all([
         diagnoseCrmInbox().catch(() => null),
-        ensureMetaInboundDelivery({ apply: false }).catch(() => null)
+        ensureMetaInboundDelivery({ apply: false }).catch(() => null),
+        ensureMetaSocialInbound({ apply: false }).catch(() => null)
       ]);
       return res.status(200).json({
         data: {
           ...publicInboundStatus(inbound),
+          social: publicSocialStatus(social),
           real_inbound: diag?.real_inbound || null,
           real_inbound_seen: Boolean(diag?.e2e_ready?.real_inbound_seen),
           last_webhook_at: (diag?.recent_webhook_hits || [])[0]?.received_at || null
@@ -167,13 +172,70 @@ export default async function handler(req, res) {
       if (!isAdmin) {
         return res.status(403).json({ error: 'forbidden', hint: 'Meta hattını yalnızca yönetici bağlar.' });
       }
+      await ensureCrmInboxSchema({ force: true }).catch(() => null);
       const inbound = await ensureMetaInboundDelivery({ apply: true });
+      const social = await ensureMetaSocialInbound({ apply: true });
       return res.status(200).json({
         ok: Boolean(inbound?.ok),
-        data: publicInboundStatus(inbound),
+        data: { ...publicInboundStatus(inbound), social: publicSocialStatus(social) },
         steps: inbound?.steps || [],
-        error: inbound?.error || null
+        social_steps: social?.steps || [],
+        error: inbound?.error || social?.error || null
       });
+    }
+
+    if (op === 'list_notes') {
+      const conversationId = String(req.query?.conversation_id || body.conversation_id || '').trim();
+      if (!conversationId) return res.status(400).json({ error: 'conversation_id_required' });
+      const { data: conv } = await supabaseAdmin.from('crm_conversations').select('*').eq('id', conversationId).maybeSingle();
+      if (!(await assertConversationAccess(conv, actor, roleSet, assignment))) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+      const { data, error } = await supabaseAdmin
+        .from('crm_conversation_notes')
+        .select('id, conversation_id, author_user_id, body, created_at')
+        .eq('conversation_id', conversationId)
+        .order('created_at', { ascending: false })
+        .limit(80);
+      if (error && /crm_conversation_notes|does not exist/i.test(error.message || '')) {
+        return res.status(200).json({ data: [] });
+      }
+      if (error) throw error;
+      return res.status(200).json({ data: data || [] });
+    }
+
+    if (op === 'add_note' && req.method === 'POST') {
+      const conversationId = String(body.conversation_id || '').trim();
+      const noteBody = String(body.body || body.note || '').trim();
+      if (!conversationId || !noteBody) return res.status(400).json({ error: 'conversation_id_and_body_required' });
+      const { data: conv } = await supabaseAdmin.from('crm_conversations').select('*').eq('id', conversationId).maybeSingle();
+      if (!(await assertConversationAccess(conv, actor, roleSet, assignment))) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+      const { data, error } = await supabaseAdmin
+        .from('crm_conversation_notes')
+        .insert({
+          conversation_id: conversationId,
+          author_user_id: actor.sub,
+          body: noteBody.slice(0, 4000)
+        })
+        .select('*')
+        .maybeSingle();
+      if (error) throw error;
+      return res.status(200).json({ data });
+    }
+
+    if (op === 'list_canned') {
+      const { data, error } = await supabaseAdmin
+        .from('crm_canned_replies')
+        .select('id, title, body, channel, sort_order')
+        .order('sort_order', { ascending: true })
+        .limit(50);
+      if (error && /crm_canned_replies|does not exist/i.test(error.message || '')) {
+        return res.status(200).json({ data: [] });
+      }
+      if (error) throw error;
+      return res.status(200).json({ data: data || [] });
     }
 
     if (op === 'get_conversation') {
@@ -295,6 +357,63 @@ export default async function handler(req, res) {
         });
       }
       return res.status(200).json({ ok: true, data: saved?.message || null, send: sendResult });
+    }
+
+    if (op === 'take_conversation' && req.method === 'POST') {
+      const conversationId = String(body.conversation_id || '').trim();
+      if (!conversationId) return res.status(400).json({ error: 'conversation_id_required' });
+      const { data: conv } = await supabaseAdmin
+        .from('crm_conversations')
+        .select('*')
+        .eq('id', conversationId)
+        .maybeSingle();
+      if (!(await assertConversationAccess(conv, actor, roleSet, assignment))) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+      const { data, error } = await supabaseAdmin
+        .from('crm_conversations')
+        .update({
+          assigned_user_id: actor.sub,
+          status: conv.status === 'closed' ? 'open' : conv.status,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', conversationId)
+        .select('*')
+        .maybeSingle();
+      if (error) throw error;
+      return res.status(200).json({ data });
+    }
+
+    if (op === 'set_tags' && req.method === 'POST') {
+      const conversationId = String(body.conversation_id || '').trim();
+      const tags = Array.isArray(body.tags)
+        ? body.tags.map((t) => String(t || '').trim()).filter(Boolean).slice(0, 12)
+        : String(body.tags || '')
+            .split(',')
+            .map((t) => t.trim())
+            .filter(Boolean)
+            .slice(0, 12);
+      if (!conversationId) return res.status(400).json({ error: 'conversation_id_required' });
+      const { data: conv } = await supabaseAdmin
+        .from('crm_conversations')
+        .select('*')
+        .eq('id', conversationId)
+        .maybeSingle();
+      if (!(await assertConversationAccess(conv, actor, roleSet, assignment))) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+      const prevMeta = conv.metadata && typeof conv.metadata === 'object' ? conv.metadata : {};
+      const { data, error } = await supabaseAdmin
+        .from('crm_conversations')
+        .update({
+          metadata: { ...prevMeta, tags },
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', conversationId)
+        .select('*')
+        .maybeSingle();
+      if (error) throw error;
+      return res.status(200).json({ data });
     }
 
     if (op === 'assign_conversation' && req.method === 'POST') {

@@ -1,6 +1,6 @@
 import { apiFetch } from './session';
 
-export type CrmChannel = 'whatsapp' | 'instagram';
+export type CrmChannel = 'whatsapp' | 'instagram' | 'facebook';
 export type CrmStatus = 'open' | 'pending' | 'closed';
 export type CrmSenderType = 'lead' | 'agent' | 'bot' | 'system';
 
@@ -13,6 +13,7 @@ export type CrmConversation = {
   assigned_user_id?: string | null;
   status: CrmStatus;
   lead_id?: string | null;
+  metadata?: { tags?: string[] } | null;
   ad_source_data?: Record<string, unknown> | null;
   last_message_at?: string | null;
   last_message_preview?: string | null;
@@ -108,6 +109,19 @@ export function crmAssignConversation(conversationId: string, assignedUserId: st
   });
 }
 
+export function crmTakeConversation(conversationId: string) {
+  return inboxPost<{ data: CrmConversation }>('take_conversation', {
+    conversation_id: conversationId
+  });
+}
+
+export function crmSetTags(conversationId: string, tags: string[]) {
+  return inboxPost<{ data: CrmConversation }>('set_tags', {
+    conversation_id: conversationId,
+    tags
+  });
+}
+
 export function crmUpdateStatus(conversationId: string, status: CrmStatus) {
   return inboxPost<{ data: CrmConversation }>('update_status', {
     conversation_id: conversationId,
@@ -143,7 +157,30 @@ export type CrmInboundStatus = {
   callbacks_ours?: boolean;
   real_inbound_seen?: boolean;
   last_webhook_at?: string | null;
+  social?: {
+    ok?: boolean;
+    page_name?: string | null;
+    hint?: string | null;
+  };
 };
+
+export function crmListNotes(conversationId: string) {
+  return inboxGet<{ data: Array<{ id: string; body: string; created_at: string; author_user_id?: string | null }> }>(
+    'list_notes',
+    { conversation_id: conversationId }
+  );
+}
+
+export function crmAddNote(conversationId: string, body: string) {
+  return inboxPost<{ data: { id: string; body: string; created_at: string } }>('add_note', {
+    conversation_id: conversationId,
+    body
+  });
+}
+
+export function crmListCanned() {
+  return inboxGet<{ data: Array<{ id: string; title: string; body: string }> }>('list_canned');
+}
 
 export function crmInboundStatus() {
   return inboxGet<{ data: CrmInboundStatus }>('inbound_status');
