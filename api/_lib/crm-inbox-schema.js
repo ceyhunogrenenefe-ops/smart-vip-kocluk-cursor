@@ -153,7 +153,8 @@ FROM (VALUES
   ('Deneme dersi', 'Ücretsiz tanışma / deneme dersi planlayalım. Uygun olduğunuz gün ve saati yazar mısınız?', 20),
   ('LGS bilgi', 'LGS programımız küçük grup + koçluk. Sınıf ve hedef liseyi yazın, size uygun grubu ileteyim.', 30),
   ('YKS bilgi', 'TYT–AYT programı için sınıf ve hedef bölümü paylaşın; kontenjan ve deneme dersini ayarlayalım.', 40),
-  ('Fiyat yönlendirme', 'Ücret, grup ve kontenjanı netleştirmek için öğrencinin sınıfı ile iki zayıf dersini yazar mısınız?', 50)
+  ('Fiyat yönlendirme', 'Ücret, grup ve kontenjanı netleştirmek için öğrencinin sınıfı ile iki zayıf dersini yazar mısınız?', 50),
+  ('Ulaşılamadı', 'Olduğunuz yerden olmak istediğiniz yere… Size ulaşamadık. Uygun bir saatte bizi arayabilir veya bu mesaja yanıt verebilirsiniz.', 60)
 ) AS v(title, body, sort_order)
 WHERE NOT EXISTS (SELECT 1 FROM public.crm_canned_replies LIMIT 1);
 `.trim();

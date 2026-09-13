@@ -8,6 +8,10 @@ import { loadMetaWhatsAppSecretsFromDb } from './meta-whatsapp.js';
 const GRAPH = () => String(process.env.META_GRAPH_API_VERSION || 'v21.0').trim() || 'v21.0';
 export const PRODUCTION_WEBHOOK_URL = 'https://www.dersonlinevipkocluk.com/api/meta/webhook';
 
+/** Meta App / Instagram yapılandırma kodu (panelde oluşturulan 16 haneli id). */
+export const DEFAULT_META_IG_BUSINESS_ID = '1784538625891317';
+export const DEFAULT_META_CONFIGURATION_ID = '1784538625891317';
+
 const PAGE_FIELDS = [
   'messages',
   'messaging_postbacks',
@@ -27,7 +31,19 @@ function pageToken() {
 }
 
 function pageIdEnv() {
-  return String(process.env.META_PAGE_ID || process.env.INSTAGRAM_BUSINESS_ACCOUNT_ID || '').trim();
+  return String(process.env.META_PAGE_ID || '').trim();
+}
+
+function igBusinessIdEnv() {
+  return String(
+    process.env.META_IG_BUSINESS_ID ||
+      process.env.INSTAGRAM_BUSINESS_ACCOUNT_ID ||
+      DEFAULT_META_IG_BUSINESS_ID
+  ).trim();
+}
+
+function configurationIdEnv() {
+  return String(process.env.META_CONFIGURATION_ID || DEFAULT_META_CONFIGURATION_ID).trim();
 }
 
 async function graphGet(path, tok) {
@@ -68,6 +84,7 @@ export async function saveMetaPageSecretsToDb(patch = {}) {
   if (patch.instagram_business_account_id) {
     next.instagram_business_account_id = String(patch.instagram_business_account_id).trim();
   }
+  if (patch.configuration_id) next.configuration_id = String(patch.configuration_id).trim();
   next.updated_at = new Date().toISOString();
   const { error: writeErr } = await supabaseAdmin
     .from('commerce_settings')
@@ -105,7 +122,8 @@ export async function ensureMetaSocialInbound({ apply = false } = {}) {
     token_present: Boolean(tok),
     page_id: null,
     page_name: null,
-    instagram_business_id: null,
+    instagram_business_id: igBusinessIdEnv() || null,
+    configuration_id: configurationIdEnv() || null,
     subscribed_fields: [],
     steps: [],
     hint: null,
@@ -188,19 +206,20 @@ export async function ensureMetaSocialInbound({ apply = false } = {}) {
     });
     if (sub.ok) {
       out.subscribed_fields = PAGE_FIELDS.split(',');
-      try {
-        await saveMetaPageSecretsToDb({
-          token: useTok,
-          page_id: pid,
-          instagram_business_account_id: out.instagram_business_id || undefined
-        });
-      } catch (e) {
-        out.steps.push({
-          step: 'persist_page_secrets',
-          ok: false,
-          error: e instanceof Error ? e.message : String(e)
-        });
-      }
+    }
+    try {
+      await saveMetaPageSecretsToDb({
+        token: useTok,
+        page_id: pid,
+        instagram_business_account_id: out.instagram_business_id || undefined,
+        configuration_id: out.configuration_id || undefined
+      });
+    } catch (e) {
+      out.steps.push({
+        step: 'persist_page_secrets',
+        ok: false,
+        error: e instanceof Error ? e.message : String(e)
+      });
     }
   }
 
@@ -220,6 +239,9 @@ export function publicSocialStatus(full) {
     page_id_suffix: full?.page_id ? String(full.page_id).slice(-6) : null,
     instagram_business_id_suffix: full?.instagram_business_id
       ? String(full.instagram_business_id).slice(-6)
+      : null,
+    configuration_id_suffix: full?.configuration_id
+      ? String(full.configuration_id).slice(-6)
       : null,
     hint: full?.hint || null,
     applied: Boolean(full?.applied)

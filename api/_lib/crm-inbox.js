@@ -494,11 +494,7 @@ export async function sendCrmInstagramDm({ igScopedId, text }) {
     process.env.INSTAGRAM_PAGE_ACCESS_TOKEN ||
     process.env.META_WHATSAPP_TOKEN ||
     '';
-  const pageId =
-    process.env.META_PAGE_ID ||
-    process.env.INSTAGRAM_BUSINESS_ACCOUNT_ID ||
-    process.env.META_IG_BUSINESS_ID ||
-    '';
+  const pageId = process.env.META_PAGE_ID || '';
   if (!token || !pageId) {
     const err = new Error('facebook_instagram_not_configured — META_PAGE_ACCESS_TOKEN + META_PAGE_ID');
     err.code = 'ENV';

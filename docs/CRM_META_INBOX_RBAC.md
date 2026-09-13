@@ -8,24 +8,32 @@
 - Her inbound WA / IG / FB mesajı → `registration_*` **ve** `crm_conversations` / `crm_messages`
 - CTWA / IG / FB ad referral → `crm_conversations.ad_source_data`
 
-## Kommo hesabı (gözlem, 2026-09-13)
+## Kommo hesabı (2026-09-13, yeni şifre ile okundu)
 - URL: `https://onlinevipdershane.kommo.com/`
-- Account: **Online VIP Dershane** · id `33570279` · timezone `Europe/Istanbul` · hesap dili `en`
-- Kullanıcı id `12041087` · arayüz dili `tr`
-- İlk form girişi başarılı; ardından Kommo `oauth.force_password_reset` (şüpheli aktivite) ile kilitlemiş — e-postadaki sıfırlama linki şart.
-- Kommo WABA’da ikinci `subscribed_app` (override yok). WA artık production webhook’a bağlı; IG/FB için Page token + `messages` aboneliği ayrı.
+- Account: **Online VIP Dershane** · id `33570279` · TR / TRY · `Europe/Istanbul` · amojo `e21a59de-…`
+- Kullanıcılar: Ceyhun (admin), KAYIT EKİBİ, LATİFE KURAY
+- Chat: son konuşmalar `waba` + `instagram_business` (Facebook Messenger Kommo’da yok)
+- Aktif widget: `amocrm_whatsapp`, Zapier, Typeform, Google Sheets
+- Meta yapılandırma / IG kodu: `1784538625891317` → `META_IG_BUSINESS_ID` / `META_CONFIGURATION_ID`
+
+### Huniler
+1. **Pipeline** (ana): Gelen → Düşünme → Görüşülüyor → İptal/ilgisiz → Takip → Tekrar aranacak → Arandı açmadı → Kazan/Kayıp
+2. **SATIŞ SONRASI HİZMETLER**: Deneme dersi / Seminer / Özel ders / Grup / Kullanıcı bilgisi / Fatura
+3. **BURSLULUK** + **WEBSİTESİ FORM** (id `13764288`, İlk Temas `106196664`) — siteden form buraya düşer
 
 ### Kommo vs bizim CRM
 | Kommo | Bizim sistem |
 | --- | --- |
-| Omnichannel chat (WA / IG / FB / Telegram / e-posta) | WA çalışıyor; IG + FB DM webhook + gönderim |
-| Unsorted / üzerine al | Havuz + **Üzerime al** + ajan atama |
-| İç not | `crm_conversation_notes` |
-| Hazır yanıt / şablon | `crm_canned_replies` |
-| Etiket | konuşma `metadata.tags` |
-| Pipeline / aşama | Kayıt Takibi hunisi (`/crm?rt_lead=`) |
-| Görev / hatırlatma | Kayıt Takibi görevleri (lead kartı) |
-| Salesbot / yayın | Meta şablon + yoklama WA (ayrı) |
+| GELEN LEADLER | Gelen Lead’ler (`new_lead`) |
+| GÖRÜŞÜLÜYOR | Görüşülen Lead’ler |
+| DÜŞÜNME AŞAMASINDA | Düşünülüyor (`considering`) |
+| TAKİP / TEKRAR ARANACAK | `follow_up` / `postponed` |
+| ARANDI AÇMADI | Kayıp nedeni `unreachable` |
+| DENEME DERSİ AYARLANDI | `trial_lesson_scheduled` |
+| Chat WA + Instagram | Inbox WA + IG + FB |
+| Unsorted / üzerine al | Havuz + **Üzerime al** |
+| İç not / şablon / etiket | not + hazır yanıt + `metadata.tags` |
+| Görev | Kayıt Takibi görevleri |
 
 ## Gönderim (CRM yanıt)
 - `META_WHATSAPP_TOKEN` + `META_PHONE_NUMBER_ID` (0850 Cloud API phone number id)

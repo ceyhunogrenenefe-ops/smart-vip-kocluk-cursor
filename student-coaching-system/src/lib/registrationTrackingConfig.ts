@@ -137,6 +137,11 @@ export const CRM_MESSAGE_TEMPLATES: { id: string; label: string; body: string }[
     body: 'Geçen görüşmemizi hatırlatmak istedik. Kararınız veya sorularınız için buradayız.'
   },
   {
+    id: 'unreachable',
+    label: 'Ulaşılamadı',
+    body: 'Olduğunuz yerden olmak istediğiniz yere… Size ulaşamadık. Uygun bir saatte bizi arayabilir veya bu mesaja yanıt verebilirsiniz. Online VIP Dershane.'
+  },
+  {
     id: 'payment',
     label: 'Ödeme hatırlatma',
     body: 'Kayıt işleminizi tamamlamak için ödeme bilgisini paylaşabiliriz. Yardımcı olmamı ister misiniz?'
