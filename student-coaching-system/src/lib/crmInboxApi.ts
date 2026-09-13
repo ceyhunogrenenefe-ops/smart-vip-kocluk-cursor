@@ -218,6 +218,7 @@ export type CrmFacebookLoginStart = {
   whitelist_uris?: string[];
   authorize_url: string;
   code_authorize_url?: string | null;
+  config_authorize_url?: string | null;
   has_app_secret: boolean;
   hint?: string;
 };
