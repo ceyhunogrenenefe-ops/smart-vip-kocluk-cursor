@@ -38,6 +38,7 @@ import {
   type CrmMessage,
   type CrmMetaTemplate
 } from '../../lib/crmInboxApi';
+import { CrmTemplateCreateModal, CrmTemplateSendPreviewModal } from './CrmTemplateModals';
 
 function ChannelBadge({ channel }: { channel: string }) {
   if (channel === 'instagram') {
@@ -84,20 +85,6 @@ function slashQuery(text: string): string | null {
 
 function replaceSlashToken(text: string, replacement: string) {
   return text.replace(/(^|\s)\/([^\s]*)$/, `$1${replacement}`);
-}
-
-function fillTemplatePreview(body: string, params: string[], names: string[]) {
-  let out = body || '';
-  names.forEach((n, i) => {
-    const key = String(n || '').trim();
-    if (!key) return;
-    const safe = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    out = out.replace(new RegExp(`\\{\\{\\s*${safe}\\s*\\}\\}`, 'g'), params[i] ?? '');
-  });
-  params.forEach((p, i) => {
-    out = out.replace(new RegExp(`\\{\\{\\s*${i + 1}\\s*\\}\\}`, 'g'), p ?? '');
-  });
-  return out;
 }
 
 export default function CrmInboxPage() {
@@ -335,12 +322,8 @@ export default function CrmInboxPage() {
     }
     setDraft(replaceSlashToken(draft, '').replace(/\s+$/, ''));
     setSlashOpen(false);
-    if (tpl.variableCount > 0) {
-      setPendingTpl(tpl);
-      setTplParams(Array.from({ length: tpl.variableCount }, () => ''));
-      return;
-    }
-    void onSendTemplate(tpl, []);
+    setPendingTpl(tpl);
+    setTplParams(Array.from({ length: tpl.variableCount }, () => ''));
   };
 
   const onCreateTemplate = async () => {
@@ -683,71 +666,6 @@ export default function CrmInboxPage() {
                 </div>
               ) : null}
 
-              {pendingTpl ? (
-                <div className="mb-2 rounded-xl border border-emerald-200 bg-emerald-50/70 p-2.5">
-                  <div className="mb-1.5 flex items-start justify-between gap-2">
-                    <div>
-                      <p className="text-xs font-semibold text-emerald-900">
-                        Şablon: {pendingTpl.name}
-                        <span className="ml-1 font-normal text-emerald-700">· {pendingTpl.language}</span>
-                      </p>
-                      {pendingTpl.body ? (
-                        <p className="mt-0.5 whitespace-pre-wrap text-[11px] text-emerald-800">
-                          {fillTemplatePreview(pendingTpl.body, tplParams, pendingTpl.variableNames || [])}
-                        </p>
-                      ) : null}
-                      {pendingTpl.mediaHeader ? (
-                        <p className="mt-1 text-[11px] text-amber-800">
-                          Başlık/görsel yok — WhatsApp’ta mümkünse şablon, değilse metin; Instagram/Facebook’ta gövde
-                          metni gider.
-                        </p>
-                      ) : selected?.channel && selected.channel !== 'whatsapp' ? (
-                        <p className="mt-1 text-[11px] text-emerald-800">
-                          {selected.channel === 'facebook' ? 'Facebook' : 'Instagram'}’a şablon gövdesi metin olarak
-                          gider.
-                        </p>
-                      ) : null}
-                    </div>
-                    <button
-                      type="button"
-                      className="text-[11px] font-medium text-slate-500 hover:text-slate-800"
-                      onClick={() => {
-                        setPendingTpl(null);
-                        setTplParams([]);
-                      }}
-                    >
-                      Vazgeç
-                    </button>
-                  </div>
-                  {pendingTpl.variableCount > 0 ? (
-                    <div className="mb-2 grid gap-1.5">
-                      {(pendingTpl.variableNames || []).map((name, i) => (
-                        <input
-                          key={`${pendingTpl.id}-${name}`}
-                          value={tplParams[i] || ''}
-                          onChange={(e) => {
-                            const next = [...tplParams];
-                            next[i] = e.target.value;
-                            setTplParams(next);
-                          }}
-                          placeholder={`{{${name}}}`}
-                          className="rounded-lg border border-emerald-200 bg-white px-2 py-1.5 text-xs outline-none focus:border-emerald-500"
-                        />
-                      ))}
-                    </div>
-                  ) : null}
-                  <button
-                    type="button"
-                    disabled={sending}
-                    onClick={() => void onSendTemplate(pendingTpl, tplParams)}
-                    className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
-                  >
-                    {sending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
-                    Şablonu gönder
-                  </button>
-                </div>
-              ) : null}
-
               <div className="flex items-end gap-2">
                 <textarea
                   ref={composeRef}
@@ -828,49 +746,12 @@ export default function CrmInboxPage() {
           </p>
           <button
             type="button"
-            onClick={() => setShowCreateTpl((v) => !v)}
+            onClick={() => setShowCreateTpl(true)}
             className="mb-2 inline-flex w-full items-center justify-center gap-1 rounded-lg border border-emerald-200 bg-white px-2 py-1.5 text-[11px] font-semibold text-emerald-800 hover:bg-emerald-50"
           >
             <Plus className="h-3.5 w-3.5" />
-            {showCreateTpl ? 'Formu kapat' : 'Şablon yaz · onaya gönder'}
+            Şablon ekle
           </button>
-          {showCreateTpl ? (
-            <div className="mb-3 space-y-1.5 rounded-lg border border-slate-200 bg-white p-2">
-              <input
-                value={createTplName}
-                onChange={(e) => setCreateTplName(e.target.value)}
-                placeholder="Şablon adı (örn. hosgeldin_veli)"
-                className="w-full rounded-md border border-slate-200 px-2 py-1 text-xs outline-none focus:border-emerald-500"
-              />
-              <select
-                value={createTplCategory}
-                onChange={(e) => setCreateTplCategory(e.target.value as 'UTILITY' | 'MARKETING')}
-                className="w-full rounded-md border border-slate-200 px-2 py-1 text-xs"
-              >
-                <option value="UTILITY">UTILITY (işlem / bilgilendirme)</option>
-                <option value="MARKETING">MARKETING (kampanya)</option>
-              </select>
-              <textarea
-                value={createTplBody}
-                onChange={(e) => setCreateTplBody(e.target.value)}
-                rows={4}
-                placeholder={'Merhaba {{1}}, Online VIP Dershane.\nGorusme saati: {{2}}.'}
-                className="w-full resize-none rounded-md border border-slate-200 px-2 py-1 text-xs outline-none focus:border-emerald-500"
-              />
-              <p className="text-[10px] text-slate-400">
-                Gövde metni yeter. Değişken: {'{{1}}'} veya {'{{veli_adi}}'}. Başlık/görsel zorunlu değil.
-              </p>
-              <button
-                type="button"
-                disabled={creatingTpl || !createTplName.trim() || !createTplBody.trim()}
-                onClick={() => void onCreateTemplate()}
-                className="inline-flex w-full items-center justify-center gap-1 rounded-md bg-emerald-600 px-2 py-1.5 text-[11px] font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
-              >
-                {creatingTpl ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
-                Meta’ya onaya gönder
-              </button>
-            </div>
-          ) : null}
           {metaTemplates.length ? (
             <div className="flex max-h-56 flex-col gap-1 overflow-y-auto">
               {metaTemplates.map((t) => (
@@ -1103,6 +984,34 @@ export default function CrmInboxPage() {
         )}
       </aside>
       </div>
+
+      <CrmTemplateCreateModal
+        open={showCreateTpl}
+        creating={creatingTpl}
+        name={createTplName}
+        body={createTplBody}
+        category={createTplCategory}
+        onName={setCreateTplName}
+        onBody={setCreateTplBody}
+        onCategory={setCreateTplCategory}
+        onClose={() => setShowCreateTpl(false)}
+        onSubmit={() => void onCreateTemplate()}
+      />
+      <CrmTemplateSendPreviewModal
+        open={Boolean(pendingTpl)}
+        template={pendingTpl}
+        params={tplParams}
+        channel={selected?.channel || 'whatsapp'}
+        sending={sending}
+        onParams={setTplParams}
+        onClose={() => {
+          setPendingTpl(null);
+          setTplParams([]);
+        }}
+        onConfirm={() => {
+          if (pendingTpl) void onSendTemplate(pendingTpl, tplParams);
+        }}
+      />
     </div>
   );
 }

@@ -1,6 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
-import { Loader2, X } from 'lucide-react';
+import { FileText, Loader2, Plus, X } from 'lucide-react';
 import { toast } from 'sonner';
+import {
+  crmCreateMetaTemplate,
+  crmListMetaTemplates,
+  type CrmMetaTemplate
+} from '../../../lib/crmInboxApi';
+import {
+  CrmTemplateCreateModal,
+  CrmTemplateSendPreviewModal,
+  fillTemplatePreview,
+  type PreviewTemplate
+} from '../../crm/CrmTemplateModals';
 import {
   rtGetLead,
   rtUpdateLead,
@@ -486,6 +497,38 @@ function PricingForm({
   );
 }
 
+function defaultTplParams(tpl: PreviewTemplate, lead?: RegLead | null) {
+  const names = tpl.variableNames || [];
+  const veli = lead?.parent_full_name || lead?.full_name || '';
+  const ogr = `${lead?.first_name || ''} ${lead?.last_name || ''}`.trim();
+  const sinif = lead?.grade_program ? GRADE_LABEL[lead.grade_program] || lead.grade_program : '';
+  return names.map((n) => {
+    const k = String(n).toLowerCase();
+    if (k.includes('ogrenci')) return ogr;
+    if (k.includes('veli') || (k.includes('ad_soyad') && !k.includes('ogrenci'))) return veli;
+    if (k.includes('sinif') || k.includes('grade')) return sinif;
+    if (k === '1') return veli;
+    if (k === '2') return ogr;
+    if (k === '3') return sinif;
+    return '';
+  });
+}
+
+function toPreviewTemplate(t: CrmMetaTemplate): PreviewTemplate {
+  return {
+    id: t.id,
+    name: t.name,
+    body: t.body,
+    language: t.language,
+    status: t.status,
+    variableCount: t.variableCount,
+    variableNames: t.variableNames,
+    variableFormat: t.variableFormat,
+    mediaHeader: t.mediaHeader,
+    kind: 'meta_template'
+  };
+}
+
 function MessagesTab({
   leadId,
   lead,
@@ -500,6 +543,17 @@ function MessagesTab({
   const [channel, setChannel] = useState<'whatsapp' | 'instagram'>('whatsapp');
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [tplQuery, setTplQuery] = useState('');
+  const [metaTemplates, setMetaTemplates] = useState<CrmMetaTemplate[]>([]);
+  const [pendingMeta, setPendingMeta] = useState<CrmMetaTemplate[]>([]);
+  const [showCreate, setShowCreate] = useState(false);
+  const [createName, setCreateName] = useState('');
+  const [createBody, setCreateBody] = useState('');
+  const [createCategory, setCreateCategory] = useState<'UTILITY' | 'MARKETING'>('UTILITY');
+  const [creating, setCreating] = useState(false);
+  const [previewTpl, setPreviewTpl] = useState<PreviewTemplate | null>(null);
+  const [previewParams, setPreviewParams] = useState<string[]>([]);
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -511,6 +565,15 @@ function MessagesTab({
     else setChannel('whatsapp');
   }, [lead?.last_inbound_channel, leadId]);
 
+  useEffect(() => {
+    void crmListMetaTemplates(false)
+      .then((res) => {
+        setMetaTemplates(res.data || []);
+        setPendingMeta(res.pending || []);
+      })
+      .catch(() => undefined);
+  }, []);
+
   const send = async () => {
     const body = text.trim();
     if (!body) return;
@@ -520,6 +583,49 @@ function MessagesTab({
       setText('');
       if (res.data?.warning) toast.warning(String(res.data.warning));
       else toast.success(channel === 'instagram' ? 'Instagram mesajı işlendi' : 'WhatsApp mesajı gönderildi');
+      onSent();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Gönderilemedi');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const openPreview = (tpl: PreviewTemplate) => {
+    setPreviewTpl(tpl);
+    setPreviewParams(defaultTplParams(tpl, lead));
+    setPickerOpen(false);
+  };
+
+  const confirmSendTemplate = async () => {
+    if (!previewTpl) return;
+    if (previewTpl.variableCount > 0 && previewParams.some((p) => !String(p || '').trim())) {
+      toast.error('Şablon değişkenlerini doldurun.');
+      return;
+    }
+    const filled = fillTemplatePreview(previewTpl.body || '', previewParams, previewTpl.variableNames || []);
+    setSending(true);
+    try {
+      const isMeta = previewTpl.kind !== 'local';
+      const res = await rtSendChannelMessage(
+        isMeta
+          ? {
+              lead_id: leadId,
+              channel,
+              body: filled,
+              template_name: previewTpl.name,
+              template_language: previewTpl.language || 'tr',
+              template_params: previewParams,
+              template_param_names:
+                previewTpl.variableFormat === 'named' ? previewTpl.variableNames : undefined,
+              template_body: previewTpl.body
+            }
+          : { lead_id: leadId, channel, body: filled }
+      );
+      if (res.data?.warning) toast.warning(String(res.data.warning));
+      else toast.success('Şablon onaylandı ve gönderildi');
+      setPreviewTpl(null);
+      setPreviewParams([]);
       onSent();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Gönderilemedi');
@@ -569,18 +675,100 @@ function MessagesTab({
       </div>
 
       <div className="space-y-2 rounded-xl border border-slate-200 p-3 dark:border-slate-700">
-        <div className="flex flex-wrap gap-1">
-          {CRM_MESSAGE_TEMPLATES.map((tpl) => (
-            <button
-              key={tpl.id}
-              type="button"
-              onClick={() => setText(tpl.body)}
-              className="rounded-full border border-slate-200 px-2.5 py-1 text-[11px] text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-300"
-            >
-              {tpl.label}
-            </button>
-          ))}
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setPickerOpen((v) => !v)}
+            className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
+          >
+            <FileText className="h-3.5 w-3.5" />
+            Şablonlar
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowCreate(true)}
+            className="inline-flex items-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-xs font-semibold text-emerald-800 hover:bg-emerald-100"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            Şablon ekle
+          </button>
         </div>
+        {pickerOpen ? (
+          <div className="rounded-xl border border-slate-200 bg-white p-2 dark:border-slate-600 dark:bg-slate-800">
+            <input
+              value={tplQuery}
+              onChange={(e) => setTplQuery(e.target.value)}
+              placeholder="Şablon ara…"
+              className="mb-2 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs dark:border-slate-600 dark:bg-slate-900"
+            />
+            <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">Hazır metinler</p>
+            <div className="mb-2 flex flex-col gap-1">
+              {CRM_MESSAGE_TEMPLATES.filter((t) => {
+                const q = tplQuery.toLocaleLowerCase('tr');
+                if (!q) return true;
+                return `${t.label} ${t.body}`.toLocaleLowerCase('tr').includes(q);
+              }).map((tpl) => (
+                <button
+                  key={tpl.id}
+                  type="button"
+                  onClick={() =>
+                    openPreview({
+                      id: `local:${tpl.id}`,
+                      name: tpl.label,
+                      body: tpl.body,
+                      variableCount: 0,
+                      kind: 'local'
+                    })
+                  }
+                  className="rounded-lg px-2 py-1.5 text-left hover:bg-slate-50 dark:hover:bg-slate-700"
+                >
+                  <span className="block text-[11px] font-semibold text-slate-800 dark:text-slate-100">{tpl.label}</span>
+                  <span className="line-clamp-2 text-[10px] text-slate-500">{tpl.body}</span>
+                </button>
+              ))}
+            </div>
+            <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-700">Meta onaylı</p>
+            <div className="flex max-h-40 flex-col gap-1 overflow-y-auto">
+              {metaTemplates.filter((t) => {
+                const q = tplQuery.toLocaleLowerCase('tr');
+                if (!q) return true;
+                return `${t.name} ${t.body}`.toLocaleLowerCase('tr').includes(q);
+              }).length ? (
+                metaTemplates
+                  .filter((t) => {
+                    const q = tplQuery.toLocaleLowerCase('tr');
+                    if (!q) return true;
+                    return `${t.name} ${t.body}`.toLocaleLowerCase('tr').includes(q);
+                  })
+                  .map((t) => (
+                    <button
+                      key={t.id}
+                      type="button"
+                      onClick={() => openPreview(toPreviewTemplate(t))}
+                      className="rounded-lg px-2 py-1.5 text-left hover:bg-emerald-50 dark:hover:bg-emerald-950/30"
+                    >
+                      <span className="flex items-center justify-between gap-1">
+                        <span className="truncate text-[11px] font-semibold text-slate-800 dark:text-slate-100">
+                          {t.name}
+                        </span>
+                        <span className="shrink-0 rounded bg-emerald-100 px-1 py-0.5 text-[9px] font-bold uppercase text-emerald-800">
+                          {t.status || 'onaylı'}
+                        </span>
+                      </span>
+                      {t.body ? <span className="line-clamp-2 text-[10px] text-slate-500">{t.body}</span> : null}
+                    </button>
+                  ))
+              ) : (
+                <p className="px-2 py-1 text-[11px] text-slate-400">Onaylı Meta şablonu yok.</p>
+              )}
+            </div>
+            {pendingMeta.length ? (
+              <p className="mt-2 text-[10px] text-amber-700">
+                Onay bekleyen: {pendingMeta.map((t) => t.name).join(', ')}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
@@ -633,8 +821,63 @@ function MessagesTab({
             {sending ? '…' : 'Gönder'}
           </button>
         </div>
-        <p className="text-[10px] text-slate-400">Ctrl/Cmd + Enter ile gönder</p>
+        <p className="text-[10px] text-slate-400">
+          Serbest metin: Ctrl/Cmd + Enter. Şablon: seç → önizle → Onayla ve gönder.
+        </p>
       </div>
+
+      <CrmTemplateCreateModal
+        open={showCreate}
+        creating={creating}
+        name={createName}
+        body={createBody}
+        category={createCategory}
+        onName={setCreateName}
+        onBody={setCreateBody}
+        onCategory={setCreateCategory}
+        onClose={() => setShowCreate(false)}
+        onSubmit={() => {
+          if (!createName.trim() || !createBody.trim()) {
+            toast.error('Şablon adı ve metin gerekli.');
+            return;
+          }
+          setCreating(true);
+          void crmCreateMetaTemplate({
+            name: createName.trim(),
+            body: createBody.trim(),
+            category: createCategory,
+            language: 'tr'
+          })
+            .then((res) => {
+              toast.success(res.message || `Onaya gönderildi: ${res.data?.status || 'PENDING'}`);
+              setCreateName('');
+              setCreateBody('');
+              setShowCreate(false);
+              return crmListMetaTemplates(true);
+            })
+            .then((res) => {
+              if (!res) return;
+              setMetaTemplates(res.data || []);
+              setPendingMeta(res.pending || []);
+            })
+            .catch((e) => toast.error(e instanceof Error ? e.message : 'Şablon onaya gönderilemedi'))
+            .finally(() => setCreating(false));
+        }}
+      />
+
+      <CrmTemplateSendPreviewModal
+        open={Boolean(previewTpl)}
+        template={previewTpl}
+        params={previewParams}
+        channel={channel}
+        sending={sending}
+        onParams={setPreviewParams}
+        onClose={() => {
+          setPreviewTpl(null);
+          setPreviewParams([]);
+        }}
+        onConfirm={() => void confirmSendTemplate()}
+      />
     </div>
   );
 }
