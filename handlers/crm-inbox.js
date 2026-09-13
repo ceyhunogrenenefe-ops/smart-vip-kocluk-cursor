@@ -22,7 +22,10 @@ import {
   publicSocialStatus,
   saveMetaPageSecretsToDb
 } from '../api/_lib/meta-social-inbound.js';
-import { describeFacebookLoginWidget } from '../api/_lib/meta-facebook-login.js';
+import {
+  DEFAULT_META_CONFIGURATION_ID,
+  describeFacebookLoginWidget
+} from '../api/_lib/meta-facebook-login.js';
 
 function userHasRole(user, role) {
   const want = String(role || '').toLowerCase();
@@ -219,6 +222,35 @@ export default async function handler(req, res) {
       await saveMetaPageSecretsToDb({ app_secret: secret });
       process.env.META_APP_SECRET = secret;
       return res.status(200).json({ ok: true, data: { saved: true, suffix: secret.slice(-4) } });
+    }
+
+    if (op === 'save_meta_configuration_id' && req.method === 'POST') {
+      if (!isAdmin) {
+        return res.status(403).json({ error: 'forbidden', hint: 'Yapılandırma ID yalnızca yönetici kaydeder.' });
+      }
+      const configId = String(body.configuration_id || body.config_id || '').trim();
+      if (!/^\d{10,22}$/.test(configId)) {
+        return res.status(400).json({
+          error: 'configuration_id_invalid',
+          hint: 'Yeni Login for Business yapılandırma ID’si (yalnızca rakam). Eski 1784538625891317 değil — o iki varlık hâlâ 1349246 verir.'
+        });
+      }
+      if (configId === DEFAULT_META_CONFIGURATION_ID) {
+        return res.status(400).json({
+          error: 'configuration_id_still_default',
+          hint: 'Bu eski yapılandırma hâlâ 52570416778031 ve 23850842047630381 istiyor. Meta’da o iki varlığı silin veya yalnızca Online VIP içeren yeni config oluşturun.'
+        });
+      }
+      await saveMetaPageSecretsToDb({ configuration_id: configId });
+      process.env.META_CONFIGURATION_ID = configId;
+      return res.status(200).json({
+        ok: true,
+        data: {
+          saved: true,
+          configuration_id: configId,
+          uses_slim_config: configId !== DEFAULT_META_CONFIGURATION_ID
+        }
+      });
     }
 
     if (op === 'save_page_token' && req.method === 'POST') {
