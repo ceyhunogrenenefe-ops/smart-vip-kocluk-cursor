@@ -9,9 +9,15 @@ import {
   getCrmAgentAssignment,
   getCrmInboundInstitutionId,
   sendCrmInstagramDm,
+  sendCrmWhatsAppTemplate,
   sendCrmWhatsAppText,
   upsertCrmMessage
 } from '../api/_lib/crm-inbox.js';
+import {
+  fillCrmTemplateBody,
+  listApprovedCrmWhatsAppTemplates,
+  mapDbTemplateToCrm
+} from '../api/_lib/meta-templates-sync.js';
 import { diagnoseCrmInbox, ensureCrmInboxSchema } from '../api/_lib/crm-inbox-schema.js';
 import { ensureMetaInboundDelivery, publicInboundStatus } from '../api/_lib/meta-inbound-ensure.js';
 import {
@@ -328,6 +334,54 @@ export default async function handler(req, res) {
       return res.status(200).json({ data: data || [] });
     }
 
+    if (op === 'list_meta_templates') {
+      await loadMetaWhatsAppSecretsFromDb();
+      const force =
+        String(req.query?.refresh || body.refresh || '').trim() === '1' ||
+        String(req.query?.force || body.force || '').trim() === '1';
+      const live = await listApprovedCrmWhatsAppTemplates({ force });
+      if (live.templates?.length) {
+        return res.status(200).json({
+          data: live.templates,
+          source: live.source,
+          hint: live.hint || null
+        });
+      }
+
+      const { data: rows, error } = await supabaseAdmin
+        .from('message_templates')
+        .select(
+          'id, name, type, content, variables, meta_template_name, meta_template_language, whatsapp_template_status'
+        )
+        .not('meta_template_name', 'is', null)
+        .limit(80);
+      if (error && /message_templates|does not exist/i.test(error.message || '')) {
+        return res.status(200).json({
+          data: [],
+          source: live.source || 'none',
+          hint: live.hint || 'Onaylı Meta şablonu bulunamadı.',
+          error: live.error || null
+        });
+      }
+      if (error) throw error;
+      const fallback = (rows || [])
+        .map(mapDbTemplateToCrm)
+        .filter((t) => t.name)
+        .filter((t) => {
+          const s = String(t.status || '').toUpperCase();
+          return !s || /APPROV|ACTIVE|ENABLED/.test(s);
+        })
+        .sort((a, b) => a.name.localeCompare(b.name, 'tr'));
+      return res.status(200).json({
+        data: fallback,
+        source: fallback.length ? 'db' : live.source || 'none',
+        hint: fallback.length
+          ? 'Graph listesi boş — kayıtlı onaylı şablonlar gösteriliyor.'
+          : live.hint || 'Onaylı Meta şablonu bulunamadı.',
+        error: live.error || null
+      });
+    }
+
     if (op === 'get_conversation') {
       const id = String(req.query?.id || body.id || '').trim();
       if (!id) return res.status(400).json({ error: 'id_required' });
@@ -384,8 +438,17 @@ export default async function handler(req, res) {
     if (op === 'send_message' && req.method === 'POST') {
       const conversationId = String(body.conversation_id || '').trim();
       const text = String(body.body || body.text || '').trim();
+      const templateName = String(body.template_name || body.templateName || '').trim();
+      const templateLanguage = String(body.template_language || body.language || 'tr').trim() || 'tr';
+      const templateParams = Array.isArray(body.template_params)
+        ? body.template_params.map((x) => String(x ?? ''))
+        : [];
+      const templateParamNames = Array.isArray(body.template_param_names)
+        ? body.template_param_names.map((x) => String(x ?? '').trim()).filter(Boolean)
+        : null;
+      const templateBodyPreview = String(body.template_body || '').trim();
       if (!conversationId) return res.status(400).json({ error: 'conversation_id_required' });
-      if (!text) return res.status(400).json({ error: 'body_required' });
+      if (!templateName && !text) return res.status(400).json({ error: 'body_required' });
 
       const { data: conv } = await supabaseAdmin
         .from('crm_conversations')
@@ -404,9 +467,30 @@ export default async function handler(req, res) {
         conv.assigned_user_id = actor.sub;
       }
 
+      if (templateName && conv.channel !== 'whatsapp') {
+        return res.status(400).json({
+          error: 'template_whatsapp_only',
+          message: 'Meta şablonları yalnızca WhatsApp konuşmasında gönderilir.'
+        });
+      }
+
       let sendResult = { ok: false, messageId: null, error: null };
+      let outboundBody = text;
       try {
-        if (conv.channel === 'whatsapp') {
+        if (templateName) {
+          const r = await sendCrmWhatsAppTemplate({
+            phone: conv.contact_identifier,
+            templateName,
+            languageCode: templateLanguage,
+            bodyParameterTexts: templateParams,
+            bodyParameterNames: templateParamNames
+          });
+          sendResult = { ok: true, messageId: r.messageId, error: null, languageUsed: r.languageUsed };
+          outboundBody =
+            fillCrmTemplateBody(templateBodyPreview, templateParams, templateParamNames) ||
+            templateBodyPreview ||
+            `[şablon] ${templateName}`;
+        } else if (conv.channel === 'whatsapp') {
           const r = await sendCrmWhatsAppText({ phone: conv.contact_identifier, text });
           sendResult = { ok: true, messageId: r.messageId, error: null };
         } else {
@@ -419,14 +503,17 @@ export default async function handler(req, res) {
           messageId: null,
           error: e instanceof Error ? e.message : String(e)
         };
+        if (templateName && !outboundBody) {
+          outboundBody = templateBodyPreview || `[şablon] ${templateName}`;
+        }
       }
 
       const saved = await upsertCrmMessage({
         channel: conv.channel,
         contactIdentifier: conv.contact_identifier,
         contactName: conv.contact_name,
-        body: text,
-        messageType: 'text',
+        body: outboundBody,
+        messageType: templateName ? 'template' : 'text',
         messageId: sendResult.messageId,
         timestamp: Date.now(),
         direction: 'outbound',
@@ -434,7 +521,16 @@ export default async function handler(req, res) {
         senderId: actor.sub,
         institutionId: conv.institution_id,
         leadId: conv.lead_id,
-        payload: { send: sendResult },
+        payload: {
+          send: sendResult,
+          template: templateName
+            ? {
+                name: templateName,
+                language: templateLanguage,
+                params: templateParams
+              }
+            : null
+        },
         deliveryStatus: sendResult.ok ? 'sent' : 'failed'
       });
 
