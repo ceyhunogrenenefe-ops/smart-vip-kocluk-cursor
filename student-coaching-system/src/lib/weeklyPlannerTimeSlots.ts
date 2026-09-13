@@ -1,6 +1,13 @@
 export const PLANNER_GRID_STEP_OPTIONS = [10, 15, 30, 60] as const;
 export type PlannerGridStepMinutes = (typeof PLANNER_GRID_STEP_OPTIONS)[number];
 
+/** Grid 08:00’dan ertesi gün 01:00’a kadar (22:00 satırından sonra 23 / 00 / 01). */
+export const PLANNER_START_HOUR = 8;
+export const PLANNER_END_HOUR = 25;
+const DAY_MINUTES = 24 * 60;
+/** 00:00–01:59 gece yarısından sonra sayılır (sabah 08:00 grid’i bozmaz). */
+const OVERNIGHT_HOUR_MAX = 1;
+
 const GRID_STEP_STORAGE_KEY = 'weekly-planner-grid-step-minutes';
 
 export type PlannerTimeSlot = {
@@ -31,8 +38,9 @@ export function savePlannerGridStepMinutes(step: PlannerGridStepMinutes): void {
 }
 
 export function minutesToHhmm(totalMinutes: number): string {
-  const h = Math.floor(totalMinutes / 60);
-  const m = totalMinutes % 60;
+  const wrapped = ((totalMinutes % DAY_MINUTES) + DAY_MINUTES) % DAY_MINUTES;
+  const h = Math.floor(wrapped / 60);
+  const m = wrapped % 60;
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
 
@@ -45,13 +53,22 @@ export function timeToMinutes(t: string): number | null {
   return h * 60 + min;
 }
 
+/** 23:00 sonrası 00:00 / 01:00’ı ertesi güne bağlar (1440 / 1500 dk). */
+export function timeToPlannerMinutes(t: string): number | null {
+  const m = timeToMinutes(t);
+  if (m == null) return null;
+  const h = Math.floor(m / 60);
+  if (h <= OVERNIGHT_HOUR_MAX) return m + DAY_MINUTES;
+  return m;
+}
+
 export function buildPlannerTimeSlots(opts?: {
   startHour?: number;
   endHour?: number;
   stepMinutes?: number;
 }): PlannerTimeSlot[] {
-  const startHour = opts?.startHour ?? 8;
-  const endHour = opts?.endHour ?? 23;
+  const startHour = opts?.startHour ?? PLANNER_START_HOUR;
+  const endHour = opts?.endHour ?? PLANNER_END_HOUR;
   const step = opts?.stepMinutes ?? 60;
   const slots: PlannerTimeSlot[] = [];
   let m = startHour * 60;
@@ -71,7 +88,7 @@ export function buildPlannerTimeSlots(opts?: {
 }
 
 export function entryMatchesPlannerSlot(entryStart: string, slot: PlannerTimeSlot): boolean {
-  const em = timeToMinutes(entryStart);
+  const em = timeToPlannerMinutes(entryStart);
   if (em == null) return false;
   return em >= slot.startMinutes && em < slot.endMinutes;
 }
@@ -111,7 +128,7 @@ export function buildDistinctPlannerSlots(
 }
 
 export function addMinutesToTimeHhmm(start: string, deltaMinutes: number): string {
-  const base = timeToMinutes(start);
+  const base = timeToPlannerMinutes(start);
   if (base == null) return start;
-  return minutesToHhmm(Math.min(base + deltaMinutes, 23 * 60 + 59));
+  return minutesToHhmm(Math.min(base + deltaMinutes, PLANNER_END_HOUR * 60));
 }
