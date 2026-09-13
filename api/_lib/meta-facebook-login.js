@@ -34,25 +34,41 @@ export function oauthRedirectUri(origin = PRODUCTION_ORIGIN) {
   return `${String(origin || PRODUCTION_ORIGIN).replace(/\/$/, '')}${OAUTH_PATH}`;
 }
 
+/** Sayfa + Instagram DM — Login for Business varlık listesi yok, 1349246 olmaz. */
+export const PAGE_IG_OAUTH_SCOPES = [
+  'pages_show_list',
+  'pages_messaging',
+  'pages_manage_metadata',
+  'instagram_basic',
+  'instagram_manage_messages',
+  'instagram_manage_comments',
+  'public_profile'
+].join(',');
+
 /**
- * Facebook Login for Business dialog — yalnızca code.
+ * mode=scopes: klasik Facebook Login (önerilen — yalnızca Online VIP sayfası).
+ * mode=config: Login for Business config_id (BM’deki tüm varlıklara izin ister, 1349246 verebilir).
  */
 export function buildFacebookLoginUrl({
   responseType = 'code',
   redirectUri,
   state,
-  origin = PRODUCTION_ORIGIN
+  origin = PRODUCTION_ORIGIN,
+  mode = 'scopes'
 } = {}) {
   const type = responseType === 'token' ? 'token' : 'code';
-  // Token ve code aynı callback — Meta beyaz listesine tek adres yeter.
   const uri = redirectUri || oauthRedirectUri(origin);
   const params = new URLSearchParams({
     client_id: metaFacebookAppId(),
     redirect_uri: uri,
-    config_id: metaFacebookConfigId(),
-    response_type: type,
-    override_default_response_type: 'true'
+    response_type: type
   });
+  if (mode === 'config') {
+    params.set('config_id', metaFacebookConfigId());
+    params.set('override_default_response_type', 'true');
+  } else {
+    params.set('scope', PAGE_IG_OAUTH_SCOPES);
+  }
   if (state) params.set('state', String(state));
   return `https://www.facebook.com/${metaFacebookGraphVersion()}/dialog/oauth?${params.toString()}`;
 }
@@ -80,7 +96,13 @@ export function facebookOAuthWhitelistUris(origin = PRODUCTION_ORIGIN) {
 export function describeFacebookLoginWidget(origin = PRODUCTION_ORIGIN, { state } = {}) {
   const hasSecret = Boolean(metaFacebookAppSecret());
   const oauth = oauthRedirectUri(origin);
-  const authorize = buildFacebookLoginUrl({ responseType: 'code', origin, state });
+  const authorize = buildFacebookLoginUrl({ responseType: 'code', origin, state, mode: 'scopes' });
+  const configAuthorize = buildFacebookLoginUrl({
+    responseType: 'code',
+    origin,
+    state,
+    mode: 'config'
+  });
   return {
     app_id: metaFacebookAppId(),
     config_id: metaFacebookConfigId(),
@@ -90,10 +112,11 @@ export function describeFacebookLoginWidget(origin = PRODUCTION_ORIGIN, { state 
     whitelist_uris: facebookOAuthWhitelistUris(origin),
     authorize_url: authorize,
     code_authorize_url: authorize,
+    config_authorize_url: configAuthorize,
     has_app_secret: hasSecret,
     hint: hasSecret
-      ? 'Instagram’ı bağla → Facebook sayfa seçimi → code callback. Redirect URI: ' + oauth
-      : 'Önce SmartKocluk Facebook App Secret’ı kaydedin (Ayarlar → Temel → App secret). Instagram Login secret değil. Login for Business yalnızca response_type=code kabul eder.'
+      ? 'Önerilen: sayfa izinleriyle bağla (config_id yok). 1349246 = Login for Business ekstra varlıklara izin isteyemez.'
+      : 'Önce SmartKocluk Facebook App Secret’ı kaydedin (Ayarlar → Temel → App secret). Instagram Login secret değil.'
   };
 }
 
