@@ -1,14 +1,6 @@
 /** Ortak: `[[...segments]].js` ve çok segment rewrite (`deep-api.js`) aynı haritayı kullanır. */
 
 export const routeLoaders = {
-  'reviews/student': () => import('../handlers/reviews-student.js'),
-  'reviews-student': () => import('../handlers/reviews-student.js'),
-  'reviews/parent': () => import('../handlers/reviews-parent.js'),
-  'reviews-parent': () => import('../handlers/reviews-parent.js'),
-  'reviews/admin': () => import('../handlers/reviews-admin.js'),
-  'reviews-admin': () => import('../handlers/reviews-admin.js'),
-  'cron/teacher-review-invites': () => import('../handlers/cron-teacher-review-invites.js'),
-
   'bbb-guest-join': () => import('../handlers/bbb-guest-join.js'),
   'guest-join-preview': () => import('../handlers/guest-join-preview.js'),
   'guest-join-resolve': () => import('../handlers/guest-join-resolve.js'),
@@ -19,6 +11,7 @@ export const routeLoaders = {
   'setup-password-reset-table': () => import('../handlers/setup-password-reset-table.js'),
   'setup-edesis-exam-assignments-table': () =>
     import('../handlers/setup-edesis-exam-assignments-table.js'),
+  'setup-crm-inbox-schema': () => import('../handlers/setup-crm-inbox-schema.js'),
   students: () => import('../handlers/students.js'),
   'student-activity': () => import('../handlers/student-activity.js'),
   'my-student': () => import('../handlers/my-student.js'),
@@ -126,6 +119,15 @@ export const routeLoaders = {
   'public-teacher-book': () => import('../handlers/public-teacher-book.js'),
   'public/teachers': () => import('../handlers/public-teachers.js'),
   'public-teachers': () => import('../handlers/public-teachers.js'),
+  'reviews/student': () => import('../handlers/reviews-student.js'),
+  'reviews-student': () => import('../handlers/reviews-student.js'),
+  'reviews/parent': () => import('../handlers/reviews-parent.js'),
+  'reviews-parent': () => import('../handlers/reviews-parent.js'),
+  'reviews/admin': () => import('../handlers/reviews-admin.js'),
+  'reviews-admin': () => import('../handlers/reviews-admin.js'),
+  'cron/teacher-review-invites': () => import('../handlers/cron-teacher-review-invites.js'),
+  teachers: () => import('../handlers/teachers.js'),
+  'teachers/reviews': () => import('../handlers/teachers.js'),
   'teacher-applications': () => import('../handlers/teacher-applications.js'),
   'meeting-tracker': () => import('../handlers/meeting-tracker.js'),
   'registration-tracking': () => import('../handlers/registration-tracking.js'),
@@ -138,5 +140,8 @@ export const routeLoaders = {
   'commerce-vendor': () => import('../handlers/commerce-vendor.js'),
   'commerce-store': () => import('../handlers/commerce-store.js'),
   'commerce-checkout': () => import('../handlers/commerce-checkout.js'),
-  'commerce-upload': () => import('../handlers/commerce-upload.js')
+  'commerce-upload': () => import('../handlers/commerce-upload.js'),
+  'commerce-checkout-handoff': () => import('../handlers/commerce-checkout-handoff.js'),
+  'commerce-checkout-pay': () => import('../handlers/commerce-checkout-pay.js'),
+  'commerce-checkout-start': () => import('../handlers/commerce-checkout-start.js')
 };

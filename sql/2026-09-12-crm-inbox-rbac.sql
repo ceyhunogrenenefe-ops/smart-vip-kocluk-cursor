@@ -56,15 +56,20 @@ CREATE TABLE IF NOT EXISTS public.crm_messages (
   body text NULL,
   media_url text NULL,
   message_type text NOT NULL DEFAULT 'text',
-  external_message_id text NULL,
+  message_id text NULL,
   delivery_status text NULL,
   payload jsonb NULL,
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS uq_crm_messages_external
-  ON public.crm_messages (external_message_id)
-  WHERE external_message_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_crm_messages_message_id
+  ON public.crm_messages (message_id)
+  WHERE message_id IS NOT NULL;
+
+ALTER TABLE public.crm_messages ADD COLUMN IF NOT EXISTS external_message_id text;
+UPDATE public.crm_messages
+SET message_id = external_message_id
+WHERE message_id IS NULL AND external_message_id IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_crm_messages_conversation_time
   ON public.crm_messages (conversation_id, created_at ASC);
