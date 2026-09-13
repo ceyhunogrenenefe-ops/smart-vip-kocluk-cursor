@@ -1,0 +1,29 @@
+{
+  "name": "online-vip-crm",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Online VIP CRM — multi-tenant omnichannel CRM for Online VIP Dershane",
+  "packageManager": "pnpm@9.15.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "turbo run dev --parallel",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "test:unit": "turbo run test:unit",
+    "db:generate": "pnpm --filter @online-vip-crm/database generate",
+    "db:migrate": "pnpm --filter @online-vip-crm/database migrate:dev",
+    "db:migrate:deploy": "pnpm --filter @online-vip-crm/database migrate:deploy",
+    "db:seed": "pnpm --filter @online-vip-crm/database seed",
+    "db:studio": "pnpm --filter @online-vip-crm/database studio",
+    "docker:up": "docker compose up -d postgres redis",
+    "docker:down": "docker compose down",
+    "typecheck": "turbo run typecheck"
+  },
+  "devDependencies": {
+    "turbo": "^2.3.3",
+    "typescript": "^5.7.2"
+  }
+}
