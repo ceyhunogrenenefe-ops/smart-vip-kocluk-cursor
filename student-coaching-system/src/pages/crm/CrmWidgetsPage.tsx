@@ -19,53 +19,6 @@ import {
   type CrmWidgetDef
 } from './crmWidgetCatalog';
 
-declare global {
-  interface Window {
-    FB?: {
-      init: (opts: { appId: string; version: string; cookie?: boolean; xfbml?: boolean }) => void;
-      login: (
-        cb: (res: { authResponse?: { accessToken?: string }; status?: string }) => void,
-        opts?: { config_id?: string }
-      ) => void;
-    };
-    fbAsyncInit?: () => void;
-  }
-}
-
-function loadFacebookSdk(appId: string, version: string): Promise<void> {
-  const ver = version.startsWith('v') ? version : `v${version}`;
-  return new Promise((resolve, reject) => {
-    if (window.FB) {
-      resolve();
-      return;
-    }
-    const prev = window.fbAsyncInit;
-    window.fbAsyncInit = () => {
-      try {
-        window.FB?.init({ appId, version: ver, cookie: false, xfbml: false });
-        prev?.();
-        resolve();
-      } catch (e) {
-        reject(e instanceof Error ? e : new Error('fb_init_failed'));
-      }
-    };
-    const existing = document.getElementById('facebook-jssdk');
-    if (existing) {
-      setTimeout(() => (window.FB ? resolve() : reject(new Error('fb_sdk_timeout'))), 8000);
-      return;
-    }
-    const script = document.createElement('script');
-    script.id = 'facebook-jssdk';
-    script.async = true;
-    script.src = 'https://connect.facebook.net/tr_TR/sdk.js';
-    script.onerror = () => reject(new Error('fb_sdk_load_failed'));
-    document.body.appendChild(script);
-    setTimeout(() => {
-      if (!window.FB) reject(new Error('fb_sdk_timeout'));
-    }, 8000);
-  });
-}
-
 function widgetInstalled(id: string, inbound: CrmInboundStatus | null): boolean {
   const social = Boolean(inbound?.social?.ok);
   const wa = Boolean(inbound?.bound_to_production);
@@ -151,51 +104,14 @@ export default function CrmWidgetsPage() {
       .finally(() => setBinding(false));
   }, [refresh]);
 
-  const connectSocial = async () => {
-    if (!login) {
-      toast.error('Login bilgisi yok — sayfayı yenileyin');
+  const connectSocial = () => {
+    const url = login?.authorize_url || login?.code_authorize_url;
+    if (!url) {
+      toast.error('Facebook giriş adresi yok — sayfayı yenileyin');
       return;
     }
     setBinding(true);
-    try {
-      try {
-        await loadFacebookSdk(login.app_id, login.graph_version);
-        const token = await new Promise<string>((resolve, reject) => {
-          if (!window.FB) {
-            reject(new Error('fb_sdk_missing'));
-            return;
-          }
-          window.FB.login(
-            (response) => {
-              const access = String(response?.authResponse?.accessToken || '').trim();
-              if (access) resolve(access);
-              else reject(new Error(response?.status === 'unknown' ? 'popup_blocked' : 'login_cancelled'));
-            },
-            { config_id: login.config_id }
-          );
-        });
-        const res = await crmSavePageToken({ user_access_token: token });
-        if (!res.ok) throw new Error(res.hint || res.error || 'Bağlanamadı');
-        toast.success(res.data?.social?.page_name || 'Instagram / Facebook bağlandı');
-        await refresh();
-        return;
-      } catch (sdkErr) {
-        const msg = sdkErr instanceof Error ? sdkErr.message : '';
-        if (msg === 'login_cancelled') {
-          toast.error('Facebook penceresi iptal edildi');
-          return;
-        }
-        if (login.authorize_url) {
-          window.location.assign(login.authorize_url);
-          return;
-        }
-        throw sdkErr;
-      }
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Bağlanamadı');
-    } finally {
-      setBinding(false);
-    }
+    window.location.assign(url);
   };
 
   const refreshWhatsApp = async () => {
@@ -426,10 +342,13 @@ export default function CrmWidgetsPage() {
         </p>
         <ol className="mt-2 list-decimal space-y-1.5 pl-5">
           <li>
-            Meta for Developers → uygulama <strong>SmartKocluk</strong> → Facebook Login → Settings
+            Meta for Developers → <strong>SmartKocluk</strong> → Ayarlar → Temel → App Domains:{' '}
+            <code className="rounded bg-slate-100 px-1.5 py-0.5">dersonlinevipkocluk.com</code>
+            · Site URL:{' '}
+            <code className="rounded bg-slate-100 px-1.5 py-0.5">https://www.dersonlinevipkocluk.com/</code>
           </li>
           <li>
-            Valid OAuth Redirect URIs:
+            Facebook Login → Settings → Valid OAuth Redirect URIs:
             <code className="mx-1 rounded bg-slate-100 px-1.5 py-0.5 text-[12px]">
               {login?.widget_redirect_uri || 'https://www.dersonlinevipkocluk.com/crm/widgetler'}
             </code>
@@ -439,11 +358,12 @@ export default function CrmWidgetsPage() {
             </code>
           </li>
           <li>
-            App Domains: <code className="rounded bg-slate-100 px-1.5 py-0.5">dersonlinevipkocluk.com</code>
+            Aynı ekranda «Allowed domains for the JavaScript SDK» / ana domain:{' '}
+            <code className="rounded bg-slate-100 px-1.5 py-0.5">https://www.dersonlinevipkocluk.com/</code>
           </li>
           <li>
-            Bu sayfanın <strong>en üstündeki</strong> «Instagram’ı bağla» veya «Facebook’u bağla»
-            butonuna tıklayın. Facebook popup’ında sayfa listesinden Online VIP’i seçin.
+            Kaydet. Sonra bu sayfanın en üstündeki «Instagram’ı bağla» — Facebook sizi kendi
+            ekranına götürür, orada Online VIP sayfasını seçin.
           </li>
         </ol>
         {socialOk ? (

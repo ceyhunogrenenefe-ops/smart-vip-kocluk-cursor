@@ -80,7 +80,7 @@ export function describeFacebookLoginWidget(origin = PRODUCTION_ORIGIN) {
     code_authorize_url: hasSecret ? buildFacebookLoginUrl({ responseType: 'code', origin }) : null,
     has_app_secret: hasSecret,
     hint:
-      'Meta App Dashboard → Facebook Login → Valid OAuth Redirect URIs ekleyin: /crm/widgetler ve /api/meta/facebook-oauth. Popup’ta Online VIP sayfasını seçin — Kommo widget ile aynı Login for Business.'
+      'SmartKocluk → App Domains: dersonlinevipkocluk.com · Facebook Login Redirect URI: /crm/widgetler. JS SDK kullanılmaz; Facebook dialog yönlendirir.'
   };
 }
 
