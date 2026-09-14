@@ -11,7 +11,9 @@ import {
   sendCrmInstagramDm,
   sendCrmWhatsAppTemplate,
   sendCrmWhatsAppText,
-  upsertCrmMessage
+  upsertCrmMessage,
+  isFacebookFallbackContact,
+  stripFacebookFallbackContact
 } from '../api/_lib/crm-inbox.js';
 import {
   fillCrmTemplateBody,
@@ -23,7 +25,7 @@ import {
   buildMetaTemplateCreatePayload,
   createOrReuseMetaMessageTemplate
 } from '../api/_lib/meta-template-create.js';
-import { diagnoseCrmInbox, ensureCrmInboxSchema } from '../api/_lib/crm-inbox-schema.js';
+import { diagnoseCrmInbox, ensureCrmInboxSchema, probeFacebookChannelSupport, FACEBOOK_CHANNEL_REPAIR_SQL } from '../api/_lib/crm-inbox-schema.js';
 import { listRecentMetaWebhookLogs } from '../api/_lib/meta-webhook-logs.js';
 import { PAGE_WEBHOOK_FIELDS, INSTAGRAM_APP_WEBHOOK_FIELDS } from '../api/_lib/meta-social-inbound.js';
 import { ensureMetaInboundDelivery, publicInboundStatus } from '../api/_lib/meta-inbound-ensure.js';
@@ -152,8 +154,15 @@ export default async function handler(req, res) {
 
       if (institutionId) query = query.eq('institution_id', institutionId);
       if (status) query = query.eq('status', status);
-      if (channel === 'whatsapp' || channel === 'instagram' || channel === 'facebook') {
+      if (channel === 'whatsapp' || channel === 'instagram') {
         query = query.eq('channel', channel);
+        if (channel === 'instagram') {
+          // fb: fallback satırlarını Instagram filtresinden çıkar (Facebook olarak gösterilir)
+          query = query.not('contact_identifier', 'like', 'fb:%');
+        }
+      } else if (channel === 'facebook') {
+        // Native facebook + CHECK yokken yazılan fb: önekli fallback
+        query = query.or('channel.eq.facebook,and(channel.eq.instagram,contact_identifier.like.fb:%)');
       }
       if (q) {
         query = query.or(
@@ -173,7 +182,26 @@ export default async function handler(req, res) {
         }
         throw error;
       }
-      return res.status(200).json({ data: data || [], institution_id: institutionId });
+      const rows = (data || []).map((row) => {
+        if (
+          isFacebookFallbackContact(row?.contact_identifier) ||
+          row?.ad_source_data?.source_platform === 'facebook' ||
+          row?.ad_source_data?.original_channel === 'facebook'
+        ) {
+          return {
+            ...row,
+            channel: 'facebook',
+            contact_identifier: stripFacebookFallbackContact(row.contact_identifier),
+            metadata: {
+              ...(row.metadata && typeof row.metadata === 'object' ? row.metadata : {}),
+              facebook_channel_fallback: true,
+              stored_contact_identifier: row.contact_identifier
+            }
+          };
+        }
+        return row;
+      });
+      return res.status(200).json({ data: rows, institution_id: institutionId });
     }
 
     if (op === 'inbound_status') {
@@ -199,19 +227,41 @@ export default async function handler(req, res) {
       if (!isAdmin) {
         return res.status(403).json({ error: 'forbidden', hint: 'Meta tanılama yalnızca yönetici.' });
       }
-      const [diag, social, recentLogs] = await Promise.all([
+      const [diag, social, recentLogs, fbChannel] = await Promise.all([
         diagnoseCrmInbox().catch((e) => ({ error: e instanceof Error ? e.message : String(e) })),
         ensureMetaSocialInbound({ apply: false }).catch((e) => ({ ok: false, error: e instanceof Error ? e.message : String(e) })),
-        listRecentMetaWebhookLogs(20).catch(() => [])
+        listRecentMetaWebhookLogs(20).catch(() => []),
+        probeFacebookChannelSupport({ force: true }).catch((e) => ({
+          ok: false,
+          error: e instanceof Error ? e.message : String(e),
+          repair_sql: FACEBOOK_CHANNEL_REPAIR_SQL
+        }))
       ]);
       const convs = Array.isArray(diag?.recent_crm_conversations) ? diag.recent_crm_conversations : [];
       const lastByChannel = (ch) => {
-        const hit = convs.find((c) => String(c.channel || '') === ch);
+        if (ch === 'facebook') {
+          const hit = convs.find(
+            (c) =>
+              String(c.channel || '') === 'facebook' ||
+              isFacebookFallbackContact(c.contact_identifier) ||
+              c?.ad_source_data?.source_platform === 'facebook'
+          );
+          return hit?.last_message_at || null;
+        }
+        const hit = convs.find((c) => String(c.channel || '') === ch && !isFacebookFallbackContact(c.contact_identifier));
         return hit?.last_message_at || null;
       };
       const logs = Array.isArray(recentLogs) ? recentLogs : [];
       const lastComment = logs.find((l) => /comment/i.test(String(l.event_type || l.field || '')));
       const pub = publicSocialStatus(social);
+      const igFields = Array.isArray(social?.app_subscriptions?.instagram?.fields)
+        ? social.app_subscriptions.instagram.fields
+        : null;
+      const igSubscribed = Boolean(
+        pub?.app_instagram_subscribed ||
+          social?.app_subscriptions?.instagram?.subscribed ||
+          (igFields && igFields.includes('messages'))
+      );
       return res.status(200).json({
         data: {
           facebook_connected: Boolean(pub?.ok || social?.page_id),
@@ -229,11 +279,13 @@ export default async function handler(req, res) {
               : pub?.ok
           ),
           page_subscribed_fields: social?.subscribed_fields || PAGE_WEBHOOK_FIELDS,
-          instagram_webhook_subscribed: Boolean(pub?.app_instagram_subscribed ?? social?.app_subscriptions?.instagram?.subscribed),
-          instagram_subscribed_fields:
-            social?.app_subscriptions?.instagram?.fields || INSTAGRAM_APP_WEBHOOK_FIELDS,
+          instagram_webhook_subscribed: igSubscribed,
+          instagram_subscribed_fields: igFields || INSTAGRAM_APP_WEBHOOK_FIELDS,
           expected_page_fields: PAGE_WEBHOOK_FIELDS,
           expected_instagram_fields: INSTAGRAM_APP_WEBHOOK_FIELDS,
+          facebook_channel_db_ok: Boolean(fbChannel?.ok),
+          facebook_channel_db_error: fbChannel?.ok ? null : fbChannel?.error || null,
+          facebook_channel_repair_sql: fbChannel?.ok ? null : FACEBOOK_CHANNEL_REPAIR_SQL,
           last_webhook_at: logs[0]?.received_at || diag?.recent_webhook_hits?.[0]?.received_at || null,
           last_facebook_message_at: lastByChannel('facebook'),
           last_instagram_message_at: lastByChannel('instagram'),
@@ -242,6 +294,7 @@ export default async function handler(req, res) {
             pub?.app_instagram_error ||
             social?.error ||
             social?.app_subscriptions?.error ||
+            (!fbChannel?.ok ? fbChannel?.error : null) ||
             diag?.error ||
             null,
           recent_webhook_events: logs,

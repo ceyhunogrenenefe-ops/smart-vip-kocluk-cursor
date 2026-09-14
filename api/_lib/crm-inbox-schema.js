@@ -208,6 +208,55 @@ async function probeCrmSchema() {
   return true;
 }
 
+/** Production’da eski CHECK bazen facebook içermiyor — probe ile doğrula. */
+export const FACEBOOK_CHANNEL_REPAIR_SQL = `
+ALTER TABLE public.crm_conversations DROP CONSTRAINT IF EXISTS crm_conversations_channel_check;
+ALTER TABLE public.crm_conversations ADD CONSTRAINT crm_conversations_channel_check
+  CHECK (channel IN ('whatsapp', 'instagram', 'facebook'));
+ALTER TABLE public.registration_channel_messages DROP CONSTRAINT IF EXISTS registration_channel_messages_channel_check;
+ALTER TABLE public.registration_channel_messages ADD CONSTRAINT registration_channel_messages_channel_check
+  CHECK (channel IN ('whatsapp', 'instagram', 'facebook'));
+`.trim();
+
+let facebookChannelCache = null; // null | { ok: boolean, error?: string, at: number }
+
+export async function probeFacebookChannelSupport({ force = false } = {}) {
+  const now = Date.now();
+  if (!force && facebookChannelCache && now - facebookChannelCache.at < 60_000) {
+    return facebookChannelCache;
+  }
+  const probeId = `__fb_channel_probe_${now}__`;
+  const institutionId = await resolveInboundInstitutionId().catch(() => null);
+  const row = {
+    institution_id: institutionId,
+    contact_identifier: probeId,
+    channel: 'facebook',
+    status: 'open',
+    contact_name: 'facebook-channel-probe',
+    ad_source_data: { probe: true },
+    unread_count: 0
+  };
+  const { data, error } = await supabaseAdmin.from('crm_conversations').insert(row).select('id').maybeSingle();
+  if (error) {
+    facebookChannelCache = {
+      ok: false,
+      error: error.message || String(error),
+      at: now,
+      repair_sql: FACEBOOK_CHANNEL_REPAIR_SQL
+    };
+    return facebookChannelCache;
+  }
+  if (data?.id) {
+    await supabaseAdmin.from('crm_conversations').delete().eq('id', data.id).catch(() => null);
+  }
+  facebookChannelCache = { ok: true, at: now };
+  return facebookChannelCache;
+}
+
+export function clearFacebookChannelSupportCache() {
+  facebookChannelCache = null;
+}
+
 async function runCrmSchemaSql() {
   const dbUrl = buildDatabaseUrl();
   if (!dbUrl) {
@@ -236,7 +285,16 @@ export async function ensureCrmInboxSchema({ force = false } = {}) {
         if (ready) {
           schemaReadyCache = true;
           cachedMetaIdColumn = null;
-          return { ok: true, created: false, via: 'sql' };
+          // Tablolar var ama facebook CHECK eksik olabilir — arka planda dene
+          const fb = await probeFacebookChannelSupport().catch(() => null);
+          if (fb && fb.ok === false && buildDatabaseUrl()) {
+            const patched = await runCrmSchemaSql().catch(() => null);
+            if (patched?.ok) {
+              clearFacebookChannelSupportCache();
+              await probeFacebookChannelSupport({ force: true }).catch(() => null);
+            }
+          }
+          return { ok: true, created: false, via: 'sql', facebook_channel: fb };
         }
       }
 
@@ -251,7 +309,9 @@ export async function ensureCrmInboxSchema({ force = false } = {}) {
         if (ready) {
           schemaReadyCache = true;
           cachedMetaIdColumn = null;
-          return { ok: true, created: true, via: ran.via || 'postgres' };
+          clearFacebookChannelSupportCache();
+          const fb = await probeFacebookChannelSupport({ force: true }).catch(() => null);
+          return { ok: true, created: true, via: ran.via || 'postgres', facebook_channel: fb };
         }
         return {
           ok: false,
@@ -264,7 +324,8 @@ export async function ensureCrmInboxSchema({ force = false } = {}) {
         ok: false,
         code: ran.code || 'schema_setup_failed',
         message: ran.message || AUTO_SCHEMA_HINT,
-        has_db_url: Boolean(buildDatabaseUrl())
+        has_db_url: Boolean(buildDatabaseUrl()),
+        repair_sql: FACEBOOK_CHANNEL_REPAIR_SQL
       };
     } finally {
       schemaEnsureInFlight = null;
