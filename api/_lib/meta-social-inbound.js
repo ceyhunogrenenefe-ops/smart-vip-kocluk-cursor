@@ -32,6 +32,11 @@ const PAGE_FIELDS = [
  * `messaging_referrals` (çoğul) burada kullanılırsa Graph tüm IG aboneliğini
  * "An unknown error occurred" ile reddeder — gerçek IG/reklam DM webhook’ları gelmez.
  */
+/**
+ * Instagram app webhook alanları.
+ * `comments` / `live_comments` = gönderi yorumu (Kommo’nun bildirim düşürdüğü kanal).
+ * `messages` / `messaging_*` = DM (Messaging API) — yorum ile aynı değildir.
+ */
 export const INSTAGRAM_APP_WEBHOOK_FIELDS = [
   'messages',
   'messaging_postbacks',
@@ -39,18 +44,21 @@ export const INSTAGRAM_APP_WEBHOOK_FIELDS = [
   'messaging_seen',
   'messaging_handover',
   'messaging_referral',
-  'standby'
+  'standby',
+  'comments',
+  'live_comments'
 ];
 
 const INSTAGRAM_FIELDS = INSTAGRAM_APP_WEBHOOK_FIELDS.join(',');
 
-/** Daraltılmış yedek set — bazı uygulamalarda handover/standby reddedilebilir */
+/** Daraltılmış yedek set — comments ayrı; DM alanları her zaman kalır */
 const INSTAGRAM_FIELDS_FALLBACK = [
   'messages',
   'messaging_postbacks',
   'messaging_optins',
   'messaging_referral',
-  'messaging_seen'
+  'messaging_seen',
+  'comments'
 ].join(',');
 
 /** WhatsApp WABA token asla kullanılmaz — IG/FB DM için ayrı Page/IG token gerekir. */

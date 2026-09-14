@@ -2,27 +2,31 @@
  * Meta WhatsApp / Instagram webhook
  * - WhatsApp: teslimat statuses + gelen mesajlar → Kayıt Takibi lead kartı
  * - Instagram Messaging: gelen DM → lead kartı
+ * - Instagram Comments: gönderi / canlı yayın yorumları → CRM inbox (Kommo comment karşılığı)
  *
  * Meta BM → Webhook URL:
  *   https://www.dersonlinevipkocluk.com/api/meta/webhook
  * Vercel env: META_WEBHOOK_VERIFY_TOKEN
- * Abonelik: messages (WhatsApp); Instagram messaging (DM)
+ * Abonelik: messages (WhatsApp); Instagram messaging + comments + live_comments
  */
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { getIstanbulDateString } from '../api/_lib/istanbul-time.js';
 import {
   ingestWhatsAppCloudMessages,
-  ingestInstagramMessagingEvents
+  ingestInstagramMessagingEvents,
+  ingestInstagramCommentChanges
 } from '../api/_lib/registration-channel-ingest.js';
 import {
   syncWhatsAppValueToCrm,
-  syncInstagramMessagingToCrm
+  syncInstagramMessagingToCrm,
+  syncInstagramCommentsToCrm
 } from '../api/_lib/crm-inbox.js';
 import {
   collectEntryMessagingEvents,
   normalizeInstagramMessagingEvent,
   resolveSocialChannelFromWebhook
 } from '../api/_lib/instagram-messaging-normalize.js';
+import { collectInstagramCommentChanges } from '../api/_lib/instagram-comments-normalize.js';
 
 function verifyToken() {
   // Vercel’de tek kaynak: META_WEBHOOK_VERIFY_TOKEN (Meta BM Verify Token ile birebir)
@@ -300,6 +304,28 @@ export default async function handler(req, res) {
           } catch (e) {
             console.warn('[meta-webhook] crm ig sync:', e instanceof Error ? e.message : e);
             crmIgSync = { processed: 0 };
+          }
+        }
+        // Gönderi / canlı yayın yorumları (Kommo comment inbox)
+        const commentChanges = collectInstagramCommentChanges(entry);
+        if (commentChanges.length) {
+          inboundMessageCount += commentChanges.length;
+          statusOnly = false;
+          try {
+            const cr = await ingestInstagramCommentChanges(commentChanges);
+            igIngested += Number(cr?.processed || 0);
+          } catch (e) {
+            console.warn('[meta-webhook] ig comment ingest:', e instanceof Error ? e.message : e);
+          }
+          try {
+            const igc = await syncInstagramCommentsToCrm(commentChanges);
+            crmIgSync = {
+              processed: Number(crmIgSync?.processed || 0) + Number(igc?.processed || 0),
+              comments: Number(igc?.processed || 0)
+            };
+            console.info('[meta-webhook] crm ig comments synced', igc?.processed || 0);
+          } catch (e) {
+            console.warn('[meta-webhook] crm ig comment sync:', e instanceof Error ? e.message : e);
           }
         }
         // bazı IG abonelikleri changes[] ile gelir

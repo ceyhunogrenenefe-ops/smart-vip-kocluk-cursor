@@ -8,4 +8,9 @@ describe('instagram app webhook fields', () => {
     assert.ok(!INSTAGRAM_APP_WEBHOOK_FIELDS.includes('messaging_referrals'));
     assert.ok(INSTAGRAM_APP_WEBHOOK_FIELDS.includes('messages'));
   });
+
+  it('subscribes comments + live_comments like Kommo post-comment inbox', () => {
+    assert.ok(INSTAGRAM_APP_WEBHOOK_FIELDS.includes('comments'));
+    assert.ok(INSTAGRAM_APP_WEBHOOK_FIELDS.includes('live_comments'));
+  });
 });

@@ -12,6 +12,7 @@ import {
   shouldReplaceGradeProgram
 } from './registration-tracking-utils.js';
 import { normalizeInstagramMessagingEvent } from './instagram-messaging-normalize.js';
+import { normalizeInstagramCommentChange } from './instagram-comments-normalize.js';
 
 function snippetOf(text, max = 140) {
   const s = String(text || '')
@@ -559,6 +560,29 @@ export async function ingestInstagramMessagingEvents(messagingEvents, { channel 
       externalMessageId: norm.messageId,
       timestamp: ev?.timestamp,
       payload: ev
+    });
+    processed += 1;
+  }
+  return { processed };
+}
+
+/** Instagram comments / live_comments webhook changes → kayıt takibi */
+export async function ingestInstagramCommentChanges(changes) {
+  const list = Array.isArray(changes) ? changes : [];
+  let processed = 0;
+  for (const change of list) {
+    const norm = normalizeInstagramCommentChange(change);
+    if (!norm?.hasInboundContent || !norm.fromId) continue;
+    await ingestRegistrationChannelMessage({
+      channel: 'instagram',
+      direction: 'inbound',
+      externalContactId: norm.fromId,
+      contactName: norm.fromUsername || null,
+      body: norm.text,
+      messageType: 'comment',
+      externalMessageId: norm.commentId ? `ig_comment:${norm.commentId}` : null,
+      timestamp: change?.value?.timestamp || null,
+      payload: change
     });
     processed += 1;
   }
