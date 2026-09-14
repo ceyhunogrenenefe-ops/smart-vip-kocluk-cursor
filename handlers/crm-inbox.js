@@ -24,6 +24,8 @@ import {
   createOrReuseMetaMessageTemplate
 } from '../api/_lib/meta-template-create.js';
 import { diagnoseCrmInbox, ensureCrmInboxSchema } from '../api/_lib/crm-inbox-schema.js';
+import { listRecentMetaWebhookLogs } from '../api/_lib/meta-webhook-logs.js';
+import { PAGE_WEBHOOK_FIELDS, INSTAGRAM_APP_WEBHOOK_FIELDS } from '../api/_lib/meta-social-inbound.js';
 import { ensureMetaInboundDelivery, publicInboundStatus } from '../api/_lib/meta-inbound-ensure.js';
 import {
   bindMetaSocialFromPageToken,
@@ -188,6 +190,74 @@ export default async function handler(req, res) {
           real_inbound: diag?.real_inbound || null,
           real_inbound_seen: Boolean(diag?.e2e_ready?.real_inbound_seen),
           last_webhook_at: (diag?.recent_webhook_hits || [])[0]?.received_at || null
+        }
+      });
+    }
+
+
+    if (op === 'meta_diagnostics') {
+      if (!isAdmin) {
+        return res.status(403).json({ error: 'forbidden', hint: 'Meta tanılama yalnızca yönetici.' });
+      }
+      const [diag, social, recentLogs] = await Promise.all([
+        diagnoseCrmInbox().catch((e) => ({ error: e instanceof Error ? e.message : String(e) })),
+        ensureMetaSocialInbound({ apply: false }).catch((e) => ({ ok: false, error: e instanceof Error ? e.message : String(e) })),
+        listRecentMetaWebhookLogs(20).catch(() => [])
+      ]);
+      const convs = Array.isArray(diag?.recent_crm_conversations) ? diag.recent_crm_conversations : [];
+      const lastByChannel = (ch) => {
+        const hit = convs.find((c) => String(c.channel || '') === ch);
+        return hit?.last_message_at || null;
+      };
+      const logs = Array.isArray(recentLogs) ? recentLogs : [];
+      const lastComment = logs.find((l) => /comment/i.test(String(l.event_type || l.field || '')));
+      const pub = publicSocialStatus(social);
+      return res.status(200).json({
+        data: {
+          facebook_connected: Boolean(pub?.ok || social?.page_id),
+          instagram_connected: Boolean(pub?.instagram_business_id_suffix || social?.instagram_business_id),
+          page_id: social?.page_id || null,
+          page_id_suffix: pub?.page_id_suffix || null,
+          instagram_business_id: social?.instagram_business_id || null,
+          instagram_business_id_suffix: pub?.instagram_business_id_suffix || null,
+          token_present: Boolean(pub?.token_present ?? social?.token_present),
+          token_valid: Boolean(social?.ok || pub?.ok),
+          token_source: pub?.token_source || social?.token_source || null,
+          page_webhook_subscribed: Boolean(
+            Array.isArray(social?.subscribed_fields)
+              ? social.subscribed_fields.includes('messages')
+              : pub?.ok
+          ),
+          page_subscribed_fields: social?.subscribed_fields || PAGE_WEBHOOK_FIELDS,
+          instagram_webhook_subscribed: Boolean(pub?.app_instagram_subscribed ?? social?.app_subscriptions?.instagram?.subscribed),
+          instagram_subscribed_fields:
+            social?.app_subscriptions?.instagram?.fields || INSTAGRAM_APP_WEBHOOK_FIELDS,
+          expected_page_fields: PAGE_WEBHOOK_FIELDS,
+          expected_instagram_fields: INSTAGRAM_APP_WEBHOOK_FIELDS,
+          last_webhook_at: logs[0]?.received_at || diag?.recent_webhook_hits?.[0]?.received_at || null,
+          last_facebook_message_at: lastByChannel('facebook'),
+          last_instagram_message_at: lastByChannel('instagram'),
+          last_comment_webhook_at: lastComment?.received_at || null,
+          last_error:
+            pub?.app_instagram_error ||
+            social?.error ||
+            social?.app_subscriptions?.error ||
+            diag?.error ||
+            null,
+          recent_webhook_events: logs,
+          permissions_hint: {
+            login_for_business_config_scopes: [
+              'pages_show_list',
+              'pages_messaging',
+              'pages_manage_metadata',
+              'instagram_basic',
+              'instagram_manage_messages',
+              'instagram_manage_comments'
+            ],
+            note: 'pages_messaging / pages_manage_metadata Login for Business config izin listesinde olmalı; OAuth URL scope satırına konmaz.'
+          },
+          social: pub,
+          env: describeSocialTokenEnv()
         }
       });
     }

@@ -261,6 +261,12 @@ export function crmEnsureInbound() {
   return inboxPost<{ ok: boolean; data: CrmInboundStatus; error?: string | null }>('ensure_inbound');
 }
 
+export type CrmMetaDiagnostics = Record<string, unknown>;
+
+export function crmMetaDiagnostics() {
+  return inboxGet<{ data: CrmMetaDiagnostics }>('meta_diagnostics');
+}
+
 export function crmSavePageToken(payload: {
   page_access_token?: string;
   user_access_token?: string;

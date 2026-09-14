@@ -18,9 +18,11 @@ import { lookupSocialProfileName } from './meta-social-inbound.js';
 import {
   getMessagingReferral,
   isAdsReferral,
-  normalizeInstagramMessagingEvent
+  normalizeInstagramMessagingEvent,
+  classifySocialInteractionSource
 } from './instagram-messaging-normalize.js';
 import { normalizeInstagramCommentChange } from './instagram-comments-normalize.js';
+import { normalizeFacebookFeedCommentChange } from './facebook-comments-normalize.js';
 
 export function normalizeCrmChannel(channel) {
   const c = String(channel || '').toLowerCase();
@@ -61,37 +63,45 @@ function isoFromTs(ts) {
   return new Date(ms).toISOString();
 }
 
-/** Click-to-WhatsApp / Instagram ad referral metadata */
-export function extractAdSourceData({ channel, message, messagingEvent } = {}) {
+/** Click-to-WhatsApp / IG-FB ad referral + organik kaynak sınıflandırması */
+export function extractAdSourceData({ channel, message, messagingEvent, isComment = false } = {}) {
   const out = {};
   try {
-    if (channel === 'whatsapp' && message && typeof message === 'object') {
+    const ch = channel === 'facebook' ? 'facebook' : channel === 'whatsapp' ? 'whatsapp' : 'instagram';
+    if (ch === 'whatsapp' && message && typeof message === 'object') {
       const ref = message.referral || null;
       if (ref && typeof ref === 'object') {
-        out.source_type = ref.source_type || ref.source || 'whatsapp_ad';
-        if (ref.source_id) out.source_id = String(ref.source_id);
+        Object.assign(out, classifySocialInteractionSource({ channel: 'whatsapp', isAd: true }));
+        out.source_type = 'ad_dm';
+        out.source = ref.source_type || ref.source || 'whatsapp_ad';
+        if (ref.source_id) out.ad_id = out.source_id = String(ref.source_id);
         if (ref.source_url) out.source_url = String(ref.source_url);
         if (ref.headline) out.headline = String(ref.headline);
         if (ref.body) out.body = String(ref.body);
         if (ref.media_type) out.media_type = String(ref.media_type);
         if (ref.image_url) out.image_url = String(ref.image_url);
         if (ref.ctwa_clid) out.ctwa_clid = String(ref.ctwa_clid);
+        if (ref.ref) out.referral = String(ref.ref);
+      } else {
+        Object.assign(out, classifySocialInteractionSource({ channel: 'whatsapp', isAd: false }));
       }
     }
-    if (
-      (channel === 'instagram' || channel === 'facebook') &&
-      messagingEvent &&
-      typeof messagingEvent === 'object'
-    ) {
+    if ((ch === 'instagram' || ch === 'facebook') && messagingEvent && typeof messagingEvent === 'object') {
       const ref = getMessagingReferral(messagingEvent);
-      if (ref && typeof ref === 'object' && isAdsReferral(ref)) {
-        out.source_type = channel === 'facebook' ? 'facebook_ad' : 'instagram_ad';
+      const ad = Boolean(ref && isAdsReferral(ref));
+      Object.assign(out, classifySocialInteractionSource({ channel: ch, isAd: ad, isComment }));
+      if (ad && ref) {
+        out.source = ch === 'facebook' ? 'facebook_ad' : 'instagram_ad';
         if (ref.ad_id) out.ad_id = String(ref.ad_id);
         if (ref.ads_context_data) out.ads_context_data = ref.ads_context_data;
         if (ref.source_url) out.source_url = String(ref.source_url);
-        if (ref.ref) out.ref = String(ref.ref);
+        if (ref.ref) out.referral = String(ref.ref);
         const title = ref.ads_context_data?.ad_title || ref.headline;
         if (title) out.headline = String(title);
+        const campaign = ref.ads_context_data?.campaign_id || ref.campaign_id;
+        const adset = ref.ads_context_data?.adset_id || ref.adset_id;
+        if (campaign) out.campaign_id = String(campaign);
+        if (adset) out.adset_id = String(adset);
       }
     }
   } catch {
@@ -453,11 +463,15 @@ export async function syncInstagramMessagingToCrm(events, { institutionId, chann
     if (norm.isEcho) continue;
     if (!norm.senderId || !norm.hasInboundContent) continue;
     const contactName = await lookupSocialProfileName(norm.senderId).catch(() => null);
+    let body = norm.text || '[medya / ek]';
+    if (norm.isAd && ch === 'facebook' && body.startsWith('[Instagram reklamından')) {
+      body = body.replace('[Instagram reklamından sohbet]', '[Facebook reklamından sohbet]');
+    }
     await upsertCrmMessage({
       channel: ch,
       contactIdentifier: norm.senderId,
       contactName,
-      body: norm.text || '[medya / ek]',
+      body,
       messageType: norm.messageType,
       messageId: norm.messageId,
       timestamp: ev?.timestamp,
@@ -491,11 +505,48 @@ export async function syncInstagramCommentsToCrm(changes, { institutionId } = {}
       senderType: 'lead',
       institutionId,
       adSourceData: {
-        source_type: norm.isLive ? 'instagram_live_comment' : 'instagram_comment',
+        ...classifySocialInteractionSource({ channel: 'instagram', isComment: true }),
+        source: norm.isLive ? 'instagram_live_comment' : 'instagram_comment',
         media_id: norm.mediaId,
+        post_id: norm.mediaId,
+        comment_id: norm.commentId,
         media_product_type: norm.mediaProductType,
         parent_id: norm.parentId,
         username: norm.fromUsername
+      },
+      payload: change
+    });
+    processed += 1;
+  }
+  return { processed };
+}
+
+
+/** Facebook Page feed yorumları → CRM (PSID = Messenger ile aynı contact) */
+export async function syncFacebookCommentsToCrm(changes, { institutionId } = {}) {
+  const list = Array.isArray(changes) ? changes : [];
+  let processed = 0;
+  for (const change of list) {
+    const norm = normalizeFacebookFeedCommentChange(change);
+    if (!norm?.hasInboundContent || !norm.fromId) continue;
+    const classif = classifySocialInteractionSource({ channel: 'facebook', isComment: true });
+    await upsertCrmMessage({
+      channel: 'facebook',
+      contactIdentifier: norm.fromId,
+      contactName: norm.fromName || null,
+      body: norm.text,
+      messageType: 'comment',
+      messageId: norm.commentId ? `fb_comment:${norm.commentId}` : null,
+      timestamp: change?.value?.created_time || null,
+      direction: 'inbound',
+      senderType: 'lead',
+      institutionId,
+      adSourceData: {
+        ...classif,
+        source: 'facebook_comment',
+        post_id: norm.postId,
+        comment_id: norm.commentId,
+        parent_id: norm.parentId
       },
       payload: change
     });
