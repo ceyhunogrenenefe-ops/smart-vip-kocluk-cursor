@@ -18,6 +18,11 @@ import {
   syncWhatsAppValueToCrm,
   syncInstagramMessagingToCrm
 } from '../api/_lib/crm-inbox.js';
+import {
+  collectEntryMessagingEvents,
+  normalizeInstagramMessagingEvent,
+  resolveSocialChannelFromWebhook
+} from '../api/_lib/instagram-messaging-normalize.js';
 
 function verifyToken() {
   // Vercel’de tek kaynak: META_WEBHOOK_VERIFY_TOKEN (Meta BM Verify Token ile birebir)
@@ -265,9 +270,12 @@ export default async function handler(req, res) {
     // Instagram Messaging (object: instagram)
     if (objectType === 'instagram') {
       for (const entry of entries) {
-        const messaging = Array.isArray(entry?.messaging) ? entry.messaging : [];
+        const messaging = collectEntryMessagingEvents(entry);
         if (messaging.length) {
-          inboundMessageCount += messaging.filter((m) => m?.message && !m?.message?.is_echo).length;
+          inboundMessageCount += messaging.filter((m) => {
+            const n = normalizeInstagramMessagingEvent(m);
+            return n.hasInboundContent && !n.isEcho;
+          }).length;
           statusOnly = false;
           const r = await ingestInstagramMessagingEvents(messaging);
           igIngested += Number(r?.processed || 0);
@@ -297,7 +305,8 @@ export default async function handler(req, res) {
               const evt = {
                 sender: { id: from },
                 timestamp: m?.timestamp,
-                message: { mid: m?.id || m?.mid, text }
+                message: { mid: m?.id || m?.mid, text },
+                referral: m?.referral || value?.referral || null
               };
               const r = await ingestInstagramMessagingEvents([evt]);
               igIngested += Number(r?.processed || 0);
@@ -323,23 +332,41 @@ export default async function handler(req, res) {
       });
     }
 
-    // WhatsApp Cloud API (+ page messaging fallback)
+    // WhatsApp Cloud API (+ page messaging fallback — IG reklam CTM sıkça object=page)
     for (const entry of entries) {
-      const messaging = Array.isArray(entry?.messaging) ? entry.messaging : [];
+      const messaging = collectEntryMessagingEvents(entry);
       if (messaging.length && (objectType === 'page' || objectType === 'instagram')) {
-        inboundMessageCount += messaging.filter((m) => m?.message && !m?.message?.is_echo).length;
+        inboundMessageCount += messaging.filter((m) => {
+          const n = normalizeInstagramMessagingEvent(m);
+          return n.hasInboundContent && !n.isEcho;
+        }).length;
         statusOnly = false;
-        const socialChannel = objectType === 'page' ? 'facebook' : 'instagram';
-        const r = await ingestInstagramMessagingEvents(messaging, { channel: socialChannel });
-        igIngested += Number(r?.processed || 0);
-        try {
-          const ig = await syncInstagramMessagingToCrm(messaging, { channel: socialChannel });
-          crmIgSync = {
-            processed: Number(crmIgSync?.processed || 0) + Number(ig?.processed || 0),
-            channel: socialChannel
-          };
-        } catch (e) {
-          console.warn('[meta-webhook] crm social sync:', e instanceof Error ? e.message : e);
+        const igBusinessId = String(
+          process.env.META_IG_BUSINESS_ID || process.env.INSTAGRAM_BUSINESS_ACCOUNT_ID || ''
+        ).trim();
+        // Per-event channel: ads CTM / IG business recipient → instagram
+        const byChannel = new Map();
+        for (const evt of messaging) {
+          const socialChannel = resolveSocialChannelFromWebhook({
+            objectType,
+            event: evt,
+            igBusinessId
+          });
+          if (!byChannel.has(socialChannel)) byChannel.set(socialChannel, []);
+          byChannel.get(socialChannel).push(evt);
+        }
+        for (const [socialChannel, batch] of byChannel) {
+          const r = await ingestInstagramMessagingEvents(batch, { channel: socialChannel });
+          igIngested += Number(r?.processed || 0);
+          try {
+            const ig = await syncInstagramMessagingToCrm(batch, { channel: socialChannel });
+            crmIgSync = {
+              processed: Number(crmIgSync?.processed || 0) + Number(ig?.processed || 0),
+              channel: socialChannel
+            };
+          } catch (e) {
+            console.warn('[meta-webhook] crm social sync:', e instanceof Error ? e.message : e);
+          }
         }
       }
 

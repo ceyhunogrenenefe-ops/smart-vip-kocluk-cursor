@@ -26,6 +26,17 @@ const PAGE_FIELDS = [
   'standby'
 ].join(',');
 
+/** Instagram app-level webhook alanları — reklam CTM için messaging_referrals şart */
+const INSTAGRAM_FIELDS = [
+  'messages',
+  'messaging_postbacks',
+  'messaging_optins',
+  'messaging_seen',
+  'messaging_handover',
+  'messaging_referrals',
+  'standby'
+].join(',');
+
 /** WhatsApp WABA token asla kullanılmaz — IG/FB DM için ayrı Page/IG token gerekir. */
 const SOCIAL_TOKEN_ENVS = [
   'META_BOUND_PAGE_TOKEN',
@@ -497,7 +508,7 @@ export async function ensureAppSocialSubscriptions({ apply = false } = {}) {
   const igSub = await graphFormPost(`${encodeURIComponent(appId)}/subscriptions`, {
     ...common,
     object: 'instagram',
-    fields: 'messages,messaging_postbacks,messaging_optins,messaging_seen,messaging_handover,standby'
+    fields: INSTAGRAM_FIELDS
   });
   out.page = { subscribed: pageSub.ok, error: pageSub.ok ? null : graphErr(pageSub.json, `http_${pageSub.status}`) };
   out.instagram = { subscribed: igSub.ok, error: igSub.ok ? null : graphErr(igSub.json, `http_${igSub.status}`) };
