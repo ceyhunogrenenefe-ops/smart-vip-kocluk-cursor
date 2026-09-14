@@ -2,14 +2,13 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   PRIMARY_4567_ZOOM_URL,
+  LGS8_ETUT_ZOOM_URL,
   isPrimary4567Grade,
+  isSeventhGrade,
   isPrimary4567JoinSubject,
   primary4567ZoomIfApplicable
 } from './primary-4567-zoom.js';
 import { linksForInstitution } from './academic-center-links-store.js';
-
-const LGS8_ZOOM =
-  'https://us06web.zoom.us/j/6946337643?pwd=SHkwQzNnaEkrOXVNajJMR1Z6UCtCUT09';
 
 describe('primary 4-7 Zoom', () => {
   it('matches 4-7 class levels and names, not 8/LGS/lise', () => {
@@ -26,6 +25,15 @@ describe('primary 4-7 Zoom', () => {
     assert.equal(isPrimary4567Grade('YKS', ''), false);
   });
 
+  it('detects seventh grade separately from 4-6 and 8', () => {
+    assert.equal(isSeventhGrade(7, '7A'), true);
+    assert.equal(isSeventhGrade('7', ''), true);
+    assert.equal(isSeventhGrade('LGS', '7A'), true);
+    assert.equal(isSeventhGrade(5, '5A'), false);
+    assert.equal(isSeventhGrade(8, '8A'), false);
+    assert.equal(isSeventhGrade('', '4-7. Sınıf Etüt'), false);
+  });
+
   it('keeps 4-7 when the program tag is LGS but the class is 5A/7A', () => {
     assert.equal(isPrimary4567Grade('LGS', '7A'), true);
     assert.equal(isPrimary4567Grade('LGS', '5A'), true);
@@ -34,7 +42,7 @@ describe('primary 4-7 Zoom', () => {
     assert.equal(isPrimary4567Grade('LGS', '8A'), false);
     assert.equal(
       primary4567ZoomIfApplicable({ subject: 'ETÜT', className: '7A', classLevel: 'LGS' }),
-      PRIMARY_4567_ZOOM_URL
+      LGS8_ETUT_ZOOM_URL
     );
     assert.equal(
       primary4567ZoomIfApplicable({ subject: 'ÖDEV TAKİBİ', className: '5A', classLevel: 'LGS' }),
@@ -59,13 +67,21 @@ describe('primary 4-7 Zoom', () => {
     assert.equal(isPrimary4567JoinSubject('DENEME ANALİZİ'), false);
   });
 
-  it('returns the shared Zoom only for 4-7 + join subjects', () => {
+  it('returns 4-6 Zoom for etüt; 7th-grade etüt uses LGS8 Zoom; deneme stays on 4-7 Zoom', () => {
     assert.equal(
       primary4567ZoomIfApplicable({ subject: 'ETÜT', className: '5A', classLevel: '5' }),
       PRIMARY_4567_ZOOM_URL
     );
     assert.equal(
+      primary4567ZoomIfApplicable({ subject: 'ETÜT', className: '7A', classLevel: 7 }),
+      LGS8_ETUT_ZOOM_URL
+    );
+    assert.equal(
       primary4567ZoomIfApplicable({ subject: 'DENEME SINAVI', className: '7A', classLevel: 7 }),
+      PRIMARY_4567_ZOOM_URL
+    );
+    assert.equal(
+      primary4567ZoomIfApplicable({ subject: 'ÖDEV TAKİBİ', className: '7A', classLevel: '7' }),
       PRIMARY_4567_ZOOM_URL
     );
     assert.equal(
@@ -78,19 +94,19 @@ describe('primary 4-7 Zoom', () => {
     );
   });
 
-  it('forces class47 and class56 exam/study to the shared Zoom; leaves class78', () => {
+  it('forces class47/56 to 4-7 Zoom and class78 study to LGS8 Zoom', () => {
     const links = linksForInstitution(
       {
         default: {
           exams: {
-            class47: LGS8_ZOOM,
-            class56: LGS8_ZOOM,
-            class78: LGS8_ZOOM
+            class47: LGS8_ETUT_ZOOM_URL,
+            class56: LGS8_ETUT_ZOOM_URL,
+            class78: 'https://evil.example/deneme78'
           },
           studyClasses: {
             class47: 'bbb:auto',
-            class56: LGS8_ZOOM,
-            class78: LGS8_ZOOM
+            class56: LGS8_ETUT_ZOOM_URL,
+            class78: 'bbb:auto'
           }
         }
       },
@@ -100,13 +116,14 @@ describe('primary 4-7 Zoom', () => {
     assert.equal(links.exams.class56, PRIMARY_4567_ZOOM_URL);
     assert.equal(links.studyClasses.class47, PRIMARY_4567_ZOOM_URL);
     assert.equal(links.studyClasses.class56, PRIMARY_4567_ZOOM_URL);
-    assert.equal(links.exams.class78, LGS8_ZOOM);
-    assert.equal(links.studyClasses.class78, LGS8_ZOOM);
+    assert.equal(links.studyClasses.class78, LGS8_ETUT_ZOOM_URL);
+    assert.equal(links.exams.class78, 'https://evil.example/deneme78');
     assert.ok(!String(links.exams.class47).includes('6946337643'));
     assert.ok(String(links.exams.class47).includes('9448152197'));
+    assert.ok(String(links.studyClasses.class78).includes('6946337643'));
   });
 
-  it('academic study guest invite for class47/class56 always returns the shared Zoom', async () => {
+  it('academic study guest invite: class47/56 → 4-7 Zoom; class78 → LGS8 Zoom', async () => {
     const { createAcademicStudyGuestJoinShareLink } = await import('./bbb-guest-join-core.js');
     for (const room of ['class47', 'class56']) {
       const share = await createAcademicStudyGuestJoinShareLink({
@@ -117,5 +134,11 @@ describe('primary 4-7 Zoom', () => {
       assert.ok(String(share.shareText || '').includes('9448152197'));
       assert.ok(!String(share.shareText || '').includes('6946337643'));
     }
+    const share78 = await createAcademicStudyGuestJoinShareLink({
+      institutionId: '73323d75-eea1-4552-8bba-d50555423589',
+      room: 'class78'
+    });
+    assert.equal(share78.url, LGS8_ETUT_ZOOM_URL);
+    assert.ok(String(share78.shareText || '').includes('6946337643'));
   });
 });

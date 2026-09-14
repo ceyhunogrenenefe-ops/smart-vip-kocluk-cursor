@@ -1,7 +1,7 @@
 import { apiFetch } from './session';
 import { copyTextToClipboard } from './copyToClipboard';
 import { isExternalMeetingPlatform, lessonJoinUrl } from './liveLessonUtils';
-import { PRIMARY_4567_ZOOM_URL, primary4567ZoomIfApplicable } from './primary4567Zoom';
+import { LGS8_ETUT_ZOOM_URL, PRIMARY_4567_ZOOM_URL, primary4567ZoomIfApplicable } from './primary4567Zoom';
 
 export type GuestJoinKind = 'class' | 'private' | 'meeting';
 
@@ -246,7 +246,12 @@ export async function copyAcademicStudyGuestJoinShareText(
   opts?: { directUrl?: string | null; title?: string }
 ): Promise<GuestJoinShare> {
   const r = String(room || '').trim().toLowerCase();
-  const forced = r === 'class47' || r === 'class56' ? PRIMARY_4567_ZOOM_URL : '';
+  const forced =
+    r === 'class47' || r === 'class56'
+      ? PRIMARY_4567_ZOOM_URL
+      : r === 'class78'
+        ? LGS8_ETUT_ZOOM_URL
+        : '';
   const direct = String(forced || opts?.directUrl || '').trim();
   if (isExternalMeetingPlatform(direct)) {
     return copyExternalMeetingShareText({
