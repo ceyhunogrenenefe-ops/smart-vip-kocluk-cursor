@@ -107,6 +107,11 @@ function pageIdEnv() {
   return raw;
 }
 
+/** Facebook Page ID for Graph `/{page-id}/messages` (IG/FB DM). Not IG business account id. */
+export function resolvePageId() {
+  return pageIdEnv();
+}
+
 export function describeSocialTokenEnv() {
   const resolved = resolveSocialToken();
   const tok = resolved.token;
