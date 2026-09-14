@@ -105,4 +105,17 @@ describe('primary 4-7 Zoom', () => {
     assert.ok(!String(links.exams.class47).includes('6946337643'));
     assert.ok(String(links.exams.class47).includes('9448152197'));
   });
+
+  it('academic study guest invite for class47/class56 always returns the shared Zoom', async () => {
+    const { createAcademicStudyGuestJoinShareLink } = await import('./bbb-guest-join-core.js');
+    for (const room of ['class47', 'class56']) {
+      const share = await createAcademicStudyGuestJoinShareLink({
+        institutionId: '73323d75-eea1-4552-8bba-d50555423589',
+        room
+      });
+      assert.equal(share.url, PRIMARY_4567_ZOOM_URL);
+      assert.ok(String(share.shareText || '').includes('9448152197'));
+      assert.ok(!String(share.shareText || '').includes('6946337643'));
+    }
+  });
 });

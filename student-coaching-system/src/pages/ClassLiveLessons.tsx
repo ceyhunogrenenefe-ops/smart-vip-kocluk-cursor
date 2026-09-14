@@ -29,7 +29,7 @@ import {
 } from '../lib/classLivePresence';
 import { useClassLivePresence } from '../hooks/useClassLivePresence';
 import { classIdsInLivePresenceWindow } from '../lib/classLiveWindow';
-import { copyGuestJoinShareText, tryCopyExternalMeetingFromRow } from '../lib/bbbGuestJoin';
+import { copyGuestJoinShareText, copyExternalMeetingShareText, tryCopyExternalMeetingFromRow } from '../lib/bbbGuestJoin';
 import { toast } from 'sonner';
 import { isEtutSubject, startEtutSession } from '../lib/etutSession';
 import { primary4567ZoomIfApplicable } from '../lib/primary4567Zoom';
@@ -891,6 +891,23 @@ export default function ClassLiveLessons() {
   const copySessionGuestLink = useCallback(
     async (s: SessionRow) => {
       try {
+        const forcedZoom = primary4567ZoomIfApplicable({
+          subject: s.subject,
+          className: selectedClass?.name,
+          classLevel: selectedClass?.class_level
+        });
+        if (forcedZoom) {
+          await copyExternalMeetingShareText({
+            url: forcedZoom,
+            title: s.subject || 'Etüt',
+            lessonDate: s.lesson_date || '',
+            lessonTime: String(s.start_time || '').slice(0, 5),
+            className: selectedClass?.name || ''
+          });
+          setNotice(null);
+          toast.success('Kopyalandı — Zoom davet metni panoya alındı');
+          return;
+        }
         const external = await tryCopyExternalMeetingFromRow(s, {
           title: s.subject || 'Etüt',
           className: selectedClass?.name || '',
@@ -929,6 +946,23 @@ export default function ClassLiveLessons() {
           }
           sessionId = match.id;
           setWeekSessions(rows);
+          const matchForcedZoom = primary4567ZoomIfApplicable({
+            subject: match.subject,
+            className: selectedClass?.name,
+            classLevel: selectedClass?.class_level
+          });
+          if (matchForcedZoom) {
+            await copyExternalMeetingShareText({
+              url: matchForcedZoom,
+              title: match.subject || 'Etüt',
+              lessonDate: match.lesson_date || '',
+              lessonTime: String(match.start_time || '').slice(0, 5),
+              className: selectedClass?.name || ''
+            });
+            setNotice(null);
+            toast.success('Kopyalandı — Zoom davet metni panoya alındı');
+            return;
+          }
           const matchExternal = await tryCopyExternalMeetingFromRow(match, {
             title: match.subject || 'Etüt',
             className: selectedClass?.name || '',
