@@ -2,7 +2,7 @@ import { PRIMARY_4567_ZOOM_URL } from './primary-4567-zoom.js';
 
 const DEFAULT_STUDY = {
   class47: PRIMARY_4567_ZOOM_URL,
-  class56: 'https://kurumsal.ornek.edu/tr/etut-56',
+  class56: PRIMARY_4567_ZOOM_URL,
   class78: 'https://kurumsal.ornek.edu/tr/etut-78',
   class911: 'https://kurumsal.ornek.edu/tr/etut-911',
   yks: 'https://kurumsal.ornek.edu/tr/etut-yks'
@@ -18,7 +18,7 @@ const DEFAULT_EXAMS = {
   yos: 'https://kurumsal.ornek.edu/tr/deneme-yos',
   class47: PRIMARY_4567_ZOOM_URL,
   class34: 'https://kurumsal.ornek.edu/tr/deneme-34',
-  class56: 'https://kurumsal.ornek.edu/tr/deneme-56',
+  class56: PRIMARY_4567_ZOOM_URL,
   class78: 'https://kurumsal.ornek.edu/tr/deneme-78',
   optic: 'https://kurumsal.ornek.edu/tr/sanal-optik',
   exam: 'https://kurumsal.ornek.edu/tr/deneme'
@@ -100,9 +100,11 @@ export function linksForInstitution(store, institutionId) {
   // Lise Deneme Sınavı giriş — kurum geneli Zoom oturumu
   merged.exams.lise = LISE_DENEME_ZOOM_ENTRY;
   if (merged.exams.exam) merged.exams.exam = LISE_DENEME_ZOOM_ENTRY;
-  // 4-7. sınıf etüt / ödev / kitap / deneme — ortak Zoom
+  // 4–7 ve 5–6 etüt / ödev / kitap / deneme — aynı Zoom (8 / LGS class78 dokunulmaz)
   merged.exams.class47 = PRIMARY_4567_ZOOM_URL;
+  merged.exams.class56 = PRIMARY_4567_ZOOM_URL;
   merged.studyClasses.class47 = PRIMARY_4567_ZOOM_URL;
+  merged.studyClasses.class56 = PRIMARY_4567_ZOOM_URL;
   return merged;
 }
 
