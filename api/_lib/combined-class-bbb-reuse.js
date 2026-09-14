@@ -18,6 +18,7 @@ import {
   hasReusableBbbSeed,
   syncConsecutivePeerMeetingLinks
 } from './consecutive-class-bbb-reuse.js';
+import { isDinKulturuSubject, lgs8DinPairId } from './lgs8-din-shared-bbb.js';
 
 export function isCombinedClassBbbReuseEnabled() {
   return String(process.env.BBB_COMBINED_CLASS_REUSE ?? 'true').toLowerCase() !== 'false';
@@ -95,6 +96,29 @@ function isSafeToResetMeetingFields(row) {
  * @param {Record<string, unknown>} session
  * @returns {Promise<import('./consecutive-class-bbb-reuse.js').resolveConsecutiveClassBbbReuse extends (...args: any) => Promise<infer R> ? R : never | null>}
  */
+
+/** Din Kültürü: yalnızca aynı çift (8A+8C / 8B+8F) ortak BBB odasında toplanır. */
+async function filterGroupByLgs8DinPair(session, group) {
+  if (!isDinKulturuSubject(session?.subject)) return group;
+  const classIds = [...new Set((group || []).map((r) => String(r.class_id || '').trim()).filter(Boolean))];
+  if (!classIds.length) return group;
+  const { data: classes, error } = await supabaseAdmin
+    .from('classes')
+    .select('id,name,class_level')
+    .in('id', classIds);
+  if (error) throw error;
+  const byId = new Map((classes || []).map((c) => [String(c.id), c]));
+  const own = byId.get(String(session.class_id || ''));
+  const ownPair = lgs8DinPairId(own?.name, own?.class_level);
+  if (!ownPair) {
+    return (group || []).filter((r) => String(r.id) === String(session.id));
+  }
+  return (group || []).filter((row) => {
+    const cls = byId.get(String(row.class_id || ''));
+    return lgs8DinPairId(cls?.name, cls?.class_level) === ownPair;
+  });
+}
+
 export async function resolveCombinedClassBbbReuse(session) {
   if (!isCombinedClassBbbReuseEnabled() || !session?.id) return null;
   try {
@@ -113,13 +137,14 @@ export async function resolveCombinedClassBbbReuse(session) {
 
     if (error) throw error;
 
-    const group = sortSessionsById(
+    let group = sortSessionsById(
       (data || []).filter((row) => {
         if (String(row.status || '') === 'cancelled') return false;
         if (normSubject(row.subject) !== subject) return false;
         return sameTimeSlot(row, session);
       })
     );
+    group = sortSessionsById(await filterGroupByLgs8DinPair(session, group));
 
     const classIds = new Set(group.map((r) => String(r.class_id || '')));
     if (classIds.size < 2) {
