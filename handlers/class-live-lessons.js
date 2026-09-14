@@ -104,6 +104,7 @@ import { listScheduledSessionBatchPeers } from '../api/_lib/class-session-batch-
 import { ensureClassTeacherLink, getTeacherPanelClassIds } from '../api/_lib/teacher-class-scope.js';
 import { errorMessage } from '../api/_lib/error-msg.js';
 import { primary4567ZoomIfApplicable } from '../api/_lib/primary-4567-zoom.js';
+import { lise911YksZoomIfApplicable } from '../api/_lib/lise-911-yks-zoom.js';
 import {
   applyLgs8DinSharedJoinContext,
   lgs8DinSharedMeetingFields,
@@ -148,7 +149,9 @@ async function resolveClassMeetingLinkFromRequest({
   dayOfWeek,
   startTime
 }) {
-  const zoom = primary4567ZoomIfApplicable({ subject, className, classLevel });
+  const zoom =
+    primary4567ZoomIfApplicable({ subject, className, classLevel }) ||
+    lise911YksZoomIfApplicable({ subject, className, classLevel });
   if (zoom) {
     return {
       ok: true,
@@ -598,11 +601,17 @@ async function overlayPrimary4567ZoomOnMeetingRows(rows) {
   }
   return rows.map((row) => {
     const cls = classMap.get(String(row.class_id || ''));
-    const zoom = primary4567ZoomIfApplicable({
-      subject: row.subject || row.title,
-      className: cls?.name,
-      classLevel: cls?.class_level
-    });
+    const zoom =
+      primary4567ZoomIfApplicable({
+        subject: row.subject || row.title,
+        className: cls?.name,
+        classLevel: cls?.class_level
+      }) ||
+      lise911YksZoomIfApplicable({
+        subject: row.subject || row.title,
+        className: cls?.name,
+        classLevel: cls?.class_level
+      });
     if (!zoom) return row;
     return { ...row, meeting_link: zoom, join_link: zoom };
   });

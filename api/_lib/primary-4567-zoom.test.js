@@ -121,9 +121,12 @@ describe('primary 4-7 Zoom', () => {
     assert.ok(!String(links.exams.class47).includes('6946337643'));
     assert.ok(String(links.exams.class47).includes('9448152197'));
     assert.ok(String(links.studyClasses.class78).includes('6946337643'));
+    assert.ok(String(links.studyClasses.class911).includes('3565095951'));
+    assert.ok(String(links.studyClasses.yks).includes('3565095951'));
+    assert.equal(links.exams.lise, links.studyClasses.class911);
   });
 
-  it('academic study guest invite: class47/56 → 4-7 Zoom; class78 → LGS8 Zoom', async () => {
+  it('academic study guest invite: class47/56 → 4-7 Zoom; class78 → LGS8 Zoom; class911/yks → Lise Zoom', async () => {
     const { createAcademicStudyGuestJoinShareLink } = await import('./bbb-guest-join-core.js');
     for (const room of ['class47', 'class56']) {
       const share = await createAcademicStudyGuestJoinShareLink({
@@ -140,5 +143,15 @@ describe('primary 4-7 Zoom', () => {
     });
     assert.equal(share78.url, LGS8_ETUT_ZOOM_URL);
     assert.ok(String(share78.shareText || '').includes('6946337643'));
+
+    const { LISE_911_YKS_ZOOM_URL } = await import('./lise-911-yks-zoom.js');
+    for (const room of ['class911', 'yks']) {
+      const share = await createAcademicStudyGuestJoinShareLink({
+        institutionId: '73323d75-eea1-4552-8bba-d50555423589',
+        room
+      });
+      assert.equal(share.url, LISE_911_YKS_ZOOM_URL);
+      assert.ok(String(share.shareText || '').includes('3565095951'));
+    }
   });
 });
