@@ -498,10 +498,11 @@ export async function syncInstagramMessagingToCrm(events, { institutionId, chann
 export async function syncInstagramCommentsToCrm(changes, { institutionId } = {}) {
   const list = Array.isArray(changes) ? changes : [];
   let processed = 0;
+  let skipped = 0;
   for (const change of list) {
     const norm = normalizeInstagramCommentChange(change);
     if (!norm?.hasInboundContent || !norm.fromId) continue;
-    await upsertCrmMessage({
+    const r = await upsertCrmMessage({
       channel: 'instagram',
       contactIdentifier: norm.fromId,
       contactName: norm.fromUsername || null,
@@ -524,9 +525,10 @@ export async function syncInstagramCommentsToCrm(changes, { institutionId } = {}
       },
       payload: change
     });
-    processed += 1;
+    if (r?.skipped) skipped += 1;
+    else processed += 1;
   }
-  return { processed };
+  return { processed, skipped };
 }
 
 
@@ -534,11 +536,12 @@ export async function syncInstagramCommentsToCrm(changes, { institutionId } = {}
 export async function syncFacebookCommentsToCrm(changes, { institutionId } = {}) {
   const list = Array.isArray(changes) ? changes : [];
   let processed = 0;
+  let skipped = 0;
   for (const change of list) {
     const norm = normalizeFacebookFeedCommentChange(change);
     if (!norm?.hasInboundContent || !norm.fromId) continue;
     const classif = classifySocialInteractionSource({ channel: 'facebook', isComment: true });
-    await upsertCrmMessage({
+    const r = await upsertCrmMessage({
       channel: 'facebook',
       contactIdentifier: norm.fromId,
       contactName: norm.fromName || null,
@@ -558,9 +561,10 @@ export async function syncFacebookCommentsToCrm(changes, { institutionId } = {})
       },
       payload: change
     });
-    processed += 1;
+    if (r?.skipped) skipped += 1;
+    else processed += 1;
   }
-  return { processed };
+  return { processed, skipped };
 }
 
 export async function sendCrmWhatsAppText({ phone, text }) {
