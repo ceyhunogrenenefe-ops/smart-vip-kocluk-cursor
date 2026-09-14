@@ -5,8 +5,31 @@
 import { supabaseAdmin } from './supabase-admin.js';
 import {
   ensureCrmInboxSchema,
-  resolveCrmMessageIdColumn
+  resolveCrmMessageIdColumn,
+  probeFacebookChannelSupport,
+  clearFacebookChannelSupportCache,
+  FACEBOOK_CHANNEL_REPAIR_SQL
 } from './crm-inbox-schema.js';
+
+/** DB CHECK facebook kabul etmiyorsa: instagram + fb: öneki (veri kaybı olmasın). */
+export const FB_CONTACT_PREFIX = 'fb:';
+
+export function isFacebookFallbackContact(contactIdentifier) {
+  return String(contactIdentifier || '').startsWith(FB_CONTACT_PREFIX);
+}
+
+export function stripFacebookFallbackContact(contactIdentifier) {
+  const s = String(contactIdentifier || '');
+  return isFacebookFallbackContact(s) ? s.slice(FB_CONTACT_PREFIX.length) : s;
+}
+
+function isFacebookChannelRejectedError(error) {
+  const msg = String(error?.message || error || '');
+  return (
+    /crm_conversations_channel_check|channel_check|check constraint/i.test(msg) &&
+    /facebook|channel/i.test(msg)
+  ) || /invalid input value for enum|channel.*facebook/i.test(msg);
+}
 import {
   loadMetaWhatsAppSecretsFromDb,
   metaWhatsAppConfigured,
@@ -242,6 +265,19 @@ export async function upsertCrmMessage({
     const { data, error } = await q;
     if (error && !/crm_conversations|does not exist|schema cache/i.test(error.message || '')) throw error;
     conversation = Array.isArray(data) ? data[0] || null : data || null;
+
+    // Facebook CHECK yoksa önceki mesajlar fb: önekiyle instagram’a yazılmış olabilir — birleştir
+    if (!conversation && ch === 'facebook') {
+      let fq = supabaseAdmin
+        .from('crm_conversations')
+        .select('*')
+        .eq('channel', 'instagram')
+        .eq('contact_identifier', `${FB_CONTACT_PREFIX}${contact}`)
+        .limit(1);
+      if (instId) fq = fq.eq('institution_id', instId);
+      const { data: fbFallback } = await fq;
+      conversation = Array.isArray(fbFallback) ? fbFallback[0] || null : fbFallback || null;
+    }
   } catch (e) {
     if (/crm_conversations|does not exist|schema cache/i.test(e?.message || '')) {
       if (_schemaRetried) return { skipped: true, reason: 'table_missing' };
@@ -298,6 +334,63 @@ export async function upsertCrmMessage({
           .eq('institution_id', instId)
           .maybeSingle();
         conversation = again;
+      } else if (ch === 'facebook' && isFacebookChannelRejectedError(error) && !_schemaRetried) {
+        // Önce DDL ile facebook CHECK’i düzeltmeyi dene
+        clearFacebookChannelSupportCache();
+        const ensured = await ensureCrmInboxSchema({ force: true }).catch(() => null);
+        const fbProbe = await probeFacebookChannelSupport({ force: true }).catch(() => null);
+        if (fbProbe?.ok) {
+          return upsertCrmMessage({
+            channel,
+            contactIdentifier,
+            contactName,
+            body,
+            mediaUrl,
+            messageType,
+            messageId,
+            timestamp,
+            direction,
+            senderType,
+            senderId,
+            institutionId,
+            leadId,
+            adSourceData,
+            payload,
+            deliveryStatus,
+            _schemaRetried: true
+          });
+        }
+        // DDL yok / CHECK hâlâ reddediyor → fb: önekli instagram fallback (UI Facebook gösterir)
+        console.warn(
+          '[crm-inbox] facebook channel rejected by DB CHECK — using fb: fallback. Run SQL:',
+          FACEBOOK_CHANNEL_REPAIR_SQL,
+          ensured?.message || error.message
+        );
+        return upsertCrmMessage({
+          channel: 'instagram',
+          contactIdentifier: `${FB_CONTACT_PREFIX}${contact}`,
+          contactName,
+          body,
+          mediaUrl,
+          messageType,
+          messageId,
+          timestamp,
+          direction,
+          senderType,
+          senderId,
+          institutionId,
+          leadId,
+          adSourceData: {
+            ...(adSourceData && typeof adSourceData === 'object' ? adSourceData : {}),
+            source_platform: 'facebook',
+            channel_fallback: 'instagram_fb_prefix',
+            original_channel: 'facebook',
+            repair_sql_hint: true
+          },
+          payload,
+          deliveryStatus,
+          _schemaRetried: true
+        });
       } else {
         throw error;
       }

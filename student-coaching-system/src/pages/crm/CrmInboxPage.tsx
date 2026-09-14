@@ -42,15 +42,20 @@ import {
 } from '../../lib/crmInboxApi';
 import { CrmTemplateCreateModal, CrmTemplateSendPreviewModal } from './CrmTemplateModals';
 
-function ChannelBadge({ channel }: { channel: string }) {
-  if (channel === 'instagram') {
+function ChannelBadge({ channel, contactIdentifier, adSourceData }: { channel: string; contactIdentifier?: string | null; adSourceData?: Record<string, unknown> | null }) {
+  const isFbFallback =
+    String(contactIdentifier || '').startsWith('fb:') ||
+    adSourceData?.source_platform === 'facebook' ||
+    adSourceData?.original_channel === 'facebook';
+  const ch = isFbFallback ? 'facebook' : channel;
+  if (ch === 'instagram') {
     return (
       <span className="inline-flex items-center gap-1 rounded bg-gradient-to-r from-purple-500 to-pink-500 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-white">
         <Instagram className="h-3 w-3" /> IG
       </span>
     );
   }
-  if (channel === 'facebook') {
+  if (ch === 'facebook') {
     return (
       <span className="inline-flex items-center gap-1 rounded bg-blue-600 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-white">
         <Facebook className="h-3 w-3" /> FB
@@ -532,7 +537,7 @@ export default function CrmInboxPage() {
                     >
                       {c.contact_name || c.contact_identifier}
                     </span>
-                    <ChannelBadge channel={c.channel} />
+                    <ChannelBadge channel={c.channel} contactIdentifier={c.contact_identifier} adSourceData={c.ad_source_data as Record<string, unknown> | null} />
                   </div>
                   <div className="flex items-center justify-between gap-2">
                     <span className="truncate text-xs text-slate-500">
@@ -565,7 +570,7 @@ export default function CrmInboxPage() {
                   <h2 className="font-semibold text-slate-900">
                     {selected?.contact_name || selected?.contact_identifier || '…'}
                   </h2>
-                  {selected && <ChannelBadge channel={selected.channel} />}
+                  {selected && <ChannelBadge channel={selected.channel} contactIdentifier={selected.contact_identifier} adSourceData={selected.ad_source_data as Record<string, unknown> | null} />}
                 </div>
                 <p className="text-xs text-slate-500">{selected?.contact_identifier}</p>
               </div>
@@ -855,7 +860,7 @@ export default function CrmInboxPage() {
               <p className="mt-1 font-medium text-slate-900">{selected.contact_name || '—'}</p>
               <p className="text-slate-600">{selected.contact_identifier}</p>
               <p className="mt-1">
-                <ChannelBadge channel={selected.channel} />
+                <ChannelBadge channel={selected.channel} contactIdentifier={selected.contact_identifier} adSourceData={selected.ad_source_data as Record<string, unknown> | null} />
               </p>
             </div>
 
