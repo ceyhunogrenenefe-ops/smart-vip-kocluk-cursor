@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { FileText, Loader2, Plus, X } from 'lucide-react';
 import { toast } from 'sonner';
+import { useAuth } from '../../../context/AuthContext';
 import {
   crmCreateMetaTemplate,
   crmListMetaTemplates,
@@ -183,6 +184,7 @@ export default function RegLeadDrawer({
           <TasksTab
             items={detail?.tasks || []}
             leadId={leadId}
+            agents={agents}
             onChanged={() => {
               load();
               onUpdated();
@@ -944,15 +946,29 @@ function InteractionsTab({
   );
 }
 
+function localDueValue(plusHours = 1) {
+  const d = new Date(Date.now() + plusHours * 3600 * 1000);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 function TasksTab({
   items,
   leadId,
+  agents,
   onChanged
 }: {
   items: Array<Record<string, unknown>>;
   leadId: string;
+  agents?: RegCoach[];
   onChanged: () => void;
 }) {
+  const { effectiveUser } = useAuth();
+  const [title, setTitle] = useState('Arama / Takip');
+  const [dueLocal, setDueLocal] = useState(localDueValue(1));
+  const [assignee, setAssignee] = useState(effectiveUser?.id || '');
+  const [busy, setBusy] = useState(false);
+
   const complete = async (taskId: string) => {
     const result = window.prompt('Görüşme sonucu:');
     if (result === null) return;
@@ -966,28 +982,70 @@ function TasksTab({
   };
 
   const create = async () => {
-    const title = window.prompt('Görev başlığı:');
-    if (!title) return;
-    const due = window.prompt('Son tarih (YYYY-MM-DD):');
+    if (!title.trim()) return;
+    setBusy(true);
     try {
+      const due = dueLocal ? new Date(dueLocal).toISOString() : null;
       await rtCreateTask({
         lead_id: leadId,
-        title,
+        title: title.trim(),
+        description: title.trim(),
         task_type: 'call_parent',
-        due_at: due ? `${due}T10:00:00+03:00` : null
+        due_at: due,
+        assigned_to: assignee || undefined,
+        next_action_at: due,
+        next_action_type: 'call_parent'
       });
-      toast.success('Görev oluşturuldu');
+      toast.success('Alarm / takip kuruldu');
       onChanged();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Oluşturulamadı');
+    } finally {
+      setBusy(false);
     }
   };
 
   return (
     <div className="space-y-3">
-      <button type="button" onClick={create} className="rounded-lg border px-3 py-1.5 text-sm">
-        + Sonraki işlem ekle
-      </button>
+      <div className="rounded-xl border border-amber-200 bg-amber-50/70 p-3">
+        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-amber-800">Alarm kur</p>
+        <input
+          className="mb-2 w-full rounded-lg border border-amber-200 bg-white px-2 py-1.5 text-sm"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          placeholder="14:00 — Arama / Takip"
+        />
+        <input
+          type="datetime-local"
+          className="mb-2 w-full rounded-lg border border-amber-200 bg-white px-2 py-1.5 text-sm"
+          value={dueLocal}
+          onChange={(e) => setDueLocal(e.target.value)}
+        />
+        {agents && agents.length > 0 && (
+          <select
+            className="mb-2 w-full rounded-lg border border-amber-200 bg-white px-2 py-1.5 text-sm"
+            value={assignee}
+            onChange={(e) => setAssignee(e.target.value)}
+          >
+            <option value={effectiveUser?.id || ''}>
+              {effectiveUser?.name || 'Ben'} (oturum)
+            </option>
+            {agents.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.name}
+              </option>
+            ))}
+          </select>
+        )}
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => void create()}
+          className="rounded-lg bg-amber-600 px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-50"
+        >
+          Hatırlatıcı oluştur
+        </button>
+      </div>
       {items.map((t) => {
         const overdue =
           t.status !== 'completed' && t.due_at && new Date(String(t.due_at)).getTime() < Date.now();
