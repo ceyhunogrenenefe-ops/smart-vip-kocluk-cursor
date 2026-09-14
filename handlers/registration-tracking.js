@@ -1617,49 +1617,26 @@ async function handleSendChannelMessage(body, institutionId, actor) {
     const igsid = lead.instagram_scoped_id;
     if (!igsid) throw new Error('Instagram scoped id yok — önce gelen DM gerekli');
     try {
-      const token =
-        process.env.INSTAGRAM_PAGE_ACCESS_TOKEN ||
-        process.env.META_PAGE_ACCESS_TOKEN ||
-        '';
-      const pageId =
-        process.env.INSTAGRAM_BUSINESS_ACCOUNT_ID ||
-        process.env.META_IG_BUSINESS_ID ||
-        '';
-      if (!token || !pageId) {
-        sendMeta = {
-          ok: false,
-          provider: 'none',
-          error: 'Instagram API yapılandırması yok — mesaj yalnızca kaydedildi'
-        };
-      } else {
-        const url = `https://graph.facebook.com/v21.0/${pageId}/messages`;
-        const res = await fetch(url, {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            recipient: { id: igsid },
-            messaging_type: 'RESPONSE',
-            message: { text }
-          })
-        });
-        const j = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          sendMeta = {
-            ok: false,
-            provider: 'meta_ig',
-            error: j?.error?.message || `HTTP ${res.status}`,
-            raw: j
-          };
-        } else {
-          sendMeta = { ok: true, provider: 'meta_ig', error: null, raw: j };
-          externalMessageId = j?.message_id || j?.id || null;
-        }
-      }
+      const { sendCrmInstagramDm } = await import('../api/_lib/crm-inbox.js');
+      const r = await sendCrmInstagramDm({ igScopedId: igsid, text });
+      sendMeta = {
+        ok: true,
+        provider: 'meta_ig',
+        error: null,
+        tokenSource: r?.tokenSource || null,
+        raw: r?.raw || r
+      };
+      externalMessageId = r?.messageId || null;
     } catch (e) {
-      sendMeta = { ok: false, provider: 'error', error: e instanceof Error ? e.message : String(e) };
+      const msg = e instanceof Error ? e.message : String(e);
+      const isEnv = e?.code === 'ENV' || /instagram_not_configured|not_configured/i.test(msg);
+      sendMeta = {
+        ok: false,
+        provider: isEnv ? 'none' : 'error',
+        error: isEnv
+          ? 'Instagram API yapılandırması yok — mesaj yalnızca kaydedildi'
+          : msg
+      };
     }
   }
 

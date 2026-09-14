@@ -720,16 +720,15 @@ export async function sendCrmWhatsAppTemplate({
 
 export async function sendCrmInstagramDm({ igScopedId, text }) {
   await loadMetaWhatsAppSecretsFromDb();
-  const token =
-    process.env.META_PAGE_ACCESS_TOKEN ||
-    process.env.INSTAGRAM_PAGE_ACCESS_TOKEN ||
-    process.env.FACEBOOK_PAGE_ACCESS_TOKEN ||
-    process.env.INSTAGRAM_ACCESS_TOKEN ||
-    '';
-  const pageId = process.env.META_PAGE_ID || process.env.FACEBOOK_PAGE_ID || '';
+  const { resolveSocialToken, resolvePageId } = await import('./meta-social-inbound.js');
+  const { token, source: tokenSource } = resolveSocialToken();
+  const pageId = resolvePageId();
   if (!token || !pageId) {
-    const err = new Error('facebook_instagram_not_configured — META_PAGE_ACCESS_TOKEN + META_PAGE_ID');
+    const err = new Error(
+      'instagram_not_configured — META_BOUND_PAGE_TOKEN (veya META_PAGE_ACCESS_TOKEN) + META_PAGE_ID gerekli'
+    );
     err.code = 'ENV';
+    err.meta = { tokenPresent: Boolean(token), tokenSource, pageIdPresent: Boolean(pageId) };
     throw err;
   }
   const graphVer = String(process.env.META_GRAPH_API_VERSION || 'v21.0').trim() || 'v21.0';
@@ -753,7 +752,7 @@ export async function sendCrmInstagramDm({ igScopedId, text }) {
     err.raw = json;
     throw err;
   }
-  return { messageId: json?.message_id || json?.id || null, raw: json };
+  return { messageId: json?.message_id || json?.id || null, raw: json, tokenSource };
 }
 
 export async function getCrmAgentAssignment(userId, institutionId) {
