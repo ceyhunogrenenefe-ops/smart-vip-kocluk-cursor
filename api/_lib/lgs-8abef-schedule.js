@@ -100,7 +100,7 @@ const SCHEDULE_8E = [
   ...saturdayDeneme()
 ];
 
-/** LGS F → 8F (Din Kültürü: 8B ile aynı Çarşamba 20:40 — ortak BBB) */
+/** LGS F → 8F (Din Kültürü: 8B ile aynı Cuma 20:40 — ortak BBB) */
 const SCHEDULE_8F = [
   ...weekday(1, [
     { start: '19:00', end: '19:40', subject: 'TÜRKÇE' },
@@ -113,7 +113,7 @@ const SCHEDULE_8F = [
   ...weekday(3, [
     { start: '19:00', end: '19:40', subject: 'FEN BİLİMLERİ' },
     { start: '19:50', end: '20:30', subject: 'FEN BİLİMLERİ' },
-    { start: '20:40', end: '21:20', subject: 'DİN KÜLTÜRÜ' }
+    { start: '20:40', end: '21:20', subject: 'İNKILAP TARİHİ' }
   ]),
   ...weekday(4, [
     { start: '19:00', end: '19:40', subject: 'MATEMATİK' },
@@ -123,12 +123,12 @@ const SCHEDULE_8F = [
   ...weekday(5, [
     { start: '19:00', end: '19:40', subject: 'İNGİLİZCE' },
     { start: '19:50', end: '20:30', subject: 'İNGİLİZCE' },
-    { start: '20:40', end: '21:20', subject: 'İNKILAP TARİHİ' }
+    { start: '20:40', end: '21:20', subject: 'DİN KÜLTÜRÜ' }
   ]),
   ...saturdayDeneme()
 ];
 
-/** LGS B → 8B */
+/** LGS B → 8B (Din Kültürü: Cuma 20:40 — 8F ile ortak BBB) */
 const SCHEDULE_8B = [
   ...weekday(1, [
     { start: '19:00', end: '19:40', subject: 'İNKILAP TARİHİ' },
@@ -141,8 +141,7 @@ const SCHEDULE_8B = [
   ]),
   ...weekday(3, [
     { start: '19:00', end: '19:40', subject: 'TÜRKÇE' },
-    { start: '19:50', end: '20:30', subject: 'TÜRKÇE' },
-    { start: '20:40', end: '21:20', subject: 'DİN KÜLTÜRÜ' }
+    { start: '19:50', end: '20:30', subject: 'TÜRKÇE' }
   ]),
   ...weekday(4, [
     { start: '19:00', end: '19:40', subject: 'MATEMATİK' },
@@ -151,12 +150,13 @@ const SCHEDULE_8B = [
   ]),
   ...weekday(5, [
     { start: '19:00', end: '19:40', subject: 'FEN BİLİMLERİ' },
-    { start: '19:50', end: '20:30', subject: 'FEN BİLİMLERİ' }
+    { start: '19:50', end: '20:30', subject: 'FEN BİLİMLERİ' },
+    { start: '20:40', end: '21:20', subject: 'DİN KÜLTÜRÜ' }
   ]),
   ...saturdayDeneme()
 ];
 
-/** LGS A → 8A */
+/** LGS A → 8A (Din Kültürü: Perşembe 19:50 — 8C ile ortak BBB) */
 const SCHEDULE_8A = [
   ...weekday(1, [
     { start: '19:00', end: '19:40', subject: 'FEN BİLİMLERİ' },
@@ -170,12 +170,11 @@ const SCHEDULE_8A = [
   ]),
   ...weekday(3, [
     { start: '19:00', end: '19:40', subject: 'MATEMATİK' },
-    { start: '19:50', end: '20:30', subject: 'MATEMATİK' },
-    { start: '20:40', end: '21:20', subject: 'DİN KÜLTÜRÜ' }
+    { start: '19:50', end: '20:30', subject: 'MATEMATİK' }
   ]),
   ...weekday(4, [
     { start: '19:00', end: '19:40', subject: 'İNGİLİZCE' },
-    { start: '19:50', end: '20:30', subject: 'İNGİLİZCE' }
+    { start: '19:50', end: '20:30', subject: 'DİN KÜLTÜRÜ' }
   ]),
   ...weekday(5, [
     { start: '19:00', end: '19:40', subject: 'MATEMATİK' },
@@ -185,7 +184,7 @@ const SCHEDULE_8A = [
 ];
 
 
-/** LGS C → 8C (Din Kültürü: 8A ile aynı Çarşamba 20:40 — ortak BBB) */
+/** LGS C → 8C (Din Kültürü: 8A ile aynı Perşembe 19:50 — ortak BBB) */
 const SCHEDULE_8C = [
   ...weekday(1, [
     { start: '19:00', end: '19:40', subject: 'FEN BİLİMLERİ' },
@@ -199,12 +198,11 @@ const SCHEDULE_8C = [
   ]),
   ...weekday(3, [
     { start: '19:00', end: '19:40', subject: 'MATEMATİK' },
-    { start: '19:50', end: '20:30', subject: 'MATEMATİK' },
-    { start: '20:40', end: '21:20', subject: 'DİN KÜLTÜRÜ' }
+    { start: '19:50', end: '20:30', subject: 'MATEMATİK' }
   ]),
   ...weekday(4, [
     { start: '19:00', end: '19:40', subject: 'İNGİLİZCE' },
-    { start: '19:50', end: '20:30', subject: 'İNGİLİZCE' }
+    { start: '19:50', end: '20:30', subject: 'DİN KÜLTÜRÜ' }
   ]),
   ...weekday(5, [
     { start: '19:00', end: '19:40', subject: 'MATEMATİK' },
