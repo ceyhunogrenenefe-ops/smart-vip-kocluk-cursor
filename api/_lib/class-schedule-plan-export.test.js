@@ -12,6 +12,8 @@ describe('class-schedule-plan-export teacher optional subjects', () => {
     expect(isTeacherOptionalSubject('DENEME SINAVI')).toBe(true);
     expect(isTeacherOptionalSubject('Deneme Analizi')).toBe(true);
     expect(isTeacherOptionalSubject('DENEME ANALİZİ')).toBe(true);
+    expect(isTeacherOptionalSubject('ÖDEV SAATİ')).toBe(true);
+    expect(isTeacherOptionalSubject('ÖDEV & KİTAP OKUMA')).toBe(true);
     expect(isTeacherOptionalSubject('MATEMATİK')).toBe(false);
   });
 

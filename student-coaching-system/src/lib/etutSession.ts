@@ -43,8 +43,8 @@ export function resolveStudyRoomForClassLevel(classLevel?: ClassLevel | string |
     .trim()
     .toUpperCase();
   if (!cl) return 'yks';
-  if (cl === 'LGS' || cl === '8' || cl === '7' || cl.includes('8.') || cl.includes('7.')) return 'class78';
-  if (cl === '5' || cl === '6' || cl.includes('5.') || cl.includes('6.')) return 'class56';
+  if (cl === 'LGS' || cl === '8' || cl.includes('8.')) return 'class78';
+  if (cl === '4' || cl === '5' || cl === '6' || cl === '7' || /[4567]\./.test(cl)) return 'class47';
   if (cl === 'YKS' || cl.includes('TYT') || cl.includes('AYT') || cl.includes('12')) return 'yks';
   if (cl.includes('9') || cl.includes('10') || cl.includes('11')) return 'class911';
   return 'yks';

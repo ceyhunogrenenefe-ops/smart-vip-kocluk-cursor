@@ -2,6 +2,8 @@ import { supabaseAdmin } from './supabase-admin.js';
 import { ensureClassTeacherLink } from './teacher-class-scope.js';
 import { resolveBbbMeetingDurationMinutes } from './bbb.js';
 import { resolveBbbOrManualMeetingLink } from './resolve-bbb-meeting-link.js';
+import { primary4567ZoomIfApplicable } from './primary-4567-zoom.js';
+import { lgs8DinSharedMeetingFields } from './lgs8-din-shared-bbb.js';
 import {
   insertOneOptionalModerator,
   selectWithOptionalColumns,
@@ -165,14 +167,40 @@ async function teacherDisplayName(teacherId) {
 }
 
 async function resolveClassMeetingLinkFromRequest(opts) {
-  return resolveBbbOrManualMeetingLink({
+  const zoom = primary4567ZoomIfApplicable({
+    subject: opts.subject,
+    className: opts.className,
+    classLevel: opts.classLevel
+  });
+  if (zoom) {
+    return {
+      ok: true,
+      meetingLink: zoom,
+      meetingLinkModerator: null,
+      platform: 'zoom',
+      autoBbb: null
+    };
+  }
+  const din = lgs8DinSharedMeetingFields({
+    subject: opts.subject,
+    className: opts.className,
+    classLevel: opts.classLevel,
+    lessonDate: opts.lessonDate,
+    dayOfWeek: opts.dayOfWeek,
+    startTime: opts.startTime
+  });
+  const resolved = await resolveBbbOrManualMeetingLink({
     manualLink: opts.manualLink,
     meetingName: `${opts.subject} — ${opts.className || 'Grup dersi'}`,
     attendeeName: 'Öğrenci',
     moderatorName: await teacherDisplayName(opts.teacherId),
     durationMinutes: opts.durationMinutes,
-    meetingKeyPrefix: opts.meetingKeyPrefix
+    meetingKeyPrefix: din?.meetingKeyPrefix || opts.meetingKeyPrefix
   });
+  if (resolved?.ok && din && !String(opts.manualLink || '').trim()) {
+    resolved.bbbMeetingId = din.bbbMeetingId;
+  }
+  return resolved;
 }
 
 function timeOverlap(aStart, aEnd, bStart, bEnd) {
@@ -246,7 +274,7 @@ export function matchTeacherId(teacherName, teachers, teacherMap = {}) {
   return partial ? String(partial.id) : null;
 }
 
-/** ETÜT / Deneme / Deneme Analizi — öğretmen zorunlu değil. */
+/** ETÜT / Deneme / Ödev / Kitap okuma — öğretmen zorunlu değil. */
 export function isTeacherOptionalSubject(subject) {
   const s = String(subject || '')
     .trim()
@@ -255,6 +283,8 @@ export function isTeacherOptionalSubject(subject) {
   if (s === 'ETÜT' || s.includes('ETUT') || s.includes('ETÜT')) return true;
   if (s.includes('DENEME ANALİZ') || s.includes('DENEME ANALIZ')) return true;
   if (s.includes('DENEME')) return true;
+  if (s.includes('ÖDEV') || s.includes('ODEV')) return true;
+  if (s.includes('KİTAP') || s.includes('KITAP')) return true;
   return false;
 }
 
@@ -543,9 +573,12 @@ export async function exportPlannerGroupToClass({
       manualLink: '',
       subject,
       className: classRow.name || group.name || '',
+      classLevel: classRow.class_level || group.classLevel || '',
       teacherId,
       durationMinutes: duration,
-      meetingKeyPrefix
+      meetingKeyPrefix,
+      dayOfWeek,
+      startTime: timeParsed.start
     });
     if (!resolved.ok) {
       skipped.push({

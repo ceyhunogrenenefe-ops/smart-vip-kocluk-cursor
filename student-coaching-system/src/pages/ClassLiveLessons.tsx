@@ -32,6 +32,7 @@ import { classIdsInLivePresenceWindow } from '../lib/classLiveWindow';
 import { copyGuestJoinShareText, tryCopyExternalMeetingFromRow } from '../lib/bbbGuestJoin';
 import { toast } from 'sonner';
 import { isEtutSubject, startEtutSession } from '../lib/etutSession';
+import { primary4567ZoomIfApplicable } from '../lib/primary4567Zoom';
 import { useRecordingUnavailableAlert, recordingUnavailableText } from '../hooks/useRecordingUnavailableAlert';
 import {
   AppModal,
@@ -434,8 +435,14 @@ export default function ClassLiveLessons() {
     }
   };
 
-  const joinClassSession = useCallback(async (s: { id: string; subject?: string; join_link?: string; meeting_link?: string; lesson_date?: string; homework?: string | null }) => {
-    const url = lessonJoinUrl(s);
+  const joinClassSession = useCallback(async (s: { id: string; class_id?: string; subject?: string; join_link?: string; meeting_link?: string; lesson_date?: string; homework?: string | null }) => {
+    const cls = classes.find((c) => c.id === (s.class_id || selectedClassId)) || null;
+    const url =
+      primary4567ZoomIfApplicable({
+        subject: s.subject,
+        className: cls?.name,
+        classLevel: cls?.class_level
+      }) || lessonJoinUrl(s);
     if (!url && !s.id) {
       setError('Toplantı bağlantısı yok.');
       return;
@@ -475,7 +482,7 @@ export default function ClassLiveLessons() {
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
-  }, [isStudentView, resolvedStudentId]);
+  }, [isStudentView, resolvedStudentId, classes, selectedClassId]);
 
   const watchClassSessionRecording = useCallback(
     async (s: {
@@ -2318,7 +2325,13 @@ export default function ClassLiveLessons() {
                                 : s.status === 'cancelled'
                                   ? 'opacity-75 ring-red-200'
                                   : 'ring-emerald-300/50 shadow-md';
-                            const sessionLink = String(s.join_link || s.meeting_link || '').trim();
+                            const cls = classes.find((c) => c.id === s.class_id) || selectedClass;
+                            const sessionLink =
+                              primary4567ZoomIfApplicable({
+                                subject: s.subject,
+                                className: cls?.name,
+                                classLevel: cls?.class_level
+                              }) || String(s.join_link || s.meeting_link || '').trim();
                             const hasSessionLink = Boolean(sessionLink);
                             const canJoin = s.status === 'scheduled' && hasSessionLink;
                             const canWatchRecording = hasClassSessionRecordingAccess(s);
@@ -2513,7 +2526,12 @@ export default function ClassLiveLessons() {
                           {templatesHere.map((s) => {
                             const teacher = teacherCandidates.find((t) => t.id === s.teacher_id);
                             const accent = liveSubjectAccent(s.subject);
-                            const slotLink = String(s.join_link || s.meeting_link || '').trim();
+                            const slotJoinUrl =
+                              primary4567ZoomIfApplicable({
+                                subject: s.subject,
+                                className: selectedClass?.name,
+                                classLevel: selectedClass?.class_level
+                              }) || String(s.join_link || s.meeting_link || '').trim();
                             return (
                               <div
                                 key={s.id}
@@ -2525,7 +2543,7 @@ export default function ClassLiveLessons() {
                                   {teacher?.name || s.teacher_name || s.teacher_id} · {String(s.start_time).slice(0, 5)}
                                 </p>
                                 <div className="mt-1.5 flex flex-wrap gap-1 calendar-pdf-hide-ui">
-                                  {slotLink ? (
+                                  {slotJoinUrl ? (
                                     <button
                                       type="button"
                                       onClick={() => void joinClassSession(s)}
@@ -2594,6 +2612,8 @@ export default function ClassLiveLessons() {
             }
             reviewedSessionIds={isStudentView ? reviewedClassSessionIds : undefined}
             studentAppointmentDefaults={studentAppointmentDefaults}
+            className={selectedClass?.name}
+            classLevel={selectedClass?.class_level}
           />
         )}
       </WeeklyLiveGridShell>
