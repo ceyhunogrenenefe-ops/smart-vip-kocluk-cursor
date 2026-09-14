@@ -1,6 +1,10 @@
-/** 4A / 5A / 6A / 7A etüt, ödev, kitap okuma ve deneme — ortak Zoom (BBB değil). */
+/** 4A / 5A / 6A etüt, ödev, kitap okuma ve deneme — ortak Zoom (BBB değil). */
 export const PRIMARY_4567_ZOOM_URL =
   'https://us06web.zoom.us/j/9448152197?pwd=czQvZWhtQ2Y3M1VwZnZIZHM1Q3pVdz09';
+
+/** 8. sınıf / LGS etüt Zoom — 7. sınıf etüt de buna bağlanır. */
+export const LGS8_ETUT_ZOOM_URL =
+  'https://us06web.zoom.us/j/6946337643?pwd=SHkwQzNnaEkrOXVNajJMR1Z6UCtCUT09';
 
 function normalizeGradeBlob(value: unknown): string {
   return String(value ?? '')
@@ -11,6 +15,12 @@ function normalizeGradeBlob(value: unknown): string {
     .replace(/ü/g, 'u')
     .replace(/ö/g, 'o')
     .replace(/ç/g, 'c');
+}
+
+function hasGradeDigitToken(value: unknown, digit: number): boolean {
+  const blob = normalizeGradeBlob(value).trim();
+  if (!blob) return false;
+  return new RegExp(`(?:^|[^\\d])${digit}(?:[a-z]|\\.|\\s|$)`).test(blob);
 }
 
 /** 8A, 8. sınıf, LGS 8 — çıplak "LGS" tek başına burada değil. */
@@ -49,6 +59,16 @@ export function isPrimary4567Grade(classLevel?: unknown, className?: unknown): b
   return false;
 }
 
+/** 7A / 7. sınıf (8. sınıf değil). */
+export function isSeventhGrade(classLevel?: unknown, className?: unknown): boolean {
+  if (hasEighthGradeToken(classLevel) || hasEighthGradeToken(className)) return false;
+  if (hasGradeDigitToken(classLevel, 7)) return true;
+  if (hasGradeDigitToken(className, 7) && !/\b4\s*[-–]\s*7\b/.test(normalizeGradeBlob(className))) {
+    return true;
+  }
+  return false;
+}
+
 /** Etüt, ödev (takibi/saati), kitap okuma, deneme sınavı — matematik vb. hariç. */
 export function isPrimary4567JoinSubject(subject?: unknown): boolean {
   const s = normalizeGradeBlob(subject).trim();
@@ -61,6 +81,18 @@ export function isPrimary4567JoinSubject(subject?: unknown): boolean {
   return false;
 }
 
+/** Sadece etüt (ödev / kitap / deneme değil). */
+export function isEtutJoinSubject(subject?: unknown): boolean {
+  const s = normalizeGradeBlob(subject).trim();
+  if (!s) return false;
+  if (s.includes('analiz')) return false;
+  return s.includes('etut');
+}
+
+/**
+ * 4–6 (+ 7 ödev/kitap/deneme) → 4–7 Zoom.
+ * 7. sınıf etüt → 8. sınıf / LGS Zoom.
+ */
 export function primary4567ZoomIfApplicable(opts?: {
   subject?: unknown;
   className?: unknown;
@@ -68,5 +100,8 @@ export function primary4567ZoomIfApplicable(opts?: {
 }): string | null {
   if (!isPrimary4567Grade(opts?.classLevel, opts?.className)) return null;
   if (!isPrimary4567JoinSubject(opts?.subject)) return null;
+  if (isSeventhGrade(opts?.classLevel, opts?.className) && isEtutJoinSubject(opts?.subject)) {
+    return LGS8_ETUT_ZOOM_URL;
+  }
   return PRIMARY_4567_ZOOM_URL;
 }

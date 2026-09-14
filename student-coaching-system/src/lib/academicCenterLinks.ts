@@ -1,6 +1,6 @@
 import { apiFetch } from './session';
 import { BBB_AUTO_MEETING_LINK, isBbbAutoMeetingLink } from './liveLessonUtils';
-import { isPrimary4567Grade, PRIMARY_4567_ZOOM_URL } from './primary4567Zoom';
+import { isPrimary4567Grade, isSeventhGrade, LGS8_ETUT_ZOOM_URL, PRIMARY_4567_ZOOM_URL } from './primary4567Zoom';
 import {
   assignBbbWaitingPopup,
   openBbbWaitingPopup,
@@ -19,8 +19,13 @@ function gradeBlob(classLevel: unknown, className?: unknown): string {
     .replace(/ç/g, 'c');
 }
 
-/** 5–6 (4 veya 7 yok) → class56 kartı; 4/7 → class47. İkisi de aynı Zoom. */
-function primary4567StudyExamRoom(classLevel: unknown, className?: unknown): 'class47' | 'class56' {
+/** 5–6 (4 veya 7 yok) → class56 kartı; 4 → class47. 7 etüt → class78. */
+function primary4567StudyExamRoom(
+  classLevel: unknown,
+  className?: unknown,
+  kind: 'study' | 'exam' = 'exam'
+): 'class47' | 'class56' | 'class78' {
+  if (kind === 'study' && isSeventhGrade(classLevel, className)) return 'class78';
   const blob = gradeBlob(classLevel, className);
   const has56 = /(?:^|[^\d])([56])(?:[a-z]|\.|\s|$)/.test(blob);
   const has47 = /(?:^|[^\d])([47])(?:[a-z]|\.|\s|$)/.test(blob);
@@ -83,9 +88,9 @@ export const STUDY_ENTRY_DEFS: {
   label: string;
   accent: string;
 }[] = [
-  { key: 'class47', label: '4-7. sınıf etüt / ödev / kitap okuma', accent: 'from-amber-500 to-orange-600' },
+  { key: 'class47', label: '4-6. sınıf etüt / ödev / kitap okuma', accent: 'from-amber-500 to-orange-600' },
   { key: 'class56', label: '5-6. sınıf etüt sınıfı', accent: 'from-violet-500 to-purple-600' },
-  { key: 'class78', label: '8. sınıf / LGS etüt sınıfı', accent: 'from-fuchsia-500 to-pink-600' },
+  { key: 'class78', label: '7-8. sınıf / LGS etüt sınıfı', accent: 'from-fuchsia-500 to-pink-600' },
   { key: 'class911', label: '9-10-11 etüt sınıfı', accent: 'from-blue-500 to-indigo-600' },
   { key: 'yks', label: 'YKS etüt sınıfı', accent: 'from-amber-500 to-orange-600' }
 ];
@@ -97,7 +102,7 @@ export function examRoomsForClassLevel(classLevel: unknown, className?: unknown)
   if (/\b(tyt|ayt|yks|lise|mezun)\b/.test(blob) || /(?:^|[^\d])(9|10|11|12)(?:\.|\s|$)/.test(blob)) {
     return ['lise'];
   }
-  if (isPrimary4567Grade(classLevel, className)) return [primary4567StudyExamRoom(classLevel, className)];
+  if (isPrimary4567Grade(classLevel, className)) return [primary4567StudyExamRoom(classLevel, className, 'exam')];
   if (/\blgs\b/.test(blob) || /(?:^|[^\d])8(?:[a-z]|\.|\s|$)/.test(blob)) return ['class78'];
   if (/(?:^|[^\d])3(?:[a-z]|\.|\s|$)/.test(blob)) return ['class34'];
   return null;
@@ -111,7 +116,9 @@ export function studyRoomsForClassLevel(classLevel: unknown, className?: unknown
     return ['yks'];
   }
   if (/(?:^|[^\d])(9|10|11)(?:\.|\s|$)/.test(blob)) return ['class911'];
-  if (isPrimary4567Grade(classLevel, className)) return [primary4567StudyExamRoom(classLevel, className)];
+  if (isPrimary4567Grade(classLevel, className)) {
+    return [primary4567StudyExamRoom(classLevel, className, 'study')];
+  }
   if (/\blgs\b/.test(blob) || /(?:^|[^\d])8(?:[a-z]|\.|\s|$)/.test(blob)) return ['class78'];
   return null;
 }
@@ -121,13 +128,13 @@ export { BBB_AUTO_MEETING_LINK, isBbbAutoMeetingLink };
 export const LISE_DENEME_ZOOM_ENTRY =
   'https://us06web.zoom.us/j/3565095951?pwd=Rk56NGhXeEYrZkZOWEVVbG5pa0RjUT09';
 
-export { PRIMARY_4567_ZOOM_URL };
+export { LGS8_ETUT_ZOOM_URL, PRIMARY_4567_ZOOM_URL };
 
 export const defaultAcademicCenterLinks: AcademicCenterLinks = {
   studyClasses: {
     class47: PRIMARY_4567_ZOOM_URL,
     class56: PRIMARY_4567_ZOOM_URL,
-    class78: 'https://kurumsal.ornek.edu/tr/etut-78',
+    class78: LGS8_ETUT_ZOOM_URL,
     class911: 'https://kurumsal.ornek.edu/tr/etut-911',
     yks: 'https://kurumsal.ornek.edu/tr/etut-yks'
   },
@@ -158,6 +165,7 @@ export function coerceAcademicCenterLinks(next: Partial<AcademicCenterLinks> | n
   const studyClasses = { ...d.studyClasses, ...(next.studyClasses || {}) };
   studyClasses.class47 = PRIMARY_4567_ZOOM_URL;
   studyClasses.class56 = PRIMARY_4567_ZOOM_URL;
+  studyClasses.class78 = LGS8_ETUT_ZOOM_URL;
   return {
     studyClasses,
     exams,

@@ -1,9 +1,9 @@
-import { PRIMARY_4567_ZOOM_URL } from './primary-4567-zoom.js';
+import { LGS8_ETUT_ZOOM_URL, PRIMARY_4567_ZOOM_URL } from './primary-4567-zoom.js';
 
 const DEFAULT_STUDY = {
   class47: PRIMARY_4567_ZOOM_URL,
   class56: PRIMARY_4567_ZOOM_URL,
-  class78: 'https://kurumsal.ornek.edu/tr/etut-78',
+  class78: LGS8_ETUT_ZOOM_URL,
   class911: 'https://kurumsal.ornek.edu/tr/etut-911',
   yks: 'https://kurumsal.ornek.edu/tr/etut-yks'
 };
@@ -11,7 +11,7 @@ const DEFAULT_STUDY = {
 const LISE_DENEME_ZOOM_ENTRY =
   'https://us06web.zoom.us/j/3565095951?pwd=Rk56NGhXeEYrZkZOWEVVbG5pa0RjUT09';
 
-export { LISE_DENEME_ZOOM_ENTRY, PRIMARY_4567_ZOOM_URL };
+export { LISE_DENEME_ZOOM_ENTRY, LGS8_ETUT_ZOOM_URL, PRIMARY_4567_ZOOM_URL };
 
 const DEFAULT_EXAMS = {
   lise: LISE_DENEME_ZOOM_ENTRY,
@@ -45,9 +45,9 @@ export const ACADEMIC_EXAM_ROOM_LABELS = {
 };
 
 export const ACADEMIC_STUDY_ROOM_LABELS = {
-  class47: '4-7. Sınıf Etüt / Ödev / Kitap Okuma',
+  class47: '4-6. Sınıf Etüt / Ödev / Kitap Okuma',
   class56: '5-6. Sınıf Etüt',
-  class78: '8. Sınıf / LGS Etüt',
+  class78: '7-8. Sınıf / LGS Etüt',
   class911: '9-10-11 Etüt',
   yks: 'YKS Etüt'
 };
@@ -100,11 +100,13 @@ export function linksForInstitution(store, institutionId) {
   // Lise Deneme Sınavı giriş — kurum geneli Zoom oturumu
   merged.exams.lise = LISE_DENEME_ZOOM_ENTRY;
   if (merged.exams.exam) merged.exams.exam = LISE_DENEME_ZOOM_ENTRY;
-  // 4–7 ve 5–6 etüt / ödev / kitap / deneme — aynı Zoom (8 / LGS class78 dokunulmaz)
+  // 4–6 ve 5–6 etüt / ödev / kitap / deneme — ortak Zoom
   merged.exams.class47 = PRIMARY_4567_ZOOM_URL;
   merged.exams.class56 = PRIMARY_4567_ZOOM_URL;
   merged.studyClasses.class47 = PRIMARY_4567_ZOOM_URL;
   merged.studyClasses.class56 = PRIMARY_4567_ZOOM_URL;
+  // 7–8 / LGS etüt — 8. sınıf Zoom (7. sınıf etüt de buraya)
+  merged.studyClasses.class78 = LGS8_ETUT_ZOOM_URL;
   return merged;
 }
 
