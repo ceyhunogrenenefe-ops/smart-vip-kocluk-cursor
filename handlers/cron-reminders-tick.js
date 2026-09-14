@@ -8,6 +8,7 @@
 import { authorizeVercelOrCronSecret } from '../api/_lib/cron-auth.js';
 import cronMeetingReminders from './cron-meeting-reminders.js';
 import cronLessonReminder from './cron-lesson-reminder.js';
+import cronCrmTaskReminders from './cron-crm-task-reminders.js';
 
 function mockRes() {
   let statusCode = 200;
@@ -55,6 +56,13 @@ export default async function handler(req, res) {
     out.jobs.meeting_reminders = { status: meeting.statusCode, ...(meeting.body || {}) };
   } catch (e) {
     out.jobs.meeting_reminders = { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+
+  try {
+    const crmTasks = await runHandler(cronCrmTaskReminders, req);
+    out.jobs.crm_task_reminders = { status: crmTasks.statusCode, ...(crmTasks.body || {}) };
+  } catch (e) {
+    out.jobs.crm_task_reminders = { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
 
   out.elapsed_ms = Date.now() - started;

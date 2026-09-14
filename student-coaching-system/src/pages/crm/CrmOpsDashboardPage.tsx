@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { Clock, GraduationCap, Loader2, MessageCircle, Trophy, Users } from 'lucide-react';
+import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { Clock, Globe, GraduationCap, Instagram, Loader2, MessageCircle, Trophy, Users } from 'lucide-react';
 import { toast } from 'sonner';
 import { rtListCoaches, rtOpsDashboard, type CrmOpsDashboard, type RegCoach } from '../../lib/registrationTrackingApi';
 import CrmFilterBar, { type CrmTimePreset } from './CrmFilterBar';
@@ -37,6 +37,81 @@ function KpiCard({
   );
 }
 
+const SOURCE_VISUAL: Record<
+  string,
+  { icon: typeof Globe; wrap: string; bar: string; color: string }
+> = {
+  website: { icon: Globe, wrap: 'bg-sky-100 text-sky-800', bar: 'bg-sky-500', color: '#0ea5e9' },
+  instagram: { icon: Instagram, wrap: 'bg-fuchsia-100 text-fuchsia-800', bar: 'bg-fuchsia-500', color: '#c026d3' },
+  whatsapp: { icon: MessageCircle, wrap: 'bg-emerald-100 text-emerald-800', bar: 'bg-emerald-500', color: '#059669' },
+  facebook: { icon: MessageCircle, wrap: 'bg-blue-100 text-blue-800', bar: 'bg-blue-600', color: '#2563eb' },
+  other: { icon: Users, wrap: 'bg-slate-100 text-slate-700', bar: 'bg-slate-400', color: '#94a3b8' }
+};
+
+function SourceMixPanel({
+  sources
+}: {
+  sources: Array<{ id: string; label: string; hint?: string; count: number; pct: number }>;
+}) {
+  const featured = sources.filter((s) => ['website', 'instagram', 'whatsapp'].includes(s.id));
+  const pie = sources.filter((s) => s.count > 0);
+  const total = sources.reduce((n, s) => n + (s.count || 0), 0);
+
+  return (
+    <div className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm">
+      <div className="mb-4 flex flex-wrap items-end justify-between gap-2">
+        <div>
+          <h3 className="text-sm font-semibold text-slate-800">Desteklenen gelen kanallar</h3>
+          <p className="mt-0.5 text-xs text-slate-500">
+            Web sitesi formu, Instagram DM ve WhatsApp gelen kutusu — seçili dönemdeki lead kaynağı.
+          </p>
+        </div>
+        <p className="text-xs font-medium tabular-nums text-slate-500">{total} iletişim</p>
+      </div>
+      <div className="grid gap-3 lg:grid-cols-5">
+        <div className="grid gap-3 sm:grid-cols-3 lg:col-span-3">
+          {featured.map((s) => {
+            const vis = SOURCE_VISUAL[s.id] || SOURCE_VISUAL.other;
+            const Icon = vis.icon;
+            return (
+              <div key={s.id} className="rounded-xl border border-slate-100 bg-slate-50/80 p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <span className={`inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-semibold ${vis.wrap}`}>
+                    <Icon className="h-3.5 w-3.5" />
+                    {s.label}
+                  </span>
+                  <span className="text-lg font-semibold tabular-nums text-slate-900">{s.count}</span>
+                </div>
+                <p className="mt-1 text-[11px] text-slate-500">{s.hint}</p>
+                <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white">
+                  <div className={`h-full rounded-full ${vis.bar}`} style={{ width: `${Math.min(100, s.pct)}%` }} />
+                </div>
+                <p className="mt-1 text-[11px] font-medium tabular-nums text-slate-600">%{s.pct}</p>
+              </div>
+            );
+          })}
+        </div>
+        <div className="h-44 lg:col-span-2">
+          {pie.length ? (
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie data={pie} dataKey="count" nameKey="label" innerRadius={42} outerRadius={68} paddingAngle={2}>
+                  {pie.map((s) => (
+                    <Cell key={s.id} fill={(SOURCE_VISUAL[s.id] || SOURCE_VISUAL.other).color} />
+                  ))}
+                </Pie>
+                <Tooltip formatter={(v: number, n: string) => [`${v}`, n]} />
+              </PieChart>
+            </ResponsiveContainer>
+          ) : (
+            <p className="flex h-full items-center justify-center text-sm text-slate-400">Kanal verisi yok</p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function CrmOpsDashboardPage() {
   const [preset, setPreset] = useState<CrmTimePreset>('this_week');
   const [from, setFrom] = useState(todayYmd());
@@ -65,7 +140,13 @@ export default function CrmOpsDashboardPage() {
         rtListCoaches().catch(() => ({ data: [] as RegCoach[] }))
       ]);
       const live = dash.data;
-      const empty = !live.contacts && !live.confirmed && !live.trial_lessons && !(live.agents || []).some((a) => a.leads);
+      const sourceSum = (live.sources || []).reduce((n, s) => n + (s.count || 0), 0);
+      const empty =
+        !live.contacts &&
+        !live.confirmed &&
+        !live.trial_lessons &&
+        !sourceSum &&
+        !(live.agents || []).some((a) => a.leads);
       if (empty) {
         setDemo(true);
         setData(CRM_OPS_DEMO_DASHBOARD);
@@ -97,7 +178,8 @@ export default function CrmOpsDashboardPage() {
         <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-700">CRM · Performans</p>
         <h2 className="mt-1 font-serif text-2xl font-semibold text-slate-900">Dashboard</h2>
         <p className="mt-1 max-w-2xl text-sm text-slate-600">
-          Seçili dönem ve temsilciye göre iletişim, deneme dersi, kesin kayıt ve ilk yanıt süresi.
+          Seçili dönem ve temsilciye göre iletişim, deneme dersi, kesin kayıt, ilk yanıt süresi ve gelen kanal
+          (web sitesi · Instagram · WhatsApp).
         </p>
       </div>
 
@@ -155,6 +237,8 @@ export default function CrmOpsDashboardPage() {
               accent="bg-orange-100 text-orange-700"
             />
           </div>
+
+          <SourceMixPanel sources={data?.sources || []} />
 
           <div className="grid gap-4 xl:grid-cols-5">
             <div className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm xl:col-span-3">

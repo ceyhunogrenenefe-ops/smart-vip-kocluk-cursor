@@ -148,6 +148,10 @@
     {
       "path": "/api/cron/solution-appointment-reminders",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/crm-task-reminders",
+      "schedule": "* * * * *"
     }
   ],
   "redirects": [

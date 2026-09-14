@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import {
   normalizeTrPhone,
   normalizeGradeProgram,
+  inferGradeProgramFromText,
+  shouldReplaceGradeProgram,
   computeConversionRate,
   isOverdue,
   splitFullName,
@@ -24,6 +26,24 @@ test('normalizeGradeProgram maps labels and aliases', () => {
   assert.equal(normalizeGradeProgram('YKS'), 'yks');
   assert.equal(normalizeGradeProgram('Özel Ders'), 'private_lesson');
   assert.equal(normalizeGradeProgram('lgs'), 'lgs');
+});
+
+test('inferGradeProgramFromText reads class from free-form inbound', () => {
+  assert.equal(inferGradeProgramFromText('Merhaba, 11. sınıf öğrencimiz için YKS koçluk'), 'grade_11');
+  assert.equal(inferGradeProgramFromText('kızım 8.sınıf LGS ye hazırlanıyor'), 'lgs');
+  assert.equal(inferGradeProgramFromText('TYT AYT paket fiyatı nedir?'), 'yks');
+  assert.equal(inferGradeProgramFromText('5. Sınıf matematik özel ders'), 'grade_5');
+  assert.equal(inferGradeProgramFromText('YÖS programı hakkında bilgi'), 'yos');
+  assert.equal(inferGradeProgramFromText('sınıf: 9'), 'grade_9');
+  assert.equal(inferGradeProgramFromText('Merhaba fiyat nedir?'), null);
+});
+
+test('shouldReplaceGradeProgram only overwrites default LGS / unspecified', () => {
+  assert.equal(shouldReplaceGradeProgram('lgs', 'yks'), true);
+  assert.equal(shouldReplaceGradeProgram('unspecified', 'grade_11'), true);
+  assert.equal(shouldReplaceGradeProgram('grade_11', 'yks'), false);
+  assert.equal(shouldReplaceGradeProgram('lgs', 'lgs'), false);
+  assert.equal(shouldReplaceGradeProgram('lgs', null), false);
 });
 
 test('computeConversionRate excludes archive imports when requested', () => {

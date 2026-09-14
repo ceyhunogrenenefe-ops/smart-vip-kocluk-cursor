@@ -59,6 +59,13 @@ export const CRM_OPS_DEMO_DASHBOARD: CrmOpsDashboard = {
     { day: '2026-09-13', contacts: 4, confirmed: 1 },
     { day: '2026-09-14', contacts: 3, confirmed: 0 }
   ],
+  sources: [
+    { id: 'website', label: 'Web sitesi', hint: 'Form ve reklam formu', count: 18, pct: 38.3 },
+    { id: 'instagram', label: 'Instagram', hint: 'DM / reklam', count: 16, pct: 34 },
+    { id: 'whatsapp', label: 'WhatsApp', hint: 'Gelen mesaj', count: 11, pct: 23.4 },
+    { id: 'facebook', label: 'Facebook', hint: 'Messenger', count: 2, pct: 4.3 },
+    { id: 'other', label: 'Diğer', hint: 'Manuel / belirsiz', count: 0, pct: 0 }
+  ],
   segments: [
     { id: 'all_tracking', label: 'Tüm takip lead’leri' },
     { id: 'trial_no_show', label: 'Deneme dersine gelmeyenler' },
