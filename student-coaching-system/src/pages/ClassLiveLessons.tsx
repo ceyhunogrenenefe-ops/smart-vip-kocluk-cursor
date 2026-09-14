@@ -437,11 +437,12 @@ export default function ClassLiveLessons() {
 
   const joinClassSession = useCallback(async (s: { id: string; class_id?: string; subject?: string; join_link?: string; meeting_link?: string; lesson_date?: string; homework?: string | null }) => {
     const cls = classes.find((c) => c.id === (s.class_id || selectedClassId)) || null;
+    const studentRow = resolvedStudentId ? students.find((st) => st.id === resolvedStudentId) : null;
     const url =
       primary4567ZoomIfApplicable({
         subject: s.subject,
-        className: cls?.name,
-        classLevel: cls?.class_level
+        className: [cls?.name, studentRow?.groupName, studentRow?.school].filter(Boolean).join(' '),
+        classLevel: cls?.class_level || studentRow?.classLevel
       }) || lessonJoinUrl(s);
     if (!url && !s.id) {
       setError('Toplantı bağlantısı yok.');
@@ -482,7 +483,7 @@ export default function ClassLiveLessons() {
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
-  }, [isStudentView, resolvedStudentId, classes, selectedClassId]);
+  }, [isStudentView, resolvedStudentId, classes, selectedClassId, students]);
 
   const watchClassSessionRecording = useCallback(
     async (s: {
@@ -892,7 +893,8 @@ export default function ClassLiveLessons() {
       try {
         const external = await tryCopyExternalMeetingFromRow(s, {
           title: s.subject || 'Etüt',
-          className: selectedClass?.name || ''
+          className: selectedClass?.name || '',
+          classLevel: selectedClass?.class_level
         });
         if (external) {
           setNotice(null);
@@ -929,7 +931,8 @@ export default function ClassLiveLessons() {
           setWeekSessions(rows);
           const matchExternal = await tryCopyExternalMeetingFromRow(match, {
             title: match.subject || 'Etüt',
-            className: selectedClass?.name || ''
+            className: selectedClass?.name || '',
+            classLevel: selectedClass?.class_level
           });
           if (matchExternal) {
             setNotice(null);
@@ -946,7 +949,7 @@ export default function ClassLiveLessons() {
         toast.error(msg);
       }
     },
-    [selectedClassId, weekColumnDates, selectedClass?.name]
+    [selectedClassId, weekColumnDates, selectedClass?.name, selectedClass?.class_level]
   );
 
   const loadBatchSessionsPool = useCallback(async () => {
