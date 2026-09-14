@@ -98,7 +98,7 @@ async function main() {
   if (DRY_RUN) {
     console.log('\nDry-run. Programı uygulamak için:');
     console.log('  DRY_RUN=0 node scripts/apply-lgs-8abef-evening-schedule.mjs');
-    console.log('  (8F Din artık 8B ile aynı Çarşamba 20:40; 8C Din 8A ile aynı)');
+    console.log('  (8F Din = 8B Cuma 20:40; 8C Din = 8A Perşembe 19:50 — ortak BBB)');
   }
 }
 
