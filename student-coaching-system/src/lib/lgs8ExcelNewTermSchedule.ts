@@ -241,6 +241,42 @@ const CLASS_8C: ClassDef = {
 
 export const LGS8_EXCEL_CLASS_DEFS = [CLASS_8A, CLASS_8B, CLASS_8C, CLASS_8F] as const;
 
+
+/** 8B→8F ve 8A→8C Din Kültürü hücrelerini birebir hizala. */
+export function alignLgs8DinPairSchedules(groups: PlannerGroup[]): PlannerGroup[] {
+  const pairs: Array<[string, string]> = [
+    ['8B', '8F'],
+    ['8A', '8C']
+  ];
+  const isDin = (subject: string) => {
+    const s = String(subject || '')
+      .toLocaleLowerCase('tr-TR')
+      .replace(/ı/g, 'i')
+      .replace(/ş/g, 's')
+      .replace(/ğ/g, 'g')
+      .replace(/ü/g, 'u')
+      .replace(/ö/g, 'o')
+      .replace(/ç/g, 'c');
+    return s.includes('din') && s.includes('kultur');
+  };
+  const byName = new Map(groups.map((g) => [g.name, g]));
+  for (const [primaryName, secondaryName] of pairs) {
+    const primary = byName.get(primaryName);
+    const secondary = byName.get(secondaryName);
+    if (!primary?.schedule || !secondary?.schedule) continue;
+    const primaryDin = Object.entries(primary.schedule).filter(([, cell]) => isDin(String(cell?.subject || '')));
+    for (const [key, cell] of Object.entries(secondary.schedule)) {
+      if (isDin(String(cell?.subject || '')) && !primaryDin.some(([k]) => k === key)) {
+        delete secondary.schedule[key];
+      }
+    }
+    for (const [key, cell] of primaryDin) {
+      secondary.schedule[key] = { subject: cell.subject, teacher: cell.teacher };
+    }
+  }
+  return groups;
+}
+
 /** Planlayıcıya basılacak dolu 2026-2027 durumu (4× 8. sınıf). */
 export function buildLgs8ExcelNewTermPlannerState() {
   const periodsByDay = buildPeriodsByDay();
@@ -249,7 +285,7 @@ export function buildLgs8ExcelNewTermPlannerState() {
     days: [...LGS8_DAYS],
     periods: clonePeriods(LGS8_WEEKDAY_PERIODS),
     periodsByDay,
-    groups: LGS8_EXCEL_CLASS_DEFS.map(toGroup),
+    groups: alignLgs8DinPairSchedules(LGS8_EXCEL_CLASS_DEFS.map(toGroup)),
   };
 }
 

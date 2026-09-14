@@ -100,7 +100,7 @@ const SCHEDULE_8E = [
   ...saturdayDeneme()
 ];
 
-/** LGS F → 8F */
+/** LGS F → 8F (Din Kültürü: 8B ile aynı Çarşamba 20:40 — ortak BBB) */
 const SCHEDULE_8F = [
   ...weekday(1, [
     { start: '19:00', end: '19:40', subject: 'TÜRKÇE' },
@@ -113,7 +113,7 @@ const SCHEDULE_8F = [
   ...weekday(3, [
     { start: '19:00', end: '19:40', subject: 'FEN BİLİMLERİ' },
     { start: '19:50', end: '20:30', subject: 'FEN BİLİMLERİ' },
-    { start: '20:40', end: '21:20', subject: 'İNKILAP TARİHİ' }
+    { start: '20:40', end: '21:20', subject: 'DİN KÜLTÜRÜ' }
   ]),
   ...weekday(4, [
     { start: '19:00', end: '19:40', subject: 'MATEMATİK' },
@@ -123,7 +123,7 @@ const SCHEDULE_8F = [
   ...weekday(5, [
     { start: '19:00', end: '19:40', subject: 'İNGİLİZCE' },
     { start: '19:50', end: '20:30', subject: 'İNGİLİZCE' },
-    { start: '20:40', end: '21:20', subject: 'DİN KÜLTÜRÜ' }
+    { start: '20:40', end: '21:20', subject: 'İNKILAP TARİHİ' }
   ]),
   ...saturdayDeneme()
 ];
@@ -184,10 +184,40 @@ const SCHEDULE_8A = [
   ...saturdayDeneme()
 ];
 
+
+/** LGS C → 8C (Din Kültürü: 8A ile aynı Çarşamba 20:40 — ortak BBB) */
+const SCHEDULE_8C = [
+  ...weekday(1, [
+    { start: '19:00', end: '19:40', subject: 'FEN BİLİMLERİ' },
+    { start: '19:50', end: '20:30', subject: 'FEN BİLİMLERİ' },
+    { start: '20:40', end: '21:20', subject: 'İNKILAP TARİHİ' }
+  ]),
+  ...weekday(2, [
+    { start: '19:00', end: '19:40', subject: 'TÜRKÇE' },
+    { start: '19:50', end: '20:30', subject: 'TÜRKÇE' },
+    { start: '20:40', end: '21:20', subject: 'FEN BİLİMLERİ' }
+  ]),
+  ...weekday(3, [
+    { start: '19:00', end: '19:40', subject: 'MATEMATİK' },
+    { start: '19:50', end: '20:30', subject: 'MATEMATİK' },
+    { start: '20:40', end: '21:20', subject: 'DİN KÜLTÜRÜ' }
+  ]),
+  ...weekday(4, [
+    { start: '19:00', end: '19:40', subject: 'İNGİLİZCE' },
+    { start: '19:50', end: '20:30', subject: 'İNGİLİZCE' }
+  ]),
+  ...weekday(5, [
+    { start: '19:00', end: '19:40', subject: 'MATEMATİK' },
+    { start: '19:50', end: '20:30', subject: 'MATEMATİK' }
+  ]),
+  ...saturdayDeneme()
+];
+
 /** @type {Record<string, SlotDef[]>} */
 export const LGS_8ABEF_SCHEDULE = {
   '8A': SCHEDULE_8A,
   '8B': SCHEDULE_8B,
+  '8C': SCHEDULE_8C,
   '8E': SCHEDULE_8E,
   '8F': SCHEDULE_8F
 };
@@ -196,6 +226,7 @@ export const LGS_8ABEF_SCHEDULE = {
 export const CLASS_NAME_MATCHERS = {
   '8A': ['8A YAZ', '8-A YAZ', '8A'],
   '8B': ['8B YAZ', '8-B YAZ', '8B'],
+  '8C': ['8C YAZ', '8-C YAZ', '8C'],
   '8E': ['8E YAZ', '8-E YAZ', '8E'],
   '8F': ['8F YAZ', '8-F YAZ', '8F']
 };

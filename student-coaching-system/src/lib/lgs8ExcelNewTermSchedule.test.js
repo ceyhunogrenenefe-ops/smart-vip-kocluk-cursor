@@ -56,3 +56,20 @@ describe('lgs8ExcelNewTermSchedule', () => {
     expect(countPlannerLessonCells(buildLgs8ExcelNewTermPlannerState())).toBeGreaterThan(100);
   });
 });
+
+  it('aligns Din Kültürü pair schedules: 8B+8F and 8A+8C', () => {
+    const state = buildLgs8ExcelNewTermPlannerState();
+    const byName = Object.fromEntries(state.groups.map((g) => [g.name, g]));
+    const dinKeys = (g) =>
+      Object.entries(g.schedule)
+        .filter(([, c]) => /din/i.test(String(c.subject || '').replace(/İ/g, 'I').replace(/ı/g, 'i')))
+        .map(([k, c]) => `${k}:${c.subject}`)
+        .sort();
+    expect(dinKeys(byName['8B'])).toEqual(dinKeys(byName['8F']));
+    expect(dinKeys(byName['8A'])).toEqual(dinKeys(byName['8C']));
+    expect(byName['8B'].schedule['4_4']?.subject).toBe('DİN KÜLTÜRÜ');
+    expect(byName['8F'].schedule['4_4']?.subject).toBe('DİN KÜLTÜRÜ');
+    expect(byName['8A'].schedule['3_3']?.subject).toBe('DİN KÜLTÜRÜ');
+    expect(byName['8C'].schedule['3_3']?.subject).toBe('DİN KÜLTÜRÜ');
+  });
+
