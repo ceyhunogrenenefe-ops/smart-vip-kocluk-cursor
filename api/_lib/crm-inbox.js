@@ -551,6 +551,8 @@ export async function syncInstagramMessagingToCrm(events, { institutionId, chann
   const ch = normalizeCrmChannel(channel) === 'whatsapp' ? 'instagram' : normalizeCrmChannel(channel);
   const list = Array.isArray(events) ? events : [];
   let processed = 0;
+  let skipped = 0;
+  const issues = [];
   for (const ev of list) {
     const norm = normalizeInstagramMessagingEvent(ev);
     if (norm.isEcho) continue;
@@ -560,7 +562,7 @@ export async function syncInstagramMessagingToCrm(events, { institutionId, chann
     if (norm.isAd && ch === 'facebook' && body.startsWith('[Instagram reklamından')) {
       body = body.replace('[Instagram reklamından sohbet]', '[Facebook reklamından sohbet]');
     }
-    await upsertCrmMessage({
+    const r = await upsertCrmMessage({
       channel: ch,
       contactIdentifier: norm.senderId,
       contactName,
@@ -574,19 +576,26 @@ export async function syncInstagramMessagingToCrm(events, { institutionId, chann
       adSourceData: extractAdSourceData({ channel: ch, messagingEvent: ev }),
       payload: ev
     });
-    processed += 1;
+    if (r?.skipped) {
+      skipped += 1;
+      const reason = String(r.reason || 'skipped');
+      if (!issues.includes(reason)) issues.push(reason);
+    } else {
+      processed += 1;
+    }
   }
-  return { processed };
+  return { processed, skipped, issues };
 }
 
 /** Instagram gönderi / canlı yayın yorumları (field=comments|live_comments) → CRM inbox */
 export async function syncInstagramCommentsToCrm(changes, { institutionId } = {}) {
   const list = Array.isArray(changes) ? changes : [];
   let processed = 0;
+  let skipped = 0;
   for (const change of list) {
     const norm = normalizeInstagramCommentChange(change);
     if (!norm?.hasInboundContent || !norm.fromId) continue;
-    await upsertCrmMessage({
+    const r = await upsertCrmMessage({
       channel: 'instagram',
       contactIdentifier: norm.fromId,
       contactName: norm.fromUsername || null,
@@ -609,9 +618,10 @@ export async function syncInstagramCommentsToCrm(changes, { institutionId } = {}
       },
       payload: change
     });
-    processed += 1;
+    if (r?.skipped) skipped += 1;
+    else processed += 1;
   }
-  return { processed };
+  return { processed, skipped };
 }
 
 
@@ -619,11 +629,12 @@ export async function syncInstagramCommentsToCrm(changes, { institutionId } = {}
 export async function syncFacebookCommentsToCrm(changes, { institutionId } = {}) {
   const list = Array.isArray(changes) ? changes : [];
   let processed = 0;
+  let skipped = 0;
   for (const change of list) {
     const norm = normalizeFacebookFeedCommentChange(change);
     if (!norm?.hasInboundContent || !norm.fromId) continue;
     const classif = classifySocialInteractionSource({ channel: 'facebook', isComment: true });
-    await upsertCrmMessage({
+    const r = await upsertCrmMessage({
       channel: 'facebook',
       contactIdentifier: norm.fromId,
       contactName: norm.fromName || null,
@@ -643,9 +654,10 @@ export async function syncFacebookCommentsToCrm(changes, { institutionId } = {})
       },
       payload: change
     });
-    processed += 1;
+    if (r?.skipped) skipped += 1;
+    else processed += 1;
   }
-  return { processed };
+  return { processed, skipped };
 }
 
 export async function sendCrmWhatsAppText({ phone, text }) {

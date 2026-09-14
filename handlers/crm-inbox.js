@@ -254,9 +254,13 @@ export default async function handler(req, res) {
       const logs = Array.isArray(recentLogs) ? recentLogs : [];
       const lastComment = logs.find((l) => /comment/i.test(String(l.event_type || l.field || '')));
       const pub = publicSocialStatus(social);
-      const igFields = Array.isArray(social?.app_subscriptions?.instagram?.fields)
-        ? social.app_subscriptions.instagram.fields
-        : null;
+      const igFields =
+        (Array.isArray(pub?.app_instagram_fields) && pub.app_instagram_fields.length
+          ? pub.app_instagram_fields
+          : null) ||
+        (Array.isArray(social?.app_subscriptions?.instagram?.fields)
+          ? social.app_subscriptions.instagram.fields
+          : null);
       const igSubscribed = Boolean(
         pub?.app_instagram_subscribed ||
           social?.app_subscriptions?.instagram?.subscribed ||
@@ -283,6 +287,7 @@ export default async function handler(req, res) {
           instagram_subscribed_fields: igFields || INSTAGRAM_APP_WEBHOOK_FIELDS,
           expected_page_fields: PAGE_WEBHOOK_FIELDS,
           expected_instagram_fields: INSTAGRAM_APP_WEBHOOK_FIELDS,
+          app_subscriptions_existing: social?.app_subscriptions?.existing || null,
           facebook_channel_db_ok: Boolean(fbChannel?.ok),
           facebook_channel_db_error: fbChannel?.ok ? null : fbChannel?.error || null,
           facebook_channel_repair_sql: fbChannel?.ok ? null : FACEBOOK_CHANNEL_REPAIR_SQL,
