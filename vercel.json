@@ -150,6 +150,10 @@
       "schedule": "*/5 * * * *"
     },
     {
+      "path": "/api/cron/crm-task-reminders",
+      "schedule": "* * * * *"
+    },
+    {
       "path": "/api/cron/teacher-review-invites",
       "schedule": "*/5 * * * *"
     }

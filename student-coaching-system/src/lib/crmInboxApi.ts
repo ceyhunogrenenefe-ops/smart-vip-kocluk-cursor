@@ -189,6 +189,12 @@ export function crmMarkRead(conversationId: string) {
   return inboxPost<{ ok: boolean }>('mark_read', { conversation_id: conversationId });
 }
 
+export function crmDeleteMessage(messageId: string) {
+  return inboxPost<{ ok: boolean; data: { deleted_id: string; conversation?: CrmConversation } }>('delete_message', {
+    message_id: messageId
+  });
+}
+
 export function crmPoll(since: string, conversationId?: string) {
   return inboxGet<{
     data: {

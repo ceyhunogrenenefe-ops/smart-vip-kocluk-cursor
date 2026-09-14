@@ -795,6 +795,50 @@ export default async function handler(req, res) {
       });
     }
 
+    if (op === 'delete_message' && req.method === 'POST') {
+      const messageId = String(body.message_id || body.id || '').trim();
+      if (!messageId) return res.status(400).json({ error: 'message_id_required' });
+      const { data: msg, error: mErr } = await supabaseAdmin
+        .from('crm_messages')
+        .select('id, conversation_id, body, created_at')
+        .eq('id', messageId)
+        .maybeSingle();
+      if (mErr) throw mErr;
+      if (!msg) return res.status(404).json({ error: 'message_not_found' });
+      const { data: conv } = await supabaseAdmin
+        .from('crm_conversations')
+        .select('*')
+        .eq('id', msg.conversation_id)
+        .maybeSingle();
+      if (!(await assertConversationAccess(conv, actor, roleSet, assignment))) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+      const { error: delErr } = await supabaseAdmin.from('crm_messages').delete().eq('id', messageId);
+      if (delErr) throw delErr;
+
+      const { data: last } = await supabaseAdmin
+        .from('crm_messages')
+        .select('body, created_at')
+        .eq('conversation_id', msg.conversation_id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      const preview = last?.body
+        ? String(last.body).replace(/\s+/g, ' ').trim().slice(0, 140)
+        : '';
+      const { data: updated } = await supabaseAdmin
+        .from('crm_conversations')
+        .update({
+          last_message_at: last?.created_at || conv.last_message_at,
+          last_message_preview: preview,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', msg.conversation_id)
+        .select('*')
+        .maybeSingle();
+      return res.status(200).json({ ok: true, data: { deleted_id: messageId, conversation: updated || conv } });
+    }
+
     if (op === 'poll') {
       const since = String(req.query?.since || body.since || '').trim();
       const conversationId = String(req.query?.conversation_id || body.conversation_id || '').trim();

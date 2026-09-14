@@ -3,6 +3,7 @@
  */
 
 export const GRADE_PROGRAMS = [
+  { code: 'unspecified', label: 'Sınıf belirsiz', sortOrder: 5 },
   { code: 'grade_2', label: '2. Sınıf', sortOrder: 10 },
   { code: 'grade_3', label: '3. Sınıf', sortOrder: 20 },
   { code: 'grade_4', label: '4. Sınıf', sortOrder: 30 },
@@ -41,6 +42,11 @@ const GRADE_ALIASES = [
   [/özel\s*ders/i, 'private_lesson']
 ];
 
+export function isKnownGradeProgram(code) {
+  const c = String(code || '').trim().toLowerCase();
+  return GRADE_PROGRAMS.some((g) => g.code === c);
+}
+
 export function normalizeGradeProgram(raw) {
   const s = String(raw || '').trim();
   if (!s) return null;
@@ -54,6 +60,57 @@ export function normalizeGradeProgram(raw) {
     if (g.label.toLocaleLowerCase('tr-TR') === lower) return g.code;
   }
   return s;
+}
+
+const GRADE_FROM_TEXT = [
+  [/\b11(?:\s*\.|\.)?\s*s[ıi]n[iı]f/i, 'grade_11'],
+  [/\b10(?:\s*\.|\.)?\s*s[ıi]n[iı]f/i, 'grade_10'],
+  [/\b12(?:\s*\.|\.)?\s*s[ıi]n[iı]f/i, 'yks'],
+  [/\b9(?:\s*\.|\.)?\s*s[ıi]n[iı]f/i, 'grade_9'],
+  [/\b8(?:\s*\.|\.)?\s*s[ıi]n[iı]f/i, 'lgs'],
+  [/\b7(?:\s*\.|\.)?\s*s[ıi]n[iı]f/i, 'grade_7'],
+  [/\b6(?:\s*\.|\.)?\s*s[ıi]n[iı]f/i, 'grade_6'],
+  [/\b5(?:\s*\.|\.)?\s*s[ıi]n[iı]f/i, 'grade_5'],
+  [/\b4(?:\s*\.|\.)?\s*s[ıi]n[iı]f/i, 'grade_4'],
+  [/\b3(?:\s*\.|\.)?\s*s[ıi]n[iı]f/i, 'grade_3'],
+  [/\b2(?:\s*\.|\.)?\s*s[ıi]n[iı]f/i, 'grade_2'],
+  [/\bs[ıi]n[iı]f\s*[:.\-]?\s*(11)\b/i, 'grade_11'],
+  [/\bs[ıi]n[iı]f\s*[:.\-]?\s*(10)\b/i, 'grade_10'],
+  [/\bs[ıi]n[iı]f\s*[:.\-]?\s*(12)\b/i, 'yks'],
+  [/\bs[ıi]n[iı]f\s*[:.\-]?\s*(9)\b/i, 'grade_9'],
+  [/\bs[ıi]n[iı]f\s*[:.\-]?\s*(8)\b/i, 'lgs'],
+  [/\bs[ıi]n[iı]f\s*[:.\-]?\s*(7)\b/i, 'grade_7'],
+  [/\bs[ıi]n[iı]f\s*[:.\-]?\s*(6)\b/i, 'grade_6'],
+  [/\bs[ıi]n[iı]f\s*[:.\-]?\s*(5)\b/i, 'grade_5'],
+  [/\bs[ıi]n[iı]f\s*[:.\-]?\s*(4)\b/i, 'grade_4'],
+  [/\bs[ıi]n[iı]f\s*[:.\-]?\s*(3)\b/i, 'grade_3'],
+  [/\bs[ıi]n[iı]f\s*[:.\-]?\s*(2)\b/i, 'grade_2'],
+  [/\b(?:y[öo]s)\b/i, 'yos'],
+  [/\b(?:yks|tyt|ayt)\b/i, 'yks'],
+  [/\blgs\b/i, 'lgs'],
+  [/\bözel\s*ders/i, 'private_lesson']
+];
+
+/** Serbest mesaj / form metninden sınıf-program kodu (eşleşmezse null). */
+export function inferGradeProgramFromText(raw) {
+  const s = String(raw || '').replace(/\s+/g, ' ').trim();
+  if (!s) return null;
+  const known = normalizeGradeProgram(s);
+  if (known && isKnownGradeProgram(known) && known !== 'unspecified') return known;
+  for (const [re, code] of GRADE_FROM_TEXT) {
+    if (re.test(s)) return code;
+  }
+  return null;
+}
+
+/** Varsayılan LGS / belirsiz üzerine mesajdan çıkan sınıf yazılabilir. */
+export function shouldReplaceGradeProgram(current, inferred) {
+  if (!inferred || !isKnownGradeProgram(inferred) || inferred === 'unspecified') return false;
+  const cur = String(current || '').trim().toLowerCase();
+  if (!cur || cur === 'unspecified') return true;
+  if (cur === inferred) return false;
+  if (cur === 'lgs' && inferred !== 'lgs') return true;
+  return false;
 }
 
 /** Türkiye telefon normalizasyonu → 05xxxxxxxxx */
