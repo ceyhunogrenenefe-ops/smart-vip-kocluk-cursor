@@ -1045,6 +1045,9 @@ function TasksTab({
         >
           Hatırlatıcı oluştur
         </button>
+        <p className="mt-2 text-[11px] text-amber-800/80">
+          Atanan ajana, görev saatinden 5 dakika önce panel bildirimi ve WhatsApp hatırlatması gider.
+        </p>
       </div>
       {items.map((t) => {
         const overdue =

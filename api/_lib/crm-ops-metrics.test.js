@@ -5,7 +5,9 @@ import {
   formatFirstResponse,
   isOfferPendingLead,
   isTrialLessonLead,
-  resolveOpsDateRange
+  resolveOpsDateRange,
+  classifyLeadSource,
+  summarizeLeadSources
 } from './crm-ops-metrics.js';
 
 test('formatFirstResponse matches Kommo-style minutes+seconds', () => {
@@ -38,4 +40,21 @@ test('trial / offer segment helpers', () => {
   assert.equal(isTrialLessonLead({ stage: 'trial_lesson_scheduled' }), true);
   assert.equal(isTrialLessonLead({ stage: 'offer_sent' }), false);
   assert.equal(isOfferPendingLead({ stage: 'offer_sent' }), true);
+});
+
+test('classifyLeadSource buckets website / instagram / whatsapp', () => {
+  assert.equal(classifyLeadSource({ last_inbound_channel: 'website', source: 'website_form_ad' }), 'website');
+  assert.equal(classifyLeadSource({ last_inbound_channel: 'instagram', source: 'instagram_inbound' }), 'instagram');
+  assert.equal(classifyLeadSource({ last_inbound_channel: 'whatsapp', source: 'whatsapp_inbound' }), 'whatsapp');
+  assert.equal(classifyLeadSource({ source: 'website_form' }), 'website');
+  const rows = summarizeLeadSources([
+    { last_inbound_channel: 'website' },
+    { last_inbound_channel: 'website' },
+    { last_inbound_channel: 'instagram' }
+  ]);
+  const web = rows.find((r) => r.id === 'website');
+  const ig = rows.find((r) => r.id === 'instagram');
+  assert.equal(web.count, 2);
+  assert.equal(ig.count, 1);
+  assert.equal(web.pct, 66.7);
 });

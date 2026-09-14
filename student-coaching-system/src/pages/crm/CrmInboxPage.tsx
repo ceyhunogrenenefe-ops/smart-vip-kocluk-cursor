@@ -10,6 +10,7 @@ import {
   RefreshCw,
   Search,
   Send,
+  Trash2,
   UserPlus
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -28,6 +29,7 @@ import {
   crmListMetaTemplates,
   crmListNotes,
   crmMarkRead,
+  crmDeleteMessage,
   crmPoll,
   crmSendMessage,
   crmSetTags,
@@ -103,6 +105,7 @@ export default function CrmInboxPage() {
   const [loadingList, setLoadingList] = useState(true);
   const [loadingMsgs, setLoadingMsgs] = useState(false);
   const [sending, setSending] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [agents, setAgents] = useState<Array<{ id: string; name: string; email: string }>>([]);
   const [inbound, setInbound] = useState<CrmInboundStatus | null>(null);
   const [binding, setBinding] = useState(false);
@@ -170,6 +173,26 @@ export default function CrmInboxPage() {
       toast.error(e instanceof Error ? e.message : 'Mesajlar yüklenemedi');
     } finally {
       setLoadingMsgs(false);
+    }
+  }, []);
+
+  const deleteMessage = useCallback(async (messageId: string) => {
+    if (!window.confirm('Bu mesajı gelen kutusundan silmek istiyor musunuz?')) return;
+    setDeletingId(messageId);
+    try {
+      const res = await crmDeleteMessage(messageId);
+      setMessages((prev) => prev.filter((m) => m.id !== messageId));
+      if (res.data?.conversation) {
+        setSelected(res.data.conversation);
+        setConversations((prev) =>
+          prev.map((c) => (c.id === res.data.conversation?.id ? { ...c, ...res.data.conversation } : c))
+        );
+      }
+      toast.success('Mesaj silindi');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Mesaj silinemedi');
+    } finally {
+      setDeletingId(null);
     }
   }, []);
 
@@ -593,7 +616,22 @@ export default function CrmInboxPage() {
                 messages.map((m) => {
                   const mine = m.sender_type === 'agent' || m.sender_type === 'bot';
                   return (
-                    <div key={m.id} className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
+                    <div key={m.id} className={`group flex items-end gap-1 ${mine ? 'justify-end' : 'justify-start'}`}>
+                      {!mine ? (
+                        <button
+                          type="button"
+                          title="Mesajı sil"
+                          disabled={deletingId === m.id}
+                          onClick={() => void deleteMessage(m.id)}
+                          className="mb-1 rounded-full p-1 text-slate-300 opacity-0 transition hover:bg-rose-50 hover:text-rose-600 group-hover:opacity-100"
+                        >
+                          {deletingId === m.id ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <Trash2 className="h-3.5 w-3.5" />
+                          )}
+                        </button>
+                      ) : null}
                       <div
                         className={`max-w-[75%] rounded-2xl px-3 py-2 text-sm shadow-sm ${
                           mine
@@ -609,6 +647,21 @@ export default function CrmInboxPage() {
                           {m.delivery_status ? ` · ${m.delivery_status}` : ''}
                         </p>
                       </div>
+                      {mine ? (
+                        <button
+                          type="button"
+                          title="Mesajı sil"
+                          disabled={deletingId === m.id}
+                          onClick={() => void deleteMessage(m.id)}
+                          className="mb-1 rounded-full p-1 text-slate-300 opacity-0 transition hover:bg-rose-50 hover:text-rose-600 group-hover:opacity-100"
+                        >
+                          {deletingId === m.id ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <Trash2 className="h-3.5 w-3.5" />
+                          )}
+                        </button>
+                      ) : null}
                     </div>
                   );
                 })
