@@ -7,7 +7,7 @@ import {
   openAcademicCenterLink,
   studyEntryUrl,
 } from './academicCenterLinks';
-import { isPrimary4567Grade, PRIMARY_4567_ZOOM_URL } from './primary4567Zoom';
+import { isPrimary4567Grade, isSeventhGrade, LGS8_ETUT_ZOOM_URL, PRIMARY_4567_ZOOM_URL } from './primary4567Zoom';
 
 const STORAGE_KEY = 'coaching_pending_etut_session_v1';
 const RETURN_FLAG_KEY = 'coaching_etut_expect_return_report';
@@ -46,6 +46,7 @@ export function resolveStudyRoomForClassLevel(classLevel?: ClassLevel | string |
   if (!cl) return 'yks';
   if (cl === 'YKS' || cl.includes('TYT') || cl.includes('AYT') || cl.includes('12')) return 'yks';
   if (cl.includes('9') || cl.includes('10') || cl.includes('11')) return 'class911';
+  if (isSeventhGrade(classLevel, '')) return 'class78';
   if (isPrimary4567Grade(classLevel, '')) {
     const n = String(classLevel || '').trim();
     if (n === '5' || n === '6' || /^[56](\.|A|B|C)/i.test(n)) return 'class56';
@@ -136,7 +137,9 @@ export async function joinEtutStudyRoom(opts: {
   const url =
     room === 'class47' || room === 'class56'
       ? PRIMARY_4567_ZOOM_URL
-      : studyEntryUrl(links, room);
+      : room === 'class78'
+        ? LGS8_ETUT_ZOOM_URL
+        : studyEntryUrl(links, room);
   if (!url) throw new Error('Etüt sınıfı bağlantısı tanımlı değil. Yönetici Akademik Merkez ayarlarını kontrol etsin.');
 
   startEtutSession({
