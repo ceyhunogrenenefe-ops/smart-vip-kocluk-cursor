@@ -20,8 +20,8 @@ import { getIstanbulDateString } from '../api/_lib/istanbul-time.js';
 import { isMissingTableError } from '../api/_lib/supabase-schema.js';
 import { errorMessage } from '../api/_lib/error-msg.js';
 
-const VALID_EXAM_ROOMS = new Set(['lise', 'yos', 'class34', 'class56', 'class78']);
-const VALID_STUDY_ROOMS = new Set(['class56', 'class78', 'class911', 'yks']);
+const VALID_EXAM_ROOMS = new Set(['lise', 'yos', 'class47', 'class34', 'class56', 'class78']);
+const VALID_STUDY_ROOMS = new Set(['class47', 'class56', 'class78', 'class911', 'yks']);
 
 function sanitizeName(raw) {
   const name = String(raw || '')
@@ -103,8 +103,8 @@ export default async function handler(req, res) {
       error: 'invalid_room',
       hint:
         kind === 'study'
-          ? 'Geçerli etüt oda: class56, class78, class911, yks'
-          : 'Geçerli deneme oda: lise, yos, class34, class56, class78'
+          ? 'Geçerli etüt oda: class47, class56, class78, class911, yks'
+          : 'Geçerli deneme oda: lise, yos, class47, class34, class56, class78'
     });
   }
 

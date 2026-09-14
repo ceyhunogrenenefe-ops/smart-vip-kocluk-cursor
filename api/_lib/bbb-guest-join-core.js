@@ -18,6 +18,7 @@ import {
   syncConsecutivePeerMeetingLinks
 } from './consecutive-class-bbb-reuse.js';
 import { resolveClassSessionBbbReuse } from './combined-class-bbb-reuse.js';
+import { applyLgs8DinSharedJoinContext } from './lgs8-din-shared-bbb.js';
 import { sessionEndUtcMs, wallTimeToUtcMs } from './class-session-end-ms.js';
 import { signBbbGuestJoinToken, guestJoinPageUrl } from './bbb-guest-token.js';
 import { upsertGuestJoinShortCode } from './guest-join-short-link.js';
@@ -30,7 +31,7 @@ import {
 } from './academic-center-links-store.js';
 import { isDirectExternalMeetingLink } from './detect-meeting-platform.js';
 
-const VALID_STUDY_ROOMS = new Set(['class56', 'class78', 'class911', 'yks']);
+const VALID_STUDY_ROOMS = new Set(['class47', 'class56', 'class78', 'class911', 'yks']);
 const ACADEMIC_STUDY_GUEST_EXPIRE_DAYS = 90;
 
 const GUEST_JOIN_OPEN_MINUTES_BEFORE = 15;
@@ -212,6 +213,35 @@ async function buildClassGuestJoinUrl(session, guestName) {
     }
   } catch {
     /* mevcut tek-oturum guest join */
+  }
+
+  try {
+    const { data: cls } = session.class_id
+      ? await supabaseAdmin
+          .from('classes')
+          .select('name,class_level')
+          .eq('id', session.class_id)
+          .maybeSingle()
+      : { data: null };
+    const dinCtx = applyLgs8DinSharedJoinContext(
+      { meetingKeyPrefix, storedMeetingId, attendeeLinkOverride: attendeeLink },
+      {
+        subject: session.subject,
+        className: cls?.name,
+        classLevel: cls?.class_level,
+        lessonDate: session.lesson_date,
+        startTime: session.start_time,
+        row: session
+      }
+    );
+    if (dinCtx?.meetingKeyPrefix) meetingKeyPrefix = dinCtx.meetingKeyPrefix;
+    if (dinCtx?.storedMeetingId) storedMeetingId = dinCtx.storedMeetingId;
+    if (dinCtx?.attendeeLinkOverride === 'bbb:auto') {
+      attendeeLink = 'bbb:auto';
+      moderatorLink = null;
+    }
+  } catch {
+    /* din shared prefix opsiyonel */
   }
 
   const ensured = await ensureBbbMeetingAlive({

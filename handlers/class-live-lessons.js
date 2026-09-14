@@ -103,6 +103,12 @@ import { findBlockingTeacherRow } from '../api/_lib/teacher-time-conflict.js';
 import { listScheduledSessionBatchPeers } from '../api/_lib/class-session-batch-peers.js';
 import { ensureClassTeacherLink, getTeacherPanelClassIds } from '../api/_lib/teacher-class-scope.js';
 import { errorMessage } from '../api/_lib/error-msg.js';
+import { primary4567ZoomIfApplicable } from '../api/_lib/primary-4567-zoom.js';
+import {
+  applyLgs8DinSharedJoinContext,
+  lgs8DinSharedMeetingFields,
+  lgs8DinSharedMeetingKeyPrefix
+} from '../api/_lib/lgs8-din-shared-bbb.js';
 
 function parseBody(req) {
   const b = req.body;
@@ -134,18 +140,44 @@ async function resolveClassMeetingLinkFromRequest({
   manualLink,
   subject,
   className,
+  classLevel,
   teacherId,
   durationMinutes,
-  meetingKeyPrefix
+  meetingKeyPrefix,
+  lessonDate,
+  dayOfWeek,
+  startTime
 }) {
-  return resolveBbbOrManualMeetingLink({
+  const zoom = primary4567ZoomIfApplicable({ subject, className, classLevel });
+  if (zoom) {
+    return {
+      ok: true,
+      meetingLink: zoom,
+      meetingLinkModerator: null,
+      platform: 'zoom',
+      autoBbb: null
+    };
+  }
+  const din = lgs8DinSharedMeetingFields({
+    subject,
+    className,
+    classLevel,
+    lessonDate,
+    dayOfWeek,
+    startTime
+  });
+  const resolved = await resolveBbbOrManualMeetingLink({
     manualLink,
     meetingName: `${subject} — ${className || 'Grup dersi'}`,
     attendeeName: 'Öğrenci',
     moderatorName: await teacherDisplayName(teacherId),
     durationMinutes,
-    meetingKeyPrefix
+    meetingKeyPrefix: din?.meetingKeyPrefix || meetingKeyPrefix
   });
+  if (resolved?.ok && din && !String(manualLink || '').trim()) {
+    resolved.bbbMeetingId = din.bbbMeetingId;
+  }
+  return resolved;
 }
 
 /** Öğrenci gibi /api/users erişemeyen roller için slot/oturum satırlarına öğretmen adı ekler */
@@ -227,7 +259,7 @@ function timeOverlap(aStart, aEnd, bStart, bEnd) {
   return A1 < B2 && A2 > B1;
 }
 
-/** Etüt / Deneme / Din: birden fazla sınıf aynı saatte (ortak Zoom/oda); öğretmen zorunlu değil. */
+/** Etüt / Deneme / Din / Ödev / Kitap okuma: birden fazla sınıf aynı saatte (ortak Zoom/oda); öğretmen zorunlu değil. */
 function isSharedMultiClassSubject(subject) {
   const s = String(subject || '')
     .trim()
@@ -236,6 +268,8 @@ function isSharedMultiClassSubject(subject) {
   if (s === 'ETÜT' || s.includes('ETUT') || s.includes('ETÜT')) return true;
   if (s.includes('DENEME')) return true;
   if (s.includes('DİN')) return true;
+  if (s.includes('ÖDEV') || s.includes('ODEV')) return true;
+  if (s.includes('KİTAP') || s.includes('KITAP')) return true;
   return false;
 }
 
@@ -754,29 +788,40 @@ async function handleClassLiveBbbJoin(req, res, actor, role) {
         durationMinutes,
         meetingKeyPrefix: `cljoin${String(row.id || '').replace(/-/g, '')}`
       };
-      if (slotMode) return base;
-      try {
-        const consecutive = await resolveConsecutiveClassBbbReuse(row);
-        const reuse = await resolveClassSessionBbbReuse(row, consecutive);
-        if (!reuse) return base;
-        row.__bbbSyncPeers = reuse.peers;
-        if (reuse.chainDurationMinutes != null) {
-          base.durationMinutes = reuse.chainDurationMinutes;
-        }
-        if (reuse.meetingKeyPrefix) base.meetingKeyPrefix = reuse.meetingKeyPrefix;
-        if (reuse.storedMeetingId) base.storedMeetingId = reuse.storedMeetingId;
-        if (reuse.seededFromPeer) {
-          if (reuse.seedAttendeeLink) base.attendeeLinkOverride = reuse.seedAttendeeLink;
-          if (reuse.seedModeratorLink != null) base.moderatorLinkOverride = reuse.seedModeratorLink;
-          if (reuse.seedAttendeePw && !String(row.bbb_attendee_pw || '').trim()) {
-            row.bbb_attendee_pw = reuse.seedAttendeePw;
+      if (!slotMode) {
+        try {
+          const consecutive = await resolveConsecutiveClassBbbReuse(row);
+          const reuse = await resolveClassSessionBbbReuse(row, consecutive);
+          if (reuse) {
+            row.__bbbSyncPeers = reuse.peers;
+            if (reuse.chainDurationMinutes != null) {
+              base.durationMinutes = reuse.chainDurationMinutes;
+            }
+            if (reuse.meetingKeyPrefix) base.meetingKeyPrefix = reuse.meetingKeyPrefix;
+            if (reuse.storedMeetingId) base.storedMeetingId = reuse.storedMeetingId;
+            if (reuse.seededFromPeer) {
+              if (reuse.seedAttendeeLink) base.attendeeLinkOverride = reuse.seedAttendeeLink;
+              if (reuse.seedModeratorLink != null) base.moderatorLinkOverride = reuse.seedModeratorLink;
+              if (reuse.seedAttendeePw && !String(row.bbb_attendee_pw || '').trim()) {
+                row.bbb_attendee_pw = reuse.seedAttendeePw;
+              }
+            } else if (reuse.seedAttendeePw && !String(row.bbb_attendee_pw || '').trim()) {
+              row.bbb_attendee_pw = reuse.seedAttendeePw;
+            }
           }
-        } else if (reuse.seedAttendeePw && !String(row.bbb_attendee_pw || '').trim()) {
-          row.bbb_attendee_pw = reuse.seedAttendeePw;
+        } catch {
+          /* fallback: mevcut tek-oturum davranışı */
         }
-      } catch {
-        /* fallback: mevcut tek-oturum davranışı */
       }
+      applyLgs8DinSharedJoinContext(base, {
+        subject: row.subject,
+        className,
+        classLevel: details.class?.class_level,
+        lessonDate: row.lesson_date,
+        dayOfWeek: row.day_of_week,
+        startTime: row.start_time,
+        row
+      });
       return base;
     },
     patchLinks: (id, links) =>
@@ -839,6 +884,16 @@ async function handleClassLiveBbbRecording(req, res, actor, role) {
     canAccess: (act, row) => canAccessClassLiveRow(act, role, row),
     patchRecordingLink: slotMode ? undefined : (id, playbackUrl) => patchRowRecordingLink(table, id, playbackUrl),
     getMeetingKeyPrefix: async (row) => {
+      const details = await getClassDetails(String(row.class_id || ''));
+      const dinPrefix = lgs8DinSharedMeetingKeyPrefix({
+        subject: row.subject,
+        className: details.class?.name,
+        classLevel: details.class?.class_level,
+        lessonDate: row.lesson_date,
+        dayOfWeek: row.day_of_week,
+        startTime: row.start_time
+      });
+      if (dinPrefix) return dinPrefix;
       if (slotMode) return `clslot${String(row.id || '').replace(/-/g, '')}`;
       try {
         const consecutive = await resolveConsecutiveClassBbbReuse(row);
@@ -2213,9 +2268,12 @@ export default async function handler(req, res) {
         manualLink: manualMeetingLink,
         subject,
         className: details.class?.name || '',
+        classLevel: details.class?.class_level || '',
         teacherId,
         durationMinutes: resolveBbbMeetingDurationMinutes(duration),
-        meetingKeyPrefix: `classsession${classId}`
+        meetingKeyPrefix: `classsession${classId}`,
+        lessonDate: date,
+        startTime: start
       });
       if (!resolved.ok) {
         return res.status(resolved.code === 'bbb_create_failed' ? 502 : 400).json({
@@ -2705,9 +2763,12 @@ export default async function handler(req, res) {
         manualLink: manualMeetingLink,
         subject,
         className: details.class?.name || '',
+        classLevel: details.class?.class_level || '',
         teacherId,
         durationMinutes: resolveBbbMeetingDurationMinutes(duration),
-        meetingKeyPrefix: `classslot${classId}`
+        meetingKeyPrefix: `classslot${classId}`,
+        dayOfWeek,
+        startTime: start
       });
       if (!resolved.ok) {
         return res.status(resolved.code === 'bbb_create_failed' ? 502 : 400).json({
@@ -2812,9 +2873,12 @@ export default async function handler(req, res) {
         manualLink: manualMeetingLink,
         subject,
         className: details.class?.name || '',
+        classLevel: details.class?.class_level || '',
         teacherId,
         durationMinutes: resolveBbbMeetingDurationMinutes(duration),
-        meetingKeyPrefix: `classbulk${classId}`
+        meetingKeyPrefix: `classbulk${classId}`,
+        lessonDate: startDate,
+        startTime: start
       });
       if (!resolved.ok) {
         return res.status(resolved.code === 'bbb_create_failed' ? 502 : 400).json({
@@ -3149,9 +3213,13 @@ export default async function handler(req, res) {
           manualLink: '',
           subject: subjectForBbb,
           className: classNameForBbb,
+          classLevel: details.class?.class_level || '',
           teacherId: teacherIdForBbb,
           durationMinutes: durMin,
-          meetingKeyPrefix: `classpatch${session.id}`
+          meetingKeyPrefix: `classpatch${session.id}`,
+          lessonDate: session.lesson_date,
+          dayOfWeek: session.day_of_week,
+          startTime: session.start_time
         });
         if (!resolved.ok) {
           return res.status(resolved.code === 'bbb_create_failed' ? 502 : 400).json({
