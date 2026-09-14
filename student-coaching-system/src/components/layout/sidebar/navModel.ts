@@ -322,6 +322,9 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
       { path: '/notifications', icon: Bell, label: 'Bildirimler' },
       { path: '/events', icon: CalendarDays, label: 'Etkinlikler' },
       { path: '/toplanti-takip', icon: ClipboardCheck, label: 'Toplantı ve Gündem Takibi' },
+      { path: '/crm/dashboard', icon: BarChart3, label: 'CRM Dashboard' },
+      { path: '/crm/gorevler', icon: ClipboardCheck, label: 'CRM Görevler' },
+      { path: '/crm/toplu-mesaj', icon: MessageCircle, label: 'CRM Toplu mesaj' },
       { path: '/crm/inbox', icon: ClipboardList, label: 'CRM Inbox' },
       { path: '/crm/widgetler', icon: Puzzle, label: 'CRM Widgetler' },
       { path: '/crm', icon: ClipboardList, label: 'CRM Pipeline' },
@@ -357,6 +360,9 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
   // CRM ajanı (yalnız inbox)
   if (tags.includes('crm_agent') && !tags.some((t) => ['super_admin', 'admin', 'coach', 'teacher', 'student', 'vendor_admin'].includes(t as string))) {
     return [
+      { path: '/crm/dashboard', icon: BarChart3, label: 'CRM Dashboard' },
+      { path: '/crm/gorevler', icon: ClipboardCheck, label: 'CRM Görevler' },
+      { path: '/crm/toplu-mesaj', icon: MessageCircle, label: 'CRM Toplu mesaj' },
       { path: '/crm/inbox', icon: ClipboardList, label: 'CRM Gelen Kutusu' },
     ];
   }
@@ -411,6 +417,9 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
     { path: '/notifications', icon: Bell, label: 'Bildirimler' },
     { path: '/events', icon: CalendarDays, label: 'Etkinlikler' },
     { path: '/toplanti-takip', icon: ClipboardCheck, label: 'Toplantı ve Gündem Takibi' },
+    { path: '/crm/dashboard', icon: BarChart3, label: 'CRM Dashboard' },
+    { path: '/crm/gorevler', icon: ClipboardCheck, label: 'CRM Görevler' },
+    { path: '/crm/toplu-mesaj', icon: MessageCircle, label: 'CRM Toplu mesaj' },
     { path: '/crm/inbox', icon: ClipboardList, label: 'CRM Inbox' },
     { path: '/crm/widgetler', icon: Puzzle, label: 'CRM Widgetler' },
     { path: '/crm', icon: ClipboardList, label: 'CRM Pipeline' },

@@ -90,6 +90,9 @@ import CrmInboxPage from './pages/crm/CrmInboxPage';
 import CrmAgentsPage from './pages/crm/CrmAgentsPage';
 import CrmWidgetsPage from './pages/crm/CrmWidgetsPage';
 import CrmHome from './pages/crm/CrmHome';
+import CrmOpsDashboardPage from './pages/crm/CrmOpsDashboardPage';
+import CrmTasksPage from './pages/crm/CrmTasksPage';
+import CrmBulkMessagePage from './pages/crm/CrmBulkMessagePage';
 import OzelDersTalepleriPage from './pages/OzelDersTalepleriPage';
 import TeacherVitrineProfilePage from './pages/TeacherVitrineProfilePage';
 import TeacherAvailabilityPage from './pages/TeacherAvailabilityPage';
@@ -430,6 +433,9 @@ function App() {
               }
             >
               <Route index element={<CrmHome />} />
+              <Route path="dashboard" element={<CrmOpsDashboardPage />} />
+              <Route path="gorevler" element={<CrmTasksPage />} />
+              <Route path="toplu-mesaj" element={<CrmBulkMessagePage />} />
               <Route path="inbox" element={<CrmInboxPage />} />
               <Route
                 path="widgetler"
