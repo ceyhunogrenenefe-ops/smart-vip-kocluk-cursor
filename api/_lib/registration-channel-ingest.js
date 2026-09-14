@@ -11,6 +11,7 @@ import {
   phoneLookupVariants,
   shouldReplaceGradeProgram
 } from './registration-tracking-utils.js';
+import { normalizeInstagramMessagingEvent } from './instagram-messaging-normalize.js';
 
 function snippetOf(text, max = 140) {
   const s = String(text || '')
@@ -538,28 +539,24 @@ export async function ingestWhatsAppCloudMessages(value) {
   return { processed };
 }
 
-/** Instagram / Facebook Messaging API entry.messaging[] → ingest */
+/** Instagram / Facebook Messaging API entry.messaging[] (+ standby / ads referral) → ingest */
 export async function ingestInstagramMessagingEvents(messagingEvents, { channel = 'instagram' } = {}) {
   const events = Array.isArray(messagingEvents) ? messagingEvents : [];
   const ch = channel === 'facebook' ? 'facebook' : 'instagram';
   let processed = 0;
   for (const ev of events) {
-    if (ev?.message?.is_echo) continue;
-    const mid = ev?.message?.mid ? String(ev.message.mid) : null;
-    const text = ev?.message?.text != null ? String(ev.message.text) : null;
-    const senderId = ev?.sender?.id ? String(ev.sender.id) : null;
-    if (!senderId) continue;
-    if (!text && !ev?.message?.attachments) continue;
-    const body = text || '[medya / ek]';
+    const norm = normalizeInstagramMessagingEvent(ev);
+    if (norm.isEcho) continue;
+    if (!norm.senderId || !norm.hasInboundContent) continue;
 
     await ingestRegistrationChannelMessage({
       channel: ch,
       direction: 'inbound',
-      externalContactId: senderId,
+      externalContactId: norm.senderId,
       contactName: null,
-      body,
-      messageType: text ? 'text' : 'attachment',
-      externalMessageId: mid,
+      body: norm.text || '[medya / ek]',
+      messageType: norm.messageType,
+      externalMessageId: norm.messageId,
       timestamp: ev?.timestamp,
       payload: ev
     });
