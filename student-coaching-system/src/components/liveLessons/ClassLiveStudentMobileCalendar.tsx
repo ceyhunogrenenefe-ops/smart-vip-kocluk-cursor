@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { ClipboardList, Copy, PlayCircle, Star } from 'lucide-react';
 import { liveSubjectAccent } from './liveSubjectAccent';
 import { hasClassSessionRecordingAccess } from '../../lib/liveLessonUtils';
+import { primary4567ZoomIfApplicable } from '../../lib/primary4567Zoom';
 import { cn } from '../../lib/utils';
 import { SolutionLessonStudentActions } from '../solutionAppointments/SolutionLessonStudentActions';
 import { isSolutionLessonSubject } from '../../lib/solutionAppointments/utils';
@@ -54,6 +55,8 @@ export type ClassLiveStudentMobileCalendarProps = {
   onReviewTeacher?: (s: SessionRow) => void;
   reviewedSessionIds?: Set<string>;
   studentAppointmentDefaults?: { name?: string; class_level?: string };
+  className?: string | null;
+  classLevel?: string | null;
 };
 
 /** Öğrenci mobil — haftalık grid yerine gün seçimi + ders listesi */
@@ -71,7 +74,9 @@ export function ClassLiveStudentMobileCalendar({
   onOpenAttendance,
   onReviewTeacher,
   reviewedSessionIds,
-  studentAppointmentDefaults
+  studentAppointmentDefaults,
+  className,
+  classLevel
 }: ClassLiveStudentMobileCalendarProps) {
   const [dayIdx, setDayIdx] = useState(() => {
     const idx = weekColumnDates.indexOf(todayIso);
@@ -159,7 +164,12 @@ export function ClassLiveStudentMobileCalendar({
           {displaySessions.map((s) => {
             const teacher = teacherCandidates.find((t) => t.id === s.teacher_id);
             const accent = liveSubjectAccent(s.subject);
-            const sessionLink = String(s.join_link || s.meeting_link || '').trim();
+            const sessionLink =
+              primary4567ZoomIfApplicable({
+                subject: s.subject,
+                className,
+                classLevel
+              }) || String(s.join_link || s.meeting_link || '').trim();
             const canJoin = s.status === 'scheduled' && Boolean(sessionLink);
             const canWatch = hasClassSessionRecordingAccess(s);
             const isSolutionLesson = isSolutionLessonSubject(s.subject);

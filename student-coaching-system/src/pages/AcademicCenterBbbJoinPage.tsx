@@ -7,8 +7,8 @@ import {
   type AcademicBbbRoomKey
 } from '../lib/academicCenterLinks';
 
-const VALID_EXAM_ROOMS = new Set(['lise', 'yos', 'class34', 'class56', 'class78']);
-const VALID_STUDY_ROOMS = new Set(['class56', 'class78', 'class911', 'yks']);
+const VALID_EXAM_ROOMS = new Set(['lise', 'yos', 'class47', 'class34', 'class56', 'class78']);
+const VALID_STUDY_ROOMS = new Set(['class47', 'class56', 'class78', 'class911', 'yks']);
 
 const COPY: Record<
   AcademicBbbRoomKind,
