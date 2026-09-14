@@ -1,5 +1,6 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { Inbox, LayoutGrid, LogOut, Puzzle, Users } from 'lucide-react';
+import { BarChart3, Bell, Inbox, LayoutGrid, LogOut, Puzzle, Send, Users } from 'lucide-react';
+import CrmAlarmHost from './CrmAlarmHost';
 import { useAuth } from '../../context/AuthContext';
 import { userRoleTags } from '../../config/rolePermissions';
 
@@ -27,6 +28,39 @@ export default function CrmLayout() {
               <h1 className="font-serif text-xl font-semibold tracking-tight text-slate-900">CRM</h1>
             </div>
             <nav className="flex flex-wrap items-center gap-1">
+              <NavLink
+                to="/crm/dashboard"
+                className={({ isActive }) =>
+                  `inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition ${
+                    isActive ? 'bg-emerald-600 text-white' : 'text-slate-600 hover:bg-slate-100'
+                  }`
+                }
+              >
+                <BarChart3 className="h-4 w-4" />
+                Dashboard
+              </NavLink>
+              <NavLink
+                to="/crm/gorevler"
+                className={({ isActive }) =>
+                  `inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition ${
+                    isActive ? 'bg-emerald-600 text-white' : 'text-slate-600 hover:bg-slate-100'
+                  }`
+                }
+              >
+                <Bell className="h-4 w-4" />
+                Görevler
+              </NavLink>
+              <NavLink
+                to="/crm/toplu-mesaj"
+                className={({ isActive }) =>
+                  `inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition ${
+                    isActive ? 'bg-emerald-600 text-white' : 'text-slate-600 hover:bg-slate-100'
+                  }`
+                }
+              >
+                <Send className="h-4 w-4" />
+                Toplu mesaj
+              </NavLink>
               <NavLink
                 to="/crm/inbox"
                 className={({ isActive }) =>
@@ -111,6 +145,7 @@ export default function CrmLayout() {
       <main className="mx-auto max-w-[1600px] px-2 py-2 sm:px-4 sm:py-4">
         <Outlet />
       </main>
+      <CrmAlarmHost />
     </div>
   );
 }

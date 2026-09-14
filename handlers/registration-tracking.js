@@ -25,6 +25,13 @@ import {
   diagnoseRegistrationInbound,
   simulateRegistrationInbound
 } from '../api/_lib/registration-channel-ingest.js';
+import {
+  handleDueAlarms,
+  handleListOpsTasks,
+  handleListSegmentLeads,
+  handleOpsDashboard,
+  handleSnoozeTask
+} from '../api/_lib/crm-ops-handlers.js';
 
 const PLATFORM_PRIMARY_INSTITUTION_ID = '73323d75-eea1-4552-8bba-d50555423589';
 
@@ -985,7 +992,7 @@ async function handleCreateTask(body, institutionId, actor) {
       institution_id: institutionId,
       meeting_id: body.meeting_id || null,
       agenda_item_id: body.agenda_item_id || null,
-      assigned_to: body.assigned_to || null,
+      assigned_to: body.assigned_to || actor.sub || null,
       title: body.title,
       description: body.description || null,
       task_type: body.task_type && TASK_TYPES.includes(body.task_type) ? body.task_type : 'other',
@@ -1007,6 +1014,21 @@ async function handleCreateTask(body, institutionId, actor) {
       senderId: actor.sub,
       institutionId
     });
+  }
+
+  if (body.lead_id && (body.next_action_at || data.due_at)) {
+    try {
+      await supabaseAdmin
+        .from('registration_leads')
+        .update({
+          next_action_at: body.next_action_at || data.due_at,
+          next_action_type: body.next_action_type || data.task_type || 'call_parent',
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', body.lead_id);
+    } catch {
+      /* optional */
+    }
   }
 
   return data;
@@ -1697,6 +1719,52 @@ async function handleSendChannelMessage(body, institutionId, actor) {
 }
 
 
+async function handleBulkTemplateSend(body, institutionId, actor) {
+  const leadIds = Array.isArray(body.lead_ids) ? body.lead_ids.map(String).filter(Boolean) : [];
+  const templateName = String(body.template_name || '').trim();
+  const templateBody = String(body.template_body || body.body || '').trim();
+  if (!leadIds.length) throw new Error('lead_ids gerekli');
+  if (!templateName && !templateBody) throw new Error('Şablon veya metin gerekli');
+
+  const results = [];
+  for (const leadId of leadIds.slice(0, 80)) {
+    try {
+      const send = await handleSendChannelMessage(
+        {
+          lead_id: leadId,
+          channel: body.channel || 'whatsapp',
+          body: templateBody,
+          template_name: templateName,
+          template_language: body.template_language || 'tr',
+          template_params: body.template_params || [],
+          template_param_names: body.template_param_names || null,
+          template_body: templateBody
+        },
+        institutionId,
+        actor
+      );
+      results.push({
+        lead_id: leadId,
+        ok: Boolean(send?.send?.ok || send?.message),
+        status: send?.send?.ok ? 'sent' : 'error',
+        error: send?.send?.error || send?.warning || null
+      });
+    } catch (e) {
+      results.push({
+        lead_id: leadId,
+        ok: false,
+        status: 'error',
+        error: errorMessage(e)
+      });
+    }
+  }
+  return {
+    sent: results.filter((r) => r.ok).length,
+    failed: results.filter((r) => !r.ok).length,
+    results
+  };
+}
+
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') {
     res.setHeader('Allow', 'GET, POST, PATCH, OPTIONS');
@@ -1785,6 +1853,26 @@ export default async function handler(req, res) {
       return res.status(200).json({ data });
     }
 
+    if (op === 'ops-dashboard') {
+      const data = await handleOpsDashboard(institutionId, filters);
+      return res.status(200).json({ data });
+    }
+
+    if (op === 'list-tasks') {
+      const data = await handleListOpsTasks(institutionId, filters);
+      return res.status(200).json({ data });
+    }
+
+    if (op === 'due-alarms') {
+      const data = await handleDueAlarms(institutionId, actor);
+      return res.status(200).json({ data });
+    }
+
+    if (op === 'segment-leads') {
+      const data = await handleListSegmentLeads(institutionId, filters);
+      return res.status(200).json({ data });
+    }
+
     if (op === 'inbound-health') {
       if (!isManager(tags) && role !== 'super_admin') return res.status(403).json({ error: 'forbidden' });
       const data = await diagnoseRegistrationInbound(institutionId);
@@ -1842,6 +1930,14 @@ export default async function handler(req, res) {
       }
       if (op === 'complete-task') {
         const data = await handleCompleteTask(body, institutionId, actor);
+        return res.status(200).json({ data });
+      }
+      if (op === 'snooze-task') {
+        const data = await handleSnoozeTask(body, institutionId, actor);
+        return res.status(200).json({ data });
+      }
+      if (op === 'bulk-template-send') {
+        const data = await handleBulkTemplateSend(body, institutionId, actor);
         return res.status(200).json({ data });
       }
       if (op === 'bulk') {

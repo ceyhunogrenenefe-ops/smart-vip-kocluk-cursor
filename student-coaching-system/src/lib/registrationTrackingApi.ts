@@ -253,6 +253,102 @@ export function rtLookupPhone(phone: string) {
   }>('lookup-phone', { method: 'GET', query: { phone } });
 }
 
+export type CrmOpsAgentRow = {
+  id: string;
+  name: string;
+  leads: number;
+  contacts?: number;
+  trial_lessons: number;
+  confirmed: number;
+  response_ms?: number | null;
+  response_label: string;
+  conversion_rate: number;
+};
+
+export type CrmOpsDashboard = {
+  range: { from: string; to: string; preset: string };
+  contacts: number;
+  trial_lessons: number;
+  confirmed: number;
+  avg_first_response_ms: number | null;
+  avg_first_response_label: string;
+  first_response_samples?: number;
+  agents: CrmOpsAgentRow[];
+  coaches: RegCoach[];
+  series: Array<{ day: string; contacts: number; confirmed: number }>;
+  segments?: Array<{ id: string; label: string }>;
+};
+
+export type CrmOpsTask = {
+  id: string;
+  lead_id: string;
+  assigned_to?: string | null;
+  title: string;
+  description?: string | null;
+  task_type?: string | null;
+  priority?: string | null;
+  status: string;
+  due_at?: string | null;
+  completed_at?: string | null;
+  lead_name: string;
+  lead_phone?: string | null;
+  lead_stage?: string | null;
+};
+
+export function rtOpsDashboard(query: Record<string, string> = {}) {
+  return rtFetch<{ data: CrmOpsDashboard }>('ops-dashboard', { method: 'GET', query });
+}
+
+export function rtListOpsTasks(query: Record<string, string> = {}) {
+  return rtFetch<{ data: { items: CrmOpsTask[]; range: { from: string; to: string } } }>('list-tasks', {
+    method: 'GET',
+    query
+  });
+}
+
+export function rtDueAlarms() {
+  return rtFetch<{ data: { items: CrmOpsTask[] } }>('due-alarms', { method: 'GET' });
+}
+
+export function rtSnoozeTask(taskId: string, minutes = 5) {
+  return rtFetch<{ data: Record<string, unknown> }>('snooze-task', {
+    method: 'POST',
+    body: JSON.stringify({ task_id: taskId, minutes })
+  });
+}
+
+export function rtSegmentLeads(query: Record<string, string> = {}) {
+  return rtFetch<{
+    data: {
+      items: Array<{
+        id: string;
+        full_name?: string;
+        first_name?: string;
+        last_name?: string;
+        phone?: string | null;
+        normalized_phone?: string | null;
+        stage?: string;
+        assigned_user_id?: string | null;
+      }>;
+      segment?: { id: string; label: string };
+    };
+  }>('segment-leads', { method: 'GET', query });
+}
+
+export function rtBulkTemplateSend(body: {
+  lead_ids: string[];
+  template_name?: string;
+  template_language?: string;
+  template_params?: string[];
+  template_body?: string;
+  body?: string;
+  channel?: string;
+}) {
+  return rtFetch<{
+    data: { sent: number; failed: number; results: Array<{ lead_id: string; ok: boolean; status: string; error?: string | null }> };
+  }>('bulk-template-send', { method: 'POST', body: JSON.stringify(body) });
+}
+
 export function rtSendChannelMessage(body: {
   lead_id: string;
   channel: 'whatsapp' | 'instagram' | string;
