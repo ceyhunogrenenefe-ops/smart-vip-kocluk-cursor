@@ -453,6 +453,7 @@ export default function CrmWidgetsPage() {
                 ['IG Business ID', String(diag.instagram_business_id_suffix || diag.instagram_business_id || '—')],
                 ['Page webhook', diag.page_webhook_subscribed ? 'Abone' : 'Eksik'],
                 ['IG webhook', diag.instagram_webhook_subscribed ? 'Abone' : 'Eksik'],
+                ['FB kanal DB', diag.facebook_channel_db_ok === false ? 'CHECK eksik' : diag.facebook_channel_db_ok ? 'OK' : '—'],
                 ['Son webhook', String(diag.last_webhook_at || '—')],
                 ['Son FB mesaj', String(diag.last_facebook_message_at || '—')],
                 ['Son IG mesaj', String(diag.last_instagram_message_at || '—')],
@@ -465,6 +466,14 @@ export default function CrmWidgetsPage() {
                 </div>
               ))}
             </div>
+            {diag.facebook_channel_db_ok === false && diag.facebook_channel_repair_sql ? (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
+                <p className="font-semibold">Facebook kanalı DB CHECK’te yok — Supabase SQL Editor’da çalıştırın:</p>
+                <pre className="mt-2 overflow-x-auto whitespace-pre-wrap rounded-lg bg-white/80 p-2 font-mono text-[11px] text-slate-800">
+                  {String(diag.facebook_channel_repair_sql)}
+                </pre>
+              </div>
+            ) : null}
             <div className="rounded-xl bg-slate-50 p-3 ring-1 ring-slate-100">
               <p className="text-xs font-semibold text-slate-700">Beklenen abonelik alanları</p>
               <p className="mt-1 text-[12px] text-slate-600">

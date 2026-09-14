@@ -269,8 +269,10 @@ export default async function handler(req, res) {
   let statusOnly = true;
   /** @type {{ processed?: number; skipped?: number; issues?: string[] } | null} */
   let crmWaSync = null;
-  /** @type {{ processed?: number } | null} */
+  /** @type {{ processed?: number; channel?: string; facebook_comments?: number; comments?: number } | null} */
   let crmIgSync = null;
+  /** @type {string[]} */
+  const crmSyncErrors = [];
 
   // Teşhis: Meta gerçekten messages mi yolluyor, yoksa sadece statuses mı?
   try {
@@ -422,7 +424,9 @@ export default async function handler(req, res) {
               channel: socialChannel
             };
           } catch (e) {
-            console.warn('[meta-webhook] crm social sync:', e instanceof Error ? e.message : e);
+            const msg = e instanceof Error ? e.message : String(e);
+            console.warn('[meta-webhook] crm social sync:', msg);
+            crmSyncErrors.push(`social:${socialChannel}:${msg}`);
           }
         }
       }
@@ -448,8 +452,10 @@ export default async function handler(req, res) {
           };
           console.info('[meta-webhook] crm fb comments synced', fc?.processed || 0);
         } catch (e) {
-          console.warn('[meta-webhook] crm fb comment sync:', e instanceof Error ? e.message : e);
-          webhookLogError = e instanceof Error ? e.message : String(e);
+          const msg = e instanceof Error ? e.message : String(e);
+          console.warn('[meta-webhook] crm fb comment sync:', msg);
+          webhookLogError = msg;
+          crmSyncErrors.push(`facebook_comment:${msg}`);
         }
       }
 
@@ -503,7 +509,8 @@ const changes = Array.isArray(entry?.changes) ? entry.changes : [];
     ig_ingested: igIngested,
     statuses: statusesApplied,
     inbound_messages_seen: inboundMessageCount,
-    crm_sync: crmWaSync || crmIgSync
+    crm_sync: crmWaSync || crmIgSync,
+    crm_sync_errors: crmSyncErrors.length ? crmSyncErrors : null
   };
   console.info('[meta-webhook] POST done', {
     wa_ingested: waIngested,
