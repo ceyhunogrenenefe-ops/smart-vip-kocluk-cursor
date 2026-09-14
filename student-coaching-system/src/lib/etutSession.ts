@@ -8,6 +8,7 @@ import {
   studyEntryUrl,
 } from './academicCenterLinks';
 import { isPrimary4567Grade, isSeventhGrade, LGS8_ETUT_ZOOM_URL, PRIMARY_4567_ZOOM_URL } from './primary4567Zoom';
+import { LISE_911_YKS_ZOOM_URL } from './lise911YksZoom';
 
 const STORAGE_KEY = 'coaching_pending_etut_session_v1';
 const RETURN_FLAG_KEY = 'coaching_etut_expect_return_report';
@@ -139,7 +140,9 @@ export async function joinEtutStudyRoom(opts: {
       ? PRIMARY_4567_ZOOM_URL
       : room === 'class78'
         ? LGS8_ETUT_ZOOM_URL
-        : studyEntryUrl(links, room);
+        : room === 'class911' || room === 'yks'
+          ? LISE_911_YKS_ZOOM_URL
+          : studyEntryUrl(links, room);
   if (!url) throw new Error('Etüt sınıfı bağlantısı tanımlı değil. Yönetici Akademik Merkez ayarlarını kontrol etsin.');
 
   startEtutSession({

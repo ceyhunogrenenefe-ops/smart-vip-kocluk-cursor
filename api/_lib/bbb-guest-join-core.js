@@ -31,6 +31,7 @@ import {
 } from './academic-center-links-store.js';
 import { isDirectExternalMeetingLink } from './detect-meeting-platform.js';
 import { LGS8_ETUT_ZOOM_URL, PRIMARY_4567_ZOOM_URL, primary4567ZoomIfApplicable } from './primary-4567-zoom.js';
+import { LISE_911_YKS_ZOOM_URL, lise911YksZoomIfApplicable } from './lise-911-yks-zoom.js';
 
 const VALID_STUDY_ROOMS = new Set(['class47', 'class56', 'class78', 'class911', 'yks']);
 const ACADEMIC_STUDY_GUEST_EXPIRE_DAYS = 90;
@@ -150,11 +151,18 @@ async function primary4567ZoomForClassSession(session) {
     .select('name, class_level')
     .eq('id', session.class_id)
     .maybeSingle();
-  return primary4567ZoomIfApplicable({
-    subject: session.subject || session.title,
-    className: data?.name,
-    classLevel: data?.class_level
-  });
+  return (
+    primary4567ZoomIfApplicable({
+      subject: session.subject || session.title,
+      className: data?.name,
+      classLevel: data?.class_level
+    }) ||
+    lise911YksZoomIfApplicable({
+      subject: session.subject || session.title,
+      className: data?.name,
+      classLevel: data?.class_level
+    })
+  );
 }
 
 async function loadTeacherLesson(id) {
@@ -510,6 +518,10 @@ async function buildAcademicStudyGuestJoinUrl({ institutionId, room, guestName }
   if (room === 'class78') {
     return LGS8_ETUT_ZOOM_URL;
   }
+  // 9–10–11 + YKS etüt — Lise deneme Zoom
+  if (room === 'class911' || room === 'yks') {
+    return LISE_911_YKS_ZOOM_URL;
+  }
 
   const stored = await loadAcademicStudyRoomUrl(institutionId, room);
   if (isShareableExternalMeetingLink(stored)) {
@@ -594,6 +606,16 @@ export async function createAcademicStudyGuestJoinShareLink({ institutionId, roo
   if (r === 'class78') {
     return externalInviteSharePayload({
       url: LGS8_ETUT_ZOOM_URL,
+      title,
+      lessonDate: '',
+      lessonTime: '',
+      className: 'Akademik Merkez — Etüt'
+    });
+  }
+  // 9–10–11 + YKS etüt davet
+  if (r === 'class911' || r === 'yks') {
+    return externalInviteSharePayload({
+      url: LISE_911_YKS_ZOOM_URL,
       title,
       lessonDate: '',
       lessonTime: '',

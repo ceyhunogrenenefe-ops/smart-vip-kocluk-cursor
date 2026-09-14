@@ -2,6 +2,7 @@ import { apiFetch } from './session';
 import { copyTextToClipboard } from './copyToClipboard';
 import { isExternalMeetingPlatform, lessonJoinUrl } from './liveLessonUtils';
 import { LGS8_ETUT_ZOOM_URL, PRIMARY_4567_ZOOM_URL, primary4567ZoomIfApplicable } from './primary4567Zoom';
+import { LISE_911_YKS_ZOOM_URL, lise911YksZoomIfApplicable } from './lise911YksZoom';
 
 export type GuestJoinKind = 'class' | 'private' | 'meeting';
 
@@ -75,11 +76,17 @@ export async function tryCopyExternalMeetingFromRow(
   },
   opts?: { className?: string; classLevel?: string | null; title?: string }
 ): Promise<GuestJoinShare | null> {
-  const zoom = primary4567ZoomIfApplicable({
-    subject: opts?.title || row.subject || row.title,
-    className: opts?.className || row.class_name,
-    classLevel: opts?.classLevel || row.class_level
-  });
+  const zoom =
+    primary4567ZoomIfApplicable({
+      subject: opts?.title || row.subject || row.title,
+      className: opts?.className || row.class_name,
+      classLevel: opts?.classLevel || row.class_level
+    }) ||
+    lise911YksZoomIfApplicable({
+      subject: opts?.title || row.subject || row.title,
+      className: opts?.className || row.class_name,
+      classLevel: opts?.classLevel || row.class_level
+    });
   const url = String(
     zoom || row.meeting_link || row.join_link || row.meet_link || row.link_zoom || lessonJoinUrl(row) || ''
   ).trim();
@@ -251,7 +258,9 @@ export async function copyAcademicStudyGuestJoinShareText(
       ? PRIMARY_4567_ZOOM_URL
       : r === 'class78'
         ? LGS8_ETUT_ZOOM_URL
-        : '';
+        : r === 'class911' || r === 'yks'
+          ? LISE_911_YKS_ZOOM_URL
+          : '';
   const direct = String(forced || opts?.directUrl || '').trim();
   if (isExternalMeetingPlatform(direct)) {
     return copyExternalMeetingShareText({

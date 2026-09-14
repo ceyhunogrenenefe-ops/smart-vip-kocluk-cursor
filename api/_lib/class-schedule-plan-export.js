@@ -3,6 +3,7 @@ import { ensureClassTeacherLink } from './teacher-class-scope.js';
 import { resolveBbbMeetingDurationMinutes } from './bbb.js';
 import { resolveBbbOrManualMeetingLink } from './resolve-bbb-meeting-link.js';
 import { primary4567ZoomIfApplicable } from './primary-4567-zoom.js';
+import { lise911YksZoomIfApplicable } from './lise-911-yks-zoom.js';
 import { lgs8DinSharedMeetingFields } from './lgs8-din-shared-bbb.js';
 import {
   insertOneOptionalModerator,
@@ -167,11 +168,17 @@ async function teacherDisplayName(teacherId) {
 }
 
 async function resolveClassMeetingLinkFromRequest(opts) {
-  const zoom = primary4567ZoomIfApplicable({
-    subject: opts.subject,
-    className: opts.className,
-    classLevel: opts.classLevel
-  });
+  const zoom =
+    primary4567ZoomIfApplicable({
+      subject: opts.subject,
+      className: opts.className,
+      classLevel: opts.classLevel
+    }) ||
+    lise911YksZoomIfApplicable({
+      subject: opts.subject,
+      className: opts.className,
+      classLevel: opts.classLevel
+    });
   if (zoom) {
     return {
       ok: true,

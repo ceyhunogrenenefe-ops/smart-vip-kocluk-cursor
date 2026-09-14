@@ -1,15 +1,15 @@
 import { LGS8_ETUT_ZOOM_URL, PRIMARY_4567_ZOOM_URL } from './primary-4567-zoom.js';
+import { LISE_911_YKS_ZOOM_URL } from './lise-911-yks-zoom.js';
+
+const LISE_DENEME_ZOOM_ENTRY = LISE_911_YKS_ZOOM_URL;
 
 const DEFAULT_STUDY = {
   class47: PRIMARY_4567_ZOOM_URL,
   class56: PRIMARY_4567_ZOOM_URL,
   class78: LGS8_ETUT_ZOOM_URL,
-  class911: 'https://kurumsal.ornek.edu/tr/etut-911',
-  yks: 'https://kurumsal.ornek.edu/tr/etut-yks'
+  class911: LISE_DENEME_ZOOM_ENTRY,
+  yks: LISE_DENEME_ZOOM_ENTRY
 };
-
-const LISE_DENEME_ZOOM_ENTRY =
-  'https://us06web.zoom.us/j/3565095951?pwd=Rk56NGhXeEYrZkZOWEVVbG5pa0RjUT09';
 
 export { LISE_DENEME_ZOOM_ENTRY, LGS8_ETUT_ZOOM_URL, PRIMARY_4567_ZOOM_URL };
 
@@ -107,6 +107,9 @@ export function linksForInstitution(store, institutionId) {
   merged.studyClasses.class56 = PRIMARY_4567_ZOOM_URL;
   // 7–8 / LGS etüt — 8. sınıf Zoom (7. sınıf etüt de buraya)
   merged.studyClasses.class78 = LGS8_ETUT_ZOOM_URL;
+  // 9–10–11 + YKS etüt — Lise deneme ile aynı Zoom
+  merged.studyClasses.class911 = LISE_DENEME_ZOOM_ENTRY;
+  merged.studyClasses.yks = LISE_DENEME_ZOOM_ENTRY;
   return merged;
 }
 

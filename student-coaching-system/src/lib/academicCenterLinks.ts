@@ -135,8 +135,8 @@ export const defaultAcademicCenterLinks: AcademicCenterLinks = {
     class47: PRIMARY_4567_ZOOM_URL,
     class56: PRIMARY_4567_ZOOM_URL,
     class78: LGS8_ETUT_ZOOM_URL,
-    class911: 'https://kurumsal.ornek.edu/tr/etut-911',
-    yks: 'https://kurumsal.ornek.edu/tr/etut-yks'
+    class911: LISE_DENEME_ZOOM_ENTRY,
+    yks: LISE_DENEME_ZOOM_ENTRY
   },
   exams: {
     lise: LISE_DENEME_ZOOM_ENTRY,
@@ -166,6 +166,10 @@ export function coerceAcademicCenterLinks(next: Partial<AcademicCenterLinks> | n
   studyClasses.class47 = PRIMARY_4567_ZOOM_URL;
   studyClasses.class56 = PRIMARY_4567_ZOOM_URL;
   studyClasses.class78 = LGS8_ETUT_ZOOM_URL;
+  studyClasses.class911 = LISE_DENEME_ZOOM_ENTRY;
+  studyClasses.yks = LISE_DENEME_ZOOM_ENTRY;
+  exams.lise = LISE_DENEME_ZOOM_ENTRY;
+  if (exams.exam) exams.exam = LISE_DENEME_ZOOM_ENTRY;
   return {
     studyClasses,
     exams,
