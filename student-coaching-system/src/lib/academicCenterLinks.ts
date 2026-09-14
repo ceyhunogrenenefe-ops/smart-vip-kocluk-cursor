@@ -1,5 +1,6 @@
 import { apiFetch } from './session';
 import { BBB_AUTO_MEETING_LINK, isBbbAutoMeetingLink } from './liveLessonUtils';
+import { isPrimary4567Grade, PRIMARY_4567_ZOOM_URL } from './primary4567Zoom';
 import {
   assignBbbWaitingPopup,
   openBbbWaitingPopup,
@@ -14,13 +15,14 @@ function storageKey(institutionId?: string | null) {
   return iid ? `${STORAGE_KEY_PREFIX}_${iid}` : `${STORAGE_KEY_PREFIX}_platform`;
 }
 
-export type ExamEntryKey = 'lise' | 'yos' | 'class34' | 'class56' | 'class78';
-export type StudyEntryKey = 'class56' | 'class78' | 'class911' | 'yks';
+export type ExamEntryKey = 'lise' | 'yos' | 'class47' | 'class34' | 'class56' | 'class78';
+export type StudyEntryKey = 'class47' | 'class56' | 'class78' | 'class911' | 'yks';
 export type AcademicBbbRoomKind = 'exam' | 'study';
 export type AcademicBbbRoomKey = ExamEntryKey | StudyEntryKey;
 
 export type AcademicCenterLinks = {
   studyClasses: {
+    class47: string;
     class56: string;
     class78: string;
     class911: string;
@@ -29,6 +31,7 @@ export type AcademicCenterLinks = {
   exams: {
     lise: string;
     yos: string;
+    class47: string;
     class34: string;
     class56: string;
     class78: string;
@@ -49,9 +52,10 @@ export const EXAM_ENTRY_DEFS: {
 }[] = [
   { key: 'lise', label: 'Lise deneme sınavı giriş', accent: 'from-blue-500 to-indigo-600' },
   { key: 'yos', label: 'YÖS deneme sınavı giriş', accent: 'from-rose-500 to-orange-600' },
-  { key: 'class34', label: '3-4. sınıf deneme sınıfı giriş', accent: 'from-emerald-500 to-teal-600' },
+  { key: 'class47', label: '4-7. sınıf deneme sınıfı giriş', accent: 'from-amber-500 to-orange-600' },
+  { key: 'class34', label: '3. sınıf deneme sınıfı giriş', accent: 'from-emerald-500 to-teal-600' },
   { key: 'class56', label: '5-6. sınıf deneme sınıfı giriş', accent: 'from-violet-500 to-purple-600' },
-  { key: 'class78', label: '7-8. sınıf deneme sınıfı giriş', accent: 'from-fuchsia-500 to-pink-600' }
+  { key: 'class78', label: '8. sınıf / LGS deneme sınıfı giriş', accent: 'from-fuchsia-500 to-pink-600' }
 ];
 
 export const STUDY_ENTRY_DEFS: {
@@ -59,8 +63,9 @@ export const STUDY_ENTRY_DEFS: {
   label: string;
   accent: string;
 }[] = [
+  { key: 'class47', label: '4-7. sınıf etüt / ödev / kitap okuma', accent: 'from-amber-500 to-orange-600' },
   { key: 'class56', label: '5-6. sınıf etüt sınıfı', accent: 'from-violet-500 to-purple-600' },
-  { key: 'class78', label: '7-8. sınıf etüt sınıfı', accent: 'from-fuchsia-500 to-pink-600' },
+  { key: 'class78', label: '8. sınıf / LGS etüt sınıfı', accent: 'from-fuchsia-500 to-pink-600' },
   { key: 'class911', label: '9-10-11 etüt sınıfı', accent: 'from-blue-500 to-indigo-600' },
   { key: 'yks', label: 'YKS etüt sınıfı', accent: 'from-amber-500 to-orange-600' }
 ];
@@ -79,9 +84,29 @@ export function examRoomsForClassLevel(classLevel: unknown): ExamEntryKey[] | nu
   if (/\b(tyt|ayt|yks|lise|mezun)\b/.test(blob) || /(?:^|[^\d])(9|10|11|12)(?:\.|\s|$)/.test(blob)) {
     return ['lise'];
   }
-  if (/\blgs\b/.test(blob) || /(?:^|[^\d])(7|8)(?:\.|\s|$)/.test(blob)) return ['class78'];
-  if (/(?:^|[^\d])(5|6)(?:\.|\s|$)/.test(blob)) return ['class56'];
-  if (/(?:^|[^\d])(3|4)(?:\.|\s|$)/.test(blob)) return ['class34'];
+  if (/\blgs\b/.test(blob) || /(?:^|[^\d])8(?:[a-z]|\.|\s|$)/.test(blob)) return ['class78'];
+  if (isPrimary4567Grade(classLevel, '')) return ['class47'];
+  if (/(?:^|[^\d])3(?:[a-z]|\.|\s|$)/.test(blob)) return ['class34'];
+  return null;
+}
+
+export function studyRoomsForClassLevel(classLevel: unknown): StudyEntryKey[] | null {
+  const blob = String(classLevel ?? '')
+    .toLocaleLowerCase('tr-TR')
+    .replace(/ı/g, 'i')
+    .replace(/ş/g, 's')
+    .replace(/ğ/g, 'g')
+    .replace(/ü/g, 'u')
+    .replace(/ö/g, 'o')
+    .replace(/ç/g, 'c');
+  if (!blob.trim()) return null;
+  if (/\byos\b/.test(blob)) return ['yks'];
+  if (/\b(tyt|ayt|yks|lise|mezun)\b/.test(blob) || /(?:^|[^\d])12(?:\.|\s|$)/.test(blob)) {
+    return ['yks'];
+  }
+  if (/(?:^|[^\d])(9|10|11)(?:\.|\s|$)/.test(blob)) return ['class911'];
+  if (/\blgs\b/.test(blob) || /(?:^|[^\d])8(?:[a-z]|\.|\s|$)/.test(blob)) return ['class78'];
+  if (isPrimary4567Grade(classLevel, '')) return ['class47'];
   return null;
 }
 
@@ -90,8 +115,11 @@ export { BBB_AUTO_MEETING_LINK, isBbbAutoMeetingLink };
 export const LISE_DENEME_ZOOM_ENTRY =
   'https://us06web.zoom.us/j/3565095951?pwd=Rk56NGhXeEYrZkZOWEVVbG5pa0RjUT09';
 
+export { PRIMARY_4567_ZOOM_URL };
+
 export const defaultAcademicCenterLinks: AcademicCenterLinks = {
   studyClasses: {
+    class47: PRIMARY_4567_ZOOM_URL,
     class56: 'https://kurumsal.ornek.edu/tr/etut-56',
     class78: 'https://kurumsal.ornek.edu/tr/etut-78',
     class911: 'https://kurumsal.ornek.edu/tr/etut-911',
@@ -100,6 +128,7 @@ export const defaultAcademicCenterLinks: AcademicCenterLinks = {
   exams: {
     lise: LISE_DENEME_ZOOM_ENTRY,
     yos: 'https://kurumsal.ornek.edu/tr/deneme-yos',
+    class47: PRIMARY_4567_ZOOM_URL,
     class34: 'https://kurumsal.ornek.edu/tr/deneme-34',
     class56: 'https://kurumsal.ornek.edu/tr/deneme-56',
     class78: 'https://kurumsal.ornek.edu/tr/deneme-78',
@@ -118,8 +147,11 @@ export function coerceAcademicCenterLinks(next: Partial<AcademicCenterLinks> | n
   const exams = { ...d.exams, ...(next.exams || {}) };
   if (exams.exam && !exams.lise) exams.lise = exams.exam;
   if (!exams.lise && exams.exam) exams.lise = exams.exam;
+  exams.class47 = PRIMARY_4567_ZOOM_URL;
+  const studyClasses = { ...d.studyClasses, ...(next.studyClasses || {}) };
+  studyClasses.class47 = PRIMARY_4567_ZOOM_URL;
   return {
-    studyClasses: { ...d.studyClasses, ...(next.studyClasses || {}) },
+    studyClasses,
     exams,
     questionPools: { ...d.questionPools, ...(next.questionPools || {}) }
   };

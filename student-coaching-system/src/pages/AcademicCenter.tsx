@@ -27,6 +27,7 @@ import {
   openAcademicCenterLink,
   STUDY_ENTRY_DEFS,
   studyEntryUrl,
+  studyRoomsForClassLevel,
   type AcademicCenterLinks,
   type ExamEntryKey,
   type StudyEntryKey
@@ -245,6 +246,12 @@ export default function AcademicCenter() {
     const keys = examRoomsForClassLevel(studentClassLevel);
     if (!keys) return EXAM_ENTRY_DEFS;
     return EXAM_ENTRY_DEFS.filter((x) => keys.includes(x.key));
+  }, [isStudent, studentClassLevel]);
+  const visibleStudyDefs = useMemo(() => {
+    if (!isStudent) return STUDY_ENTRY_DEFS;
+    const keys = studyRoomsForClassLevel(studentClassLevel);
+    if (!keys) return STUDY_ENTRY_DEFS;
+    return STUDY_ENTRY_DEFS.filter((x) => keys.includes(x.key));
   }, [isStudent, studentClassLevel]);
   const institutionId = institution?.id || activeInstitutionId || null;
   const [activeTab, setActiveTab] = useState<TabKey>('study');
@@ -502,7 +509,7 @@ export default function AcademicCenter() {
                 </p>
               ) : null}
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              {STUDY_ENTRY_DEFS.map((x) => {
+              {visibleStudyDefs.map((x) => {
                 const href = studyEntryUrl(links, x.key);
                 const busy = bbbBusyStudy === x.key;
                 const guestBusy = studyGuestLinkBusy === x.key;
