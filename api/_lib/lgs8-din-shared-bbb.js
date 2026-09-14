@@ -51,6 +51,25 @@ export function lgs8DinPairId(className, classLevel) {
   return null;
 }
 
+/** Din çifti içindeki diğer şube(ler), örn. 8B → ['8F']. */
+export function lgs8DinPartnerSections(className, classLevel) {
+  const section = extractLgs8Section(className, classLevel);
+  if (!section) return [];
+  for (const pair of LGS8_DIN_PAIRS) {
+    if (pair.includes(section)) return pair.filter((x) => x !== section);
+  }
+  return [];
+}
+
+/** İki sınıf aynı Din BBB odasını paylaşır mı? */
+export function sessionsShareLgs8DinRoom(a, b) {
+  if (!a || !b) return false;
+  if (!isDinKulturuSubject(a.subject) || !isDinKulturuSubject(b.subject)) return false;
+  const pairA = lgs8DinPairId(a.className, a.classLevel);
+  const pairB = lgs8DinPairId(b.className, b.classLevel);
+  return Boolean(pairA && pairA === pairB);
+}
+
 function startHmm(startTime) {
   const raw = String(startTime || '').trim();
   if (/^\d{2}:\d{2}/.test(raw)) return raw.slice(0, 5).replace(':', '');
