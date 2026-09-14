@@ -6,11 +6,13 @@ import {
   crmEnsureInbound,
   crmFacebookLoginStart,
   crmInboundStatus,
+  crmMetaDiagnostics,
   crmSaveMetaAppSecret,
   crmSaveMetaConfigurationId,
   crmSavePageToken,
   type CrmFacebookLoginStart,
-  type CrmInboundStatus
+  type CrmInboundStatus,
+  type CrmMetaDiagnostics
 } from '../../lib/crmInboxApi';
 import {
   CRM_WIDGET_CATALOG,
@@ -43,6 +45,8 @@ export default function CrmWidgetsPage() {
   const [savingConfig, setSavingConfig] = useState(false);
   const [q, setQ] = useState('');
   const [cat, setCat] = useState<(typeof CRM_WIDGET_CATEGORIES)[number]['id']>('all');
+  const [diag, setDiag] = useState<CrmMetaDiagnostics | null>(null);
+  const [diagLoading, setDiagLoading] = useState(false);
 
   const socialOk = Boolean(inbound?.social?.ok);
   const pageName = inbound?.social?.page_name || '';
@@ -54,6 +58,18 @@ export default function CrmWidgetsPage() {
     ]);
     if (statusRes?.data) setInbound(statusRes.data);
     if (loginRes?.data) setLogin(loginRes.data);
+  }, []);
+
+  const refreshDiag = useCallback(async () => {
+    setDiagLoading(true);
+    try {
+      const res = await crmMetaDiagnostics();
+      if (res?.data) setDiag(res.data);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Meta tanılama alınamadı');
+    } finally {
+      setDiagLoading(false);
+    }
   }, []);
 
   useEffect(() => {
@@ -403,6 +419,98 @@ export default function CrmWidgetsPage() {
           )}
         </div>
       </section>
+
+      <section
+        id="meta-tanilama"
+        className="rounded-2xl border-2 border-slate-200 bg-white p-4 shadow-sm sm:p-5"
+      >
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Meta Tanılama</p>
+            <h3 className="mt-1 text-lg font-semibold text-slate-900">Facebook / Instagram webhook durumu</h3>
+            <p className="mt-1 text-sm text-slate-600">
+              Bağlantı, abonelik alanları, son webhook ve son 20 event. Silent failure kontrolü.
+            </p>
+          </div>
+          <button
+            type="button"
+            disabled={diagLoading}
+            onClick={() => void refreshDiag()}
+            className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60"
+          >
+            {diagLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+            Tanılamayı yenile
+          </button>
+        </div>
+        {diag ? (
+          <div className="mt-4 space-y-3">
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {[
+                ['Facebook bağlı', diag.facebook_connected ? 'Evet' : 'Hayır'],
+                ['Instagram bağlı', diag.instagram_connected ? 'Evet' : 'Hayır'],
+                ['Token geçerli', diag.token_valid ? 'Evet' : 'Hayır'],
+                ['Page ID', String(diag.page_id_suffix || diag.page_id || '—')],
+                ['IG Business ID', String(diag.instagram_business_id_suffix || diag.instagram_business_id || '—')],
+                ['Page webhook', diag.page_webhook_subscribed ? 'Abone' : 'Eksik'],
+                ['IG webhook', diag.instagram_webhook_subscribed ? 'Abone' : 'Eksik'],
+                ['Son webhook', String(diag.last_webhook_at || '—')],
+                ['Son FB mesaj', String(diag.last_facebook_message_at || '—')],
+                ['Son IG mesaj', String(diag.last_instagram_message_at || '—')],
+                ['Son yorum webhook', String(diag.last_comment_webhook_at || '—')],
+                ['Son hata', String(diag.last_error || '—')]
+              ].map(([k, v]) => (
+                <div key={String(k)} className="rounded-xl bg-slate-50 px-3 py-2 ring-1 ring-slate-100">
+                  <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">{k}</p>
+                  <p className="mt-0.5 break-all text-sm font-semibold text-slate-900">{v}</p>
+                </div>
+              ))}
+            </div>
+            <div className="rounded-xl bg-slate-50 p-3 ring-1 ring-slate-100">
+              <p className="text-xs font-semibold text-slate-700">Beklenen abonelik alanları</p>
+              <p className="mt-1 text-[12px] text-slate-600">
+                Page: {Array.isArray((diag.expected_page_fields || diag.page_subscribed_fields)) ? ((diag.expected_page_fields || diag.page_subscribed_fields) as string[]).join(', ') : '—'}
+              </p>
+              <p className="mt-1 text-[12px] text-slate-600">
+                Instagram: {Array.isArray((diag.expected_instagram_fields || diag.instagram_subscribed_fields)) ? ((diag.expected_instagram_fields || diag.instagram_subscribed_fields) as string[]).join(', ') : '—'}
+              </p>
+            </div>
+            <div className="overflow-x-auto rounded-xl ring-1 ring-slate-200">
+              <table className="min-w-full text-left text-xs">
+                <thead className="bg-slate-100 text-slate-600">
+                  <tr>
+                    <th className="px-2 py-1.5 font-semibold">Zaman</th>
+                    <th className="px-2 py-1.5 font-semibold">Platform</th>
+                    <th className="px-2 py-1.5 font-semibold">Event</th>
+                    <th className="px-2 py-1.5 font-semibold">Sender</th>
+                    <th className="px-2 py-1.5 font-semibold">Durum</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(Array.isArray((diag.recent_webhook_events || diag.recent_webhook_events)) ? ((diag.recent_webhook_events || diag.recent_webhook_events) as Array<Record<string, unknown>>) : []).slice(0, 20).map((ev, i) => (
+                    <tr key={String(ev.id || i)} className="border-t border-slate-100">
+                      <td className="px-2 py-1.5 whitespace-nowrap">{String(ev.received_at || '—')}</td>
+                      <td className="px-2 py-1.5">{String(ev.platform || ev.object_type || '—')}</td>
+                      <td className="px-2 py-1.5">{String(ev.event_type || ev.field || '—')}</td>
+                      <td className="px-2 py-1.5 font-mono">{String(ev.sender_id || '—').slice(-10)}</td>
+                      <td className="px-2 py-1.5">{String(ev.processing_status || '—')}</td>
+                    </tr>
+                  ))}
+                  {!Array.isArray((diag.recent_webhook_events || diag.recent_webhook_events)) || ((diag.recent_webhook_events || diag.recent_webhook_events) as unknown[]).length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="px-2 py-3 text-slate-500">
+                        Henüz webhook kaydı yok — SQL migration veya ilk mesaj sonrası dolar.
+                      </td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ) : (
+          <p className="mt-3 text-sm text-slate-500">Tanılamayı yenile ile Meta durumunu yükleyin.</p>
+        )}
+      </section>
+
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
         <div className="relative flex-1">

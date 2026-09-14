@@ -59,7 +59,7 @@ describe('instagram messaging normalize (ads + standby)', () => {
     assert.equal(events.length, 2);
   });
 
-  it('routes page+IG business recipient / ads referral to instagram channel', () => {
+  it('routes page recipient by IG business vs Page id (ads stay on correct channel)', () => {
     assert.equal(
       resolveSocialChannelFromWebhook({
         objectType: 'page',
@@ -68,12 +68,18 @@ describe('instagram messaging normalize (ads + standby)', () => {
       }),
       'instagram'
     );
+    // Facebook Click-to-Messenger ad on page — must NOT be forced to instagram
     assert.equal(
       resolveSocialChannelFromWebhook({
         objectType: 'page',
-        event: { sender: { id: 'u' }, referral: { source: 'ADS', ad_id: '1' } }
+        pageId: 'page1',
+        event: {
+          sender: { id: 'u' },
+          recipient: { id: 'page1' },
+          referral: { source: 'ADS', ad_id: '1' }
+        }
       }),
-      'instagram'
+      'facebook'
     );
     assert.equal(
       resolveSocialChannelFromWebhook({
