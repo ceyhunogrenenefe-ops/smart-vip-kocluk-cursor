@@ -13,6 +13,7 @@ import {
 } from './registration-tracking-utils.js';
 import { normalizeInstagramMessagingEvent } from './instagram-messaging-normalize.js';
 import { normalizeInstagramCommentChange } from './instagram-comments-normalize.js';
+import { normalizeFacebookFeedCommentChange } from './facebook-comments-normalize.js';
 
 function snippetOf(text, max = 140) {
   const s = String(text || '')
@@ -590,6 +591,30 @@ export async function ingestInstagramCommentChanges(changes) {
 }
 
 /** LGS / belirsiz varsayılanını mesaj özetinden düzelt (cron, sınırlı). */
+
+/** Facebook Page feed comments → kayıt takibi (PSID = Messenger contact) */
+export async function ingestFacebookCommentChanges(changes) {
+  const list = Array.isArray(changes) ? changes : [];
+  let processed = 0;
+  for (const change of list) {
+    const norm = normalizeFacebookFeedCommentChange(change);
+    if (!norm?.hasInboundContent || !norm.fromId) continue;
+    await ingestRegistrationChannelMessage({
+      channel: 'facebook',
+      direction: 'inbound',
+      externalContactId: norm.fromId,
+      contactName: norm.fromName || null,
+      body: norm.text,
+      messageType: 'comment',
+      externalMessageId: norm.commentId ? `fb_comment:${norm.commentId}` : null,
+      timestamp: change?.value?.created_time || null,
+      payload: change
+    });
+    processed += 1;
+  }
+  return { processed };
+}
+
 export async function reclassifyLeadGradesFromSnippets({ institutionId = null, limit = 250 } = {}) {
   let q = supabaseAdmin
     .from('registration_leads')

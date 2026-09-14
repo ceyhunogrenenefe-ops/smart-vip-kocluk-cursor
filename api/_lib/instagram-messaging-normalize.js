@@ -27,13 +27,26 @@ export function isAdsReferral(ref) {
   return false;
 }
 
-function adReferralSnippet(ref) {
+function adReferralSnippet(ref, channel = 'instagram') {
   const ctx = ref?.ads_context_data || {};
   const title = String(ctx.ad_title || ref?.headline || '').trim();
-  const bits = ['[Instagram reklamından sohbet]'];
+  const label =
+    channel === 'facebook' ? '[Facebook reklamından sohbet]' : '[Instagram reklamından sohbet]';
+  const bits = [label];
   if (title) bits.push(title);
   if (ref?.ad_id) bits.push(`ad:${ref.ad_id}`);
   return bits.join(' — ');
+}
+
+/**
+ * CRM kaynak sınıflandırması (Kommo parity).
+ * @returns {{ source_platform: string, source_type: string }}
+ */
+export function classifySocialInteractionSource({ channel, isAd = false, isComment = false } = {}) {
+  const platform = channel === 'facebook' ? 'facebook' : channel === 'whatsapp' ? 'whatsapp' : 'instagram';
+  if (isComment) return { source_platform: platform, source_type: 'post_comment' };
+  if (isAd) return { source_platform: platform, source_type: 'ad_dm' };
+  return { source_platform: platform, source_type: 'organic_dm' };
 }
 
 /**
@@ -76,7 +89,7 @@ export function normalizeInstagramMessagingEvent(ev) {
   }
 
   if (!text && !hasAttachments && referral && isAdsReferral(referral)) {
-    text = adReferralSnippet(referral);
+    text = adReferralSnippet(referral, 'instagram');
   } else if (!text && !hasAttachments && referral) {
     text = '[Instagram sohbet başladı]';
   }
@@ -102,10 +115,17 @@ export function collectEntryMessagingEvents(entry) {
 }
 
 /**
- * Page webhook'unda IG business id ile Instagram kanalını ayır.
- * Reklam CTM çoğu zaman object=page üzerinden gelir.
+ * Page webhook kanal ayrımı.
+ * - recipient === IG business id → Instagram (IG Messaging page üzerinden)
+ * - aksi halde object=page → Facebook Messenger (organik veya Click-to-Messenger reklam)
+ * ÖNCEKİ BUG: tüm ADS referral’ları Instagram’a zorlanıyordu → FB CTM kayboluyor / yanlış kanal.
  */
-export function resolveSocialChannelFromWebhook({ objectType, event, igBusinessId } = {}) {
+export function resolveSocialChannelFromWebhook({
+  objectType,
+  event,
+  igBusinessId,
+  pageId
+} = {}) {
   const obj = String(objectType || '').toLowerCase();
   if (obj === 'instagram') return 'instagram';
   if (obj !== 'page') return obj === 'facebook' ? 'facebook' : 'instagram';
@@ -113,11 +133,14 @@ export function resolveSocialChannelFromWebhook({ objectType, event, igBusinessI
   const igBiz = String(
     igBusinessId || process.env.META_IG_BUSINESS_ID || process.env.INSTAGRAM_BUSINESS_ACCOUNT_ID || ''
   ).trim();
+  const page = String(
+    pageId || process.env.META_PAGE_ID || process.env.FACEBOOK_PAGE_ID || ''
+  ).trim();
   const recipientId = String(event?.recipient?.id || '').trim();
+
   if (igBiz && recipientId && recipientId === igBiz) return 'instagram';
+  if (page && recipientId && recipientId === page) return 'facebook';
 
-  const ref = getMessagingReferral(event);
-  if (isAdsReferral(ref)) return 'instagram';
-
+  // recipient bilinmiyor: page object varsayılanı Messenger
   return 'facebook';
 }

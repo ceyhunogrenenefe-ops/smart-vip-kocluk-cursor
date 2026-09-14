@@ -20,7 +20,9 @@ describe('crm ig ads extract + normalize bridge', () => {
         }
       }
     });
-    assert.equal(data?.source_type, 'instagram_ad');
+    assert.equal(data?.source_type, 'ad_dm');
+    assert.equal(data?.source_platform, 'instagram');
+    assert.equal(data?.source, 'instagram_ad');
     assert.equal(data?.ad_id, 'ad77');
     assert.equal(data?.headline, 'VIP LGS');
   });
