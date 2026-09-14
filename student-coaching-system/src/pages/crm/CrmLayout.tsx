@@ -1,6 +1,7 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { BarChart3, Bell, Inbox, LayoutGrid, LogOut, Puzzle, Send, Users } from 'lucide-react';
 import CrmAlarmHost from './CrmAlarmHost';
+import CrmLiveOpsHost from './CrmLiveOpsHost';
 import { useAuth } from '../../context/AuthContext';
 import { userRoleTags } from '../../config/rolePermissions';
 
@@ -146,6 +147,7 @@ export default function CrmLayout() {
         <Outlet />
       </main>
       <CrmAlarmHost />
+      <CrmLiveOpsHost />
     </div>
   );
 }

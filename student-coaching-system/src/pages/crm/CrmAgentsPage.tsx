@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Loader2, UserCheck, UserPlus } from 'lucide-react';
+import { Circle, Loader2, UserCheck, UserPlus } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   crmAdminCreateUser,
   crmAdminDemoteAgent,
   crmAdminListAgents,
-  crmAdminPromoteAgent
+  crmAdminPromoteAgent,
+  crmListPresence
 } from '../../lib/crmInboxApi';
 
 type AgentRow = {
@@ -22,6 +23,7 @@ export default function CrmAgentsPage() {
   const [loading, setLoading] = useState(true);
   const [agents, setAgents] = useState<AgentRow[]>([]);
   const [coaches, setCoaches] = useState<CoachRow[]>([]);
+  const [onlineIds, setOnlineIds] = useState<Set<string>>(new Set());
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -53,6 +55,28 @@ export default function CrmAgentsPage() {
   useEffect(() => {
     void reload();
   }, [reload]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadPresence = async () => {
+      try {
+        const res = await crmListPresence(false);
+        if (cancelled) return;
+        const ids = new Set(
+          (res.data?.items || []).filter((p) => p.online).map((p) => p.user_id)
+        );
+        setOnlineIds(ids);
+      } catch {
+        if (!cancelled) setOnlineIds(new Set());
+      }
+    };
+    void loadPresence();
+    const id = window.setInterval(() => void loadPresence(), 20_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, []);
 
   const onCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -175,6 +199,9 @@ export default function CrmAgentsPage() {
       <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="border-b border-slate-100 px-4 py-3 font-semibold text-slate-900">
           Aktif ajanlar
+          <span className="ml-2 text-xs font-normal text-emerald-700">
+            · {onlineIds.size} çevrimiçi
+          </span>
         </div>
         {loading ? (
           <div className="flex justify-center py-10">
@@ -187,7 +214,19 @@ export default function CrmAgentsPage() {
             {agents.map((a) => (
               <li key={a.id} className="flex items-center justify-between gap-3 px-4 py-3 text-sm">
                 <div>
-                  <p className="font-medium text-slate-900">{a.name}</p>
+                  <p className="flex items-center gap-1.5 font-medium text-slate-900">
+                    <Circle
+                      className={`h-2.5 w-2.5 ${
+                        onlineIds.has(a.id) ? 'fill-emerald-500 text-emerald-500' : 'fill-slate-300 text-slate-300'
+                      }`}
+                    />
+                    {a.name}
+                    {onlineIds.has(a.id) ? (
+                      <span className="rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">
+                        çevrimiçi
+                      </span>
+                    ) : null}
+                  </p>
                   <p className="text-xs text-slate-500">
                     {a.email} · {a.role}
                     {a.roles?.length ? ` [${a.roles.join(', ')}]` : ''}

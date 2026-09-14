@@ -354,3 +354,27 @@ export function crmAdminPromoteAgent(payload: {
 export function crmAdminDemoteAgent(userId: string) {
   return adminPost<{ data: unknown }>('demote_agent', { user_id: userId });
 }
+
+export type CrmPresenceAgent = {
+  user_id: string;
+  name: string;
+  email?: string | null;
+  role?: string | null;
+  roles?: string[];
+  phone?: string | null;
+  last_seen_at?: string | null;
+  page_path?: string | null;
+  online: boolean;
+};
+
+export function crmHeartbeat(pagePath?: string) {
+  return inboxPost<{ ok: boolean; data?: { ok?: boolean; last_seen_at?: string; error?: string } }>('heartbeat', {
+    page_path: pagePath || (typeof window !== 'undefined' ? window.location.pathname : '')
+  });
+}
+
+export function crmListPresence(onlineOnly = false) {
+  return inboxGet<{
+    data: { ok?: boolean; items?: CrmPresenceAgent[]; online_count?: number; error?: string };
+  }>('list_presence', onlineOnly ? { online_only: '1' } : undefined);
+}

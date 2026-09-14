@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   Kanban,
@@ -168,6 +168,46 @@ export default function RegistrationTrackingPanel({ isManager, institutionId }: 
   useEffect(() => {
     reload();
   }, [reload]);
+
+  // Soft poll: yeni lead'ler sayfa yenilemeden + ses
+  const knownLeadIdsRef = useRef<Set<string>>(new Set());
+  const leadsPrimedRef = useRef(false);
+  useEffect(() => {
+    for (const l of leads) knownLeadIdsRef.current.add(l.id);
+    if (leads.length > 0) leadsPrimedRef.current = true;
+  }, [leads]);
+
+  useEffect(() => {
+    if (!institutionId && !isManager) return;
+    const silent = async () => {
+      try {
+        const query = buildQuery();
+        const listRes = await rtListLeads(query);
+        const items = listRes.items || [];
+        let added = false;
+        for (const item of items) {
+          if (!knownLeadIdsRef.current.has(item.id)) {
+            knownLeadIdsRef.current.add(item.id);
+            if (leadsPrimedRef.current) added = true;
+          }
+        }
+        leadsPrimedRef.current = true;
+        setLeads(items);
+        if (added) {
+          try {
+            const { playCrmLeadChime } = await import('../../lib/crmLiveSound');
+            playCrmLeadChime();
+          } catch {
+            /* ignore */
+          }
+        }
+      } catch {
+        /* ignore soft poll errors */
+      }
+    };
+    const id = window.setInterval(() => void silent(), 6_000);
+    return () => window.clearInterval(id);
+  }, [buildQuery, institutionId, isManager]);
 
   useEffect(() => {
     rtListCoaches()
