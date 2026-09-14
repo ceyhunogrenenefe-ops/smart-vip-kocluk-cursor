@@ -229,11 +229,20 @@ export default async function handler(req, res) {
               : pub?.ok
           ),
           page_subscribed_fields: social?.subscribed_fields || PAGE_WEBHOOK_FIELDS,
-          instagram_webhook_subscribed: Boolean(pub?.app_instagram_subscribed ?? social?.app_subscriptions?.instagram?.subscribed),
+          instagram_webhook_subscribed: Boolean(
+            pub?.app_instagram_subscribed || social?.app_subscriptions?.instagram?.subscribed
+          ),
           instagram_subscribed_fields:
-            social?.app_subscriptions?.instagram?.fields || INSTAGRAM_APP_WEBHOOK_FIELDS,
+            (Array.isArray(pub?.app_instagram_fields) && pub.app_instagram_fields.length
+              ? pub.app_instagram_fields
+              : null) ||
+            (Array.isArray(social?.app_subscriptions?.instagram?.fields)
+              ? social.app_subscriptions.instagram.fields
+              : null) ||
+            INSTAGRAM_APP_WEBHOOK_FIELDS,
           expected_page_fields: PAGE_WEBHOOK_FIELDS,
           expected_instagram_fields: INSTAGRAM_APP_WEBHOOK_FIELDS,
+          app_subscriptions_existing: social?.app_subscriptions?.existing || null,
           last_webhook_at: logs[0]?.received_at || diag?.recent_webhook_hits?.[0]?.received_at || null,
           last_facebook_message_at: lastByChannel('facebook'),
           last_instagram_message_at: lastByChannel('instagram'),

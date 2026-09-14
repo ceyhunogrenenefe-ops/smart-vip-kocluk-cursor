@@ -458,6 +458,8 @@ export async function syncInstagramMessagingToCrm(events, { institutionId, chann
   const ch = normalizeCrmChannel(channel) === 'whatsapp' ? 'instagram' : normalizeCrmChannel(channel);
   const list = Array.isArray(events) ? events : [];
   let processed = 0;
+  let skipped = 0;
+  const issues = [];
   for (const ev of list) {
     const norm = normalizeInstagramMessagingEvent(ev);
     if (norm.isEcho) continue;
@@ -467,7 +469,7 @@ export async function syncInstagramMessagingToCrm(events, { institutionId, chann
     if (norm.isAd && ch === 'facebook' && body.startsWith('[Instagram reklamından')) {
       body = body.replace('[Instagram reklamından sohbet]', '[Facebook reklamından sohbet]');
     }
-    await upsertCrmMessage({
+    const r = await upsertCrmMessage({
       channel: ch,
       contactIdentifier: norm.senderId,
       contactName,
@@ -481,9 +483,15 @@ export async function syncInstagramMessagingToCrm(events, { institutionId, chann
       adSourceData: extractAdSourceData({ channel: ch, messagingEvent: ev }),
       payload: ev
     });
-    processed += 1;
+    if (r?.skipped) {
+      skipped += 1;
+      const reason = String(r.reason || 'skipped');
+      if (!issues.includes(reason)) issues.push(reason);
+    } else {
+      processed += 1;
+    }
   }
-  return { processed };
+  return { processed, skipped, issues };
 }
 
 /** Instagram gönderi / canlı yayın yorumları (field=comments|live_comments) → CRM inbox */
