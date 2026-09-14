@@ -15,6 +15,11 @@ import {
   sendMetaTextMessage
 } from './meta-whatsapp.js';
 import { lookupSocialProfileName } from './meta-social-inbound.js';
+import {
+  getMessagingReferral,
+  isAdsReferral,
+  normalizeInstagramMessagingEvent
+} from './instagram-messaging-normalize.js';
 
 export function normalizeCrmChannel(channel) {
   const c = String(channel || '').toLowerCase();
@@ -77,12 +82,15 @@ export function extractAdSourceData({ channel, message, messagingEvent } = {}) {
       messagingEvent &&
       typeof messagingEvent === 'object'
     ) {
-      const ref = messagingEvent.referral || messagingEvent.postback?.referral || null;
-      if (ref && typeof ref === 'object') {
-        out.source_type = ref.source || ref.type || (channel === 'facebook' ? 'facebook_ad' : 'instagram_ad');
+      const ref = getMessagingReferral(messagingEvent);
+      if (ref && typeof ref === 'object' && isAdsReferral(ref)) {
+        out.source_type = channel === 'facebook' ? 'facebook_ad' : 'instagram_ad';
         if (ref.ad_id) out.ad_id = String(ref.ad_id);
         if (ref.ads_context_data) out.ads_context_data = ref.ads_context_data;
+        if (ref.source_url) out.source_url = String(ref.source_url);
         if (ref.ref) out.ref = String(ref.ref);
+        const title = ref.ads_context_data?.ad_title || ref.headline;
+        if (title) out.headline = String(title);
       }
     }
   } catch {
@@ -440,19 +448,17 @@ export async function syncInstagramMessagingToCrm(events, { institutionId, chann
   const list = Array.isArray(events) ? events : [];
   let processed = 0;
   for (const ev of list) {
-    if (ev?.message?.is_echo) continue;
-    const senderId = ev?.sender?.id ? String(ev.sender.id) : null;
-    if (!senderId) continue;
-    const text = ev?.message?.text != null ? String(ev.message.text) : null;
-    if (!text && !ev?.message?.attachments) continue;
-    const contactName = await lookupSocialProfileName(senderId).catch(() => null);
+    const norm = normalizeInstagramMessagingEvent(ev);
+    if (norm.isEcho) continue;
+    if (!norm.senderId || !norm.hasInboundContent) continue;
+    const contactName = await lookupSocialProfileName(norm.senderId).catch(() => null);
     await upsertCrmMessage({
       channel: ch,
-      contactIdentifier: senderId,
+      contactIdentifier: norm.senderId,
       contactName,
-      body: text || '[medya / ek]',
-      messageType: text ? 'text' : 'attachment',
-      messageId: ev?.message?.mid ? String(ev.message.mid) : null,
+      body: norm.text || '[medya / ek]',
+      messageType: norm.messageType,
+      messageId: norm.messageId,
       timestamp: ev?.timestamp,
       direction: 'inbound',
       senderType: 'lead',
