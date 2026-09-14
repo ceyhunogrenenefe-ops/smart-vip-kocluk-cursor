@@ -1009,6 +1009,39 @@ export default async function handler(req, res) {
       });
     }
 
+    if (op === 'heartbeat') {
+      const { upsertCrmAgentPresence } = await import('../api/_lib/crm-live-ops.js');
+      const pagePath = String(body.page_path || req.query?.page_path || '').trim() || null;
+      const result = await upsertCrmAgentPresence({
+        userId: actor.sub || actor.id,
+        institutionId: institutionId || null,
+        pagePath,
+        userAgent: String(req.headers['user-agent'] || '').slice(0, 240) || null
+      });
+      if (!result.ok && result.error === 'presence_table_missing') {
+        await ensureCrmInboxSchema({ force: true }).catch(() => null);
+        const retry = await upsertCrmAgentPresence({
+          userId: actor.sub || actor.id,
+          institutionId: institutionId || null,
+          pagePath,
+          userAgent: String(req.headers['user-agent'] || '').slice(0, 240) || null
+        });
+        return res.status(200).json({ ok: retry.ok, data: retry });
+      }
+      return res.status(200).json({ ok: result.ok, data: result });
+    }
+
+    if (op === 'list_presence') {
+      if (!isAdmin) return res.status(403).json({ error: 'forbidden' });
+      const { listCrmAgentPresence } = await import('../api/_lib/crm-live-ops.js');
+      const onlineOnly = String(req.query?.online_only || body.online_only || '') === '1';
+      const result = await listCrmAgentPresence({
+        institutionId: institutionId || null,
+        onlineOnly
+      });
+      return res.status(200).json({ data: result });
+    }
+
     return res.status(400).json({ error: 'unknown_op', op });
   } catch (e) {
     console.error('[crm-inbox]', e);
