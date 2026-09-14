@@ -4,7 +4,13 @@
  */
 import { createHash } from 'node:crypto';
 import { ingestRegistrationChannelMessage } from './registration-channel-ingest.js';
-import { normalizeGradeProgram, normalizeTrPhone, splitFullName } from './registration-tracking-utils.js';
+import {
+  inferGradeProgramFromText,
+  isKnownGradeProgram,
+  normalizeGradeProgram,
+  normalizeTrPhone,
+  splitFullName
+} from './registration-tracking-utils.js';
 
 export const SITE_LEAD_PANEL_ORIGIN = 'https://www.dersonlinevipkocluk.com';
 
@@ -63,8 +69,10 @@ function pickGrade(...vals) {
   for (const raw of vals) {
     const s = firstString(raw);
     if (!s) continue;
+    const inferred = inferGradeProgramFromText(s);
+    if (inferred) return inferred;
     const code = normalizeGradeProgram(s);
-    if (code) return code;
+    if (code && isKnownGradeProgram(code) && code !== 'unspecified') return code;
   }
   return null;
 }
@@ -210,7 +218,8 @@ export function parseSiteLeadPayload(raw) {
     utm_term: firstString(body.utm_term, utmIn.utm_term, utmIn.term, fromPage.utm_term)
   };
 
-  const gradeProgram = pickGrade(sinif, program, body.grade_program);
+  const gradeProgram =
+    pickGrade(sinif, program, body.grade_program, note, studentName, JSON.stringify(answers || {})) || null;
   const paid = isPaidAdAttribution(utm, { page, utm_source: body.utm_source, utm_medium: body.utm_medium });
   const source = paid || /form.?ad|reklam/i.test(formKind) ? 'website_form_ad' : 'website_form';
 

@@ -68,3 +68,12 @@ test('honeypot fields are detected', () => {
   assert.equal(isSiteLeadHoneypot({ ad_soyad: 'A', website: 'http://spam' }), true);
   assert.equal(isSiteLeadHoneypot({ ad_soyad: 'A', telefon: '05321234567' }), false);
 });
+
+test('grade inferred from free-text note when sinif empty', () => {
+  const p = parseSiteLeadPayload({
+    ad_soyad: 'Deniz Ak',
+    telefon: '5321234567',
+    not: 'YKS 11. sınıf için koçluk istiyoruz'
+  });
+  assert.equal(p.gradeProgram, 'grade_11');
+});

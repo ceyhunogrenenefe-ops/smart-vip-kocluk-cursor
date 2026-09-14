@@ -126,3 +126,36 @@ export const CRM_OPS_SEGMENTS = [
   { id: 'considering', label: 'Düşünüyor', stage_in: ['considering', 'follow_up'] },
   { id: 'new_lead', label: 'Yeni lead’ler', stage_in: ['new_lead', 'first_contact_pending'] }
 ];
+
+export const CRM_SOURCE_BUCKETS = [
+  { id: 'website', label: 'Web sitesi', hint: 'Form ve reklam formu' },
+  { id: 'instagram', label: 'Instagram', hint: 'DM / reklam' },
+  { id: 'whatsapp', label: 'WhatsApp', hint: 'Gelen mesaj' },
+  { id: 'facebook', label: 'Facebook', hint: 'Messenger' },
+  { id: 'other', label: 'Diğer', hint: 'Manuel / belirsiz' }
+];
+
+export function classifyLeadSource(lead) {
+  const ch = String(lead?.last_inbound_channel || '').toLowerCase();
+  const src = String(lead?.source || '').toLowerCase();
+  if (ch === 'website' || /website|web_form|site.?form|siteform/.test(src)) return 'website';
+  if (ch === 'instagram' || src.includes('instagram')) return 'instagram';
+  if (ch === 'facebook' || src.includes('facebook')) return 'facebook';
+  if (ch === 'whatsapp' || src.includes('whatsapp')) return 'whatsapp';
+  if (/web/.test(`${ch} ${src}`)) return 'website';
+  return 'other';
+}
+
+export function summarizeLeadSources(leads) {
+  const counts = Object.fromEntries(CRM_SOURCE_BUCKETS.map((b) => [b.id, 0]));
+  for (const l of leads || []) {
+    const id = classifyLeadSource(l);
+    counts[id] = (counts[id] || 0) + 1;
+  }
+  const total = (leads || []).length;
+  return CRM_SOURCE_BUCKETS.map((b) => ({
+    ...b,
+    count: counts[b.id] || 0,
+    pct: total ? Math.round(((counts[b.id] || 0) / total) * 1000) / 10 : 0
+  }));
+}

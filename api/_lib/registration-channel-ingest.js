@@ -4,7 +4,13 @@
  */
 import { supabaseAdmin } from './supabase-admin.js';
 import { upsertCrmMessage, extractAdSourceData, toMetaWaContactId } from './crm-inbox.js';
-import { normalizeTrPhone, phoneLookupVariants } from './registration-tracking-utils.js';
+import {
+  inferGradeProgramFromText,
+  isKnownGradeProgram,
+  normalizeTrPhone,
+  phoneLookupVariants,
+  shouldReplaceGradeProgram
+} from './registration-tracking-utils.js';
 
 function snippetOf(text, max = 140) {
   const s = String(text || '')
@@ -94,7 +100,7 @@ async function findLeadByPhone(normalizedPhone, institutionId, { includeAlternat
 
   let q = supabaseAdmin
     .from('registration_leads')
-    .select('id, institution_id, full_name, primary_status, stage')
+    .select('id, institution_id, full_name, primary_status, stage, grade_program, notes')
     .is('deleted_at', null)
     .or(orParts.join(','))
     .order('updated_at', { ascending: false })
@@ -121,7 +127,7 @@ async function findLeadByInstagramId(igId, institutionId) {
   if (!igId) return null;
   let q = supabaseAdmin
     .from('registration_leads')
-    .select('id, institution_id, full_name, primary_status, stage')
+    .select('id, institution_id, full_name, primary_status, stage, grade_program, notes')
     .is('deleted_at', null)
     .eq('instagram_scoped_id', String(igId))
     .order('updated_at', { ascending: false })
@@ -143,7 +149,7 @@ async function findLeadByFacebookId(psid, institutionId) {
   try {
     let q = supabaseAdmin
       .from('registration_leads')
-      .select('id, institution_id, full_name, primary_status, stage')
+      .select('id, institution_id, full_name, primary_status, stage, grade_program, notes')
       .is('deleted_at', null)
       .eq('facebook_psid', id)
       .order('updated_at', { ascending: false })
@@ -196,6 +202,16 @@ async function createLeadFromInbound({
     (channel === 'instagram' ? 'IG' : channel === 'facebook' ? 'FB' : 'WA');
   const now = new Date().toISOString();
 
+  const inferred = inferGradeProgramFromText(
+    [firstMessage, notes, interestedPackage, contactName].filter(Boolean).join('\n')
+  );
+  const resolvedGrade =
+    (gradeProgram && isKnownGradeProgram(gradeProgram) && gradeProgram !== 'unspecified'
+      ? gradeProgram
+      : null) ||
+    inferred ||
+    'unspecified';
+
   const row = {
     institution_id: institutionId,
     first_name: firstName.slice(0, 80),
@@ -203,7 +219,7 @@ async function createLeadFromInbound({
     parent_full_name: name.slice(0, 160),
     phone: phone || null,
     normalized_phone: normalizedPhone || null,
-    grade_program: gradeProgram || 'lgs',
+    grade_program: resolvedGrade,
     primary_status: 'tracking',
     stage: 'new_lead',
     temperature: 'warm',
@@ -362,6 +378,9 @@ export async function ingestRegistrationChannelMessage(msg) {
 
   if (lead?.id && direction === 'inbound') {
     const snip = snippetOf(body);
+    const inferredGrade = inferGradeProgramFromText(
+      [body, lead.notes, lead.last_inbound_snippet].filter(Boolean).join('\n')
+    );
     const leadPatch = {
       last_contact_at: occurredAt,
       last_inbound_channel: msg.leadInboundChannel || channel,
@@ -369,6 +388,9 @@ export async function ingestRegistrationChannelMessage(msg) {
       last_inbound_at: occurredAt,
       updated_at: new Date().toISOString()
     };
+    if (shouldReplaceGradeProgram(lead.grade_program, inferredGrade)) {
+      leadPatch.grade_program = inferredGrade;
+    }
     if (channel === 'instagram' && externalContactId) {
       leadPatch.instagram_scoped_id = externalContactId;
     }
@@ -544,6 +566,34 @@ export async function ingestInstagramMessagingEvents(messagingEvents, { channel 
     processed += 1;
   }
   return { processed };
+}
+
+/** LGS / belirsiz varsayılanını mesaj özetinden düzelt (cron, sınırlı). */
+export async function reclassifyLeadGradesFromSnippets({ institutionId = null, limit = 250 } = {}) {
+  let q = supabaseAdmin
+    .from('registration_leads')
+    .select('id, grade_program, notes, last_inbound_snippet')
+    .is('deleted_at', null)
+    .eq('primary_status', 'tracking')
+    .in('grade_program', ['lgs', 'unspecified'])
+    .order('updated_at', { ascending: false })
+    .limit(Math.min(400, Math.max(20, Number(limit) || 250)));
+  if (institutionId) q = q.eq('institution_id', institutionId);
+  const { data, error } = await q;
+  if (error) throw error;
+  let updated = 0;
+  for (const lead of data || []) {
+    const inferred = inferGradeProgramFromText(
+      [lead.last_inbound_snippet, lead.notes].filter(Boolean).join('\n')
+    );
+    if (!shouldReplaceGradeProgram(lead.grade_program, inferred)) continue;
+    const { error: uErr } = await supabaseAdmin
+      .from('registration_leads')
+      .update({ grade_program: inferred, updated_at: new Date().toISOString() })
+      .eq('id', lead.id);
+    if (!uErr) updated += 1;
+  }
+  return { scanned: (data || []).length, updated };
 }
 
 /** Yönetici teşhis: tablo / kurum / son mesajlar */

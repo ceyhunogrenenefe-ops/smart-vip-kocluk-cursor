@@ -9,7 +9,8 @@ import {
   formatFirstResponse,
   inIsoRange,
   isTrialLessonLead,
-  resolveOpsDateRange
+  resolveOpsDateRange,
+  summarizeLeadSources
 } from './crm-ops-metrics.js';
 
 function boundsFromRange(fromYmd, toYmd) {
@@ -46,14 +47,30 @@ export async function handleOpsDashboard(institutionId, filters = {}) {
   let leadQ = supabaseAdmin
     .from('registration_leads')
     .select(
-      'id, first_name, last_name, full_name, assigned_user_id, primary_status, stage, confirmed_at, created_at, last_contact_at, last_inbound_at, first_contact_at'
+      'id, first_name, last_name, full_name, assigned_user_id, primary_status, stage, confirmed_at, created_at, last_contact_at, last_inbound_at, first_contact_at, source, last_inbound_channel'
     )
     .eq('institution_id', institutionId)
     .is('deleted_at', null);
   if (assignee) leadQ = leadQ.eq('assigned_user_id', assignee);
   const { data: leads, error } = await leadQ.limit(8000);
-  if (error) throw error;
-  const all = leads || [];
+  let all = leads || [];
+  if (error) {
+    if (/last_inbound_channel|column/i.test(error.message || '')) {
+      let q2 = supabaseAdmin
+        .from('registration_leads')
+        .select(
+          'id, first_name, last_name, full_name, assigned_user_id, primary_status, stage, confirmed_at, created_at, last_contact_at, last_inbound_at, first_contact_at, source'
+        )
+        .eq('institution_id', institutionId)
+        .is('deleted_at', null);
+      if (assignee) q2 = q2.eq('assigned_user_id', assignee);
+      const { data: leads2, error: e2 } = await q2.limit(8000);
+      if (e2) throw e2;
+      all = leads2 || [];
+    } else {
+      throw error;
+    }
+  }
 
   const contacts = all.filter(
     (l) =>
@@ -189,6 +206,7 @@ export async function handleOpsDashboard(institutionId, filters = {}) {
     agents,
     coaches,
     series: [...seriesMap.values()].sort((a, b) => a.day.localeCompare(b.day)),
+    sources: summarizeLeadSources(contacts.length ? contacts : all.filter((l) => inIsoRange(l.created_at, fromMs, toMs))),
     segments: CRM_OPS_SEGMENTS
   };
 }

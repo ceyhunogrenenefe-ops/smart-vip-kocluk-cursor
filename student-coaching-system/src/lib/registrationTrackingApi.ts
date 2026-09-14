@@ -276,6 +276,13 @@ export type CrmOpsDashboard = {
   agents: CrmOpsAgentRow[];
   coaches: RegCoach[];
   series: Array<{ day: string; contacts: number; confirmed: number }>;
+  sources?: Array<{
+    id: string;
+    label: string;
+    hint?: string;
+    count: number;
+    pct: number;
+  }>;
   segments?: Array<{ id: string; label: string }>;
 };
 

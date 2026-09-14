@@ -1,6 +1,7 @@
 /** CRM — merkezi config ve Türkçe etiketler */
 
 export const GRADE_PROGRAMS = [
+  { code: 'unspecified', label: 'Sınıf belirsiz', sortOrder: 5 },
   { code: 'grade_2', label: '2. Sınıf', sortOrder: 10 },
   { code: 'grade_3', label: '3. Sınıf', sortOrder: 20 },
   { code: 'grade_4', label: '4. Sınıf', sortOrder: 30 },
