@@ -30,6 +30,7 @@ import {
   normalizeAcademicLinksStore
 } from './academic-center-links-store.js';
 import { isDirectExternalMeetingLink } from './detect-meeting-platform.js';
+import { PRIMARY_4567_ZOOM_URL, primary4567ZoomIfApplicable } from './primary-4567-zoom.js';
 
 const VALID_STUDY_ROOMS = new Set(['class47', 'class56', 'class78', 'class911', 'yks']);
 const ACADEMIC_STUDY_GUEST_EXPIRE_DAYS = 90;
@@ -142,6 +143,20 @@ async function loadClassSession(id) {
   return data;
 }
 
+async function primary4567ZoomForClassSession(session) {
+  if (!session?.class_id) return null;
+  const { data } = await supabaseAdmin
+    .from('classes')
+    .select('name, class_level')
+    .eq('id', session.class_id)
+    .maybeSingle();
+  return primary4567ZoomIfApplicable({
+    subject: session.subject || session.title,
+    className: data?.name,
+    classLevel: data?.class_level
+  });
+}
+
 async function loadTeacherLesson(id) {
   const { data, error } = await supabaseAdmin.from('teacher_lessons').select('*').eq('id', id).maybeSingle();
   if (error) throw error;
@@ -171,7 +186,8 @@ async function buildClassGuestJoinUrl(session, guestName) {
     throw new Error('Ders zamanı geçersiz.');
   }
 
-  const externalLink = String(session.meeting_link || '').trim();
+  const zoom = await primary4567ZoomForClassSession(session);
+  const externalLink = String(zoom || session.meeting_link || '').trim();
   if (isShareableExternalMeetingLink(externalLink)) {
     return externalLink;
   }
@@ -486,6 +502,11 @@ function academicStudyMeetingKeyPrefix(institutionId, room) {
 async function buildAcademicStudyGuestJoinUrl({ institutionId, room, guestName }) {
   if (!VALID_STUDY_ROOMS.has(room)) throw new Error('Geçersiz etüt sınıfı.');
 
+  // 4–7 / 5–6 etüt — DB’de 8. sınıf Zoom veya BBB kalsa bile verilen Zoom
+  if (room === 'class47' || room === 'class56') {
+    return PRIMARY_4567_ZOOM_URL;
+  }
+
   const stored = await loadAcademicStudyRoomUrl(institutionId, room);
   if (isShareableExternalMeetingLink(stored)) {
     return stored;
@@ -554,6 +575,17 @@ export async function createAcademicStudyGuestJoinShareLink({ institutionId, roo
   if (!VALID_STUDY_ROOMS.has(r)) throw new Error('Geçersiz etüt sınıfı.');
   const title =
     ACADEMIC_STUDY_ROOM_LABELS[r] || DEFAULT_ACADEMIC_LINKS.studyClasses[r] || 'Etüt Sınıfı';
+
+  // 4–7 / 5–6 davet — her zaman verilen Zoom (eski 8. sınıf / BBB linki panoya düşmesin)
+  if (r === 'class47' || r === 'class56') {
+    return externalInviteSharePayload({
+      url: PRIMARY_4567_ZOOM_URL,
+      title,
+      lessonDate: '',
+      lessonTime: '',
+      className: 'Akademik Merkez — Etüt'
+    });
+  }
 
   const stored = await loadAcademicStudyRoomUrl(institutionId, r);
   if (isShareableExternalMeetingLink(stored)) {
@@ -676,7 +708,8 @@ export async function createGuestJoinShareLink({ kind, id }) {
   if (!session) throw new Error('Ders oturumu bulunamadı.');
   if (String(session.status || '') === 'cancelled') throw new Error('İptal edilmiş ders için link oluşturulamaz.');
 
-  const externalLink = String(session.meeting_link || '').trim();
+  const zoom = await primary4567ZoomForClassSession(session);
+  const externalLink = String(zoom || session.meeting_link || '').trim();
   if (isShareableExternalMeetingLink(externalLink)) {
     const className = await loadClassName(String(session.class_id || ''));
     return externalInviteSharePayload({

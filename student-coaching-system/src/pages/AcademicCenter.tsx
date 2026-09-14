@@ -236,23 +236,26 @@ export default function AcademicCenter() {
         { roles: tags }
       )?.trim() || ''
     : '';
-  const studentClassLevel = useMemo(() => {
-    if (!studentId) return '';
+  const studentGradeContext = useMemo(() => {
+    if (!studentId) return { classLevel: '', className: '' };
     const row = students.find((s) => s.id === studentId);
-    return row?.classLevel != null ? String(row.classLevel) : '';
+    return {
+      classLevel: row?.classLevel != null ? String(row.classLevel) : '',
+      className: [row?.groupName, row?.school].filter(Boolean).join(' ')
+    };
   }, [studentId, students]);
   const visibleExamDefs = useMemo(() => {
     if (!isStudent) return EXAM_ENTRY_DEFS;
-    const keys = examRoomsForClassLevel(studentClassLevel);
+    const keys = examRoomsForClassLevel(studentGradeContext.classLevel, studentGradeContext.className);
     if (!keys) return EXAM_ENTRY_DEFS;
     return EXAM_ENTRY_DEFS.filter((x) => keys.includes(x.key));
-  }, [isStudent, studentClassLevel]);
+  }, [isStudent, studentGradeContext]);
   const visibleStudyDefs = useMemo(() => {
     if (!isStudent) return STUDY_ENTRY_DEFS;
-    const keys = studyRoomsForClassLevel(studentClassLevel);
+    const keys = studyRoomsForClassLevel(studentGradeContext.classLevel, studentGradeContext.className);
     if (!keys) return STUDY_ENTRY_DEFS;
     return STUDY_ENTRY_DEFS.filter((x) => keys.includes(x.key));
-  }, [isStudent, studentClassLevel]);
+  }, [isStudent, studentGradeContext]);
   const institutionId = institution?.id || activeInstitutionId || null;
   const [activeTab, setActiveTab] = useState<TabKey>('study');
   const [links, setLinks] = useState<AcademicCenterLinks>(

@@ -583,6 +583,31 @@ async function getClassDetails(classId) {
   };
 }
 
+async function overlayPrimary4567ZoomOnMeetingRows(rows) {
+  if (!Array.isArray(rows) || !rows.length) return rows || [];
+  const classIds = [
+    ...new Set(rows.map((r) => String(r?.class_id || '').trim()).filter(Boolean))
+  ];
+  const classMap = new Map();
+  if (classIds.length) {
+    const { data } = await supabaseAdmin
+      .from('classes')
+      .select('id,name,class_level')
+      .in('id', classIds);
+    for (const c of data || []) classMap.set(String(c.id), c);
+  }
+  return rows.map((row) => {
+    const cls = classMap.get(String(row.class_id || ''));
+    const zoom = primary4567ZoomIfApplicable({
+      subject: row.subject || row.title,
+      className: cls?.name,
+      classLevel: cls?.class_level
+    });
+    if (!zoom) return row;
+    return { ...row, meeting_link: zoom, join_link: zoom };
+  });
+}
+
 async function resolveActorStudentId(actor) {
   let sid = actor.student_id ? String(actor.student_id).trim() : '';
   if (!sid && actor.sub) {
@@ -763,7 +788,9 @@ async function handleClassLiveBbbJoin(req, res, actor, role) {
     loadRow: async (id) => {
       const { data, error } = await supabaseAdmin.from(table).select('*').eq('id', id).maybeSingle();
       if (error) throw error;
-      return data;
+      if (!data) return data;
+      const [overlaid] = await overlayPrimary4567ZoomOnMeetingRows([data]);
+      return overlaid || data;
     },
     canAccess: (act, row) => canAccessClassLiveRow(act, role, row),
     getLinks: (row) => ({
@@ -1093,7 +1120,7 @@ export default async function handler(req, res) {
       if (error) return res.status(500).json({ error: error.message });
       const filtered = await filterRowsForStudentEnrollment(actor, role, data || []);
       const enriched = enrichMeetingRowsJoinLink(await attachTeacherNameField(filtered), role);
-      return res.status(200).json({ data: enriched });
+      return res.status(200).json({ data: await overlayPrimary4567ZoomOnMeetingRows(enriched) });
     }
 
     if (scope === 'teacher-rates') {
@@ -1443,7 +1470,7 @@ export default async function handler(req, res) {
       if (error) return res.status(500).json({ error: error.message });
       const filtered = await filterRowsForStudentEnrollment(actor, role, data || []);
       const enriched = enrichMeetingRowsJoinLink(await attachTeacherNameField(filtered), role);
-      return res.status(200).json({ data: enriched });
+      return res.status(200).json({ data: await overlayPrimary4567ZoomOnMeetingRows(enriched) });
     }
 
     if (scope === 'attendance') {

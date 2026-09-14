@@ -1,6 +1,7 @@
 import { apiFetch } from './session';
 import { copyTextToClipboard } from './copyToClipboard';
 import { isExternalMeetingPlatform, lessonJoinUrl } from './liveLessonUtils';
+import { PRIMARY_4567_ZOOM_URL, primary4567ZoomIfApplicable } from './primary4567Zoom';
 
 export type GuestJoinKind = 'class' | 'private' | 'meeting';
 
@@ -58,7 +59,7 @@ export async function copyExternalMeetingShareText(opts: {
   return { url, shareText, longUrl: url, code: null };
 }
 
-/** Satırda Zoom/Meet varsa onu kopyala; yoksa false. */
+/** Satırda 4–7 Zoom veya Zoom/Meet varsa onu kopyala; yoksa false. */
 export async function tryCopyExternalMeetingFromRow(
   row: {
     meeting_link?: string | null;
@@ -70,11 +71,17 @@ export async function tryCopyExternalMeetingFromRow(
     lesson_date?: string | null;
     start_time?: string | null;
     class_name?: string | null;
+    class_level?: string | null;
   },
-  opts?: { className?: string; title?: string }
+  opts?: { className?: string; classLevel?: string | null; title?: string }
 ): Promise<GuestJoinShare | null> {
+  const zoom = primary4567ZoomIfApplicable({
+    subject: opts?.title || row.subject || row.title,
+    className: opts?.className || row.class_name,
+    classLevel: opts?.classLevel || row.class_level
+  });
   const url = String(
-    row.meeting_link || row.join_link || row.meet_link || row.link_zoom || lessonJoinUrl(row) || ''
+    zoom || row.meeting_link || row.join_link || row.meet_link || row.link_zoom || lessonJoinUrl(row) || ''
   ).trim();
   if (!isExternalMeetingPlatform(url)) return null;
   return copyExternalMeetingShareText({
@@ -238,7 +245,9 @@ export async function copyAcademicStudyGuestJoinShareText(
   institutionId?: string | null,
   opts?: { directUrl?: string | null; title?: string }
 ): Promise<GuestJoinShare> {
-  const direct = String(opts?.directUrl || '').trim();
+  const r = String(room || '').trim().toLowerCase();
+  const forced = r === 'class47' || r === 'class56' ? PRIMARY_4567_ZOOM_URL : '';
+  const direct = String(forced || opts?.directUrl || '').trim();
   if (isExternalMeetingPlatform(direct)) {
     return copyExternalMeetingShareText({
       url: direct,

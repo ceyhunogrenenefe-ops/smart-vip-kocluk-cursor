@@ -29,7 +29,7 @@ import {
 } from '../lib/classLivePresence';
 import { useClassLivePresence } from '../hooks/useClassLivePresence';
 import { classIdsInLivePresenceWindow } from '../lib/classLiveWindow';
-import { copyGuestJoinShareText, tryCopyExternalMeetingFromRow } from '../lib/bbbGuestJoin';
+import { copyGuestJoinShareText, copyExternalMeetingShareText, tryCopyExternalMeetingFromRow } from '../lib/bbbGuestJoin';
 import { toast } from 'sonner';
 import { isEtutSubject, startEtutSession } from '../lib/etutSession';
 import { primary4567ZoomIfApplicable } from '../lib/primary4567Zoom';
@@ -437,11 +437,12 @@ export default function ClassLiveLessons() {
 
   const joinClassSession = useCallback(async (s: { id: string; class_id?: string; subject?: string; join_link?: string; meeting_link?: string; lesson_date?: string; homework?: string | null }) => {
     const cls = classes.find((c) => c.id === (s.class_id || selectedClassId)) || null;
+    const studentRow = resolvedStudentId ? students.find((st) => st.id === resolvedStudentId) : null;
     const url =
       primary4567ZoomIfApplicable({
         subject: s.subject,
-        className: cls?.name,
-        classLevel: cls?.class_level
+        className: [cls?.name, studentRow?.groupName, studentRow?.school].filter(Boolean).join(' '),
+        classLevel: cls?.class_level || studentRow?.classLevel
       }) || lessonJoinUrl(s);
     if (!url && !s.id) {
       setError('Toplantı bağlantısı yok.');
@@ -482,7 +483,7 @@ export default function ClassLiveLessons() {
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
-  }, [isStudentView, resolvedStudentId, classes, selectedClassId]);
+  }, [isStudentView, resolvedStudentId, classes, selectedClassId, students]);
 
   const watchClassSessionRecording = useCallback(
     async (s: {
@@ -890,9 +891,27 @@ export default function ClassLiveLessons() {
   const copySessionGuestLink = useCallback(
     async (s: SessionRow) => {
       try {
+        const forcedZoom = primary4567ZoomIfApplicable({
+          subject: s.subject,
+          className: selectedClass?.name,
+          classLevel: selectedClass?.class_level
+        });
+        if (forcedZoom) {
+          await copyExternalMeetingShareText({
+            url: forcedZoom,
+            title: s.subject || 'Etüt',
+            lessonDate: s.lesson_date || '',
+            lessonTime: String(s.start_time || '').slice(0, 5),
+            className: selectedClass?.name || ''
+          });
+          setNotice(null);
+          toast.success('Kopyalandı — Zoom davet metni panoya alındı');
+          return;
+        }
         const external = await tryCopyExternalMeetingFromRow(s, {
           title: s.subject || 'Etüt',
-          className: selectedClass?.name || ''
+          className: selectedClass?.name || '',
+          classLevel: selectedClass?.class_level
         });
         if (external) {
           setNotice(null);
@@ -927,9 +946,27 @@ export default function ClassLiveLessons() {
           }
           sessionId = match.id;
           setWeekSessions(rows);
+          const matchForcedZoom = primary4567ZoomIfApplicable({
+            subject: match.subject,
+            className: selectedClass?.name,
+            classLevel: selectedClass?.class_level
+          });
+          if (matchForcedZoom) {
+            await copyExternalMeetingShareText({
+              url: matchForcedZoom,
+              title: match.subject || 'Etüt',
+              lessonDate: match.lesson_date || '',
+              lessonTime: String(match.start_time || '').slice(0, 5),
+              className: selectedClass?.name || ''
+            });
+            setNotice(null);
+            toast.success('Kopyalandı — Zoom davet metni panoya alındı');
+            return;
+          }
           const matchExternal = await tryCopyExternalMeetingFromRow(match, {
             title: match.subject || 'Etüt',
-            className: selectedClass?.name || ''
+            className: selectedClass?.name || '',
+            classLevel: selectedClass?.class_level
           });
           if (matchExternal) {
             setNotice(null);
@@ -946,7 +983,7 @@ export default function ClassLiveLessons() {
         toast.error(msg);
       }
     },
-    [selectedClassId, weekColumnDates, selectedClass?.name]
+    [selectedClassId, weekColumnDates, selectedClass?.name, selectedClass?.class_level]
   );
 
   const loadBatchSessionsPool = useCallback(async () => {
