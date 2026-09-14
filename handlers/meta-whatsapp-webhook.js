@@ -7,19 +7,21 @@
  * Meta BM → Webhook URL:
  *   https://www.dersonlinevipkocluk.com/api/meta/webhook
  * Vercel env: META_WEBHOOK_VERIFY_TOKEN
- * Abonelik: messages (WhatsApp); Instagram messaging + comments + live_comments
+ * Abonelik: messages (WhatsApp); Instagram messaging + comments; Page messaging + feed
  */
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { getIstanbulDateString } from '../api/_lib/istanbul-time.js';
 import {
   ingestWhatsAppCloudMessages,
   ingestInstagramMessagingEvents,
-  ingestInstagramCommentChanges
+  ingestInstagramCommentChanges,
+  ingestFacebookCommentChanges
 } from '../api/_lib/registration-channel-ingest.js';
 import {
   syncWhatsAppValueToCrm,
   syncInstagramMessagingToCrm,
-  syncInstagramCommentsToCrm
+  syncInstagramCommentsToCrm,
+  syncFacebookCommentsToCrm
 } from '../api/_lib/crm-inbox.js';
 import {
   collectEntryMessagingEvents,
@@ -27,6 +29,13 @@ import {
   resolveSocialChannelFromWebhook
 } from '../api/_lib/instagram-messaging-normalize.js';
 import { collectInstagramCommentChanges } from '../api/_lib/instagram-comments-normalize.js';
+import {
+  collectFacebookFeedCommentChanges
+} from '../api/_lib/facebook-comments-normalize.js';
+import {
+  insertMetaWebhookLog,
+  finalizeMetaWebhookLog
+} from '../api/_lib/meta-webhook-logs.js';
 
 function verifyToken() {
   // Vercel’de tek kaynak: META_WEBHOOK_VERIFY_TOKEN (Meta BM Verify Token ile birebir)
@@ -243,6 +252,9 @@ export default async function handler(req, res) {
 
   // Teşhis kaydı (tablo yoksa sessizce atlanır)
   void logWebhookHit(body);
+  const webhookLog = await insertMetaWebhookLog(body).catch(() => ({ id: null }));
+  let webhookLogStatus = 'processed';
+  let webhookLogError = null;
   console.info('[meta-webhook] POST received', {
     object: String(body?.object || '').toLowerCase() || null,
     entries: Array.isArray(body?.entry) ? body.entry.length : 0
@@ -363,12 +375,14 @@ export default async function handler(req, res) {
           }
         }
       }
+      await finalizeMetaWebhookLog(webhookLog?.id, { status: webhookLogStatus, error: webhookLogError }).catch(() => null);
       return res.status(200).json({
         ok: true,
         channel: 'instagram',
         ingested: igIngested,
         inbound_messages_seen: inboundMessageCount,
         crm_sync: crmIgSync,
+        webhook_log_id: webhookLog?.id || null,
         received: getIstanbulDateString()
       });
     }
@@ -385,13 +399,15 @@ export default async function handler(req, res) {
         const igBusinessId = String(
           process.env.META_IG_BUSINESS_ID || process.env.INSTAGRAM_BUSINESS_ACCOUNT_ID || ''
         ).trim();
-        // Per-event channel: ads CTM / IG business recipient → instagram
+        const pageId = String(process.env.META_PAGE_ID || process.env.FACEBOOK_PAGE_ID || entry?.id || '').trim();
+        // Per-event channel: IG business recipient → instagram; page recipient → facebook (CTM ads included)
         const byChannel = new Map();
         for (const evt of messaging) {
           const socialChannel = resolveSocialChannelFromWebhook({
             objectType,
             event: evt,
-            igBusinessId
+            igBusinessId,
+            pageId
           });
           if (!byChannel.has(socialChannel)) byChannel.set(socialChannel, []);
           byChannel.get(socialChannel).push(evt);
@@ -411,7 +427,33 @@ export default async function handler(req, res) {
         }
       }
 
-      const changes = Array.isArray(entry?.changes) ? entry.changes : [];
+      
+      // Facebook Page feed yorumları
+      const fbComments = collectFacebookFeedCommentChanges(entry);
+      if (fbComments.length) {
+        inboundMessageCount += fbComments.length;
+        statusOnly = false;
+        try {
+          const fr = await ingestFacebookCommentChanges(fbComments);
+          igIngested += Number(fr?.processed || 0);
+        } catch (e) {
+          console.warn('[meta-webhook] fb comment ingest:', e instanceof Error ? e.message : e);
+          webhookLogError = e instanceof Error ? e.message : String(e);
+        }
+        try {
+          const fc = await syncFacebookCommentsToCrm(fbComments);
+          crmIgSync = {
+            processed: Number(crmIgSync?.processed || 0) + Number(fc?.processed || 0),
+            facebook_comments: Number(fc?.processed || 0)
+          };
+          console.info('[meta-webhook] crm fb comments synced', fc?.processed || 0);
+        } catch (e) {
+          console.warn('[meta-webhook] crm fb comment sync:', e instanceof Error ? e.message : e);
+          webhookLogError = e instanceof Error ? e.message : String(e);
+        }
+      }
+
+const changes = Array.isArray(entry?.changes) ? entry.changes : [];
       for (const change of changes) {
         if (String(change?.field || '') !== 'messages') continue;
         const value = change?.value && typeof change.value === 'object' ? change.value : {};
@@ -442,8 +484,11 @@ export default async function handler(req, res) {
     }
   } catch (e) {
     console.error('[meta-webhook] ingest error:', e instanceof Error ? e.message : e);
+    webhookLogStatus = 'error';
+    webhookLogError = e instanceof Error ? e.message : String(e);
     // Meta'ya her zaman 200 dön — aksi halde retry storm
   }
+  await finalizeMetaWebhookLog(webhookLog?.id, { status: webhookLogStatus, error: webhookLogError }).catch(() => null);
 
   if (statusOnly && statusesApplied > 0 && waIngested === 0) {
     console.info(

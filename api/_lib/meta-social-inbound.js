@@ -17,14 +17,18 @@ function looksLikeConfigurationId(id) {
   return s === DEFAULT_META_CONFIGURATION_ID || /^1784\d{12}$/.test(s);
 }
 
-const PAGE_FIELDS = [
+/** Page subscribed_fields — `feed` Facebook gönderi/yorum bildirimleri için şart */
+export const PAGE_WEBHOOK_FIELDS = [
   'messages',
   'messaging_postbacks',
   'messaging_optins',
   'message_echoes',
   'messaging_referrals',
-  'standby'
-].join(',');
+  'standby',
+  'feed'
+];
+
+const PAGE_FIELDS = PAGE_WEBHOOK_FIELDS.join(',');
 
 /**
  * Instagram app-level webhook alanları (object=instagram).
