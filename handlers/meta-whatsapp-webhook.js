@@ -72,11 +72,26 @@ async function logWebhookHit(body) {
           };
         }
       }
-      // Instagram-style messaging[]
-      const messaging = Array.isArray(entry?.messaging) ? entry.messaging : [];
+      // Instagram-style messaging[] + standby (reklam / handover)
+      const messaging = [
+        ...(Array.isArray(entry?.messaging) ? entry.messaging : []),
+        ...(Array.isArray(entry?.standby) ? entry.standby : [])
+      ];
       if (messaging.length) {
-        messageCount += messaging.filter((m) => m?.message && !m?.message?.is_echo).length;
-        if (!sample) sample = { field: 'messaging', count: messaging.length };
+        messageCount += messaging.filter((m) => {
+          if (m?.message?.is_echo) return false;
+          return Boolean(m?.message || m?.referral || m?.postback);
+        }).length;
+        if (!sample) {
+          const first = messaging[0] || {};
+          sample = {
+            field: Array.isArray(entry?.standby) && entry.standby.length ? 'standby' : 'messaging',
+            count: messaging.length,
+            has_referral: Boolean(first.referral || first.message?.referral),
+            has_text: Boolean(first.message?.text),
+            sender_suffix: first.sender?.id ? String(first.sender.id).slice(-6) : null
+          };
+        }
       }
     }
 

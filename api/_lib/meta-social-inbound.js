@@ -26,15 +26,31 @@ const PAGE_FIELDS = [
   'standby'
 ].join(',');
 
-/** Instagram app-level webhook alanları — reklam CTM için messaging_referrals şart */
-const INSTAGRAM_FIELDS = [
+/**
+ * Instagram app-level webhook alanları (object=instagram).
+ * Meta docs: alan adı `messaging_referral` (tekil). Page tarafındaki
+ * `messaging_referrals` (çoğul) burada kullanılırsa Graph tüm IG aboneliğini
+ * "An unknown error occurred" ile reddeder — gerçek IG/reklam DM webhook’ları gelmez.
+ */
+export const INSTAGRAM_APP_WEBHOOK_FIELDS = [
   'messages',
   'messaging_postbacks',
   'messaging_optins',
   'messaging_seen',
   'messaging_handover',
-  'messaging_referrals',
+  'messaging_referral',
   'standby'
+];
+
+const INSTAGRAM_FIELDS = INSTAGRAM_APP_WEBHOOK_FIELDS.join(',');
+
+/** Daraltılmış yedek set — bazı uygulamalarda handover/standby reddedilebilir */
+const INSTAGRAM_FIELDS_FALLBACK = [
+  'messages',
+  'messaging_postbacks',
+  'messaging_optins',
+  'messaging_referral',
+  'messaging_seen'
 ].join(',');
 
 /** WhatsApp WABA token asla kullanılmaz — IG/FB DM için ayrı Page/IG token gerekir. */
@@ -159,7 +175,14 @@ function appAccessToken() {
 }
 
 function graphErr(json, fallback) {
-  return json?.error?.message ? String(json.error.message) : fallback;
+  const err = json?.error;
+  if (!err || typeof err !== 'object') return fallback;
+  const msg = String(err.message || fallback || 'graph_error');
+  const bits = [msg];
+  if (err.code != null) bits.push(`code=${err.code}`);
+  if (err.error_subcode != null) bits.push(`sub=${err.error_subcode}`);
+  if (err.error_user_msg) bits.push(String(err.error_user_msg));
+  return bits.join(' | ');
 }
 
 export async function saveMetaPageSecretsToDb(patch = {}) {
@@ -420,15 +443,23 @@ export async function ensureMetaSocialInbound({ apply = false } = {}) {
   }
 
   const bound = Boolean(pid && (hasMessages || (apply && out.steps.some((s) => s.step === 'subscribe_page_messages' && s.ok))));
-  out.ok = bound;
-  out.hint = bound
-    ? `Facebook/Instagram DM webhook ${PRODUCTION_WEBHOOK_URL} — sayfa ${out.page_name || pid} mesajlara abone.`
-    : 'Sayfa messages alanına abone değil. Hattı bağla ile subscribed_apps çalışır; App Dashboard’da Instagram + Messenger webhook alanları da işaretli olmalı.';
+  const appIgOk = !apply || !out.app_subscriptions || Boolean(out.app_subscriptions?.instagram?.subscribed);
+  out.ok = bound && appIgOk;
+  if (bound && !appIgOk) {
+    out.error = out.app_subscriptions?.instagram?.error || out.app_subscriptions?.error || 'instagram_app_subscription_failed';
+    out.hint =
+      'Sayfa abone ama Instagram app webhook (object=instagram) başarısız. Reklam / bazı DM’ler Meta’dan gelmez — Hattı bağla tekrar veya App Dashboard → Instagram → Webhooks.';
+  } else {
+    out.hint = bound
+      ? `Facebook/Instagram DM webhook ${PRODUCTION_WEBHOOK_URL} — sayfa ${out.page_name || pid} mesajlara abone.`
+      : 'Sayfa messages alanına abone değil. Hattı bağla ile subscribed_apps çalışır; App Dashboard’da Instagram + Messenger webhook alanları da işaretli olmalı.';
+  }
   if (!out.ok && !out.error) out.error = 'not_bound_yet';
   return out;
 }
 
 export function publicSocialStatus(full) {
+  const appSub = full?.app_subscriptions || null;
   return {
     ok: Boolean(full?.ok),
     token_present: Boolean(full?.token_present),
@@ -441,7 +472,11 @@ export function publicSocialStatus(full) {
       : null,
     configuration_id: full?.configuration_id || DEFAULT_META_CONFIGURATION_ID,
     app_id: appIdEnv(),
-    app_subscriptions_ok: Boolean(full?.app_subscriptions?.ok),
+    app_subscriptions_ok: Boolean(appSub?.ok),
+    app_page_subscribed: Boolean(appSub?.page?.subscribed),
+    app_instagram_subscribed: Boolean(appSub?.instagram?.subscribed),
+    app_instagram_error: appSub?.instagram?.error || null,
+    app_instagram_fields: appSub?.instagram?.fields || null,
     hint: full?.hint || null,
     applied: Boolean(full?.applied)
   };
@@ -476,6 +511,12 @@ export async function ensureAppSocialSubscriptions({ apply = false } = {}) {
 
   const existing = await graphGet(`${encodeURIComponent(appId)}/subscriptions`, appTok);
   const rows = existing.ok && Array.isArray(existing.json?.data) ? existing.json.data : [];
+  out.existing = rows.map((r) => ({
+    object: r?.object || null,
+    callback_url: r?.callback_url || null,
+    fields: Array.isArray(r?.fields) ? r.fields.map((f) => f?.name || f).filter(Boolean) : r?.fields || null,
+    active: r?.active
+  }));
   const hasPage = rows.some(
     (r) => String(r?.object || '') === 'page' && String(r?.callback_url || '').includes('/api/meta/webhook')
   );
@@ -505,13 +546,34 @@ export async function ensureAppSocialSubscriptions({ apply = false } = {}) {
     object: 'page',
     fields: PAGE_FIELDS
   });
-  const igSub = await graphFormPost(`${encodeURIComponent(appId)}/subscriptions`, {
+  let igSub = await graphFormPost(`${encodeURIComponent(appId)}/subscriptions`, {
     ...common,
     object: 'instagram',
     fields: INSTAGRAM_FIELDS
   });
+  let igFieldsUsed = INSTAGRAM_FIELDS;
+  if (!igSub.ok) {
+    const retry = await graphFormPost(`${encodeURIComponent(appId)}/subscriptions`, {
+      ...common,
+      object: 'instagram',
+      fields: INSTAGRAM_FIELDS_FALLBACK
+    });
+    if (retry.ok) {
+      igSub = retry;
+      igFieldsUsed = INSTAGRAM_FIELDS_FALLBACK;
+    } else {
+      out.instagram_retry = {
+        ok: false,
+        error: graphErr(retry.json, `http_${retry.status}`)
+      };
+    }
+  }
   out.page = { subscribed: pageSub.ok, error: pageSub.ok ? null : graphErr(pageSub.json, `http_${pageSub.status}`) };
-  out.instagram = { subscribed: igSub.ok, error: igSub.ok ? null : graphErr(igSub.json, `http_${igSub.status}`) };
+  out.instagram = {
+    subscribed: igSub.ok,
+    error: igSub.ok ? null : graphErr(igSub.json, `http_${igSub.status}`),
+    fields: igFieldsUsed
+  };
   out.ok = Boolean(pageSub.ok && igSub.ok);
   out.hint = out.ok
     ? `App webhook (page + instagram) → ${PRODUCTION_WEBHOOK_URL}`
