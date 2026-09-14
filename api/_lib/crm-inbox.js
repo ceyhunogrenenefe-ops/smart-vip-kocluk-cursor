@@ -20,6 +20,7 @@ import {
   isAdsReferral,
   normalizeInstagramMessagingEvent
 } from './instagram-messaging-normalize.js';
+import { normalizeInstagramCommentChange } from './instagram-comments-normalize.js';
 
 export function normalizeCrmChannel(channel) {
   const c = String(channel || '').toLowerCase();
@@ -465,6 +466,38 @@ export async function syncInstagramMessagingToCrm(events, { institutionId, chann
       institutionId,
       adSourceData: extractAdSourceData({ channel: ch, messagingEvent: ev }),
       payload: ev
+    });
+    processed += 1;
+  }
+  return { processed };
+}
+
+/** Instagram gönderi / canlı yayın yorumları (field=comments|live_comments) → CRM inbox */
+export async function syncInstagramCommentsToCrm(changes, { institutionId } = {}) {
+  const list = Array.isArray(changes) ? changes : [];
+  let processed = 0;
+  for (const change of list) {
+    const norm = normalizeInstagramCommentChange(change);
+    if (!norm?.hasInboundContent || !norm.fromId) continue;
+    await upsertCrmMessage({
+      channel: 'instagram',
+      contactIdentifier: norm.fromId,
+      contactName: norm.fromUsername || null,
+      body: norm.text,
+      messageType: 'comment',
+      messageId: norm.commentId ? `ig_comment:${norm.commentId}` : null,
+      timestamp: change?.value?.timestamp || null,
+      direction: 'inbound',
+      senderType: 'lead',
+      institutionId,
+      adSourceData: {
+        source_type: norm.isLive ? 'instagram_live_comment' : 'instagram_comment',
+        media_id: norm.mediaId,
+        media_product_type: norm.mediaProductType,
+        parent_id: norm.parentId,
+        username: norm.fromUsername
+      },
+      payload: change
     });
     processed += 1;
   }

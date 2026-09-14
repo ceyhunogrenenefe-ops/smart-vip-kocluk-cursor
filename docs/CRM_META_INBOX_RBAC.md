@@ -4,9 +4,10 @@
 - Primary: `GET|POST /api/meta/webhook`
 - Alias: `GET|POST /api/webhooks/meta`
 - Verify token env: `META_WEBHOOK_VERIFY_TOKEN` (veya `META_VERIFY_TOKEN`)
-- Ingest: WhatsApp Cloud (`entry.changes.value.messages`) + Instagram DM (`object=instagram`) + Facebook Messenger (`object=page`)
+- Ingest: WhatsApp Cloud (`entry.changes.value.messages`) + Instagram DM (`object=instagram` messaging) + Instagram **gönderi yorumları** (`changes.field=comments|live_comments`) + Facebook Messenger (`object=page`)
 - Her inbound WA / IG / FB mesajı → `registration_*` **ve** `crm_conversations` / `crm_messages`
 - CTWA / IG / FB ad referral → `crm_conversations.ad_source_data`
+- IG comment → `message_type=comment`, önizleme `[Gönderi yorumu] …`, `ad_source_data.source_type=instagram_comment`
 
 ## Instagram / Facebook DM (native Meta — Kommo köprüsü yok)
 - Vercel Production token (WhatsApp token **değil**):
@@ -15,6 +16,7 @@
 - WhatsApp `META_WHATSAPP_TOKEN` IG/FB DM abone edemez; ayrı sayfa token kullanılır
 - Bind: CRM → **Widgetler** (`/crm/widgetler`) — Kommo katalogu (WA / IG / FB / Telegram / chat / e-posta / lead ads / Google / form…)
 - Instagram + Facebook + WhatsApp Cloud bağlanır; diğer kartlar Kommo listesinin karşılığı (sıradaki native bağlar)
+- **Instagram gönderi yorumları** (`comments` / `live_comments`) CRM inbox’a düşer (Kommo comment bildiriminin native karşılığı)
 - Alternatif: `GET /api/whatsapp-health?ensure_meta_social=1` veya Inbox → Hattı bağla
 - OAuth: `GET /api/meta/facebook-oauth` · redirect URI `/crm/widgetler`
 - Teşhis: `GET /api/whatsapp-health` → `meta_social_env.token_source` (token yazılmaz, yalnızca env adı + suffix)
@@ -42,10 +44,12 @@
 | TAKİP / TEKRAR ARANACAK | `follow_up` / `postponed` |
 | ARANDI AÇMADI | Kayıp nedeni `unreachable` |
 | DENEME DERSİ AYARLANDI | `trial_lesson_scheduled` |
-| Chat WA + Instagram | Inbox WA + IG + FB |
+| Chat WA + Instagram **DM** | Inbox WA + IG + FB **DM** |
+| Instagram **gönderi yorumu** bildirimi | Inbox IG `comments` / `live_comments` (`[Gönderi yorumu] …`) |
 | Unsorted / üzerine al | Havuz + **Üzerime al** |
 | İç not / şablon / etiket | not + hazır yanıt + **Meta onaylı WA şablonları** (`/` seçici) + `metadata.tags` |
 | Görev | Kayıt Takibi görevleri |
+| Yorum → otomatik Salesbot / DM otomasyonu | Henüz yok (manuel yanıt / pipeline) |
 
 ## Gönderim (CRM yanıt)
 - `META_WHATSAPP_TOKEN` + `META_PHONE_NUMBER_ID` (0850 Cloud API phone number id)
