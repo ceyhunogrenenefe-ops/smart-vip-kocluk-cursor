@@ -298,6 +298,24 @@ export default async function handler(req, res) {
   }
 
   try {
+    // Bilinmeyen object → raw log + ignore_reason (sessiz drop yok)
+    if (objectType && objectType !== 'instagram' && objectType !== 'page' && objectType !== 'whatsapp_business_account') {
+      webhookLogStatus = 'ignored';
+      webhookLogError = `ignore_reason:unknown_object:${objectType}`;
+      console.info('[meta-webhook] ignored unknown object', { object: objectType, entries: entries.length });
+      await finalizeMetaWebhookLog(webhookLog?.id, {
+        status: webhookLogStatus,
+        error: webhookLogError
+      }).catch(() => null);
+      return res.status(200).json({
+        ok: true,
+        ignored: true,
+        ignore_reason: `unknown_object:${objectType}`,
+        received: getIstanbulDateString(),
+        webhook_log_id: webhookLog?.id || null
+      });
+    }
+
     // Instagram Messaging (object: instagram)
     if (objectType === 'instagram') {
       for (const entry of entries) {

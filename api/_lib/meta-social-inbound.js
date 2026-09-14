@@ -452,6 +452,26 @@ export async function ensureMetaSocialInbound({ apply = false } = {}) {
         error: e instanceof Error ? e.message : String(e)
       });
     }
+  } else {
+    // Tanılama / inbound_status: app webhook durumunu oku (aksi halde UI hep "IG Webhook Eksik" gösterir)
+    try {
+      const appSub = await ensureAppSocialSubscriptions({ apply: false });
+      out.app_subscriptions = appSub;
+      out.steps.push({
+        step: 'app_subscriptions_status',
+        ok: Boolean(appSub?.ok),
+        page_subscribed: Boolean(appSub?.page?.subscribed),
+        instagram_subscribed: Boolean(appSub?.instagram?.subscribed),
+        error: appSub?.error || null,
+        existing: appSub?.existing || null
+      });
+    } catch (e) {
+      out.steps.push({
+        step: 'app_subscriptions_status',
+        ok: false,
+        error: e instanceof Error ? e.message : String(e)
+      });
+    }
   }
 
   const bound = Boolean(pid && (hasMessages || (apply && out.steps.some((s) => s.step === 'subscribe_page_messages' && s.ok))));
@@ -472,6 +492,12 @@ export async function ensureMetaSocialInbound({ apply = false } = {}) {
 
 export function publicSocialStatus(full) {
   const appSub = full?.app_subscriptions || null;
+  const igFieldsRaw = appSub?.instagram?.fields;
+  const igFields = Array.isArray(igFieldsRaw)
+    ? igFieldsRaw
+    : typeof igFieldsRaw === 'string'
+      ? igFieldsRaw.split(',').map((s) => s.trim()).filter(Boolean)
+      : null;
   return {
     ok: Boolean(full?.ok),
     token_present: Boolean(full?.token_present),
@@ -488,7 +514,7 @@ export function publicSocialStatus(full) {
     app_page_subscribed: Boolean(appSub?.page?.subscribed),
     app_instagram_subscribed: Boolean(appSub?.instagram?.subscribed),
     app_instagram_error: appSub?.instagram?.error || null,
-    app_instagram_fields: appSub?.instagram?.fields || null,
+    app_instagram_fields: igFields,
     hint: full?.hint || null,
     applied: Boolean(full?.applied)
   };
@@ -529,20 +555,35 @@ export async function ensureAppSocialSubscriptions({ apply = false } = {}) {
     fields: Array.isArray(r?.fields) ? r.fields.map((f) => f?.name || f).filter(Boolean) : r?.fields || null,
     active: r?.active
   }));
-  const hasPage = rows.some(
-    (r) => String(r?.object || '') === 'page' && String(r?.callback_url || '').includes('/api/meta/webhook')
-  );
-  const hasIg = rows.some(
-    (r) => String(r?.object || '') === 'instagram' && String(r?.callback_url || '').includes('/api/meta/webhook')
-  );
-  out.page = { subscribed: hasPage };
-  out.instagram = { subscribed: hasIg };
+  /** Meta bazen path varyantı / trailing slash döner — domain + meta webhook yeter */
+  const isOurCallback = (url) => {
+    const u = String(url || '').toLowerCase();
+    if (!u.includes('dersonlinevipkocluk.com')) return false;
+    return (
+      u.includes('/api/meta/webhook') ||
+      u.includes('/api/webhooks/meta') ||
+      u.includes('meta/webhook') ||
+      u.includes('/api/meta-whatsapp-webhook')
+    );
+  };
+  const pageRow = rows.find((r) => String(r?.object || '') === 'page' && isOurCallback(r?.callback_url));
+  const igRow = rows.find((r) => String(r?.object || '') === 'instagram' && isOurCallback(r?.callback_url));
+  const hasPage = Boolean(pageRow);
+  const hasIg = Boolean(igRow);
+  const pageFields = Array.isArray(pageRow?.fields)
+    ? pageRow.fields.map((f) => f?.name || f).filter(Boolean)
+    : null;
+  const igFields = Array.isArray(igRow?.fields)
+    ? igRow.fields.map((f) => f?.name || f).filter(Boolean)
+    : null;
+  out.page = { subscribed: hasPage, fields: pageFields, callback_url: pageRow?.callback_url || null };
+  out.instagram = { subscribed: hasIg, fields: igFields, callback_url: igRow?.callback_url || null };
 
   if (!apply) {
     out.ok = hasPage && hasIg;
     out.hint = out.ok
       ? 'SmartKocluk app page + instagram webhook alanları production URL’ye abone.'
-      : 'App-level instagram/page subscription eksik — Hattı bağla veya META_APP_SECRET ile ensure.';
+      : `App-level subscription eksik — page=${hasPage} ig=${hasIg}. Hattı bağla veya META_APP_SECRET ile ensure. existing=${JSON.stringify(out.existing).slice(0, 400)}`;
     if (!out.ok) out.error = 'app_subscriptions_incomplete';
     return out;
   }
