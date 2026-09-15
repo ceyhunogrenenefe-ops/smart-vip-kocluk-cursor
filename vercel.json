@@ -152,6 +152,10 @@
     {
       "path": "/api/cron/crm-task-reminders",
       "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/cron/crm-reply-sla",
+      "schedule": "* * * * *"
     }
   ],
   "redirects": [

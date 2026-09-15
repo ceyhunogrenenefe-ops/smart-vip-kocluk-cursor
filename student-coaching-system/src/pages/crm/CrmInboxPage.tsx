@@ -40,6 +40,7 @@ import {
   type CrmMessage,
   type CrmMetaTemplate
 } from '../../lib/crmInboxApi';
+import { playCrmLeadChime } from '../../lib/crmLiveSound';
 import { CrmTemplateCreateModal, CrmTemplateSendPreviewModal } from './CrmTemplateModals';
 
 function ChannelBadge({ channel, contactIdentifier, adSourceData }: { channel: string; contactIdentifier?: string | null; adSourceData?: Record<string, unknown> | null }) {
@@ -264,18 +265,25 @@ export default function CrmInboxPage() {
             setMessages((prev) => {
               const ids = new Set(prev.map((m) => m.id));
               const next = [...prev];
+              let addedInbound = false;
               for (const m of res.data!.messages!) {
-                if (!ids.has(m.id)) next.push(m);
+                if (ids.has(m.id)) continue;
+                next.push(m);
+                if (m.direction === 'inbound' || m.sender_type === 'lead') addedInbound = true;
               }
+              if (addedInbound) playCrmLeadChime();
               return next;
             });
           }
           if (res.data?.conversations?.length) {
             setConversations((prev) => {
               const map = new Map(prev.map((c) => [c.id, c]));
+              let newConv = false;
               for (const c of res.data!.conversations!) {
+                if (!map.has(c.id)) newConv = true;
                 map.set(c.id, { ...(map.get(c.id) || ({} as CrmConversation)), ...c });
               }
+              if (newConv) playCrmLeadChime();
               return [...map.values()].sort((a, b) =>
                 String(b.last_message_at || '').localeCompare(String(a.last_message_at || ''))
               );
