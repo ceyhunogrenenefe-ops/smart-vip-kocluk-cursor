@@ -278,6 +278,114 @@ export async function lookupSocialProfileName(scopedId, tok = resolveSocialToken
   return name;
 }
 
+
+/**
+ * IG DM gerçekten bu token/uygulama ile okunabiliyor mu?
+ * Conversations API + debug_token scopes → Advanced Access / Development Mode ayrımı.
+ * Yorum webhook’u çalışıp DM POST gelmemesi çoğu zaman burada biter.
+ */
+export async function probeInstagramDmCapability({ pageId, igBusinessId, pageToken } = {}) {
+  const tok = String(pageToken || resolveSocialToken().token || '').trim();
+  const pid = String(pageId || resolvePageId() || '').trim();
+  const ig = String(igBusinessId || igBusinessIdEnv() || '').trim();
+  /** @type {Record<string, unknown>} */
+  const out = {
+    ok: false,
+    page_conversations_ok: null,
+    ig_conversations_ok: null,
+    page_conversations_error: null,
+    ig_conversations_error: null,
+    page_conversation_count: null,
+    ig_conversation_count: null,
+    token_scopes: [],
+    has_instagram_manage_messages_scope: null,
+    has_pages_messaging_scope: null,
+    app_id: appIdEnv() || null,
+    likely_cause: null,
+    hint: null
+  };
+  if (!tok) {
+    out.likely_cause = 'missing_page_token';
+    out.hint = 'Page token yok — Hattı bağla.';
+    return out;
+  }
+
+  const appTok = appAccessToken();
+  if (appTok) {
+    const dbg = await graphGet(
+      `debug_token?input_token=${encodeURIComponent(tok)}&access_token=${encodeURIComponent(appTok)}`,
+      appTok
+    );
+    const data = dbg.ok ? dbg.json?.data : null;
+    const scopes = Array.isArray(data?.scopes) ? data.scopes.map(String) : [];
+    const granular = Array.isArray(data?.granular_scopes)
+      ? data.granular_scopes.flatMap((g) => (g?.scope ? [String(g.scope)] : []))
+      : [];
+    const all = [...new Set([...scopes, ...granular])];
+    out.token_scopes = all.slice(0, 40);
+    out.has_instagram_manage_messages_scope = all.some((s) =>
+      /instagram_manage_messages|instagram_business_manage_messages/i.test(s)
+    );
+    out.has_pages_messaging_scope = all.some((s) => /pages_messaging/i.test(s));
+    out.token_type = data?.type || data?.application || null;
+    out.token_app_id = data?.app_id != null ? String(data.app_id) : null;
+    out.token_is_valid = data?.is_valid != null ? Boolean(data.is_valid) : null;
+  }
+
+  if (pid) {
+    const r = await graphGet(
+      `${encodeURIComponent(pid)}/conversations?platform=instagram&fields=id,updated_time&limit=5`,
+      tok
+    );
+    out.page_conversations_ok = Boolean(r.ok);
+    if (r.ok) {
+      const rows = Array.isArray(r.json?.data) ? r.json.data : [];
+      out.page_conversation_count = rows.length;
+    } else {
+      out.page_conversations_error = graphErr(r.json, 'page_conversations_failed');
+      out.page_conversations_code = r.json?.error?.code ?? null;
+    }
+  }
+
+  if (ig) {
+    const r = await graphGet(
+      `${encodeURIComponent(ig)}/conversations?platform=instagram&fields=id,updated_time&limit=5`,
+      tok
+    );
+    out.ig_conversations_ok = Boolean(r.ok);
+    if (r.ok) {
+      const rows = Array.isArray(r.json?.data) ? r.json.data : [];
+      out.ig_conversation_count = rows.length;
+    } else {
+      out.ig_conversations_error = graphErr(r.json, 'ig_conversations_failed');
+      out.ig_conversations_code = r.json?.error?.code ?? null;
+    }
+  }
+
+  const anyConvOk = out.page_conversations_ok || out.ig_conversations_ok;
+  out.ok = Boolean(anyConvOk);
+
+  const errBlob = `${out.page_conversations_error || ''} ${out.ig_conversations_error || ''}`.toLowerCase();
+  const code = out.page_conversations_code || out.ig_conversations_code;
+  if (out.ok) {
+    out.likely_cause = 'api_ok_webhook_routing';
+    out.hint =
+      'Conversations API ok — token DM okuyabiliyor. Webhook hâlâ gelmiyorsa Meta Conversation Routing / Instagram Gelen Kutusu hâlâ başka alıcıya (veya IG native) veriyor. Meta Business Suite → Inbox ayarları + Instagram → Bağlı araçlar’da yalnız SmartKocluk olsun; ardından yeni bir kullanıcıdan DM atın.';
+  } else if (code === 3 || code === 10 || /capability|permission|advanced|#(#)?200|not been granted/i.test(errBlob)) {
+    out.likely_cause = 'missing_advanced_access_or_permission';
+    out.hint =
+      'Graph Conversations API reddetti (permission/capability). Meta App Dashboard → App Review → Advanced Access: instagram_manage_messages + pages_messaging canlı (Live) olmalı. Development Mode’da yalnızca test kullanıcılarının DM’i gelir; yorumlar gelebilir, reklam/yeni kullanıcı DM’i gelmez.';
+  } else if (out.has_instagram_manage_messages_scope === false) {
+    out.likely_cause = 'token_missing_instagram_manage_messages';
+    out.hint =
+      'Page token’da instagram_manage_messages scope yok. Facebook Login for Business ile sayfayı yeniden bağlayın (Hattı bağla / Widget bağlama).';
+  } else {
+    out.likely_cause = 'conversations_probe_failed';
+    out.hint = `IG Conversations probe başarısız: ${out.page_conversations_error || out.ig_conversations_error || 'unknown'}`;
+  }
+  return out;
+}
+
 export async function ensureMetaSocialInbound({ apply = false } = {}) {
   await loadMetaWhatsAppSecretsFromDb();
   const resolved = resolveSocialToken();
@@ -526,6 +634,37 @@ export async function ensureMetaSocialInbound({ apply = false } = {}) {
       ? `Facebook/Instagram DM webhook ${PRODUCTION_WEBHOOK_URL} — sayfa ${out.page_name || pid} mesajlara abone. IG reklam DM gelmiyorsa Kommo Instagram entegrasyonunu kapatın (köprü yok; Meta doğrudan CRM’e göndermeli).`
       : 'Sayfa messages alanına abone değil. Hattı bağla ile subscribed_apps çalışır; App Dashboard’da Instagram + Messenger webhook alanları da işaretli olmalı.';
   }
+
+  try {
+    const probe = await probeInstagramDmCapability({
+      pageId: pid || out.page_id,
+      igBusinessId: out.instagram_business_id,
+      pageToken: useTok || tok
+    });
+    out.ig_dm_capability = probe;
+    out.steps.push({
+      step: 'ig_dm_capability_probe',
+      ok: Boolean(probe?.ok),
+      likely_cause: probe?.likely_cause || null,
+      page_conversations_ok: probe?.page_conversations_ok,
+      ig_conversations_ok: probe?.ig_conversations_ok,
+      has_instagram_manage_messages_scope: probe?.has_instagram_manage_messages_scope,
+      error: probe?.page_conversations_error || probe?.ig_conversations_error || null
+    });
+    if (!probe?.ok && probe?.hint) {
+      out.hint = `${out.hint || ''} ${probe.hint}`.trim();
+    } else if (probe?.ok && probe?.hint && bound) {
+      // Webhook abone ama DM POST yoksa routing ipucu ekle
+      out.dm_routing_hint = probe.hint;
+    }
+  } catch (e) {
+    out.steps.push({
+      step: 'ig_dm_capability_probe',
+      ok: false,
+      error: e instanceof Error ? e.message : String(e)
+    });
+  }
+
   if (!out.ok && !out.error) out.error = 'not_bound_yet';
   return out;
 }
@@ -556,7 +695,21 @@ export function publicSocialStatus(full) {
     app_instagram_error: appSub?.instagram?.error || null,
     app_instagram_fields: igFields,
     hint: full?.hint || null,
-    applied: Boolean(full?.applied)
+    applied: Boolean(full?.applied),
+    ig_dm_capability: full?.ig_dm_capability
+      ? {
+          ok: Boolean(full.ig_dm_capability.ok),
+          likely_cause: full.ig_dm_capability.likely_cause || null,
+          hint: full.ig_dm_capability.hint || null,
+          has_instagram_manage_messages_scope: full.ig_dm_capability.has_instagram_manage_messages_scope,
+          has_pages_messaging_scope: full.ig_dm_capability.has_pages_messaging_scope,
+          page_conversations_ok: full.ig_dm_capability.page_conversations_ok,
+          ig_conversations_ok: full.ig_dm_capability.ig_conversations_ok,
+          page_conversations_error: full.ig_dm_capability.page_conversations_error || null,
+          ig_conversations_error: full.ig_dm_capability.ig_conversations_error || null
+        }
+      : null,
+    dm_routing_hint: full?.dm_routing_hint || full?.ig_dm_capability?.hint || null
   };
 }
 

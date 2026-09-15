@@ -37,3 +37,16 @@ Sonra Widgetler → **Hattı bağla / ensure_inbound**.
 | 6 | Instagram reklam DM | CRM `instagram`, `ad_dm` + referral |
 | 7 | Aynı kullanıcı önce yorum sonra DM | Aynı contact altında birleşir |
 | 8 | Aynı webhook 2 kez | unique message_id → duplicate yok |
+
+
+## Kommo kesildi, yorum geliyor, DM gelmiyor
+
+1. Prod kanıt: `comments` webhook var, `messaging` POST yok → **META_DID_NOT_DELIVER**.
+2. Page `subscribed_apps` yalnız SmartKocluk ise kod/abonelik tamam.
+3. Kontrol listesi:
+   - Meta App Dashboard → **Live mode**
+   - App Review → **Advanced Access**: `instagram_manage_messages`, `pages_messaging`
+   - Instagram app (telefon) → Ayarlar → Mesajlar → bağlı iş ortakları: Kommo yok
+   - Meta Business Suite → Inbox / Conversation routing: varsayılan SmartKocluk
+4. Meta Dashboard “Test” butonu CRM’e düşmez (`entry.id=0`). Gerçek IG hesabından DM atın.
+5. Widgetler → Meta Tanılama → **IG DM Graph yetkisi** satırına bakın.
