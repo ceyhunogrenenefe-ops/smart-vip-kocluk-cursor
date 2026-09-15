@@ -152,17 +152,10 @@
     {
       "path": "/api/cron/crm-task-reminders",
       "schedule": "* * * * *"
-<<<<<<< HEAD
-=======
     },
     {
       "path": "/api/cron/crm-reply-sla",
       "schedule": "* * * * *"
-    },
-    {
-      "path": "/api/cron/teacher-review-invites",
-      "schedule": "*/5 * * * *"
->>>>>>> b146029 (feat(crm): canlı lead poll, ses, ajan presence ve 5dk SLA WhatsApp)
     }
   ],
   "redirects": [
