@@ -2,30 +2,38 @@
 
 Production: `https://www.dersonlinevipkocluk.com` · CRM → Widgetler → **Meta Tanılama**
 
-## Instagram reklam DM (Kommo köprüsü YOK — doğrudan CRM)
+Meta resmi akış: [Setup Webhooks Subscriptions](https://developers.facebook.com/docs/instagram-platform/webhooks)
 
-Kommo’yu kapatacaksınız; IG reklam mesajları native Meta webhook ile CRM’e düşmeli.
+| Adım | Meta | Bizde |
+|------|------|--------|
+| 1 | Create endpoint (GET verify + POST) | `/api/meta/webhook` — `META_WEBHOOK_VERIFY_TOKEN` |
+| 2 | App webhook fields | `object=instagram` + `object=page` → messages, referral, comments… |
+| 3 | `POST /{Page\|IG}/subscribed_apps` | CRM **Hattı bağla** (`ensure_meta_social`) |
+| 4 | Test + **Live** + Advanced Access | Gerçek IG DM (Dashboard Test ≠ CRM) |
 
-1. **Kommo → Ayarlar → Entegrasyonlar → Instagram → Bağlantıyı kaldır**  
-   (CRM↔Kommo mesaj köprüsü kurulmaz.)
-2. **Meta Business Suite** → Instagram hesabı → bağlı iş ortakları / messaging partner listesinden Kommo’yu çıkarın.
-3. Instagram (profesyonel) → Mesajlar ayarlarında üçüncü taraf / Kommo erişimi olmasın.
-4. CRM → Widgetler → **Hattı bağla** (`ensure_inbound`).
-5. Instagram **Click to Message** reklamından test DM → Inbox `channel=instagram`.
+## Instagram reklam / organik DM
 
-Tanılama:
-- WA hit > 0 ve IG hit = 0 → kırmızı kutu “Instagram reklam DM partner block”.
-- Yorumlar geliyor ama gerçek DM POST’u yok → amber kutu **META_DID_NOT_DELIVER** (Kommo hâlâ DM alıcısı; kod drop değil).
-- Meta App Dashboard “Send test” → entry.id=0 sentetik; CRM konuşması oluşmaz. Gerçek IG hesabından DM atın.
+1. Meta App Dashboard → **Live mode** (Development’ta yalnız tester DM’i).
+2. App Review → **Advanced Access**: `instagram_manage_messages`, `pages_messaging` (+ Business Verification).
+3. Webhooks: Instagram + Page fields; Callback = production `/api/meta/webhook`.
+4. CRM → Widgetler → **Hattı bağla** (Page + mümkünse IG account `subscribed_apps`).
+5. Messaging partner / Conversation Routing: yalnız SmartKocluk (Kommo yok).
+6. Tester olmayan IG’den DM + reklam CTM → Inbox `channel=instagram`.
 
-WhatsApp reklamları ayrı WABA hattından zaten gelir; IG için Meta teslimatının Kommo’dan sökülmesi şart.
+Tanılama paneli: **Meta Setup Webhooks (4 adım)** + **IG DM Graph yetkisi**.
+
+| Sinyal | Anlam |
+|--------|--------|
+| Yorum/Reels var, messaging POST yok | `META_DID_NOT_DELIVER` — genelde Advanced Access / Live |
+| `likely_cause=missing_advanced_access_or_permission` | Conversations API (#3) — App Review |
+| Dashboard “Test” / entry.id=0 | Sentetik — CRM konuşması oluşmaz |
+| WA hit > 0, IG hit = 0 | Endpoint OK; Meta IG messaging göndermiyor |
+
+WhatsApp reklamları WABA webhook ile ayrı gelir.
 
 SQL (bir kez):
 1. `student-coaching-system/sql/2026-09-14-meta-webhook-logs.sql`
-2. **Zorunlu (FB DM/yorum için):** `student-coaching-system/sql/2026-09-14-crm-facebook-channel-check.sql`  
-   Tanılama’da **FB kanal DB = CHECK eksik** görürseniz bu SQL’i çalıştırın.
-
-Sonra Widgetler → **Hattı bağla / ensure_inbound**.
+2. **Zorunlu (FB DM/yorum için):** `student-coaching-system/sql/2026-09-14-crm-facebook-channel-check.sql`
 
 | # | Senaryo | Beklenen |
 |---|---------|----------|
@@ -37,16 +45,3 @@ Sonra Widgetler → **Hattı bağla / ensure_inbound**.
 | 6 | Instagram reklam DM | CRM `instagram`, `ad_dm` + referral |
 | 7 | Aynı kullanıcı önce yorum sonra DM | Aynı contact altında birleşir |
 | 8 | Aynı webhook 2 kez | unique message_id → duplicate yok |
-
-
-## Kommo kesildi, yorum geliyor, DM gelmiyor
-
-1. Prod kanıt: `comments` webhook var, `messaging` POST yok → **META_DID_NOT_DELIVER**.
-2. Page `subscribed_apps` yalnız SmartKocluk ise kod/abonelik tamam.
-3. Kontrol listesi:
-   - Meta App Dashboard → **Live mode**
-   - App Review → **Advanced Access**: `instagram_manage_messages`, `pages_messaging`
-   - Instagram app (telefon) → Ayarlar → Mesajlar → bağlı iş ortakları: Kommo yok
-   - Meta Business Suite → Inbox / Conversation routing: varsayılan SmartKocluk
-4. Meta Dashboard “Test” butonu CRM’e düşmez (`entry.id=0`). Gerçek IG hesabından DM atın.
-5. Widgetler → Meta Tanılama → **IG DM Graph yetkisi** satırına bakın.
