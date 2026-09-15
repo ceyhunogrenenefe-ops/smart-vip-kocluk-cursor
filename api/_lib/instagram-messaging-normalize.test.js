@@ -81,6 +81,23 @@ describe('instagram messaging normalize (ads + standby)', () => {
       }),
       'facebook'
     );
+    // Instagram ad signal on page recipient → instagram
+    assert.equal(
+      resolveSocialChannelFromWebhook({
+        objectType: 'page',
+        pageId: 'page1',
+        event: {
+          sender: { id: 'u' },
+          recipient: { id: 'page1' },
+          referral: {
+            source: 'ADS',
+            ad_id: '9',
+            ads_context_data: { photo_url: 'https://ig.cdn/x.jpg', post_id: 'ig_post' }
+          }
+        }
+      }),
+      'instagram'
+    );
     assert.equal(
       resolveSocialChannelFromWebhook({
         objectType: 'page',

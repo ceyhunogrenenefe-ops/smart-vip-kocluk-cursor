@@ -156,6 +156,10 @@
     {
       "path": "/api/cron/crm-reply-sla",
       "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/cron/crm-instagram-sync",
+      "schedule": "*/2 * * * *"
     }
   ],
   "redirects": [

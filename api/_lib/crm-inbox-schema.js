@@ -278,7 +278,11 @@ export async function probeFacebookChannelSupport({ force = false } = {}) {
     return facebookChannelCache;
   }
   if (data?.id) {
-    await supabaseAdmin.from('crm_conversations').delete().eq('id', data.id).catch(() => null);
+    try {
+      await supabaseAdmin.from('crm_conversations').delete().eq('id', data.id);
+    } catch {
+      /* probe cleanup best-effort */
+    }
   }
   facebookChannelCache = { ok: true, at: now };
   return facebookChannelCache;
