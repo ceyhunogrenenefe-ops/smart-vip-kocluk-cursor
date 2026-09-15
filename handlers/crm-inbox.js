@@ -27,6 +27,7 @@ import {
 } from '../api/_lib/meta-template-create.js';
 import { diagnoseCrmInbox, ensureCrmInboxSchema, probeFacebookChannelSupport, FACEBOOK_CHANNEL_REPAIR_SQL } from '../api/_lib/crm-inbox-schema.js';
 import { listRecentMetaWebhookLogs } from '../api/_lib/meta-webhook-logs.js';
+import { analyzeInstagramDmDelivery } from '../api/_lib/meta-webhook-ingress-diag.js';
 import { PAGE_WEBHOOK_FIELDS, INSTAGRAM_APP_WEBHOOK_FIELDS } from '../api/_lib/meta-social-inbound.js';
 import { ensureMetaInboundDelivery, publicInboundStatus } from '../api/_lib/meta-inbound-ensure.js';
 import {
@@ -286,6 +287,11 @@ export default async function handler(req, res) {
         igSubscribed && recentWaHits > 0 && recentIgHits === 0 && (!lastIgMs || nowMs - lastIgMs > 6 * 60 * 60 * 1000)
       );
 
+      const igDmDelivery = analyzeInstagramDmDelivery(logs, { nowMs });
+      // Yorumlar geliyor ama gerçek DM POST’u yok → partner/routing boşluğu (kod drop değil)
+      const igDmNotDelivered = Boolean(igDmDelivery?.meta_did_not_deliver);
+
+
       return res.status(200).json({
         data: {
           facebook_connected: Boolean(pub?.ok || social?.page_id),
@@ -317,8 +323,15 @@ export default async function handler(req, res) {
           last_comment_webhook_at: lastComment?.received_at || null,
           recent_whatsapp_webhook_hits_24h: recentWaHits,
           recent_instagram_webhook_hits_24h: recentIgHits,
-          instagram_ads_partner_block: igAdsPartnerBlock,
+          instagram_ads_partner_block: igAdsPartnerBlock || igDmNotDelivered,
+          instagram_dm_delivery: igDmDelivery,
+          instagram_dm_not_delivered: igDmNotDelivered,
+          last_instagram_webhook_event: igDmDelivery?.last_instagram_event || null,
           instagram_ads_direct_steps: [
+            igDmNotDelivered
+              ? 'KANIT: Reels/yorum webhook’ları SmartKocluk’a geliyor; gerçek IG DM POST’u gelmiyor (META_DID_NOT_DELIVER). Kommo hâlâ Instagram DM birincil alıcısı.'
+              : 'Instagram DM webhook’ları SmartKocluk endpoint’ine düşmeli (object=instagram + entry.messaging/standby).',
+
             'Kommo → Ayarlar → Entegrasyonlar → Instagram → Bağlantıyı kaldır (köprü kurmayacağız; Kommo’yu kapatacaksınız).',
             'Meta Business Suite → Ayarlar → Instagram hesapları / Bağlı iş ortakları: Instagram mesaj ortağı olarak yalnız SmartKocluk kalsın.',
             'Instagram uygulaması (profesyonel) → Ayarlar → Mesajlar → “İstekleri ve mesajları yönet” / üçüncü taraf erişiminde Kommo olmasın.',

@@ -13,7 +13,10 @@ Kommo’yu kapatacaksınız; IG reklam mesajları native Meta webhook ile CRM’
 4. CRM → Widgetler → **Hattı bağla** (`ensure_inbound`).
 5. Instagram **Click to Message** reklamından test DM → Inbox `channel=instagram`.
 
-Tanılama: WA hit > 0 ve IG hit = 0 ise kırmızı kutu “Instagram reklam DM partner block” çıkar.
+Tanılama:
+- WA hit > 0 ve IG hit = 0 → kırmızı kutu “Instagram reklam DM partner block”.
+- Yorumlar geliyor ama gerçek DM POST’u yok → amber kutu **META_DID_NOT_DELIVER** (Kommo hâlâ DM alıcısı; kod drop değil).
+- Meta App Dashboard “Send test” → entry.id=0 sentetik; CRM konuşması oluşmaz. Gerçek IG hesabından DM atın.
 
 WhatsApp reklamları ayrı WABA hattından zaten gelir; IG için Meta teslimatının Kommo’dan sökülmesi şart.
 
