@@ -252,7 +252,7 @@
       "destination": "/api/guest-join-preview?code=:code"
     },
     {
-      "source": "/((?!api/|assets/|commerce/|ders-program-planner/|satis\\.html|kullanici\\.html|gizlilik\\.html).*)",
+      "source": "/((?!api/|assets/|commerce/|ders-program-planner/|satis\\.html|kullanici\\.html|gizlilik\\.html|veri-silme\\.html).*)",
       "destination": "/index.html"
     }
   ]
