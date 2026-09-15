@@ -291,6 +291,25 @@ export default async function handler(req, res) {
       // Yorumlar geliyor ama gerçek DM POST’u yok → partner/routing boşluğu (kod drop değil)
       const igDmNotDelivered = Boolean(igDmDelivery?.meta_did_not_deliver);
 
+      // Graph Conversations code=3 → uygulama Advanced Access almamış.
+      // Bu durumda Meta yalnız uygulamada rolü olan hesapların DM’ini teslim eder;
+      // reklam ve yeni kullanıcı DM’leri hiç gelmez. Kommo/routing suçlamadan önce
+      // kanıtı buna göre gösteriyoruz.
+      const igCapability = pub?.ig_dm_capability || social?.ig_dm_capability || null;
+      const advancedAccessMissing =
+        igCapability?.likely_cause === 'missing_advanced_access_or_permission' ||
+        igCapability?.likely_cause === 'token_missing_instagram_manage_messages';
+
+      const advancedAccessSteps = [
+        'KANIT: Graph Conversations API “(#3) Application does not have the capability” döndürüyor — uygulama Instagram DM okuyamıyor.',
+        'Meta App Dashboard → App Review → Permissions and Features → instagram_manage_messages için ADVANCED ACCESS isteyin (Standard Access yetmez).',
+        'Aynı ekranda pages_messaging ve pages_manage_metadata için de Advanced Access isteyin.',
+        'Uygulamayı Development değil LIVE moda alın.',
+        'Onay geldikten sonra CRM → Widgetler → Hattı bağla ile sayfayı yeniden yetkilendirin (token yeni izinleri alsın).',
+        'Doğrulama: /api/cron/crm-instagram-sync artık ok:true dönmeli, sonra reklamdan test DM atın.',
+        'Not: Bu izin verilene kadar yalnız uygulamada rolü olan (admin/test) hesapların DM’i gelir; yorumlar etkilenmez.'
+      ];
+
 
       return res.status(200).json({
         data: {
@@ -327,9 +346,11 @@ export default async function handler(req, res) {
           instagram_dm_delivery: igDmDelivery,
           instagram_dm_not_delivered: igDmNotDelivered,
           last_instagram_webhook_event: igDmDelivery?.last_instagram_event || null,
-          ig_dm_capability: pub?.ig_dm_capability || social?.ig_dm_capability || null,
+          ig_dm_capability: igCapability,
+          instagram_advanced_access_missing: advancedAccessMissing,
+          instagram_dm_blocker: advancedAccessMissing ? 'META_ADVANCED_ACCESS_REQUIRED' : null,
           dm_routing_hint: pub?.dm_routing_hint || social?.dm_routing_hint || pub?.ig_dm_capability?.hint || null,
-          instagram_ads_direct_steps: [
+          instagram_ads_direct_steps: advancedAccessMissing ? advancedAccessSteps : [
             igDmNotDelivered
               ? 'KANIT: Reels/yorum webhook’ları SmartKocluk’a geliyor; gerçek IG DM POST’u gelmiyor (META_DID_NOT_DELIVER). Kommo hâlâ Instagram DM birincil alıcısı.'
               : 'Instagram DM webhook’ları SmartKocluk endpoint’ine düşmeli (object=instagram + entry.messaging/standby).',

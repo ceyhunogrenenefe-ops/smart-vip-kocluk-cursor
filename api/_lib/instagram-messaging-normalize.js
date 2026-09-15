@@ -107,11 +107,52 @@ export function normalizeInstagramMessagingEvent(ev) {
   };
 }
 
-/** entry.messaging + entry.standby (Handover / reklam inbox) */
+/**
+ * Instagram DM’leri her zaman `entry.messaging[]` ile gelmez: Instagram Login
+ * tabanlı aboneliklerde (ve Meta’nın bazı reklam/CTM teslimatlarında) aynı olay
+ * `entry.changes[{ field: 'messages', value: { sender, recipient, message } }]`
+ * biçiminde düşer. Bu biçim daha önce hiçbir yerde okunmuyordu → DM kayboluyordu.
+ *
+ * WhatsApp Cloud payload’u da `field: 'messages'` kullanır ama `value.messages[]`
+ * dizisi taşır; onu burada ayıklayıp WA işleyicisine bırakıyoruz.
+ */
+export function collectChangeMessagingEvents(entry) {
+  const out = [];
+  const MESSAGING_FIELDS = new Set([
+    'messages',
+    'messaging',
+    'message_echoes',
+    'messaging_referral',
+    'messaging_referrals',
+    'messaging_postbacks',
+    'messaging_optins',
+    'standby'
+  ]);
+  for (const change of Array.isArray(entry?.changes) ? entry.changes : []) {
+    const field = String(change?.field || '').toLowerCase();
+    if (!MESSAGING_FIELDS.has(field)) continue;
+    const value = change?.value && typeof change.value === 'object' ? change.value : null;
+    if (!value) continue;
+    // WhatsApp Cloud (value.messages[] + metadata.phone_number_id) → WA işleyicisi
+    if (Array.isArray(value.messages)) continue;
+    if (Array.isArray(value.messaging)) {
+      for (const ev of value.messaging) if (ev && typeof ev === 'object') out.push(ev);
+      continue;
+    }
+    if (Array.isArray(value.standby)) {
+      for (const ev of value.standby) if (ev && typeof ev === 'object') out.push(ev);
+      continue;
+    }
+    if (value.sender || value.message || value.referral || value.postback) out.push(value);
+  }
+  return out;
+}
+
+/** entry.messaging + entry.standby + changes[field=messages] (Handover / reklam inbox) */
 export function collectEntryMessagingEvents(entry) {
   const messaging = Array.isArray(entry?.messaging) ? entry.messaging : [];
   const standby = Array.isArray(entry?.standby) ? entry.standby : [];
-  return [...messaging, ...standby];
+  return [...messaging, ...standby, ...collectChangeMessagingEvents(entry)];
 }
 
 /**

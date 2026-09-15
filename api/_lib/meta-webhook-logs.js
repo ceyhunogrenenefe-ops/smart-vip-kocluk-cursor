@@ -3,6 +3,7 @@
  * Secret/token loglanmaz; yalnızca yapılandırılmış JSON.
  */
 import { supabaseAdmin } from './supabase-admin.js';
+import { collectChangeMessagingEvents } from './instagram-messaging-normalize.js';
 
 const DDL = `
 CREATE TABLE IF NOT EXISTS public.meta_webhook_logs (
@@ -49,7 +50,21 @@ export async function ensureMetaWebhookLogsTable() {
 export function summarizeMetaWebhookPayload(body) {
   const objectType = String(body?.object || '').toLowerCase() || null;
   const entries = Array.isArray(body?.entry) ? body.entry : [];
-  const entry = entries[0] || {};
+  // Gönderen taşıyan entry’yi seç — çok entry’li POST’larda ilki çoğu zaman
+  // okundu/echo olup gerçek DM ikinci entry’de gelir.
+  const entryEvents = (e) => [
+    ...(Array.isArray(e?.messaging) ? e.messaging : []),
+    ...(Array.isArray(e?.standby) ? e.standby : []),
+    ...collectChangeMessagingEvents(e)
+  ];
+  const hasContent = (e) =>
+    entryEvents(e).some((ev) => ev?.sender?.id && (ev.message || ev.referral || ev.postback)) ||
+    (Array.isArray(e?.changes) ? e.changes : []).some((c) => c?.value?.from?.id);
+  const entry =
+    entries.find(hasContent) ||
+    entries.find((e) => entryEvents(e).some((ev) => ev?.sender?.id)) ||
+    entries[0] ||
+    {};
   const pageOrIgId = entry?.id != null ? String(entry.id) : null;
 
   let eventType = null;
@@ -60,7 +75,8 @@ export function summarizeMetaWebhookPayload(body) {
 
   const messaging = [
     ...(Array.isArray(entry?.messaging) ? entry.messaging : []),
-    ...(Array.isArray(entry?.standby) ? entry.standby : [])
+    ...(Array.isArray(entry?.standby) ? entry.standby : []),
+    ...collectChangeMessagingEvents(entry)
   ];
   if (messaging.length) {
     const m = messaging[0] || {};
