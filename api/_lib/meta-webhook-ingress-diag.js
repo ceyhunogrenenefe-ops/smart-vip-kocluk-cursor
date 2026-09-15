@@ -5,13 +5,20 @@
 
 export const DROP = {
   UNSUPPORTED_OBJECT: 'DROP_UNSUPPORTED_OBJECT',
+  UNKNOWN_PAGE: 'DROP_UNKNOWN_PAGE',
+  UNKNOWN_IG: 'DROP_UNKNOWN_IG',
   SYNTHETIC_META_TEST: 'DROP_SYNTHETIC_META_TEST',
   NO_MESSAGING: 'DROP_NO_MESSAGING',
   ECHO: 'DROP_ECHO',
+  DUPLICATE: 'DROP_DUPLICATE',
+  NO_TENANT: 'DROP_NO_TENANT',
+  UNKNOWN_SENDER: 'DROP_UNKNOWN_SENDER',
   NO_SENDER: 'DROP_NO_SENDER',
   NO_INBOUND_CONTENT: 'DROP_NO_INBOUND_CONTENT',
   HANDOVER_ONLY: 'DROP_HANDOVER_ONLY',
-  READ_ONLY: 'DROP_READ_ONLY'
+  READ_ONLY: 'DROP_READ_ONLY',
+  ROUTING: 'DROP_ROUTING',
+  INVALID_SIGNATURE: 'DROP_INVALID_SIGNATURE'
 };
 
 export const ACCEPT = {
@@ -238,17 +245,28 @@ export function analyzeInstagramDmDelivery(logs = [], { nowMs = Date.now(), wind
     ig_real_dm_hits: realDmRows.length,
     ig_synthetic_hits: syntheticRows.length,
     last_instagram_event: lastIgAny
-      ? {
-          received_at: lastIgAny.received_at || null,
-          object: lastIgAny.object_type || lastIgAny.platform || null,
-          event_type: lastIgAny.event_type || lastIgAny.field || null,
-          entry_id: lastIgAny.instagram_account_id || lastIgAny.page_id || null,
-          sender_id: lastIgAny.sender_id || lastIgAny.sample?.sender_id || null,
-          message_id: lastIgAny.message_id || lastIgAny.sample?.message_id || null,
-          processing_status: lastIgAny.processing_status || null,
-          drop_reason: lastIgAny.processing_error || null,
-          accepted: !String(lastIgAny.processing_error || '').startsWith('DROP_')
-        }
+      ? (() => {
+          const dropReason = lastIgAny.processing_error || lastIgAny.sample?.drop_reason || null;
+          const evt = String(lastIgAny.event_type || lastIgAny.field || '').toLowerCase();
+          const channel =
+            /comment/i.test(evt) ? 'instagram_comment'
+            : String(lastIgAny.instagram_account_id || '') === '0' ? 'instagram_synthetic'
+            : 'instagram_dm';
+          const dropped = Boolean(dropReason && String(dropReason).startsWith('DROP_'));
+          return {
+            received_at: lastIgAny.received_at || null,
+            object: lastIgAny.object_type || lastIgAny.platform || null,
+            entry_id: lastIgAny.instagram_account_id || lastIgAny.page_id || null,
+            event_type: lastIgAny.event_type || lastIgAny.field || null,
+            channel,
+            accepted: !dropped,
+            dropped,
+            drop_reason: dropReason,
+            sender_id: lastIgAny.sender_id || lastIgAny.sample?.sender_id || null,
+            message_id: lastIgAny.message_id || lastIgAny.sample?.message_id || null,
+            processing_status: lastIgAny.processing_status || null
+          };
+        })()
       : null,
     last_instagram_comment_at: lastComment?.received_at || null,
     last_instagram_real_dm_at: lastRealDm?.received_at || null,

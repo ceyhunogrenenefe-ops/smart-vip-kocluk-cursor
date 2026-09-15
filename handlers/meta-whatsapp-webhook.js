@@ -349,8 +349,8 @@ export default async function handler(req, res) {
     // Bilinmeyen object → raw log + ignore_reason (sessiz drop yok)
     if (objectType && objectType !== 'instagram' && objectType !== 'page' && objectType !== 'whatsapp_business_account') {
       webhookLogStatus = 'ignored';
-      webhookLogError = `ignore_reason:unknown_object:${objectType}`;
-      console.info('[meta-webhook] ignored unknown object', { object: objectType, entries: entries.length });
+      webhookLogError = `DROP_UNSUPPORTED_OBJECT:${objectType}`;
+      console.info('[meta-webhook] DROP_UNSUPPORTED_OBJECT', { object: objectType, entries: entries.length });
       await finalizeMetaWebhookLog(webhookLog?.id, {
         status: webhookLogStatus,
         error: webhookLogError
@@ -358,7 +358,7 @@ export default async function handler(req, res) {
       return res.status(200).json({
         ok: true,
         ignored: true,
-        ignore_reason: `unknown_object:${objectType}`,
+        ignore_reason: `DROP_UNSUPPORTED_OBJECT:${objectType}`,
         received: getIstanbulDateString(),
         webhook_log_id: webhookLog?.id || null
       });
@@ -371,7 +371,19 @@ export default async function handler(req, res) {
         if (messaging.length) {
           inboundMessageCount += messaging.filter((m) => {
             const n = normalizeInstagramMessagingEvent(m);
-            return n.hasInboundContent && !n.isEcho;
+            if (n.isEcho) {
+              console.info('[meta-webhook] DROP_ECHO', { mid_suffix: n.messageId ? String(n.messageId).slice(-8) : null });
+              return false;
+            }
+            if (!n.senderId) {
+              console.info('[meta-webhook] DROP_UNKNOWN_SENDER', { has_text: Boolean(n.text) });
+              return false;
+            }
+            if (!n.hasInboundContent) {
+              console.info('[meta-webhook] DROP_NO_INBOUND_CONTENT', { sender_suffix: String(n.senderId).slice(-6) });
+              return false;
+            }
+            return true;
           }).length;
           statusOnly = false;
           const r = await ingestInstagramMessagingEvents(messaging);
@@ -456,6 +468,13 @@ export default async function handler(req, res) {
           }
         }
       }
+      if (!webhookLogError && ingressDiag?.drop_reason) {
+        webhookLogError = ingressDiag.drop_reason;
+      }
+      if (!webhookLogError && ingressDiag?.verdict && String(ingressDiag.verdict).startsWith('DROP_')) {
+        webhookLogStatus = 'ignored';
+        webhookLogError = ingressDiag.verdict;
+      }
       await finalizeMetaWebhookLog(webhookLog?.id, { status: webhookLogStatus, error: webhookLogError }).catch(() => null);
       return res.status(200).json({
         ok: true,
@@ -481,7 +500,19 @@ export default async function handler(req, res) {
       if (messaging.length && (objectType === 'page' || objectType === 'instagram')) {
         inboundMessageCount += messaging.filter((m) => {
           const n = normalizeInstagramMessagingEvent(m);
-          return n.hasInboundContent && !n.isEcho;
+          if (n.isEcho) {
+            console.info('[meta-webhook] DROP_ECHO', { mid_suffix: n.messageId ? String(n.messageId).slice(-8) : null, via: 'page' });
+            return false;
+          }
+          if (!n.senderId) {
+            console.info('[meta-webhook] DROP_UNKNOWN_SENDER', { has_text: Boolean(n.text), via: 'page' });
+            return false;
+          }
+          if (!n.hasInboundContent) {
+            console.info('[meta-webhook] DROP_NO_INBOUND_CONTENT', { sender_suffix: String(n.senderId).slice(-6), via: 'page' });
+            return false;
+          }
+          return true;
         }).length;
         statusOnly = false;
         const igBusinessId = String(

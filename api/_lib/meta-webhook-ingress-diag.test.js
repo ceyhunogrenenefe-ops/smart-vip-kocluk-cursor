@@ -86,5 +86,8 @@ const gap = analyzeInstagramDmDelivery([
 ]);
 assert.equal(gap.verdict, 'META_DID_NOT_DELIVER');
 assert.equal(gap.meta_did_not_deliver, true);
+assert.equal(gap.last_instagram_event.channel, 'instagram_comment');
+assert.equal(gap.last_instagram_event.accepted, true);
+assert.equal(gap.last_instagram_event.dropped, false);
 
 console.log('meta-webhook-ingress-diag tests ok');
