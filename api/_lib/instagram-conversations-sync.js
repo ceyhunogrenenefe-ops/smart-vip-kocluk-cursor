@@ -27,6 +27,46 @@ function graphErr(json, fallback) {
   return [err.message || fallback, err.code != null ? `code=${err.code}` : null].filter(Boolean).join(' | ');
 }
 
+/**
+ * Graph `/conversations` hatasını eyleme dönüşür bir engele çevirir.
+ * `(#3) Application does not have the capability` = uygulama Advanced Access
+ * almamış; Meta o zaman yalnız uygulamada rolü olan hesapların DM’ini teslim eder.
+ * Gerçek müşteri ve reklam DM’leri hiç gelmez — yorumlar gelmeye devam eder.
+ * Bu kod tarafında düzeltilemez; Meta App Dashboard’da izin yükseltmesi ister.
+ */
+export function classifyGraphConversationsError(errText) {
+  const s = String(errText || '');
+  const isCapability =
+    /\|\s*code=3\b/.test(s) ||
+    /does not have the capability/i.test(s) ||
+    /\(#3\)/.test(s);
+  const isPermission =
+    /\|\s*code=(10|200|299)\b/.test(s) ||
+    /permission|not been granted|advanced access/i.test(s);
+
+  if (isCapability || isPermission) {
+    return {
+      blocker: 'META_ADVANCED_ACCESS_REQUIRED',
+      hint:
+        'Meta uygulaması Instagram DM okuma yetkisine sahip değil (Graph code=3). ' +
+        'Bu yüzden reklam DM’leri ve yeni kullanıcı DM’leri CRM’e hiç düşmüyor; yorumlar gelmeye devam ediyor. ' +
+        'Kod tarafında çözülemez — Meta App Dashboard’da Advanced Access verilmeli.',
+      steps: [
+        'Meta App Dashboard → Uygulama → App Review → Permissions and Features',
+        'instagram_manage_messages için Advanced Access isteyin (Standard Access yetmez)',
+        'pages_messaging + pages_manage_metadata için de Advanced Access isteyin',
+        'Uygulamayı Development değil Live moda alın',
+        'Onaydan sonra Widgetler → Hattı bağla ile sayfayı yeniden yetkilendirin (token yeni scope’ları alsın)'
+      ]
+    };
+  }
+  return {
+    blocker: null,
+    hint: 'Graph conversations okunamadı. pages_messaging + instagram_manage_messages ve Page–IG bağlantısı gerekir.',
+    steps: null
+  };
+}
+
 /** Graph conversation message → webhook-benzeri messaging event */
 export function graphMessageToMessagingEvent(msg, { igBusinessId, pageId } = {}) {
   if (!msg || typeof msg !== 'object') return null;
@@ -127,6 +167,8 @@ export async function syncInstagramConversationsFromGraph(opts = {}) {
     thread_errors: 0,
     crm: null,
     error: null,
+    blocker: null,
+    blocker_steps: null,
     hint: null
   };
 
@@ -156,8 +198,10 @@ export async function syncInstagramConversationsFromGraph(opts = {}) {
 
   if (!ids.length && listErr) {
     out.error = listErr;
-    out.hint =
-      'Graph conversations okunamadı. pages_messaging + instagram_manage_messages ve Page–IG bağlantısı gerekir.';
+    const diag = classifyGraphConversationsError(listErr);
+    out.blocker = diag.blocker;
+    out.blocker_steps = diag.steps;
+    out.hint = diag.hint;
     return out;
   }
 

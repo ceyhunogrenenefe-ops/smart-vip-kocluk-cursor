@@ -2,6 +2,7 @@
  * Meta webhook ingress diagnostics — token/secret/message body asla loglanmaz.
  * Instagram DM vs comment vs Meta Dashboard “Test” ayrımı + drop reason codes.
  */
+import { collectChangeMessagingEvents } from './instagram-messaging-normalize.js';
 
 export const DROP = {
   UNSUPPORTED_OBJECT: 'DROP_UNSUPPORTED_OBJECT',
@@ -47,9 +48,50 @@ function safeHeader(req, name) {
 }
 
 function firstMessagingEvent(entry) {
-  const messaging = Array.isArray(entry?.messaging) ? entry.messaging : [];
+  const messaging = [
+    ...(Array.isArray(entry?.messaging) ? entry.messaging : []),
+    ...collectChangeMessagingEvents(entry)
+  ];
   const standby = Array.isArray(entry?.standby) ? entry.standby : [];
-  return { messaging, standby, first: messaging[0] || standby[0] || null, fromStandby: !messaging[0] && Boolean(standby[0]) };
+  return {
+    messaging,
+    standby,
+    first: messaging[0] || standby[0] || null,
+    fromStandby: !messaging[0] && Boolean(standby[0])
+  };
+}
+
+/**
+ * Entry’nin taşıdığı sinyal gücü.
+ * 2 = gerçek gelen içerik (mesaj/ek/reklam referralı/yorum)
+ * 1 = gönderen var ama içerik yok (okundu, echo, handover)
+ * 0 = boş
+ * Çok entry’li POST’ta okundu bildirimi gerçek DM’i gölgelemesin diye gerekli.
+ */
+function entrySignalStrength(entry) {
+  for (const change of Array.isArray(entry?.changes) ? entry.changes : []) {
+    const f = String(change?.field || '').toLowerCase();
+    if (f === 'comments' || f === 'live_comments') return 2;
+    if (f === 'feed' && String(change?.value?.item || '') === 'comment') return 2;
+  }
+  const { messaging, standby } = firstMessagingEvent(entry);
+  let best = 0;
+  for (const ev of [...messaging, ...standby]) {
+    if (!ev?.sender?.id) continue;
+    if (best < 1) best = 1;
+    if (ev?.message?.is_echo) continue;
+    const hasContent = Boolean(
+      (ev?.message?.text != null && String(ev.message.text).length > 0) ||
+        (Array.isArray(ev?.message?.attachments) && ev.message.attachments.length) ||
+        ev?.message?.attachment ||
+        ev?.message?.sticker_id ||
+        ev?.referral ||
+        ev?.message?.referral ||
+        ev?.postback
+    );
+    if (hasContent) return 2;
+  }
+  return best;
 }
 
 /**
@@ -59,7 +101,13 @@ export function classifyMetaWebhookIngress(body, req = null) {
   const receivedAt = new Date().toISOString();
   const objectType = String(body?.object || '').toLowerCase() || null;
   const entries = Array.isArray(body?.entry) ? body.entry : [];
-  const entry = entries[0] || {};
+  // Meta tek POST’ta birden çok entry yollayabilir (ilki okundu bilgisi, ikincisi
+  // gerçek DM gibi). Yalnız entries[0]’a bakmak gerçek mesajı görünmez kılıyordu.
+  const entry =
+    entries.find((e) => entrySignalStrength(e) === 2) ||
+    entries.find((e) => entrySignalStrength(e) === 1) ||
+    entries[0] ||
+    {};
   const entryId = entry?.id != null ? String(entry.id) : null;
 
   const { messaging, standby, first, fromStandby } = firstMessagingEvent(entry);
@@ -95,10 +143,17 @@ export function classifyMetaWebhookIngress(body, req = null) {
   const commentSender =
     commentChange?.value?.from?.id != null ? String(commentChange.value.from.id) : null;
 
+  // Meta App Dashboard “Send test” payload’u entry.id=0 ve gönderensiz gelir.
+  // Gönderen VEYA message mid varsa olay gerçektir — `changes[field=messages]`
+  // biçimindeki gerçek IG DM’leri sentetik sayıp düşürmeyelim.
   const isSynthetic =
     entryId === '0' ||
     entryId === '000000000000000' ||
-    (objectType === 'instagram' && !senderId && !commentSender && (messaging.length > 0 || changeFields.includes('messages')));
+    (objectType === 'instagram' &&
+      !senderId &&
+      !commentSender &&
+      !messageMid &&
+      (messaging.length > 0 || changeFields.includes('messages')));
 
   /** @type {string} */
   let channelClass = 'unknown';

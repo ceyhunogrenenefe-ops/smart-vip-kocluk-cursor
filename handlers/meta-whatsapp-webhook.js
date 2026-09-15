@@ -87,11 +87,8 @@ async function logWebhookHit(body) {
           };
         }
       }
-      // Instagram-style messaging[] + standby (reklam / handover)
-      const messaging = [
-        ...(Array.isArray(entry?.messaging) ? entry.messaging : []),
-        ...(Array.isArray(entry?.standby) ? entry.standby : [])
-      ];
+      // Instagram-style messaging[] + standby + changes[field=messages] (reklam / handover)
+      const messaging = collectEntryMessagingEvents(entry);
       if (messaging.length) {
         messageCount += messaging.filter((m) => {
           if (m?.message?.is_echo) return false;
