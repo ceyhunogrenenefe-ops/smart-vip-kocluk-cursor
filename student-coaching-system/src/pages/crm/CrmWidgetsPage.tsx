@@ -474,6 +474,36 @@ export default function CrmWidgetsPage() {
                 </pre>
               </div>
             ) : null}
+            {diag.instagram_ads_partner_block ||
+            (Number(diag.recent_whatsapp_webhook_hits_24h || 0) > 0 &&
+              Number(diag.recent_instagram_webhook_hits_24h || 0) === 0 &&
+              diag.instagram_webhook_subscribed) ? (
+              <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-3 text-sm text-rose-950">
+                <p className="font-semibold">Instagram reklam DM’leri CRM’e gelmiyor — Kommo köprüsü yok, doğrudan Meta</p>
+                <p className="mt-1 text-xs text-rose-900/90">
+                  WhatsApp webhook’ları geliyor, Instagram aboneliği aktif görünüyor ama son 24s IG hit yok. Meta IG
+                  mesajlarını hâlâ Kommo’ya veriyor. Köprü kurmayacağız — Kommo Instagram bağlantısını sökün, CRM
+                  tek alıcı olsun.
+                </p>
+                <ol className="mt-2 list-decimal space-y-1 pl-4 text-xs text-rose-950">
+                  {(Array.isArray(diag.instagram_ads_direct_steps)
+                    ? (diag.instagram_ads_direct_steps as string[])
+                    : [
+                        'Kommo → Entegrasyonlar → Instagram → Bağlantıyı kaldır',
+                        'Meta Business Suite → Instagram bağlı iş ortaklarından Kommo’yu çıkarın',
+                        'CRM Widgetler → Hattı bağla',
+                        'Instagram reklamından test DM gönderin'
+                      ]
+                  ).map((step) => (
+                    <li key={step}>{step}</li>
+                  ))}
+                </ol>
+                <p className="mt-2 text-[11px] text-rose-800">
+                  24s WA hit: {String(diag.recent_whatsapp_webhook_hits_24h ?? '—')} · IG hit:{' '}
+                  {String(diag.recent_instagram_webhook_hits_24h ?? '—')}
+                </p>
+              </div>
+            ) : null}
             <div className="rounded-xl bg-slate-50 p-3 ring-1 ring-slate-100">
               <p className="text-xs font-semibold text-slate-700">Beklenen abonelik alanları</p>
               <p className="mt-1 text-[12px] text-slate-600">

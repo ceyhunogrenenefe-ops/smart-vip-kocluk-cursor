@@ -266,6 +266,26 @@ export default async function handler(req, res) {
           social?.app_subscriptions?.instagram?.subscribed ||
           (igFields && igFields.includes('messages'))
       );
+
+      const nowMs = Date.now();
+      const dayAgo = nowMs - 24 * 60 * 60 * 1000;
+      const recentIgHits = logs.filter((l) => {
+        const plat = String(l.platform || l.object_type || '').toLowerCase();
+        const at = l.received_at ? new Date(l.received_at).getTime() : 0;
+        return at >= dayAgo && (plat.includes('instagram') || plat === 'instagram');
+      }).length;
+      const recentWaHits = logs.filter((l) => {
+        const plat = String(l.platform || l.object_type || '').toLowerCase();
+        const at = l.received_at ? new Date(l.received_at).getTime() : 0;
+        return at >= dayAgo && plat.includes('whatsapp');
+      }).length;
+      const lastIgAt = lastByChannel('instagram');
+      const lastIgMs = lastIgAt ? new Date(lastIgAt).getTime() : 0;
+      // Webhook abone + WA geliyor ama IG hit/mesaj yok → Meta IG’yi başka partnere (Kommo) veriyor
+      const igAdsPartnerBlock = Boolean(
+        igSubscribed && recentWaHits > 0 && recentIgHits === 0 && (!lastIgMs || nowMs - lastIgMs > 6 * 60 * 60 * 1000)
+      );
+
       return res.status(200).json({
         data: {
           facebook_connected: Boolean(pub?.ok || social?.page_id),
@@ -293,8 +313,19 @@ export default async function handler(req, res) {
           facebook_channel_repair_sql: fbChannel?.ok ? null : FACEBOOK_CHANNEL_REPAIR_SQL,
           last_webhook_at: logs[0]?.received_at || diag?.recent_webhook_hits?.[0]?.received_at || null,
           last_facebook_message_at: lastByChannel('facebook'),
-          last_instagram_message_at: lastByChannel('instagram'),
+          last_instagram_message_at: lastIgAt,
           last_comment_webhook_at: lastComment?.received_at || null,
+          recent_whatsapp_webhook_hits_24h: recentWaHits,
+          recent_instagram_webhook_hits_24h: recentIgHits,
+          instagram_ads_partner_block: igAdsPartnerBlock,
+          instagram_ads_direct_steps: [
+            'Kommo → Ayarlar → Entegrasyonlar → Instagram → Bağlantıyı kaldır (köprü kurmayacağız; Kommo’yu kapatacaksınız).',
+            'Meta Business Suite → Ayarlar → Instagram hesapları / Bağlı iş ortakları: Instagram mesaj ortağı olarak yalnız SmartKocluk kalsın.',
+            'Instagram uygulaması (profesyonel) → Ayarlar → Mesajlar → “İstekleri ve mesajları yönet” / üçüncü taraf erişiminde Kommo olmasın.',
+            'CRM → Widgetler → Hattı bağla (ensure_inbound) — IG object=instagram messages + messaging_referral yenilenir.',
+            'Instagram reklamından (Click to Message) yeni bir test DM gönderin → CRM Inbox’ta channel=instagram görünmeli.',
+            'Not: WhatsApp reklamları WABA webhook ile zaten geliyor; IG için Meta teslimatı Kommo’dan sökülmeli.'
+          ],
           last_error:
             pub?.app_instagram_error ||
             social?.error ||

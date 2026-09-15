@@ -498,7 +498,7 @@ export async function ensureMetaSocialInbound({ apply = false } = {}) {
       'Sayfa abone ama Instagram app webhook (object=instagram) başarısız. Reklam / bazı DM’ler Meta’dan gelmez — Hattı bağla tekrar veya App Dashboard → Instagram → Webhooks.';
   } else {
     out.hint = bound
-      ? `Facebook/Instagram DM webhook ${PRODUCTION_WEBHOOK_URL} — sayfa ${out.page_name || pid} mesajlara abone.`
+      ? `Facebook/Instagram DM webhook ${PRODUCTION_WEBHOOK_URL} — sayfa ${out.page_name || pid} mesajlara abone. IG reklam DM gelmiyorsa Kommo Instagram entegrasyonunu kapatın (köprü yok; Meta doğrudan CRM’e göndermeli).`
       : 'Sayfa messages alanına abone değil. Hattı bağla ile subscribed_apps çalışır; App Dashboard’da Instagram + Messenger webhook alanları da işaretli olmalı.';
   }
   if (!out.ok && !out.error) out.error = 'not_bound_yet';
