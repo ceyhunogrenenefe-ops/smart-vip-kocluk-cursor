@@ -477,7 +477,29 @@ export default function CrmWidgetsPage() {
               </div>
             ) : null}
             
-            {diag.instagram_dm_not_delivered ||
+            
+            {diag.ig_dm_capability ? (
+              <div className={`rounded-xl border px-3 py-3 text-sm ${
+                (diag.ig_dm_capability as { ok?: boolean }).ok
+                  ? 'border-amber-300 bg-amber-50 text-amber-950'
+                  : 'border-rose-300 bg-rose-50 text-rose-950'
+              }`}>
+                <p className="font-semibold">
+                  IG DM Graph yetkisi:{' '}
+                  {(diag.ig_dm_capability as { ok?: boolean }).ok ? 'Conversations API OK' : 'Conversations API RED'}
+                </p>
+                <p className="mt-1 text-xs opacity-90">
+                  Neden: {String((diag.ig_dm_capability as { likely_cause?: string }).likely_cause || '—')}
+                </p>
+                <p className="mt-1 text-xs opacity-90">
+                  {String((diag.ig_dm_capability as { hint?: string }).hint || diag.dm_routing_hint || '')}
+                </p>
+                <p className="mt-2 text-[11px] opacity-80">
+                  scopes messages={String((diag.ig_dm_capability as { has_instagram_manage_messages_scope?: boolean }).has_instagram_manage_messages_scope)} · pages_messaging={String((diag.ig_dm_capability as { has_pages_messaging_scope?: boolean }).has_pages_messaging_scope)} · pageConv={String((diag.ig_dm_capability as { page_conversations_ok?: boolean }).page_conversations_ok)} · igConv={String((diag.ig_dm_capability as { ig_conversations_ok?: boolean }).ig_conversations_ok)}
+                </p>
+              </div>
+            ) : null}
+{diag.instagram_dm_not_delivered ||
             (diag.instagram_dm_delivery as { verdict?: string } | undefined)?.verdict === 'META_DID_NOT_DELIVER' ? (
               <div className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-3 text-sm text-amber-950">
                 <p className="font-semibold">Instagram DM endpoint’e POST edilmiyor (META_DID_NOT_DELIVER)</p>

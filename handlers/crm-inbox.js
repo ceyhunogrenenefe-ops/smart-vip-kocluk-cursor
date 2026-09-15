@@ -327,6 +327,8 @@ export default async function handler(req, res) {
           instagram_dm_delivery: igDmDelivery,
           instagram_dm_not_delivered: igDmNotDelivered,
           last_instagram_webhook_event: igDmDelivery?.last_instagram_event || null,
+          ig_dm_capability: pub?.ig_dm_capability || social?.ig_dm_capability || null,
+          dm_routing_hint: pub?.dm_routing_hint || social?.dm_routing_hint || pub?.ig_dm_capability?.hint || null,
           instagram_ads_direct_steps: [
             igDmNotDelivered
               ? 'KANIT: Reels/yorum webhook’ları SmartKocluk’a geliyor; gerçek IG DM POST’u gelmiyor (META_DID_NOT_DELIVER). Kommo hâlâ Instagram DM birincil alıcısı.'
