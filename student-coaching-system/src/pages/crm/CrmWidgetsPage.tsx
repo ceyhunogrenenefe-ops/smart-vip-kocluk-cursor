@@ -503,6 +503,29 @@ export default function CrmWidgetsPage() {
                 </p>
               </div>
             ) : null}
+
+            {diag.last_instagram_webhook_event ? (
+              <div className="rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-800">
+                <p className="font-semibold text-slate-900">Son IG webhook event (kanıt)</p>
+                <dl className="mt-2 grid gap-1 text-xs sm:grid-cols-2">
+                  {[
+                    ['received_at', (diag.last_instagram_webhook_event as { received_at?: string }).received_at],
+                    ['object', (diag.last_instagram_webhook_event as { object?: string }).object],
+                    ['entry_id', (diag.last_instagram_webhook_event as { entry_id?: string }).entry_id],
+                    ['event_type', (diag.last_instagram_webhook_event as { event_type?: string }).event_type],
+                    ['channel', (diag.last_instagram_webhook_event as { channel?: string }).channel],
+                    ['accepted', String((diag.last_instagram_webhook_event as { accepted?: boolean }).accepted)],
+                    ['dropped', String((diag.last_instagram_webhook_event as { dropped?: boolean }).dropped)],
+                    ['drop_reason', (diag.last_instagram_webhook_event as { drop_reason?: string }).drop_reason]
+                  ].map(([k, v]) => (
+                    <div key={String(k)} className="flex gap-2">
+                      <dt className="w-28 shrink-0 font-medium text-slate-500">{k}</dt>
+                      <dd className="break-all font-mono text-slate-900">{String(v || '—')}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </div>
+            ) : null}
 {diag.instagram_ads_partner_block ||
             (Number(diag.recent_whatsapp_webhook_hits_24h || 0) > 0 &&
               Number(diag.recent_instagram_webhook_hits_24h || 0) === 0 &&
