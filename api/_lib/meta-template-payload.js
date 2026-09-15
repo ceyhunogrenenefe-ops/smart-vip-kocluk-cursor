@@ -13,6 +13,10 @@ const EXAMPLE_BY_PARAM = {
   il: 'Istanbul',
   siparis_notu: 'Kapi sifresi 12',
   ucret_durumu: '-',
+  parent_name: 'Ayse Yilmaz',
+  student_name: 'Safiye Yilmaz',
+  teacher_name: 'Mehmet Demir',
+  review_link: 'https://www.dersonlinevipkocluk.com/review/public?token=ornek',
 };
 
 /** Gövdedeki {{named_param}} sırası — yalnızca küçük harf / alt çizgi. */
