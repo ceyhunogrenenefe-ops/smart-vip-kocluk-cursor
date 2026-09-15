@@ -1,0 +1,22 @@
+import { authorizeVercelOrCronSecret, rejectUnauthorizedCron } from '../api/_lib/cron-auth.js';
+import { runCrmReplySlaJob } from '../api/_lib/crm-live-ops.js';
+import { recordCronRun } from '../api/_lib/cron-run-log.js';
+
+export default async function handler(req, res) {
+  if (req.method !== 'GET' && req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
+  const auth = authorizeVercelOrCronSecret(req);
+  if (rejectUnauthorizedCron(res, auth)) return;
+
+  try {
+    const result = await runCrmReplySlaJob({ triggeredBy: 'crm-reply-sla' });
+    await recordCronRun({ jobKey: 'crm_reply_sla', ok: true, detail: result }).catch(() => {});
+    return res.status(200).json(result);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error('[cron-crm-reply-sla] fatal', msg);
+    await recordCronRun({ jobKey: 'crm_reply_sla', ok: false, detail: { error: msg } }).catch(() => {});
+    return res.status(500).json({ ok: false, error: msg });
+  }
+}

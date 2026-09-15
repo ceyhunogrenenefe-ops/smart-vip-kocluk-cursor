@@ -154,6 +154,10 @@
       "schedule": "* * * * *"
     },
     {
+      "path": "/api/cron/crm-reply-sla",
+      "schedule": "* * * * *"
+    },
+    {
       "path": "/api/cron/teacher-review-invites",
       "schedule": "*/5 * * * *"
     }
