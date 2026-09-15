@@ -158,6 +158,10 @@
       "schedule": "* * * * *"
     },
     {
+      "path": "/api/cron/crm-instagram-sync",
+      "schedule": "*/2 * * * *"
+    },
+    {
       "path": "/api/cron/teacher-review-invites",
       "schedule": "*/5 * * * *"
     }

@@ -139,7 +139,29 @@ export function resolveSocialChannelFromWebhook({
   const recipientId = String(event?.recipient?.id || '').trim();
 
   if (igBiz && recipientId && recipientId === igBiz) return 'instagram';
-  if (page && recipientId && recipientId === page) return 'facebook';
+  if (page && recipientId && recipientId === page) {
+    // Nadir: Instagram reklam DM’i object=page + recipient=page_id ile gelir;
+    // referral.ads_context_data.photo_url / post_id IG sinyali ise instagram say.
+    const ref = event?.referral || event?.message?.referral || null;
+    const ctx = ref?.ads_context_data || ref?.ads_context || null;
+    const igAdSignal = Boolean(
+      ctx &&
+        (ctx.photo_url ||
+          ctx.video_url ||
+          ctx.post_id ||
+          String(ctx.product || '')
+            .toLowerCase()
+            .includes('instagram') ||
+          String(ref?.type || '')
+            .toUpperCase()
+            .includes('IG'))
+    );
+    if (igAdSignal) return 'instagram';
+    return 'facebook';
+  }
+
+  // recipient IG id’ye benziyor / bilinen page değil → Instagram (reklam CTM)
+  if (recipientId && page && recipientId !== page) return 'instagram';
 
   // recipient bilinmiyor: page object varsayılanı Messenger
   return 'facebook';

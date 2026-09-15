@@ -126,7 +126,7 @@ export function describeSocialTokenEnv() {
   };
 }
 
-function igBusinessIdEnv() {
+export function igBusinessIdEnv() {
   const raw = String(
     process.env.META_IG_BUSINESS_ID || process.env.INSTAGRAM_BUSINESS_ACCOUNT_ID || ''
   ).trim();
@@ -404,7 +404,17 @@ export async function ensureMetaSocialInbound({ apply = false } = {}) {
   if (subGet.ok) {
     const rows = Array.isArray(subGet.json?.data) ? subGet.json.data : [];
     out.subscribed_fields = rows.flatMap((r) => r.subscribed_fields || []);
-    out.steps.push({ step: 'page_subscribed_apps', ok: true, count: rows.length });
+    out.page_subscribed_apps = rows.map((r) => ({
+      id: r?.id || null,
+      name: r?.name || null,
+      subscribed_fields: r?.subscribed_fields || []
+    }));
+    out.steps.push({
+      step: 'page_subscribed_apps',
+      ok: true,
+      count: rows.length,
+      apps: out.page_subscribed_apps
+    });
   } else {
     out.steps.push({
       step: 'page_subscribed_apps',
