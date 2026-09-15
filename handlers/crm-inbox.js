@@ -29,6 +29,7 @@ import { diagnoseCrmInbox, ensureCrmInboxSchema, probeFacebookChannelSupport, FA
 import { listRecentMetaWebhookLogs } from '../api/_lib/meta-webhook-logs.js';
 import { analyzeInstagramDmDelivery } from '../api/_lib/meta-webhook-ingress-diag.js';
 import { PAGE_WEBHOOK_FIELDS, INSTAGRAM_APP_WEBHOOK_FIELDS } from '../api/_lib/meta-social-inbound.js';
+import { buildMetaWebhookSetupChecklist } from '../api/_lib/meta-webhook-setup-checklist.js';
 import { ensureMetaInboundDelivery, publicInboundStatus } from '../api/_lib/meta-inbound-ensure.js';
 import {
   bindMetaSocialFromPageToken,
@@ -291,6 +292,31 @@ export default async function handler(req, res) {
       // Yorumlar geliyor ama gerçek DM POST’u yok → partner/routing boşluğu (kod drop değil)
       const igDmNotDelivered = Boolean(igDmDelivery?.meta_did_not_deliver);
 
+      const metaSetup =
+        pub?.meta_webhook_setup ||
+        social?.meta_webhook_setup ||
+        buildMetaWebhookSetupChecklist({
+          verifyTokenPresent: Boolean(
+            process.env.META_WEBHOOK_VERIFY_TOKEN ||
+              process.env.META_VERIFY_TOKEN ||
+              process.env.META_WHATSAPP_WEBHOOK_VERIFY_TOKEN
+          ),
+          endpointReachable: true,
+          appInstagramSubscribed: igSubscribed,
+          appPageSubscribed: Boolean(pub?.app_page_subscribed || social?.app_subscriptions?.page?.subscribed),
+          pageSubscribedAppsMessages: Boolean(
+            Array.isArray(social?.subscribed_fields)
+              ? social.subscribed_fields.includes('messages')
+              : pub?.ok
+          ),
+          igAccountSubscribedApps: Boolean(pub?.ig_account_subscribed || social?.ig_account_subscribed),
+          igDmLikelyCause: pub?.ig_dm_capability?.likely_cause || social?.ig_dm_capability?.likely_cause || null,
+          igDmCapabilityOk: Boolean(pub?.ig_dm_capability?.ok || social?.ig_dm_capability?.ok),
+          hasInstagramManageMessagesScope:
+            pub?.ig_dm_capability?.has_instagram_manage_messages_scope ??
+            social?.ig_dm_capability?.has_instagram_manage_messages_scope,
+          appInstagramFields: igFields || INSTAGRAM_APP_WEBHOOK_FIELDS
+        });
 
       return res.status(200).json({
         data: {
@@ -329,17 +355,18 @@ export default async function handler(req, res) {
           last_instagram_webhook_event: igDmDelivery?.last_instagram_event || null,
           ig_dm_capability: pub?.ig_dm_capability || social?.ig_dm_capability || null,
           dm_routing_hint: pub?.dm_routing_hint || social?.dm_routing_hint || pub?.ig_dm_capability?.hint || null,
+          meta_webhook_setup: metaSetup,
+          ig_account_subscribed: Boolean(pub?.ig_account_subscribed || social?.ig_account_subscribed),
           instagram_ads_direct_steps: [
             igDmNotDelivered
-              ? 'KANIT: Reels/yorum webhook’ları SmartKocluk’a geliyor; gerçek IG DM POST’u gelmiyor (META_DID_NOT_DELIVER). Kommo hâlâ Instagram DM birincil alıcısı.'
+              ? 'KANIT: Reels/yorum webhook’ları geliyor; gerçek IG DM POST’u yok (META_DID_NOT_DELIVER). Meta doc: App Live + Advanced Access olmadan messaging webhook gelmez.'
               : 'Instagram DM webhook’ları SmartKocluk endpoint’ine düşmeli (object=instagram + entry.messaging/standby).',
-
-            'Kommo → Ayarlar → Entegrasyonlar → Instagram → Bağlantıyı kaldır (köprü kurmayacağız; Kommo’yu kapatacaksınız).',
-            'Meta Business Suite → Ayarlar → Instagram hesapları / Bağlı iş ortakları: Instagram mesaj ortağı olarak yalnız SmartKocluk kalsın.',
-            'Instagram uygulaması (profesyonel) → Ayarlar → Mesajlar → “İstekleri ve mesajları yönet” / üçüncü taraf erişiminde Kommo olmasın.',
-            'CRM → Widgetler → Hattı bağla (ensure_inbound) — IG object=instagram messages + messaging_referral yenilenir.',
-            'Instagram reklamından (Click to Message) yeni bir test DM gönderin → CRM Inbox’ta channel=instagram görünmeli.',
-            'Not: WhatsApp reklamları WABA webhook ile zaten geliyor; IG için Meta teslimatı Kommo’dan sökülmeli.'
+            'Meta App Dashboard → App Mode: Live (Development’ta yalnız tester DM’i gelir).',
+            'App Review → Advanced Access: instagram_manage_messages + pages_messaging (+ Business Verification).',
+            'App Dashboard → Webhooks: Instagram + Page → messages, messaging_referral/referrals, comments; Callback = /api/meta/webhook.',
+            'CRM → Widgetler → Hattı bağla — Step 3: POST /{page|ig}/subscribed_apps (subscribed_fields).',
+            'Kommo / diğer messaging partner yok; Conversation Routing varsayılan SmartKocluk.',
+            'Test: Dashboard “Test” butonu değil — gerçek IG hesabından DM (+ reklam CTM). entry.id=0 CRM oluşturmaz.'
           ],
           last_error:
             pub?.app_instagram_error ||
