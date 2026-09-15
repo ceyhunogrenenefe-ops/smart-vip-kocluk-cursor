@@ -327,16 +327,35 @@ export default async function handler(req, res) {
       await ensureCrmInboxSchema({ force: true }).catch(() => null);
       const inbound = await ensureMetaInboundDelivery({ apply: true });
       const social = await ensureMetaSocialInbound({ apply: true });
+      let igSync = null;
+      try {
+        const { syncInstagramConversationsFromGraph } = await import('../api/_lib/instagram-conversations-sync.js');
+        igSync = await syncInstagramConversationsFromGraph({ apply: true, limit: 20 });
+      } catch (e) {
+        igSync = { ok: false, error: e instanceof Error ? e.message : String(e) };
+      }
       return res.status(200).json({
         ok: Boolean(inbound?.ok),
         data: {
           ...publicInboundStatus(inbound),
-          social: { ...publicSocialStatus(social), env: describeSocialTokenEnv() }
+          social: { ...publicSocialStatus(social), env: describeSocialTokenEnv() },
+          instagram_conversation_sync: igSync
         },
         steps: inbound?.steps || [],
         social_steps: social?.steps || [],
-        error: inbound?.error || social?.error || null
+        error: inbound?.error || social?.error || igSync?.error || null
       });
+    }
+
+    if (op === 'sync_instagram_conversations') {
+      if (!isAdmin) {
+        return res.status(403).json({ error: 'forbidden', hint: 'IG sync yalnızca yönetici.' });
+      }
+      const { syncInstagramConversationsFromGraph } = await import('../api/_lib/instagram-conversations-sync.js');
+      const apply = String(req.query?.apply || body.apply || '1') !== '0';
+      const limit = Number(req.query?.limit || body.limit || 20);
+      const result = await syncInstagramConversationsFromGraph({ apply, limit });
+      return res.status(result.ok ? 200 : 502).json({ ok: result.ok, data: result });
     }
 
     if (op === 'facebook_login_start') {
