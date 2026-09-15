@@ -239,6 +239,31 @@ export async function saveMetaPageSecretsToDb(patch = {}) {
 
 const nameCache = new Map();
 
+
+/** Handover: standby’deki IG/FB konuşmasının kontrolünü SmartKocluk’a al. */
+export async function takeMessengerThreadControl(userScopedId, { metadata = 'smartkocluk_crm_take' } = {}) {
+  const recipientId = String(userScopedId || '').trim();
+  const { token, source } = resolveSocialToken();
+  const pageId = resolvePageId();
+  if (!recipientId) return { ok: false, error: 'missing_recipient' };
+  if (!token) return { ok: false, error: 'missing_page_token', token_source: source };
+  if (!pageId) return { ok: false, error: 'missing_page_id' };
+  const r = await graphPost(`${pageId}/take_thread_control`, token, {
+    recipient: { id: recipientId },
+    metadata: String(metadata || 'smartkocluk_crm_take').slice(0, 1000)
+  });
+  if (!r.ok) {
+    return {
+      ok: false,
+      error: graphErr(r.json, 'take_thread_control_failed'),
+      status: r.status,
+      page_id_suffix: pageId.slice(-6),
+      token_source: source
+    };
+  }
+  return { ok: true, page_id_suffix: pageId.slice(-6), token_source: source };
+}
+
 export async function lookupSocialProfileName(scopedId, tok = resolveSocialToken().token) {
   const id = String(scopedId || '').trim();
   if (!id || !tok) return null;
