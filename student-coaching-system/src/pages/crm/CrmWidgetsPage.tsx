@@ -499,14 +499,47 @@ export default function CrmWidgetsPage() {
                 </p>
               </div>
             ) : null}
-{diag.instagram_dm_not_delivered ||
+
+            {diag.meta_webhook_setup ? (
+              <div className={`rounded-xl border px-3 py-3 text-sm ${
+                (diag.meta_webhook_setup as { ok?: boolean }).ok
+                  ? 'border-emerald-300 bg-emerald-50 text-emerald-950'
+                  : 'border-sky-300 bg-sky-50 text-sky-950'
+              }`}>
+                <p className="font-semibold">Meta Setup Webhooks (4 adım)</p>
+                <p className="mt-1 text-[11px] opacity-80">
+                  Callback: {String((diag.meta_webhook_setup as { callback_url?: string }).callback_url || '/api/meta/webhook')}
+                </p>
+                <ol className="mt-2 list-decimal space-y-2 pl-4 text-xs">
+                  {(Array.isArray((diag.meta_webhook_setup as { steps?: unknown[] }).steps)
+                    ? ((diag.meta_webhook_setup as { steps: Array<{ id?: number; title?: string; ok?: boolean; detail?: string; action?: string | null }> }).steps)
+                    : []
+                  ).map((s) => (
+                    <li key={String(s.id || s.title)}>
+                      <span className="font-semibold">{s.ok ? '✓' : '○'} {String(s.title || '')}</span>
+                      <span className="mt-0.5 block opacity-90">{String(s.detail || '')}</span>
+                      {!s.ok && s.action ? (
+                        <span className="mt-0.5 block font-medium">{String(s.action)}</span>
+                      ) : null}
+                    </li>
+                  ))}
+                </ol>
+                {(diag.meta_webhook_setup as { blocker?: { action?: string } | null }).blocker?.action ? (
+                  <p className="mt-2 text-xs font-semibold">
+                    Bloker: {String((diag.meta_webhook_setup as { blocker?: { action?: string } }).blocker?.action)}
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+
+            {diag.instagram_dm_not_delivered ||
             (diag.instagram_dm_delivery as { verdict?: string } | undefined)?.verdict === 'META_DID_NOT_DELIVER' ? (
               <div className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-3 text-sm text-amber-950">
                 <p className="font-semibold">Instagram DM endpoint’e POST edilmiyor (META_DID_NOT_DELIVER)</p>
                 <p className="mt-1 text-xs text-amber-900/90">
-                  Reels/yorum webhook’ları SmartKocluk’a geliyor; gerçek DM POST’u gelmiyor. Bu bir kod filtresi değil —
-                  Meta Conversation Routing / Kommo hâlâ DM birincil alıcısı. Kommo Instagram bağlantısını tamamen kesin,
-                  sonra gerçek bir Instagram hesabından (Dashboard Test butonu değil) DM gönderin.
+                  Yorum webhook’ları gelebilir; gerçek kullanıcı/reklam DM için Meta App <strong>Live</strong> +{' '}
+                  <strong>Advanced Access</strong> (<code>instagram_manage_messages</code>) şart. Dashboard “Test”
+                  butonu CRM konuşması oluşturmaz — tester olmayan IG’den DM atın.
                 </p>
                 <p className="mt-2 text-[11px] text-amber-800">
                   Son yorum: {String((diag.instagram_dm_delivery as { last_instagram_comment_at?: string } | undefined)?.last_instagram_comment_at || '—')}

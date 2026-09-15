@@ -4,6 +4,7 @@
  */
 import { supabaseAdmin } from './supabase-admin.js';
 import { loadMetaWhatsAppSecretsFromDb } from './meta-whatsapp.js';
+import { buildMetaWebhookSetupChecklist } from './meta-webhook-setup-checklist.js';
 
 const GRAPH = () => String(process.env.META_GRAPH_API_VERSION || 'v21.0').trim() || 'v21.0';
 export const PRODUCTION_WEBHOOK_URL = 'https://www.dersonlinevipkocluk.com/api/meta/webhook';
@@ -17,8 +18,27 @@ function looksLikeConfigurationId(id) {
   return s === DEFAULT_META_CONFIGURATION_ID || /^1784\d{12}$/.test(s);
 }
 
-/** Page subscribed_fields — `feed` Facebook gönderi/yorum bildirimleri için şart */
+/**
+ * Page subscribed_fields (Messenger Platform / Facebook Login path).
+ * Meta: messaging_referrals (çoğul) Page object’te; feed = FB gönderi/yorum.
+ */
 export const PAGE_WEBHOOK_FIELDS = [
+  'messages',
+  'messaging_postbacks',
+  'messaging_optins',
+  'message_echoes',
+  'messaging_referrals',
+  'messaging_seen',
+  'messaging_handover',
+  'message_reactions',
+  'standby',
+  'feed'
+];
+
+const PAGE_FIELDS = PAGE_WEBHOOK_FIELDS.join(',');
+
+/** Page subscribe dar yedek — yeni alan Graph’ta reddedilirse */
+const PAGE_FIELDS_FALLBACK = [
   'messages',
   'messaging_postbacks',
   'messaging_optins',
@@ -26,19 +46,15 @@ export const PAGE_WEBHOOK_FIELDS = [
   'messaging_referrals',
   'standby',
   'feed'
-];
-
-const PAGE_FIELDS = PAGE_WEBHOOK_FIELDS.join(',');
+].join(',');
 
 /**
  * Instagram app-level webhook alanları (object=instagram).
  * Meta docs: alan adı `messaging_referral` (tekil). Page tarafındaki
  * `messaging_referrals` (çoğul) burada kullanılırsa Graph tüm IG aboneliğini
  * "An unknown error occurred" ile reddeder — gerçek IG/reklam DM webhook’ları gelmez.
- */
-/**
- * Instagram app webhook alanları.
- * `comments` / `live_comments` = gönderi yorumu (Kommo’nun bildirim düşürdüğü kanal).
+ *
+ * `comments` / `live_comments` = gönderi yorumu.
  * `messages` / `messaging_*` = DM (Messaging API) — yorum ile aynı değildir.
  */
 export const INSTAGRAM_APP_WEBHOOK_FIELDS = [
@@ -48,6 +64,8 @@ export const INSTAGRAM_APP_WEBHOOK_FIELDS = [
   'messaging_seen',
   'messaging_handover',
   'messaging_referral',
+  'message_reactions',
+  'message_echoes',
   'standby',
   'comments',
   'live_comments'
@@ -64,6 +82,25 @@ const INSTAGRAM_FIELDS_FALLBACK = [
   'messaging_seen',
   'comments'
 ].join(',');
+
+/**
+ * Meta Step 3 — hesap seviyesi subscribed_apps alanları
+ * (Page ID veya IG professional account ID + access token).
+ */
+export const IG_ACCOUNT_SUBSCRIBED_FIELDS = [
+  'messages',
+  'messaging_postbacks',
+  'messaging_optins',
+  'messaging_seen',
+  'messaging_handover',
+  'messaging_referral',
+  'message_reactions',
+  'standby',
+  'comments',
+  'live_comments'
+].join(',');
+
+const IG_ACCOUNT_SUBSCRIBED_FIELDS_FALLBACK = 'messages,messaging_referral,comments,standby';
 
 /** WhatsApp WABA token asla kullanılmaz — IG/FB DM için ayrı Page/IG token gerekir. */
 const SOCIAL_TOKEN_ENVS = [
@@ -559,17 +596,77 @@ export async function ensureMetaSocialInbound({ apply = false } = {}) {
   const hasMessages = (out.subscribed_fields || []).includes('messages');
   if (apply) {
     out.applied = true;
-    const sub = await graphPost(`${encodeURIComponent(pid)}/subscribed_apps`, useTok, {
+    // Meta Step 3 (Messenger Platform): POST /{PAGE_ID}/subscribed_apps
+    let sub = await graphPost(`${encodeURIComponent(pid)}/subscribed_apps`, useTok, {
       subscribed_fields: PAGE_FIELDS
     });
+    let pageFieldsUsed = PAGE_FIELDS;
+    if (!sub.ok) {
+      const retry = await graphPost(`${encodeURIComponent(pid)}/subscribed_apps`, useTok, {
+        subscribed_fields: PAGE_FIELDS_FALLBACK
+      });
+      if (retry.ok) {
+        sub = retry;
+        pageFieldsUsed = PAGE_FIELDS_FALLBACK;
+      }
+    }
     out.steps.push({
       step: 'subscribe_page_messages',
       ok: sub.ok,
+      fields: pageFieldsUsed,
       error: sub.ok ? null : graphErr(sub.json, `http_${sub.status}`)
     });
     if (sub.ok) {
-      out.subscribed_fields = PAGE_FIELDS.split(',');
+      out.subscribed_fields = pageFieldsUsed.split(',');
     }
+
+    // Meta Step 3 (Instagram Login path): POST /{IG_ACCOUNT_ID}/subscribed_apps
+    const igId = out.instagram_business_id ? String(out.instagram_business_id) : '';
+    if (igId && igId !== String(pid)) {
+      let igSub = await graphPost(`${encodeURIComponent(igId)}/subscribed_apps`, useTok, {
+        subscribed_fields: IG_ACCOUNT_SUBSCRIBED_FIELDS
+      });
+      let igAccFields = IG_ACCOUNT_SUBSCRIBED_FIELDS;
+      if (!igSub.ok) {
+        const retry = await graphPost(`${encodeURIComponent(igId)}/subscribed_apps`, useTok, {
+          subscribed_fields: IG_ACCOUNT_SUBSCRIBED_FIELDS_FALLBACK
+        });
+        if (retry.ok) {
+          igSub = retry;
+          igAccFields = IG_ACCOUNT_SUBSCRIBED_FIELDS_FALLBACK;
+        }
+      }
+      // Instagram User token path (graph.instagram.com) — Page token yetmezse denenebilir
+      if (!igSub.ok && out.token_kind === 'instagram') {
+        const igGraph = await fetch(
+          `https://graph.instagram.com/${GRAPH()}/${encodeURIComponent(igId)}/subscribed_apps`,
+          {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${tok}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ subscribed_fields: IG_ACCOUNT_SUBSCRIBED_FIELDS_FALLBACK })
+          }
+        );
+        const igJson = await igGraph.json().catch(() => ({}));
+        if (igGraph.ok) {
+          igSub = { ok: true, status: igGraph.status, json: igJson };
+          igAccFields = IG_ACCOUNT_SUBSCRIBED_FIELDS_FALLBACK;
+        } else {
+          igSub = { ok: false, status: igGraph.status, json: igJson };
+        }
+      }
+      out.ig_account_subscribed = Boolean(igSub.ok);
+      out.ig_account_subscribed_fields = igSub.ok ? igAccFields.split(',') : [];
+      out.steps.push({
+        step: 'subscribe_ig_account_messages',
+        ok: igSub.ok,
+        fields: igAccFields,
+        error: igSub.ok ? null : graphErr(igSub.json, `http_${igSub.status}`),
+        hint: igSub.ok
+          ? null
+          : 'IG account subscribed_apps reddedildi — Messenger Platform’da Page aboneliği yeterli olabilir; Instagram Login için IG User token gerekir.'
+      });
+    }
+
     try {
       await saveMetaPageSecretsToDb({
         token: useTok,
@@ -631,7 +728,7 @@ export async function ensureMetaSocialInbound({ apply = false } = {}) {
       'Sayfa abone ama Instagram app webhook (object=instagram) başarısız. Reklam / bazı DM’ler Meta’dan gelmez — Hattı bağla tekrar veya App Dashboard → Instagram → Webhooks.';
   } else {
     out.hint = bound
-      ? `Facebook/Instagram DM webhook ${PRODUCTION_WEBHOOK_URL} — sayfa ${out.page_name || pid} mesajlara abone. IG reklam DM gelmiyorsa Kommo Instagram entegrasyonunu kapatın (köprü yok; Meta doğrudan CRM’e göndermeli).`
+      ? `Facebook/Instagram DM webhook ${PRODUCTION_WEBHOOK_URL} — sayfa ${out.page_name || pid} mesajlara abone. Gerçek kullanıcı DM gelmiyorsa App Live + Advanced Access (instagram_manage_messages) gerekir; Dashboard Test CRM oluşturmaz.`
       : 'Sayfa messages alanına abone değil. Hattı bağla ile subscribed_apps çalışır; App Dashboard’da Instagram + Messenger webhook alanları da işaretli olmalı.';
   }
 
@@ -664,6 +761,30 @@ export async function ensureMetaSocialInbound({ apply = false } = {}) {
       error: e instanceof Error ? e.message : String(e)
     });
   }
+
+  const igFieldsRaw = out.app_subscriptions?.instagram?.fields;
+  const igFieldsList = Array.isArray(igFieldsRaw)
+    ? igFieldsRaw
+    : typeof igFieldsRaw === 'string'
+      ? igFieldsRaw.split(',').map((s) => s.trim()).filter(Boolean)
+      : INSTAGRAM_APP_WEBHOOK_FIELDS;
+  out.meta_webhook_setup = buildMetaWebhookSetupChecklist({
+    verifyTokenPresent: Boolean(verifyTokenEnv()),
+    endpointReachable: true,
+    appInstagramSubscribed: Boolean(out.app_subscriptions?.instagram?.subscribed),
+    appPageSubscribed: Boolean(out.app_subscriptions?.page?.subscribed),
+    pageSubscribedAppsMessages: bound,
+    igAccountSubscribedApps: Boolean(out.ig_account_subscribed),
+    igDmLikelyCause: out.ig_dm_capability?.likely_cause || null,
+    igDmCapabilityOk: Boolean(out.ig_dm_capability?.ok),
+    hasInstagramManageMessagesScope: out.ig_dm_capability?.has_instagram_manage_messages_scope,
+    appInstagramFields: igFieldsList
+  });
+  out.steps.push({
+    step: 'meta_webhook_setup_checklist',
+    ok: Boolean(out.meta_webhook_setup?.ok),
+    blocker: out.meta_webhook_setup?.blocker || null
+  });
 
   if (!out.ok && !out.error) out.error = 'not_bound_yet';
   return out;
@@ -709,7 +830,9 @@ export function publicSocialStatus(full) {
           ig_conversations_error: full.ig_dm_capability.ig_conversations_error || null
         }
       : null,
-    dm_routing_hint: full?.dm_routing_hint || full?.ig_dm_capability?.hint || null
+    dm_routing_hint: full?.dm_routing_hint || full?.ig_dm_capability?.hint || null,
+    ig_account_subscribed: Boolean(full?.ig_account_subscribed),
+    meta_webhook_setup: full?.meta_webhook_setup || null
   };
 }
 
@@ -792,6 +915,19 @@ export async function ensureAppSocialSubscriptions({ apply = false } = {}) {
     object: 'page',
     fields: PAGE_FIELDS
   });
+  let pageFieldsUsed = PAGE_FIELDS;
+  let pageSubFinal = pageSub;
+  if (!pageSub.ok) {
+    const retry = await graphFormPost(`${encodeURIComponent(appId)}/subscriptions`, {
+      ...common,
+      object: 'page',
+      fields: PAGE_FIELDS_FALLBACK
+    });
+    if (retry.ok) {
+      pageSubFinal = retry;
+      pageFieldsUsed = PAGE_FIELDS_FALLBACK;
+    }
+  }
   let igSub = await graphFormPost(`${encodeURIComponent(appId)}/subscriptions`, {
     ...common,
     object: 'instagram',
@@ -814,13 +950,17 @@ export async function ensureAppSocialSubscriptions({ apply = false } = {}) {
       };
     }
   }
-  out.page = { subscribed: pageSub.ok, error: pageSub.ok ? null : graphErr(pageSub.json, `http_${pageSub.status}`) };
+  out.page = {
+    subscribed: pageSubFinal.ok,
+    error: pageSubFinal.ok ? null : graphErr(pageSubFinal.json, `http_${pageSubFinal.status}`),
+    fields: pageFieldsUsed
+  };
   out.instagram = {
     subscribed: igSub.ok,
     error: igSub.ok ? null : graphErr(igSub.json, `http_${igSub.status}`),
     fields: igFieldsUsed
   };
-  out.ok = Boolean(pageSub.ok && igSub.ok);
+  out.ok = Boolean(pageSubFinal.ok && igSub.ok);
   out.hint = out.ok
     ? `App webhook (page + instagram) → ${PRODUCTION_WEBHOOK_URL}`
     : out.page?.error || out.instagram?.error || 'app_subscribe_failed';

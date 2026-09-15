@@ -13,4 +13,10 @@ describe('instagram app webhook fields', () => {
     assert.ok(INSTAGRAM_APP_WEBHOOK_FIELDS.includes('comments'));
     assert.ok(INSTAGRAM_APP_WEBHOOK_FIELDS.includes('live_comments'));
   });
+
+  it('includes Messenger Platform messaging fields from Meta webhook fields table', () => {
+    assert.ok(INSTAGRAM_APP_WEBHOOK_FIELDS.includes('message_reactions'));
+    assert.ok(INSTAGRAM_APP_WEBHOOK_FIELDS.includes('message_echoes'));
+    assert.ok(INSTAGRAM_APP_WEBHOOK_FIELDS.includes('messaging_handover'));
+  });
 });
