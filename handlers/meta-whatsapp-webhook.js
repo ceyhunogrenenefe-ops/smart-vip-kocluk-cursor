@@ -36,6 +36,8 @@ import {
   insertMetaWebhookLog,
   finalizeMetaWebhookLog
 } from '../api/_lib/meta-webhook-logs.js';
+import { classifyMetaWebhookIngress } from '../api/_lib/meta-webhook-ingress-diag.js';
+import { takeMessengerThreadControl } from '../api/_lib/meta-social-inbound.js';
 
 function verifyToken() {
   // Vercel’de tek kaynak: META_WEBHOOK_VERIFY_TOKEN (Meta BM Verify Token ile birebir)
@@ -250,6 +252,31 @@ export default async function handler(req, res) {
   }
   if (!body || typeof body !== 'object') body = {};
 
+  // Ingress teşhisi — parse/filter’dan ÖNCE (token/metin yok)
+  const ingressDiag = classifyMetaWebhookIngress(body, req);
+  console.info('[meta-webhook] ingress_diag', {
+    received_at: ingressDiag.received_at,
+    method: ingressDiag.method,
+    object: ingressDiag.object,
+    entry_id: ingressDiag.entry_id,
+    channel_class: ingressDiag.channel_class,
+    has_messaging: ingressDiag.has_messaging,
+    has_standby: ingressDiag.has_standby,
+    has_comment: ingressDiag.has_comment,
+    has_handover: ingressDiag.has_handover,
+    has_referral: ingressDiag.has_referral,
+    has_text: ingressDiag.has_text,
+    is_echo: ingressDiag.is_echo,
+    is_synthetic_meta_test: ingressDiag.is_synthetic_meta_test,
+    sender_id: ingressDiag.sender_id,
+    recipient_id: ingressDiag.recipient_id,
+    message_mid_suffix: ingressDiag.message_mid_suffix,
+    change_fields: ingressDiag.change_fields,
+    verdict: ingressDiag.verdict,
+    drop_reason: ingressDiag.drop_reason,
+    meta_headers: ingressDiag.meta_headers
+  });
+
   // Teşhis kaydı (tablo yoksa sessizce atlanır)
   void logWebhookHit(body);
   const webhookLog = await insertMetaWebhookLog(body).catch(() => ({ id: null }));
@@ -259,6 +286,25 @@ export default async function handler(req, res) {
     object: String(body?.object || '').toLowerCase() || null,
     entries: Array.isArray(body?.entry) ? body.entry.length : 0
   });
+
+  if (ingressDiag?.drop_reason === 'DROP_SYNTHETIC_META_TEST') {
+    webhookLogStatus = 'ignored';
+    webhookLogError = 'DROP_SYNTHETIC_META_TEST';
+    console.info('[meta-webhook] DROP_SYNTHETIC_META_TEST — Meta App Dashboard test payload (entry.id=0); CRM konuşması yazılmaz');
+    await finalizeMetaWebhookLog(webhookLog?.id, {
+      status: webhookLogStatus,
+      error: webhookLogError
+    }).catch(() => null);
+    return res.status(200).json({
+      ok: true,
+      ignored: true,
+      ignore_reason: 'DROP_SYNTHETIC_META_TEST',
+      ingress: ingressDiag,
+      webhook_log_id: webhookLog?.id || null,
+      received: getIstanbulDateString()
+    });
+  }
+
 
   const objectType = String(body.object || '').toLowerCase();
   const entries = Array.isArray(body.entry) ? body.entry : [];
@@ -303,8 +349,8 @@ export default async function handler(req, res) {
     // Bilinmeyen object → raw log + ignore_reason (sessiz drop yok)
     if (objectType && objectType !== 'instagram' && objectType !== 'page' && objectType !== 'whatsapp_business_account') {
       webhookLogStatus = 'ignored';
-      webhookLogError = `ignore_reason:unknown_object:${objectType}`;
-      console.info('[meta-webhook] ignored unknown object', { object: objectType, entries: entries.length });
+      webhookLogError = `DROP_UNSUPPORTED_OBJECT:${objectType}`;
+      console.info('[meta-webhook] DROP_UNSUPPORTED_OBJECT', { object: objectType, entries: entries.length });
       await finalizeMetaWebhookLog(webhookLog?.id, {
         status: webhookLogStatus,
         error: webhookLogError
@@ -312,7 +358,7 @@ export default async function handler(req, res) {
       return res.status(200).json({
         ok: true,
         ignored: true,
-        ignore_reason: `unknown_object:${objectType}`,
+        ignore_reason: `DROP_UNSUPPORTED_OBJECT:${objectType}`,
         received: getIstanbulDateString(),
         webhook_log_id: webhookLog?.id || null
       });
@@ -325,7 +371,19 @@ export default async function handler(req, res) {
         if (messaging.length) {
           inboundMessageCount += messaging.filter((m) => {
             const n = normalizeInstagramMessagingEvent(m);
-            return n.hasInboundContent && !n.isEcho;
+            if (n.isEcho) {
+              console.info('[meta-webhook] DROP_ECHO', { mid_suffix: n.messageId ? String(n.messageId).slice(-8) : null });
+              return false;
+            }
+            if (!n.senderId) {
+              console.info('[meta-webhook] DROP_UNKNOWN_SENDER', { has_text: Boolean(n.text) });
+              return false;
+            }
+            if (!n.hasInboundContent) {
+              console.info('[meta-webhook] DROP_NO_INBOUND_CONTENT', { sender_suffix: String(n.senderId).slice(-6) });
+              return false;
+            }
+            return true;
           }).length;
           statusOnly = false;
           const r = await ingestInstagramMessagingEvents(messaging);
@@ -338,6 +396,21 @@ export default async function handler(req, res) {
             crmIgSync = { processed: 0 };
           }
         }
+
+        // Standby = başka partner (Kommo) birincil; mesajı yaz + thread kontrolünü al
+        if (Array.isArray(entry?.standby) && entry.standby.length) {
+          for (const ev of entry.standby) {
+            const uid = ev?.sender?.id != null ? String(ev.sender.id) : '';
+            if (!uid) continue;
+            try {
+              const take = await takeMessengerThreadControl(uid, { metadata: 'smartkocluk_standby_claim' });
+              console.info('[meta-webhook] take_thread_control', { sender_suffix: uid.slice(-6), ok: take?.ok, error: take?.error || null });
+            } catch (e) {
+              console.warn('[meta-webhook] take_thread_control failed:', e instanceof Error ? e.message : e);
+            }
+          }
+        }
+
         // Gönderi / canlı yayın yorumları (Kommo comment inbox)
         const commentChanges = collectInstagramCommentChanges(entry);
         if (commentChanges.length) {
@@ -395,6 +468,13 @@ export default async function handler(req, res) {
           }
         }
       }
+      if (!webhookLogError && ingressDiag?.drop_reason) {
+        webhookLogError = ingressDiag.drop_reason;
+      }
+      if (!webhookLogError && ingressDiag?.verdict && String(ingressDiag.verdict).startsWith('DROP_')) {
+        webhookLogStatus = 'ignored';
+        webhookLogError = ingressDiag.verdict;
+      }
       await finalizeMetaWebhookLog(webhookLog?.id, { status: webhookLogStatus, error: webhookLogError }).catch(() => null);
       return res.status(200).json({
         ok: true,
@@ -403,6 +483,13 @@ export default async function handler(req, res) {
         inbound_messages_seen: inboundMessageCount,
         crm_sync: crmIgSync,
         webhook_log_id: webhookLog?.id || null,
+        ingress: {
+          verdict: ingressDiag?.verdict || null,
+          drop_reason: ingressDiag?.drop_reason || null,
+          has_standby: ingressDiag?.has_standby || false,
+          is_synthetic_meta_test: ingressDiag?.is_synthetic_meta_test || false,
+          sender_id: ingressDiag?.sender_id || null
+        },
         received: getIstanbulDateString()
       });
     }
@@ -413,7 +500,19 @@ export default async function handler(req, res) {
       if (messaging.length && (objectType === 'page' || objectType === 'instagram')) {
         inboundMessageCount += messaging.filter((m) => {
           const n = normalizeInstagramMessagingEvent(m);
-          return n.hasInboundContent && !n.isEcho;
+          if (n.isEcho) {
+            console.info('[meta-webhook] DROP_ECHO', { mid_suffix: n.messageId ? String(n.messageId).slice(-8) : null, via: 'page' });
+            return false;
+          }
+          if (!n.senderId) {
+            console.info('[meta-webhook] DROP_UNKNOWN_SENDER', { has_text: Boolean(n.text), via: 'page' });
+            return false;
+          }
+          if (!n.hasInboundContent) {
+            console.info('[meta-webhook] DROP_NO_INBOUND_CONTENT', { sender_suffix: String(n.senderId).slice(-6), via: 'page' });
+            return false;
+          }
+          return true;
         }).length;
         statusOnly = false;
         const igBusinessId = String(

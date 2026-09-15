@@ -458,6 +458,8 @@ export default function CrmWidgetsPage() {
                 ['Son FB mesaj', String(diag.last_facebook_message_at || '—')],
                 ['Son IG mesaj', String(diag.last_instagram_message_at || '—')],
                 ['Son yorum webhook', String(diag.last_comment_webhook_at || '—')],
+                ['IG DM teslimat', String((diag.instagram_dm_delivery as { verdict?: string } | undefined)?.verdict || '—')],
+                ['Son IG event', String((diag.last_instagram_webhook_event as { event_type?: string } | undefined)?.event_type || '—')],
                 ['Son hata', String(diag.last_error || '—')]
               ].map(([k, v]) => (
                 <div key={String(k)} className="rounded-xl bg-slate-50 px-3 py-2 ring-1 ring-slate-100">
@@ -474,7 +476,57 @@ export default function CrmWidgetsPage() {
                 </pre>
               </div>
             ) : null}
-            {diag.instagram_ads_partner_block ||
+            
+            {diag.instagram_dm_not_delivered ||
+            (diag.instagram_dm_delivery as { verdict?: string } | undefined)?.verdict === 'META_DID_NOT_DELIVER' ? (
+              <div className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-3 text-sm text-amber-950">
+                <p className="font-semibold">Instagram DM endpoint’e POST edilmiyor (META_DID_NOT_DELIVER)</p>
+                <p className="mt-1 text-xs text-amber-900/90">
+                  Reels/yorum webhook’ları SmartKocluk’a geliyor; gerçek DM POST’u gelmiyor. Bu bir kod filtresi değil —
+                  Meta Conversation Routing / Kommo hâlâ DM birincil alıcısı. Kommo Instagram bağlantısını tamamen kesin,
+                  sonra gerçek bir Instagram hesabından (Dashboard Test butonu değil) DM gönderin.
+                </p>
+                <p className="mt-2 text-[11px] text-amber-800">
+                  Son yorum: {String((diag.instagram_dm_delivery as { last_instagram_comment_at?: string } | undefined)?.last_instagram_comment_at || '—')}
+                  {' · '}
+                  Son gerçek DM: {String((diag.instagram_dm_delivery as { last_instagram_real_dm_at?: string } | undefined)?.last_instagram_real_dm_at || 'yok')}
+                  {' · '}
+                  Sentetik test: {String((diag.instagram_dm_delivery as { ig_synthetic_hits?: number } | undefined)?.ig_synthetic_hits ?? '—')}
+                </p>
+              </div>
+            ) : null}
+            {(diag.instagram_dm_delivery as { verdict?: string } | undefined)?.verdict === 'ONLY_SYNTHETIC_META_TESTS' ? (
+              <div className="rounded-xl border border-slate-300 bg-slate-50 px-3 py-3 text-sm text-slate-800">
+                <p className="font-semibold">Meta Dashboard “Test” boş payload — CRM’e düşmez</p>
+                <p className="mt-1 text-xs text-slate-600">
+                  entry.id=0 sentetik istekler CRM konuşması oluşturmaz. Instagram uygulamasından gerçek DM gönderin.
+                </p>
+              </div>
+            ) : null}
+
+            {diag.last_instagram_webhook_event ? (
+              <div className="rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-800">
+                <p className="font-semibold text-slate-900">Son IG webhook event (kanıt)</p>
+                <dl className="mt-2 grid gap-1 text-xs sm:grid-cols-2">
+                  {[
+                    ['received_at', (diag.last_instagram_webhook_event as { received_at?: string }).received_at],
+                    ['object', (diag.last_instagram_webhook_event as { object?: string }).object],
+                    ['entry_id', (diag.last_instagram_webhook_event as { entry_id?: string }).entry_id],
+                    ['event_type', (diag.last_instagram_webhook_event as { event_type?: string }).event_type],
+                    ['channel', (diag.last_instagram_webhook_event as { channel?: string }).channel],
+                    ['accepted', String((diag.last_instagram_webhook_event as { accepted?: boolean }).accepted)],
+                    ['dropped', String((diag.last_instagram_webhook_event as { dropped?: boolean }).dropped)],
+                    ['drop_reason', (diag.last_instagram_webhook_event as { drop_reason?: string }).drop_reason]
+                  ].map(([k, v]) => (
+                    <div key={String(k)} className="flex gap-2">
+                      <dt className="w-28 shrink-0 font-medium text-slate-500">{k}</dt>
+                      <dd className="break-all font-mono text-slate-900">{String(v || '—')}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </div>
+            ) : null}
+{diag.instagram_ads_partner_block ||
             (Number(diag.recent_whatsapp_webhook_hits_24h || 0) > 0 &&
               Number(diag.recent_instagram_webhook_hits_24h || 0) === 0 &&
               diag.instagram_webhook_subscribed) ? (
