@@ -1,6 +1,10 @@
 /**
  * Instagram DM backfill — Meta Conversations API.
  * Webhook kaçırılan (Kommo’ya giden) IG reklam / DM’leri CRM’e çeker.
+ *
+ * Not: Tek istekte çok mesaj+attachment istersek Meta code=1
+ * (“Please reduce the amount of data”) döner → konuşma listesi ile
+ * mesajları ayrı, küçük sayfalarda çekeriz.
  */
 import { loadMetaWhatsAppSecretsFromDb } from './meta-whatsapp.js';
 import { resolveSocialToken, resolvePageId, igBusinessIdEnv } from './meta-social-inbound.js';
@@ -59,13 +63,52 @@ export function graphMessageToMessagingEvent(msg, { igBusinessId, pageId } = {})
   };
 }
 
+async function listConversationIds(rootId, tok, limit) {
+  const attempts = [
+    `${encodeURIComponent(rootId)}/conversations?platform=instagram&limit=${limit}&fields=id,updated_time`,
+    `${encodeURIComponent(rootId)}/conversations?platform=instagram&limit=${Math.min(limit, 5)}&fields=id`
+  ];
+  let last = null;
+  for (const path of attempts) {
+    const res = await graphGet(path, tok);
+    last = res;
+    if (res.ok) {
+      const rows = Array.isArray(res.json?.data) ? res.json.data : [];
+      return { ok: true, ids: rows.map((r) => String(r.id || '').trim()).filter(Boolean), raw: res };
+    }
+  }
+  return { ok: false, ids: [], raw: last };
+}
+
+async function fetchThreadMessages(conversationId, tok, messagesPerThread) {
+  const fields = `messages.limit(${messagesPerThread}){id,message,from,created_time}`;
+  const attempts = [
+    `${encodeURIComponent(conversationId)}?fields=${encodeURIComponent(fields)}`,
+    `${encodeURIComponent(conversationId)}?fields=${encodeURIComponent(
+      `messages.limit(${Math.min(messagesPerThread, 5)}){id,message,from,created_time}`
+    )}`
+  ];
+  for (const path of attempts) {
+    const res = await graphGet(path, tok);
+    if (res.ok) {
+      const msgs = Array.isArray(res.json?.messages?.data) ? res.json.messages.data : [];
+      return { ok: true, messages: msgs, error: null };
+    }
+    // code=1 → daha küçük dene
+    if (String(res.json?.error?.code) !== '1') {
+      return { ok: false, messages: [], error: graphErr(res.json, `http_${res.status}`) };
+    }
+  }
+  return { ok: false, messages: [], error: 'reduce_data_failed' };
+}
+
 /**
  * Son IG konuşmalarını Graph’tan çekip CRM’e yazar.
  * @param {{ limit?: number, messagesPerThread?: number, apply?: boolean }} opts
  */
 export async function syncInstagramConversationsFromGraph(opts = {}) {
-  const limit = Math.min(Math.max(Number(opts.limit) || 15, 1), 40);
-  const messagesPerThread = Math.min(Math.max(Number(opts.messagesPerThread) || 20, 1), 50);
+  const limit = Math.min(Math.max(Number(opts.limit) || 8, 1), 20);
+  const messagesPerThread = Math.min(Math.max(Number(opts.messagesPerThread) || 8, 1), 20);
   const apply = opts.apply !== false;
 
   await loadMetaWhatsAppSecretsFromDb().catch(() => null);
@@ -81,6 +124,7 @@ export async function syncInstagramConversationsFromGraph(opts = {}) {
     instagram_business_id: igId || null,
     conversations_scanned: 0,
     events_built: 0,
+    thread_errors: 0,
     crm: null,
     error: null,
     hint: null
@@ -97,29 +141,35 @@ export async function syncInstagramConversationsFromGraph(opts = {}) {
     return out;
   }
 
-  const rootId = pageId || igId;
-  const fields = [
-    'id',
-    'updated_time',
-    `messages.limit(${messagesPerThread}){id,message,from,created_time,attachments}`
-  ].join(',');
+  // Page id ile platform=instagram tercih; olmazsa IG business id dene
+  const roots = [pageId, igId].filter(Boolean).filter((v, i, a) => a.indexOf(v) === i);
+  let ids = [];
+  let listErr = null;
+  for (const rootId of roots) {
+    const listed = await listConversationIds(rootId, token, limit);
+    if (listed.ok) {
+      ids = listed.ids;
+      break;
+    }
+    listErr = graphErr(listed.raw?.json, `http_${listed.raw?.status}`);
+  }
 
-  const path = `${encodeURIComponent(rootId)}/conversations?platform=instagram&limit=${limit}&fields=${encodeURIComponent(fields)}`;
-  const list = await graphGet(path, token);
-  if (!list.ok) {
-    out.error = graphErr(list.json, `http_${list.status}`);
+  if (!ids.length && listErr) {
+    out.error = listErr;
     out.hint =
       'Graph conversations okunamadı. pages_messaging + instagram_manage_messages ve Page–IG bağlantısı gerekir.';
     return out;
   }
 
-  const threads = Array.isArray(list.json?.data) ? list.json.data : [];
-  out.conversations_scanned = threads.length;
-
+  out.conversations_scanned = ids.length;
   const events = [];
-  for (const thread of threads) {
-    const msgs = Array.isArray(thread?.messages?.data) ? thread.messages.data : [];
-    const ordered = [...msgs].reverse();
+  for (const cid of ids) {
+    const thread = await fetchThreadMessages(cid, token, messagesPerThread);
+    if (!thread.ok) {
+      out.thread_errors += 1;
+      continue;
+    }
+    const ordered = [...thread.messages].reverse();
     for (const msg of ordered) {
       const ev = graphMessageToMessagingEvent(msg, { igBusinessId: igId, pageId });
       if (ev) events.push(ev);
@@ -129,14 +179,17 @@ export async function syncInstagramConversationsFromGraph(opts = {}) {
 
   if (!apply) {
     out.ok = true;
-    out.hint = `Dry-run: ${threads.length} konuşma, ${events.length} inbound aday.`;
+    out.hint = `Dry-run: ${ids.length} konuşma, ${events.length} inbound aday.`;
     return out;
   }
 
   if (!events.length) {
     out.ok = true;
     out.crm = { processed: 0, skipped: 0, issues: [] };
-    out.hint = 'Graph’ta yeni inbound IG mesajı yok (veya hepsi bizden).';
+    out.hint =
+      ids.length === 0
+        ? 'Graph’ta IG konuşması yok (veya token bu inbox’u görmüyor).'
+        : 'Graph’ta yeni inbound IG mesajı yok (veya hepsi bizden).';
     return out;
   }
 
