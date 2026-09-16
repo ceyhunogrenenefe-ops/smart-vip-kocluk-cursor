@@ -231,6 +231,9 @@ async function resolveCreatedByFk(actor) {
   return data.id;
 }
 
+/** Başka ekranlardan verilen, kullanıcı formunda gösterilmeyen yetkiler */
+const PRESERVED_EXTERNAL_ROLES = ['crm_agent', 'vendor_admin'];
+
 export default async function handler(req, res) {
   try {
     let actor = await enrichStudentActor(requireAuth(req));
@@ -581,6 +584,11 @@ export default async function handler(req, res) {
       if (Object.prototype.hasOwnProperty.call(raw, 'roles')) {
         body.roles = normalizeRoles(raw.roles, String(raw.role || existing.role || 'student'));
         body.role = body.roles[0];
+        // Kullanıcı Yönetimi formunda CRM temsilcisi / satıcı kutucuğu yok: kaydetme bu yetkileri silmesin
+        // (kendi ekranlarından — CRM Temsilciler, Kitap Pazaryeri — yönetilir)
+        for (const kept of PRESERVED_EXTERNAL_ROLES) {
+          if (priorRoles.includes(kept) && !body.roles.includes(kept)) body.roles.push(kept);
+        }
       }
 
       if (actor.role === 'admin' && body.institution_id !== undefined) {
