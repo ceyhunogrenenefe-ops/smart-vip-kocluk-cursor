@@ -383,7 +383,7 @@ function GeneralForm({
       </label>
       {isManager && agents && agents.length > 0 && (
         <label className="block">
-          <span className="text-xs text-slate-500">Sorumlu ajan</span>
+          <span className="text-xs text-slate-500">Sorumlu temsilci</span>
           <select
             className="mt-0.5 w-full rounded border px-2 py-1.5 dark:border-slate-600 dark:bg-slate-800"
             value={form.assigned_user_id || ''}
@@ -1046,7 +1046,7 @@ function TasksTab({
           Hatırlatıcı oluştur
         </button>
         <p className="mt-2 text-[11px] text-amber-800/80">
-          Atanan ajana, görev saatinden 5 dakika önce panel bildirimi ve WhatsApp hatırlatması gider.
+          Atanan temsilciye, görev saatinden 5 dakika önce panel bildirimi ve WhatsApp hatırlatması gider.
         </p>
       </div>
       {items.map((t) => {

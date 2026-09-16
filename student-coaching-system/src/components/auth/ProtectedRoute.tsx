@@ -45,6 +45,11 @@ export default function ProtectedRoute({ children, allowedRoles }: ProtectedRout
 
   // Giriş yapılmamışsa login sayfasına yönlendir
   if (!isAuthenticated || !effectiveUser) {
+    // CRM linkleri kendi giriş sayfasına gider; girişten sonra aynı CRM sayfasına döner
+    if ((location.pathname || '').startsWith('/crm')) {
+      const next = `${location.pathname}${location.search || ''}`;
+      return <Navigate to={`/crm/giris?next=${encodeURIComponent(next)}`} replace />;
+    }
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
@@ -60,6 +65,10 @@ export default function ProtectedRoute({ children, allowedRoles }: ProtectedRout
   if (allowedRoles && !userHasAnyRole(effectiveUser, allowedRoles)) {
     if (isCrmAgentOnly(effectiveUser)) {
       return <Navigate to="/crm/inbox" replace />;
+    }
+    // CRM yetkisi olmayan hesap: koçluk paneline sessizce düşmek yerine CRM girişinde uyarı
+    if ((location.pathname || '').startsWith('/crm')) {
+      return <Navigate to="/crm/giris" replace />;
     }
     return <Navigate to="/" replace />;
   }

@@ -356,6 +356,10 @@ export function rtBulkTemplateSend(body: {
   template_body?: string;
   body?: string;
   channel?: string;
+  /** Aynı gönderimin parçaları tek kampanyada toplanır (analiz için) */
+  campaign_id?: string;
+  planned_count?: number;
+  filters?: { grades: string[]; columns: string[]; assigned_user_id?: string };
 }) {
   return rtFetch<{
     data: { sent: number; failed: number; results: Array<{ lead_id: string; ok: boolean; status: string; error?: string | null }> };
@@ -379,4 +383,119 @@ export function rtSendChannelMessage(body: {
       warning?: string | null;
     };
   }>('send-channel-message', { method: 'POST', body: JSON.stringify(body) });
+}
+
+export type CrmCampaignSummary = {
+  planned: number;
+  attempted: number;
+  accepted: number;
+  delivered: number;
+  read: number;
+  failed: number;
+  pending: number;
+};
+
+export type CrmDailyReportPayload = {
+  date: string;
+  institution_name?: string | null;
+  sources: { whatsapp: number; instagram: number; website: number; facebook: number; other: number; total: number };
+  inbound_messages: { whatsapp: number; instagram: number; facebook: number; total: number };
+  waiting_reply: number;
+  conversations: { contacted: number; outbound_messages: number; notes: number };
+  representatives: Array<{
+    user_id: string;
+    name: string;
+    messages: number;
+    contacts: number;
+    notes: number;
+    stage_changes: number;
+    confirmed: number;
+  }>;
+  status: {
+    stage_changes: number;
+    confirmed: number;
+    lost: number;
+    by_stage: Array<{ stage: string; label: string; count: number }>;
+  };
+  pipeline: Array<{ id: string; label: string; count: number }>;
+  bulk: {
+    totals: CrmCampaignSummary & { campaigns: number };
+    campaigns: Array<
+      CrmCampaignSummary & {
+        id: string;
+        template_name: string;
+        audience: string;
+        created_by_name: string | null;
+        created_at: string;
+      }
+    >;
+  };
+  tasks: { due: number; completed: number; open: number };
+};
+
+export type CrmDailyReportRow = {
+  id: string;
+  report_date: string;
+  payload: CrmDailyReportPayload;
+  message: string;
+  generated_at: string;
+  sent_at: string | null;
+  delivery?: {
+    sent: number;
+    failed: number;
+    recipients?: Array<{ name: string; role: string; phone: string | null; ok: boolean; error: string | null }>;
+  } | null;
+};
+
+export function rtGetDailyReport(date: string, refresh = false) {
+  return rtFetch<{ data: CrmDailyReportRow }>('daily-report', {
+    method: 'GET',
+    query: { date, refresh: refresh ? '1' : '' }
+  });
+}
+
+export function rtListDailyReports() {
+  return rtFetch<{
+    data: {
+      items: Array<{
+        report_date: string;
+        generated_at: string;
+        sent_at: string | null;
+        new_leads: number;
+        contacted: number;
+        confirmed: number;
+        bulk_sent: number;
+      }>;
+    };
+  }>('daily-report-list', { method: 'GET' });
+}
+
+export function rtSendDailyReport(date: string, force = false) {
+  return rtFetch<{
+    data: {
+      report_date: string;
+      delivery: {
+        sent: number;
+        failed: number;
+        already_sent_at?: string;
+        recipients?: Array<{ name: string; role: string; phone: string | null; ok: boolean; error: string | null }>;
+      };
+    };
+  }>('daily-report-send', { method: 'POST', body: JSON.stringify({ date, force }) });
+}
+
+export function rtListBulkCampaigns() {
+  return rtFetch<{
+    data: {
+      items: Array<
+        CrmCampaignSummary & {
+          id: string;
+          template_name: string | null;
+          audience: string;
+          created_at: string;
+          created_by_name: string | null;
+        }
+      >;
+    };
+  }>('bulk-campaigns', { method: 'GET' });
 }

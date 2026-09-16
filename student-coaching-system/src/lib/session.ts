@@ -139,7 +139,13 @@ export const apiFetch = async (url: string, options: RequestInit = {}) => {
           return res;
         }
         authRedirectToLoginInProgress = true;
-        window.location.replace('/login');
+        // Oturum CRM'de düştüyse CRM girişine, girişten sonra aynı sayfaya dön
+        const here = `${window.location.pathname}${window.location.search}`;
+        if (window.location.pathname.startsWith('/crm') && !window.location.pathname.startsWith('/crm/giris')) {
+          window.location.replace(`/crm/giris?next=${encodeURIComponent(here)}`);
+        } else {
+          window.location.replace('/login');
+        }
       }
     } catch {
       // Body parse edilemezse hiç bozmayalım.

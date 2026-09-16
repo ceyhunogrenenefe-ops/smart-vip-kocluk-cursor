@@ -100,7 +100,7 @@ export default function CrmTasksPage() {
         <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-700">CRM · Takip</p>
         <h2 className="mt-1 font-serif text-2xl font-semibold">Görevler</h2>
         <p className="mt-1 text-sm text-slate-600">
-          Günün bekleyen, geciken ve tamamlanan arama / takip alarmları. Atanan ajana görev saatinden{' '}
+          Günün bekleyen, geciken ve tamamlanan arama / takip alarmları. Atanan temsilciye görev saatinden{' '}
           <strong>5 dakika önce</strong> panel bildirimi ve WhatsApp hatırlatması gider.
         </p>
       </div>

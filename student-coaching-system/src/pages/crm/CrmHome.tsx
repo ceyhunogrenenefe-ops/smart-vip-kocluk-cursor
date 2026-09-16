@@ -3,7 +3,7 @@ import { useAuth } from '../../context/AuthContext';
 import { userRoleTags } from '../../config/rolePermissions';
 import MeetingTrackerPage from '../MeetingTrackerPage';
 
-/** /crm index: ajan → inbox; admin → pipeline (MeetingTracker) */
+/** /crm index: temsilci → inbox; admin → pipeline (MeetingTracker) */
 export default function CrmHome() {
   const { effectiveUser } = useAuth();
   const tags = userRoleTags(effectiveUser);

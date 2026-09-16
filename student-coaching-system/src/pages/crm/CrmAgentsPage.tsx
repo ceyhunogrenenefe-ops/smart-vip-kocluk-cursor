@@ -46,7 +46,7 @@ export default function CrmAgentsPage() {
       setAgents([...map.values()]);
       setCoaches(res.data?.coach_candidates || []);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Ajan listesi alınamadı');
+      toast.error(e instanceof Error ? e.message : 'Temsilci listesi alınamadı');
     } finally {
       setLoading(false);
     }
@@ -88,7 +88,7 @@ export default function CrmAgentsPage() {
         password,
         can_access_unassigned_pool: true
       });
-      toast.success('CRM ajanı oluşturuldu');
+      toast.success('CRM temsilcisi oluşturuldu');
       setName('');
       setEmail('');
       setPassword('');
@@ -107,7 +107,7 @@ export default function CrmAgentsPage() {
         user_id: promoteId,
         can_access_unassigned_pool: true
       });
-      toast.success('Koç CRM ajanı olarak atandı');
+      toast.success('Koç CRM temsilcisi olarak atandı');
       setPromoteId('');
       await reload();
     } catch (err) {
@@ -118,9 +118,9 @@ export default function CrmAgentsPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="font-serif text-2xl font-semibold text-slate-900">CRM Ajan Yönetimi</h2>
+        <h2 className="font-serif text-2xl font-semibold text-slate-900">CRM Temsilci Yönetimi</h2>
         <p className="mt-1 text-sm text-slate-600">
-          Yalnızca CRM erişimli kullanıcı oluşturun veya mevcut koçları ajan yapın. Ajanlar faturalama ve
+          Yalnızca CRM erişimli kullanıcı oluşturun veya mevcut koçları temsilci yapın. Temsilciler faturalama ve
           sistem ayarlarını göremez.
         </p>
       </div>
@@ -132,7 +132,7 @@ export default function CrmAgentsPage() {
         >
           <h3 className="flex items-center gap-2 font-semibold text-slate-900">
             <UserPlus className="h-4 w-4 text-emerald-600" />
-            Yeni CRM ajanı
+            Yeni CRM temsilcisi
           </h3>
           <input
             required
@@ -171,7 +171,7 @@ export default function CrmAgentsPage() {
         <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <h3 className="flex items-center gap-2 font-semibold text-slate-900">
             <UserCheck className="h-4 w-4 text-sky-600" />
-            Mevcut koçu ajan yap
+            Mevcut koçu temsilci yap
           </h3>
           <select
             value={promoteId}
@@ -191,14 +191,14 @@ export default function CrmAgentsPage() {
             disabled={!promoteId}
             className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-700 disabled:opacity-50"
           >
-            CRM ajanı olarak ata
+            CRM temsilcisi olarak ata
           </button>
         </div>
       </div>
 
       <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="border-b border-slate-100 px-4 py-3 font-semibold text-slate-900">
-          Aktif ajanlar
+          Aktif temsilciler
           <span className="ml-2 text-xs font-normal text-emerald-700">
             · {onlineIds.size} çevrimiçi
           </span>
@@ -208,7 +208,7 @@ export default function CrmAgentsPage() {
             <Loader2 className="h-6 w-6 animate-spin text-slate-400" />
           </div>
         ) : agents.length === 0 ? (
-          <p className="p-4 text-sm text-slate-500">Henüz CRM ajanı yok</p>
+          <p className="p-4 text-sm text-slate-500">Henüz CRM temsilcisi yok</p>
         ) : (
           <ul className="divide-y divide-slate-100">
             {agents.map((a) => (
@@ -237,7 +237,7 @@ export default function CrmAgentsPage() {
                   onClick={() => {
                     void crmAdminDemoteAgent(a.id)
                       .then(() => {
-                        toast.success('Ajan yetkisi kaldırıldı');
+                        toast.success('Temsilci yetkisi kaldırıldı');
                         return reload();
                       })
                       .catch((err) => toast.error(err.message));

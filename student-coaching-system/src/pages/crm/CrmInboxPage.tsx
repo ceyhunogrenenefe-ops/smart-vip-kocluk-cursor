@@ -896,7 +896,7 @@ export default function CrmInboxPage() {
               <div>
                 <h3 className="mb-1 flex items-center gap-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
                   <UserPlus className="h-3.5 w-3.5" />
-                  Ajana ata
+                  Temsilciye ata
                 </h3>
                 <select
                   value={selected.assigned_user_id || ''}

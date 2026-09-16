@@ -96,7 +96,7 @@ export default function CrmLiveOpsHost() {
 
   return (
     <div className="pointer-events-none fixed bottom-4 left-4 z-[70] max-w-[min(100%-2rem,320px)] rounded-xl border border-emerald-200/80 bg-white/95 px-3 py-2 shadow-lg backdrop-blur">
-      <p className="text-[10px] font-bold uppercase tracking-wide text-emerald-800">Çevrimiçi ajanlar</p>
+      <p className="text-[10px] font-bold uppercase tracking-wide text-emerald-800">Çevrimiçi temsilciler</p>
       <ul className="mt-1 space-y-0.5">
         {online.slice(0, 8).map((a) => (
           <li key={a.user_id} className="flex items-center gap-1.5 text-xs text-slate-700">

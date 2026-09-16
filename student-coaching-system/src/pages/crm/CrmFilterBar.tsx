@@ -76,14 +76,14 @@ export default function CrmFilterBar({
       <label className="block min-w-[220px]">
         <span className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">
           <Users className="h-3.5 w-3.5" />
-          Acente / Temsilci
+          Temsilci
         </span>
         <select
           value={agentId}
           onChange={(e) => onAgent(e.target.value)}
           className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-800"
         >
-          <option value="">Tüm acenteler</option>
+          <option value="">Tüm temsilciler</option>
           {agents.map((a) => (
             <option key={a.id} value={a.id}>
               {a.name}
