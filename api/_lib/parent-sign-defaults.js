@@ -379,13 +379,25 @@ export function normalizeTaksitTutarlari(rawTutarlar, ucret, taksitN) {
   return autoSplitTutarlar(ucret, n);
 }
 
+/** Ücretten ödenen peşinatı düşer; taksitlere bölünecek kalan tutarı verir. */
+export function taksitBazTutar(ucret, pesinat) {
+  const u = Number(ucret);
+  const p = Number(pesinat);
+  const toplam = Number.isFinite(u) && u > 0 ? u : 0;
+  const odenen = Number.isFinite(p) && p > 0 ? Math.min(p, toplam) : 0;
+  return Math.max(0, Math.round((toplam - odenen) * 100) / 100);
+}
+
 /** Elden / taksitli ödeme takibi — vade ve tutar listesi verilirse kullanılır */
-export function buildTaksitPlan(ucret, taksitN, baslangicYmd, vadeDates, tutarlar) {
+export function buildTaksitPlan(ucret, taksitN, baslangicYmd, vadeDates, tutarlar, pesinat = 0) {
   const u = Number(ucret);
   const n = Math.max(1, Math.min(48, Math.round(Number(taksitN) || 1)));
   if (!Number.isFinite(u) || u <= 0 || n <= 0) return [];
+  // Peşinat ödendiyse taksitler kalan tutara göre bölünür.
+  const kalan = taksitBazTutar(u, pesinat);
+  if (kalan <= 0) return [];
   const vadeler = normalizeTaksitVadeleri(vadeDates, n, baslangicYmd);
-  const tutarList = normalizeTaksitTutarlari(tutarlar, u, n);
+  const tutarList = normalizeTaksitTutarlari(tutarlar, kalan, n);
   const out = [];
   for (let i = 0; i < n; i++) {
     out.push({
@@ -416,7 +428,7 @@ export function mergeTaksitPlans(oldCards, newCards) {
   });
 }
 
-export function taksitPlanTableHtml(cards, para_birimi) {
+export function taksitPlanTableHtml(cards, para_birimi, pesinatTl = 0) {
   const list = Array.isArray(cards) ? cards : [];
   if (!list.length) return '';
   const pb = paraBirimiLabel(para_birimi);
@@ -430,7 +442,11 @@ export function taksitPlanTableHtml(cards, para_birimi) {
       return `<tr><td>${esc(String(no))}</td><td>${esc(tutarStr)}</td><td>${esc(vade || '—')}</td></tr>`;
     })
     .join('');
-  return `<div class="taksitprog"><h2>Ödeme planı (taksit vadeleri)</h2><table class="dersmini"><thead><tr><th>Taksit</th><th>Tutar</th><th>Vade</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  return `<div class="taksitprog"><h2>Ödeme planı (taksit vadeleri)</h2>${
+    Number(pesinatTl) > 0
+      ? `<p style="font-size:13px;color:#334155;margin:4px 0">Peşinat olarak <strong>${esc(String(pesinatTl))} ${esc(pb)}</strong> ödenmiştir; aşağıdaki taksitler kalan tutar üzerinden düzenlenmiştir.</p>`
+      : ''
+  }<table class="dersmini"><thead><tr><th>Taksit</th><th>Tutar</th><th>Vade</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 
 export function buildParentContractHtml(fields) {
@@ -458,7 +474,8 @@ export function buildParentContractHtml(fields) {
     kayit_formu_detay,
     para_birimi,
     institution_legal_html,
-    taksit_kartlari
+    taksit_kartlari,
+    pesinat
   } = fields;
 
   const h1 = String(document_title || '').trim() || 'Ön kayıt / bilgilendirme özeti';
@@ -468,16 +485,23 @@ export function buildParentContractHtml(fields) {
   const legalBlock = String(institution_legal_html || '').trim();
   const taksitBlock = taksitPlanTableHtml(
     taksit_kartlari || (kayit_formu_detay && kayit_formu_detay.taksit_kartlari),
-    para_birimi
+    para_birimi,
+    Number(pesinat) || 0
   );
   const pb = paraBirimiLabel(para_birimi);
   const sym = paraBirimiSymbol(para_birimi);
 
   const taksitN = Math.max(1, Math.min(48, Math.round(Number(taksit_sayisi) || 1)));
   const ucretNum = Number(ucret);
+  // Peşinat ödendiyse taksit tutarı kalan üzerinden gösterilir.
+  const pesinatNum =
+    Number.isFinite(Number(pesinat)) && Number(pesinat) > 0
+      ? Math.min(Number(pesinat), Number.isFinite(ucretNum) ? ucretNum : Number(pesinat))
+      : 0;
+  const kalanNum = taksitBazTutar(ucretNum, pesinatNum);
   const taksitTutar =
-    Number.isFinite(ucretNum) && ucretNum > 0 && taksitN > 0
-      ? Math.round(ucretNum / taksitN)
+    Number.isFinite(kalanNum) && kalanNum > 0 && taksitN > 0
+      ? Math.round(kalanNum / taksitN)
       : null;
 
   return `<!DOCTYPE html><html lang="tr"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
@@ -515,10 +539,16 @@ a{color:#1d4ed8}
 <tr><td>Bitiş</td><td>${esc(bitis_tarihi)}</td></tr>
 <tr><td>Haftalık ders saati</td><td>${esc(String(haftalik_ders_saati))} saat</td></tr>
 <tr><td>Ücret (${esc(pb)})</td><td>${esc(String(ucret))} ${esc(sym)}</td></tr>
+${
+  pesinatNum > 0
+    ? `<tr><td>Peşinat (ödendi)</td><td>${esc(String(pesinatNum))} ${esc(sym)}</td></tr>
+<tr><td>Kalan tutar (${esc(pb)})</td><td>${esc(String(kalanNum))} ${esc(sym)}</td></tr>`
+    : ''
+}
 <tr><td>Taksit sayısı</td><td>${esc(String(taksitN))}</td></tr>
 ${
   taksitTutar != null
-    ? `<tr><td>Ortalama taksit tutarı (${esc(pb)})</td><td>${esc(String(taksitTutar))} ${esc(sym)} (yaklaşık)</td></tr>`
+    ? `<tr><td>${pesinatNum > 0 ? 'Kalan tutarın taksiti' : 'Ortalama taksit tutarı'} (${esc(pb)})</td><td>${esc(String(taksitTutar))} ${esc(sym)} (yaklaşık)</td></tr>`
     : ''
 }
 </table>

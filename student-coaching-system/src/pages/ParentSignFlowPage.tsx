@@ -436,6 +436,8 @@ export default function ParentSignFlowPage() {
   const [ucret, setUcret] = useState<number>(25000);
   const [paraBirimi, setParaBirimi] = useState<ParaBirimi>('TRY');
   const [taksitSayisi, setTaksitSayisi] = useState<number>(1);
+  /** Veli pesin odediyse taksitler kalan tutara bolunur */
+  const [pesinat, setPesinat] = useState<number>(0);
   const [taksitVadeleri, setTaksitVadeleri] = useState<string[]>([]);
   const [taksitTutarlari, setTaksitTutarlari] = useState<number[]>([]);
 
@@ -456,6 +458,7 @@ export default function ParentSignFlowPage() {
   const [editUcret, setEditUcret] = useState(0);
   const [editParaBirimi, setEditParaBirimi] = useState<ParaBirimi>('TRY');
   const [editTaksitSayisi, setEditTaksitSayisi] = useState(1);
+  const [editPesinat, setEditPesinat] = useState(0);
   const [editTaksitVadeleri, setEditTaksitVadeleri] = useState<string[]>([]);
   const [editTaksitTutarlari, setEditTaksitTutarlari] = useState<number[]>([]);
   /** Doğrudan HTML düzenleme (koç/admin/süper admin; yalnız imza öncesi) */
@@ -777,6 +780,7 @@ export default function ParentSignFlowPage() {
         ucret: ogrenciOnceKayitFormu ? 0 : ucret,
         para_birimi: ogrenciOnceKayitFormu ? ('TRY' as ParaBirimi) : paraBirimi,
         taksit_sayisi: ogrenciOnceKayitFormu ? 1 : taksitSayisi,
+        pesinat: ogrenciOnceKayitFormu ? 0 : Math.max(0, Math.min(pesinat, ucret)),
         sozlesme_turu: 'satis_sozlesmesi' as SozlesmeTuruKey,
         ...(primaryPresetId ? { preset_id: primaryPresetId } : {}),
         ...(fillPick.startsWith('s:') ? { student_id: fillPick.slice(2) } : {}),
@@ -1091,6 +1095,7 @@ export default function ParentSignFlowPage() {
     setEditBitis(String(r.bitis_tarihi || '').slice(0, 10));
     setEditHaftalikDersSaati(Number(r.haftalik_ders_saati) || 0);
     setEditUcret(Number(r.ucret) || 0);
+    setEditPesinat(Number(r.pesinat) || 0);
     setEditParaBirimi((String(r.para_birimi || 'TRY').toUpperCase() as ParaBirimi) || 'TRY');
     setEditTaksitSayisi(Number(r.taksit_sayisi) || 1);
     const editTaksitN = Math.max(1, Math.min(48, Math.round(Number(r.taksit_sayisi) || 1)));
@@ -1151,6 +1156,7 @@ export default function ParentSignFlowPage() {
         ucret: editUcret,
         para_birimi: editParaBirimi,
         taksit_sayisi: editTaksitSayisi,
+        pesinat: Math.max(0, Math.min(editPesinat, editUcret)),
         sozlesme_turu: 'satis_sozlesmesi',
         ...(editCustomHtmlMode ? { custom_merged_html: editMergedHtml.trim() } : {}),
         ...(editTaksitSayisi > 1 && editTaksitVadeleri.length > 0 ? { taksit_vadeleri: editTaksitVadeleri } : {}),
@@ -1856,6 +1862,23 @@ export default function ParentSignFlowPage() {
                   />
                 </div>
                 <div>
+                  <label className="text-xs text-slate-500">Peşinat (ödendi)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={ucret}
+                    className="mt-1 w-full rounded-lg border px-3 py-2 text-sm dark:bg-slate-950 dark:border-slate-600"
+                    value={pesinat}
+                    onChange={(e) => setPesinat(Math.max(0, Math.min(Number(e.target.value) || 0, ucret)))}
+                  />
+                  <p className="mt-1 text-[11px] text-slate-500">
+                    Kalan tutar: <strong>{Math.max(0, ucret - pesinat)}</strong>
+                    {taksitSayisi > 0
+                      ? ` · ${taksitSayisi} taksit · ~${Math.round(Math.max(0, ucret - pesinat) / taksitSayisi)}/taksit`
+                      : ''}
+                  </p>
+                </div>
+                <div>
                   <label className="text-xs text-slate-500">Taksit sayısı</label>
                   <input
                     type="number"
@@ -1868,14 +1891,16 @@ export default function ParentSignFlowPage() {
                 </div>
                 <TaksitPlanEditor
                   taksitSayisi={taksitSayisi}
-                  ucret={ucret}
+                  ucret={Math.max(0, ucret - pesinat)}
                   paraBirimi={paraBirimi}
                   vadeler={taksitVadeleri}
                   tutarlar={taksitTutarlari}
                   onVadelerChange={setTaksitVadeleri}
                   onTutarlarChange={setTaksitTutarlari}
                   onResetMonthly={() => setTaksitVadeleri(defaultTaksitVadeleri(taksitSayisi))}
-                  onResetEqualSplit={() => setTaksitTutarlari(splitTaksitTutarlari(ucret, taksitSayisi))}
+                  onResetEqualSplit={() =>
+                    setTaksitTutarlari(splitTaksitTutarlari(Math.max(0, ucret - pesinat), taksitSayisi))
+                  }
                 />
               </>
             ) : null}
@@ -2606,6 +2631,25 @@ export default function ParentSignFlowPage() {
                   value={editUcret}
                   onChange={(e) => setEditUcret(Number(e.target.value))}
                 />
+              </div>
+              <div>
+                <label className="text-xs text-slate-500">Peşinat (ödendi)</label>
+                <input
+                  type="number"
+                  min={0}
+                  max={editUcret}
+                  className="mt-1 w-full rounded-lg border px-3 py-2 text-sm dark:bg-slate-950 dark:border-slate-600"
+                  value={editPesinat}
+                  onChange={(e) =>
+                    setEditPesinat(Math.max(0, Math.min(Number(e.target.value) || 0, editUcret)))
+                  }
+                />
+                <p className="mt-1 text-[11px] text-slate-500">
+                  Kalan tutar: <strong>{Math.max(0, editUcret - editPesinat)}</strong>
+                  {editTaksitSayisi > 0
+                    ? ` · ${editTaksitSayisi} taksit · ~${Math.round(Math.max(0, editUcret - editPesinat) / editTaksitSayisi)}/taksit`
+                    : ''}
+                </p>
               </div>
               <div>
                 <label className="text-xs text-slate-500">Taksit sayısı</label>
