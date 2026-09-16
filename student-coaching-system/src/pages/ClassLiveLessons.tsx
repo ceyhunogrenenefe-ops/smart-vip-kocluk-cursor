@@ -523,7 +523,7 @@ export default function ClassLiveLessons() {
     {
       student_id: string;
       student_name?: string;
-      status: 'present' | 'absent' | 'late';
+      status: 'present' | 'absent' | 'late' | 'excused';
       camera_status: 'on' | 'off' | null;
     }[]
   >([]);
@@ -1422,7 +1422,7 @@ export default function ClassLiveLessons() {
         return '';
       };
       const resolveCamera = (studentId: string, status: string): 'on' | 'off' | null => {
-        if (status === 'absent') return null;
+        if (status === 'absent' || status === 'excused') return null;
         const raw = cameraById.get(studentId) || '';
         if (raw === 'on' || raw === 'open') return 'on';
         if (raw === 'off' || raw === 'closed') return 'off';
@@ -1437,9 +1437,10 @@ export default function ClassLiveLessons() {
         // İlk kayıt / kamera seçilmemiş: Kaydet engellenmesin — varsayılan açık
         return 'on';
       };
-      const toDraftStatus = (st: string): 'present' | 'absent' | 'late' => {
+      const toDraftStatus = (st: string): 'present' | 'absent' | 'late' | 'excused' => {
         if (st === 'absent') return 'absent';
         if (st === 'late') return 'late';
+        if (st === 'excused') return 'excused';
         return 'present';
       };
       if (roster.length) {
@@ -1480,21 +1481,23 @@ export default function ClassLiveLessons() {
     let present = 0;
     let late = 0;
     let absent = 0;
+    let excused = 0;
     let cameraOpen = 0;
     let cameraClosed = 0;
     for (const r of attendanceDraft) {
       if (r.status === 'present') present += 1;
       else if (r.status === 'late') late += 1;
+      else if (r.status === 'excused') excused += 1;
       else absent += 1;
       if (r.status === 'present' || r.status === 'late') {
         if (r.camera_status === 'on') cameraOpen += 1;
         else if (r.camera_status === 'off') cameraClosed += 1;
       }
     }
-    return { total: attendanceDraft.length, present, late, absent, cameraOpen, cameraClosed };
+    return { total: attendanceDraft.length, present, late, absent, excused, cameraOpen, cameraClosed };
   }, [attendanceDraft]);
 
-  const setDraftStatus = (idx: number, status: 'present' | 'absent' | 'late') => {
+  const setDraftStatus = (idx: number, status: 'present' | 'absent' | 'late' | 'excused') => {
     setAttendanceCameraWarn(null);
     setAttendanceDraft((prev) =>
       prev.map((r, i) =>
@@ -1503,7 +1506,7 @@ export default function ClassLiveLessons() {
               ...r,
               status,
               camera_status:
-                status === 'absent'
+                status === 'absent' || status === 'excused'
                   ? null
                   : r.camera_status === 'on' || r.camera_status === 'off'
                     ? r.camera_status
@@ -1521,14 +1524,14 @@ export default function ClassLiveLessons() {
     );
   };
 
-  const bulkSetStatus = (status: 'present' | 'absent' | 'late') => {
+  const bulkSetStatus = (status: 'present' | 'absent' | 'late' | 'excused') => {
     setAttendanceCameraWarn(null);
     setAttendanceDraft((prev) =>
       prev.map((r) => ({
         ...r,
         status,
         camera_status:
-          status === 'absent'
+          status === 'absent' || status === 'excused'
             ? null
             : r.camera_status === 'on' || r.camera_status === 'off'
               ? r.camera_status
@@ -1550,7 +1553,8 @@ export default function ClassLiveLessons() {
     if (!attendanceSession || attendanceDraft.length === 0) return;
     // Kamera seçilmemiş katılanlar → varsayılan açık (Kaydet engellenmesin)
     const normalizedDraft = attendanceDraft.map((row) => {
-      if (row.status === 'absent') return { ...row, camera_status: null as 'on' | 'off' | null };
+      if (row.status === 'absent' || row.status === 'excused')
+        return { ...row, camera_status: null as 'on' | 'off' | null };
       if (row.camera_status === 'on' || row.camera_status === 'off') return row;
       return { ...row, camera_status: 'on' as const };
     });
@@ -3135,6 +3139,7 @@ export default function ClassLiveLessons() {
                   <span>✅ {attendanceSummary.present} Katıldı</span>
                   <span>🕐 {attendanceSummary.late} Geç</span>
                   <span>❌ {attendanceSummary.absent} Katılmadı</span>
+                  <span>🟡 {attendanceSummary.excused} İzinli</span>
                   <span>🎥 {attendanceSummary.cameraOpen} Kamera açık</span>
                   <span>🚫 {attendanceSummary.cameraClosed} Kamera kapalı</span>
                 </div>
@@ -3152,6 +3157,13 @@ export default function ClassLiveLessons() {
                     className="rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-[11px] font-semibold text-rose-800 touch-manipulation"
                   >
                     Tümünü Katılmadı
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => bulkSetStatus('excused')}
+                    className="rounded-lg border border-violet-200 bg-violet-50 px-2.5 py-1.5 text-[11px] font-semibold text-violet-800 touch-manipulation"
+                  >
+                    Tümünü İzinli
                   </button>
                   <button
                     type="button"
@@ -3176,12 +3188,13 @@ export default function ClassLiveLessons() {
                       className="border border-slate-100 rounded-xl px-3 py-2.5 space-y-2"
                     >
                       <div className="text-sm font-medium text-slate-800 truncate">{displayName}</div>
-                      <div className="grid grid-cols-3 gap-1.5">
+                      <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
                         {(
                           [
                             { v: 'present' as const, label: '✅ Katıldı', active: 'bg-emerald-600 text-white border-emerald-600' },
                             { v: 'absent' as const, label: '❌ Katılmadı', active: 'bg-rose-600 text-white border-rose-600' },
-                            { v: 'late' as const, label: '🕐 Geç', active: 'bg-amber-600 text-white border-amber-600' }
+                            { v: 'late' as const, label: '🕐 Geç', active: 'bg-amber-600 text-white border-amber-600' },
+                            { v: 'excused' as const, label: '🟡 İzinli', active: 'bg-violet-600 text-white border-violet-600' }
                           ] as const
                         ).map((opt) => (
                           <button

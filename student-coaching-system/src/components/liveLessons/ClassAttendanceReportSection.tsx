@@ -16,14 +16,14 @@ export type ClassAttendanceReportRow = {
   teacher_name: string;
   student_id: string;
   student_name: string;
-  status: 'present' | 'absent';
+  status: 'present' | 'absent' | 'late' | 'excused';
   marked_at: string | null;
   marked_by: string | null;
 };
 
 type ReportPayload = {
   rows: ClassAttendanceReportRow[];
-  summary: { present: number; absent: number; records: number; session_count: number };
+  summary: { present: number; absent: number; late?: number; excused?: number; records: number; session_count: number };
 };
 
 function isoDateDaysAgo(days: number): string {
@@ -87,7 +87,12 @@ export function ClassAttendanceReportSection({ institutionChoices, className = '
         setData(null);
         return;
       }
-      setData(j.data || { rows: [], summary: { present: 0, absent: 0, records: 0, session_count: 0 } });
+      setData(
+        j.data || {
+          rows: [],
+          summary: { present: 0, absent: 0, late: 0, excused: 0, records: 0, session_count: 0 }
+        }
+      );
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Yükleme hatası');
       setData(null);
@@ -120,7 +125,13 @@ export function ClassAttendanceReportSection({ institutionChoices, className = '
         r.subject,
         r.teacher_name,
         r.student_name,
-        r.status === 'present' ? 'geldi' : 'gelmedi',
+        r.status === 'present'
+          ? 'geldi'
+          : r.status === 'late'
+            ? 'geç geldi'
+            : r.status === 'excused'
+              ? 'izinli'
+              : 'gelmedi',
         r.marked_at ? new Date(r.marked_at).toISOString() : ''
       ]
         .map((cell) => `"${String(cell).replace(/"/g, '""')}"`)
@@ -242,6 +253,10 @@ export function ClassAttendanceReportSection({ institutionChoices, className = '
           <div className="rounded-lg bg-rose-50 border border-rose-100 px-3 py-2">
             <p className="text-xs text-rose-700">Gelmedi</p>
             <p className="text-xl font-bold text-rose-800">{data.summary.absent}</p>
+          </div>
+          <div className="rounded-lg bg-violet-50 border border-violet-100 px-3 py-2">
+            <p className="text-xs text-violet-700">İzinli</p>
+            <p className="text-xl font-bold text-violet-800">{data.summary.excused ?? 0}</p>
           </div>
           <div className="rounded-lg bg-slate-50 border border-slate-100 px-3 py-2">
             <p className="text-xs text-slate-600">Yoklama satırı</p>

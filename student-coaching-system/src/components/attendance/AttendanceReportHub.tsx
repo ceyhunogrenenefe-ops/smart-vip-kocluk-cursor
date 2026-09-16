@@ -36,7 +36,7 @@ export type AttendanceHubRow = {
   student_name: string;
   student_phone: string | null;
   parent_phone: string | null;
-  status: 'present' | 'absent' | 'late';
+  status: 'present' | 'absent' | 'late' | 'excused';
   camera_status?: 'on' | 'off' | 'n_a' | null;
   marked_at: string | null;
   marked_by: string | null;
@@ -51,6 +51,7 @@ type StatsPayload = {
     present: number;
     absent: number;
     late: number;
+    excused: number;
     participation_pct: number;
   }[];
   teacher_yoklama: {
@@ -60,6 +61,7 @@ type StatsPayload = {
     present: number;
     absent: number;
     late: number;
+    excused: number;
   }[];
 };
 
@@ -103,7 +105,9 @@ export function AttendanceReportHub({ institutions, activeInstitutionId }: Props
   const [studentId, setStudentId] = useState('');
   const [sessionId, setSessionId] = useState('');
   const [teacherId, setTeacherId] = useState('');
-  const [status, setStatus] = useState<'all' | 'absent' | 'present' | 'late' | 'camera_off'>('all');
+  const [status, setStatus] = useState<
+    'all' | 'absent' | 'present' | 'late' | 'excused' | 'camera_off'
+  >('all');
   const [lessonType, setLessonType] = useState<'all' | 'group' | 'private'>('group');
   const [absentToday, setAbsentToday] = useState(false);
   const [includeStats, setIncludeStats] = useState(true);
@@ -112,7 +116,14 @@ export function AttendanceReportHub({ institutions, activeInstitutionId }: Props
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [rows, setRows] = useState<AttendanceHubRow[]>([]);
-  const [summary, setSummary] = useState({ present: 0, absent: 0, late: 0, records: 0, session_count: 0 });
+  const [summary, setSummary] = useState({
+    present: 0,
+    absent: 0,
+    late: 0,
+    excused: 0,
+    records: 0,
+    session_count: 0
+  });
   const [stats, setStats] = useState<StatsPayload | null>(null);
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -246,6 +257,7 @@ export function AttendanceReportHub({ institutions, activeInstitutionId }: Props
           present: 0,
           absent: 0,
           late: 0,
+          excused: 0,
           records: 0,
           session_count: 0
         }
@@ -402,7 +414,13 @@ export function AttendanceReportHub({ institutions, activeInstitutionId }: Props
         r.subject,
         r.teacher_name,
         r.student_name,
-        r.status === 'present' ? '✅ Katıldı' : r.status === 'late' ? '🕐 Geç Katıldı' : '❌ Katılmadı',
+        r.status === 'present'
+          ? '✅ Katıldı'
+          : r.status === 'late'
+            ? '🕐 Geç Katıldı'
+            : r.status === 'excused'
+              ? '🟡 İzinli'
+              : '❌ Katılmadı',
         r.camera_status === 'off'
           ? '🚫 Kapalı'
           : r.camera_status === 'on'
@@ -470,6 +488,7 @@ export function AttendanceReportHub({ institutions, activeInstitutionId }: Props
             <option value="absent">Katılmadı</option>
             <option value="present">Katıldı</option>
             <option value="late">Geç katıldı</option>
+            <option value="excused">İzinli</option>
             <option value="camera_off">Kamera kapalı</option>
           </select>
         </label>
@@ -639,7 +658,7 @@ export function AttendanceReportHub({ institutions, activeInstitutionId }: Props
 
       {error ? <p className="text-sm text-red-600">{error}</p> : null}
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
         <div className="rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-2">
           <p className="text-xs text-emerald-800">Katıldı</p>
           <p className="text-xl font-bold text-emerald-900">{summary.present}</p>
@@ -651,6 +670,10 @@ export function AttendanceReportHub({ institutions, activeInstitutionId }: Props
         <div className="rounded-lg border border-amber-100 bg-amber-50 px-3 py-2">
           <p className="text-xs text-amber-900">Geç katıldı</p>
           <p className="text-xl font-bold text-amber-950">{summary.late}</p>
+        </div>
+        <div className="rounded-lg border border-violet-100 bg-violet-50 px-3 py-2">
+          <p className="text-xs text-violet-800">İzinli</p>
+          <p className="text-xl font-bold text-violet-900">{summary.excused}</p>
         </div>
         <div className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
           <p className="text-xs text-slate-600">Kayıt</p>
@@ -723,6 +746,7 @@ export function AttendanceReportHub({ institutions, activeInstitutionId }: Props
                     <th className="px-2 py-2 text-emerald-700">Katıldı</th>
                     <th className="px-2 py-2 text-amber-700">Geç</th>
                     <th className="px-2 py-2 text-rose-700">Katılmadı</th>
+                    <th className="px-2 py-2 text-violet-700">İzinli</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -733,6 +757,7 @@ export function AttendanceReportHub({ institutions, activeInstitutionId }: Props
                       <td className="px-2 py-2 text-emerald-700">{t.present}</td>
                       <td className="px-2 py-2 text-amber-700">{t.late}</td>
                       <td className="px-2 py-2 text-rose-700">{t.absent}</td>
+                      <td className="px-2 py-2 text-violet-700">{t.excused ?? 0}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -857,7 +882,13 @@ export function AttendanceReportHub({ institutions, activeInstitutionId }: Props
                           statusStyle(r.status)
                         )}
                       >
-                        {r.status === 'present' ? 'Katıldı' : r.status === 'late' ? 'Geç' : 'Katılmadı'}
+                        {r.status === 'present'
+                          ? 'Katıldı'
+                          : r.status === 'late'
+                            ? 'Geç'
+                            : r.status === 'excused'
+                              ? 'İzinli'
+                              : 'Katılmadı'}
                       </span>
                       {r.camera_status === 'off' ? (
                         <span className="ml-1 rounded px-2 py-0.5 text-[10px] font-semibold bg-amber-100 text-amber-900">
@@ -944,7 +975,13 @@ export function AttendanceReportHub({ institutions, activeInstitutionId }: Props
                     <td className="font-medium text-slate-900">{r.student_name}</td>
                     <td className="px-2 py-2">
                       <span className={`inline-flex rounded px-2 py-0.5 text-xs font-semibold ${statusStyle(r.status)}`}>
-                        {r.status === 'present' ? 'Katıldı' : r.status === 'late' ? 'Geç katıldı' : 'Katılmadı'}
+                        {r.status === 'present'
+                          ? 'Katıldı'
+                          : r.status === 'late'
+                            ? 'Geç katıldı'
+                            : r.status === 'excused'
+                              ? 'İzinli'
+                              : 'Katılmadı'}
                       </span>
                     </td>
                     <td className="whitespace-nowrap px-2 py-2 text-xs">
