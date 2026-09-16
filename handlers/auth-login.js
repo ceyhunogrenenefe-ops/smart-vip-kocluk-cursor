@@ -31,6 +31,31 @@ function normalizeLoginRoles(primaryRole, rolesArr) {
   return [...set];
 }
 
+/**
+ * CRM Temsilciler ekranındaki aktif atama = temsilci yetkisi.
+ * users.roles içinden crm_agent silinmiş olsa da temsilci CRM'e girebilsin.
+ */
+async function withActiveCrmAssignmentRole(user) {
+  const roles = normalizeLoginRoles(user.role, user.roles);
+  if (roles.includes('crm_agent')) return roles;
+  try {
+    const { data } = await withDbTimeout(
+      supabaseAdmin
+        .from('crm_user_assignments')
+        .select('id')
+        .eq('user_id', user.id)
+        .eq('is_active', true)
+        .limit(1),
+      4000,
+      'crm_assignment_lookup'
+    );
+    if (data?.length) roles.push('crm_agent');
+  } catch {
+    /* tablo yoksa girişi engelleme */
+  }
+  return roles;
+}
+
 async function lookupUserByEmail(normalizedEmail) {
   const { data, error } = await withDbTimeout(
     supabaseAdmin.from('users').select(USER_LOGIN_COLUMNS).eq('email', normalizedEmail).maybeSingle(),
@@ -238,7 +263,7 @@ export default async function handler(req, res) {
       email: user.email,
       phone: user.phone || undefined,
       role: user.role,
-      roles: normalizeLoginRoles(user.role, user.roles),
+      roles: await withActiveCrmAssignmentRole(user),
       studentId,
       coachId,
       institutionId: institutionId || undefined,
