@@ -1704,7 +1704,12 @@ async function handleBulkTemplateSend(body, institutionId, actor) {
   if (!templateName && !templateBody) throw new Error('Şablon veya metin gerekli');
 
   const results = [];
-  for (const leadId of leadIds.slice(0, 80)) {
+  const MAX_PER_REQUEST = 80;
+  for (const leadId of leadIds.slice(MAX_PER_REQUEST)) {
+    // Kuyrukta sessizce kalmasın: istemci parça parça gönderir, taşan kayıt açıkça hatalı döner
+    results.push({ lead_id: leadId, ok: false, status: 'error', error: 'İstek başına en fazla 80 kişi' });
+  }
+  for (const leadId of leadIds.slice(0, MAX_PER_REQUEST)) {
     try {
       const send = await handleSendChannelMessage(
         {

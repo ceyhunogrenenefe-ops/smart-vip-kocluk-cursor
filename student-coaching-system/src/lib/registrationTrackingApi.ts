@@ -335,9 +335,15 @@ export function rtSegmentLeads(query: Record<string, string> = {}) {
         phone?: string | null;
         normalized_phone?: string | null;
         stage?: string;
+        grade_program?: string | null;
+        primary_status?: string;
+        pipeline_column?: string;
         assigned_user_id?: string | null;
       }>;
-      segment?: { id: string; label: string };
+      segment?: { id: string; label: string } | null;
+      facets?: { grades: Record<string, number>; columns: Record<string, number> };
+      columns?: Array<{ id: string; label: string }>;
+      grade_programs?: Array<{ code: string; label: string }>;
     };
   }>('segment-leads', { method: 'GET', query });
 }

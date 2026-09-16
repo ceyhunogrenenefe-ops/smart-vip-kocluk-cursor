@@ -159,3 +159,76 @@ export function summarizeLeadSources(leads) {
     pct: total ? Math.round(((counts[b.id] || 0) / total) * 1000) / 10 : 0
   }));
 }
+
+/**
+ * Toplu mesaj hedef kitlesi — pipeline sütunları (CRM Pipeline ekranıyla aynı gruplama).
+ * Kesin kayıt / kaybedildi primary_status ile ayrılır.
+ */
+export const CRM_BULK_PIPELINE_COLUMNS = [
+  { id: 'incoming', label: "Gelen Lead'ler", stages: ['new_lead', 'first_contact_pending'] },
+  {
+    id: 'contact',
+    label: "Görüşülen Lead'ler",
+    stages: ['first_contact_completed', 'presentation_scheduled', 'offer_sent']
+  },
+  { id: 'trial', label: 'Deneme Dersi Planlanan / Yapılan', stages: ['trial_lesson_scheduled', 'trial_lesson_completed'] },
+  { id: 'thinking', label: 'Düşünülüyor', stages: ['considering', 'follow_up', 'postponed'] },
+  { id: 'payment', label: 'Ödeme Bekleniyor', stages: ['payment_pending'] },
+  { id: 'confirmed', label: 'Kesin Kayıt', status: 'confirmed' },
+  { id: 'lost', label: 'Kaybedildi', status: 'lost' }
+];
+
+export function bulkColumnIdForLead(lead) {
+  const status = String(lead?.primary_status || 'tracking');
+  if (status === 'confirmed') return 'confirmed';
+  if (status === 'lost') return 'lost';
+  const stage = String(lead?.stage || '');
+  for (const col of CRM_BULK_PIPELINE_COLUMNS) {
+    if (col.stages?.includes(stage)) return col.id;
+  }
+  return 'incoming';
+}
+
+function csvList(v) {
+  if (Array.isArray(v)) return v.map(String).map((s) => s.trim()).filter(Boolean);
+  return String(v || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+/**
+ * Sınıf + pipeline sütunu filtresi. Hiç sütun seçilmezse takipteki (açık) lead'ler.
+ * Sayaçlar: sınıf sayıları seçili sütunlara göre, sütun sayıları seçili sınıflara göre.
+ */
+export function filterBulkAudience(leads, filters = {}) {
+  const grades = new Set(csvList(filters.grades));
+  let columns = new Set(csvList(filters.columns));
+  if (!columns.size && filters.segment) {
+    // Eski segment parametresi: stage listesi → takipteki lead'ler
+    const seg = CRM_OPS_SEGMENTS.find((s) => s.id === filters.segment);
+    if (seg?.stage_in?.length) {
+      const stageSet = new Set(seg.stage_in);
+      const legacy = (leads || []).filter(
+        (l) => String(l.primary_status || 'tracking') === 'tracking' && stageSet.has(String(l.stage || ''))
+      );
+      return filterBulkAudience(legacy, { grades: [...grades], columns: ['incoming', 'contact', 'trial', 'thinking', 'payment'] });
+    }
+  }
+  const openColumns = ['incoming', 'contact', 'trial', 'thinking', 'payment'];
+  const colOk = (id) => (columns.size ? columns.has(id) : openColumns.includes(id));
+  const gradeOf = (l) => String(l.grade_program || 'unspecified');
+
+  const gradeCounts = {};
+  const columnCounts = {};
+  const items = [];
+  for (const l of leads || []) {
+    const col = bulkColumnIdForLead(l);
+    const g = gradeOf(l);
+    const gOk = !grades.size || grades.has(g);
+    if (colOk(col)) gradeCounts[g] = (gradeCounts[g] || 0) + 1;
+    if (gOk) columnCounts[col] = (columnCounts[col] || 0) + 1;
+    if (gOk && colOk(col)) items.push({ ...l, pipeline_column: col });
+  }
+  return { items, facets: { grades: gradeCounts, columns: columnCounts } };
+}

@@ -2,10 +2,12 @@
  * CRM Dashboard / görev / toplu şablon — registration-tracking ops
  */
 import { supabaseAdmin } from './supabase-admin.js';
-import { istanbulDayBounds } from './registration-tracking-utils.js';
+import { GRADE_PROGRAMS, istanbulDayBounds } from './registration-tracking-utils.js';
 import {
   computeFirstResponseAvgMs,
+  CRM_BULK_PIPELINE_COLUMNS,
   CRM_OPS_SEGMENTS,
+  filterBulkAudience,
   formatFirstResponse,
   inIsoRange,
   isTrialLessonLead,
@@ -375,18 +377,24 @@ export function resolveBulkSegment(segmentId) {
 }
 
 export async function handleListSegmentLeads(institutionId, filters = {}) {
-  const segment = resolveBulkSegment(filters.segment || 'all_tracking');
+  const segment = resolveBulkSegment(filters.segment || '') || null;
   const assignee = String(filters.assigned_user_id || '').trim();
   let q = supabaseAdmin
     .from('registration_leads')
-    .select('id, first_name, last_name, full_name, phone, normalized_phone, stage, assigned_user_id, primary_status')
+    .select(
+      'id, first_name, last_name, full_name, phone, normalized_phone, stage, grade_program, assigned_user_id, primary_status'
+    )
     .eq('institution_id', institutionId)
     .is('deleted_at', null)
-    .eq('primary_status', 'tracking')
-    .limit(300);
+    .order('created_at', { ascending: false })
+    .limit(5000);
   if (assignee) q = q.eq('assigned_user_id', assignee);
-  if (segment?.stage_in?.length) q = q.in('stage', segment.stage_in);
   const { data, error } = await q;
   if (error) throw error;
-  return { items: data || [], segment };
+  const { items, facets } = filterBulkAudience(data || [], {
+    grades: filters.grades,
+    columns: filters.columns,
+    segment: filters.columns ? '' : filters.segment
+  });
+  return { items, facets, segment, columns: CRM_BULK_PIPELINE_COLUMNS, grade_programs: GRADE_PROGRAMS };
 }
