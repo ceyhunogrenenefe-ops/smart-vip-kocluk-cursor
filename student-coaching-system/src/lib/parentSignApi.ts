@@ -93,6 +93,8 @@ export interface ParentSignContractRow {
   bitis_tarihi: string;
   haftalik_ders_saati: number;
   ucret: number;
+  /** Veli tarafindan pesin odenen tutar; taksitler kalan tutara gore hesaplanir */
+  pesinat?: number;
   para_birimi?: ParaBirimi | string;
   taksit_sayisi?: number;
   kurum_kodu: string;
@@ -318,6 +320,8 @@ export async function createParentSignContract(body: {
   bitis_tarihi: string;
   haftalik_ders_saati?: number;
   ucret?: number;
+  /** Odenen pesinat; taksitler ucretten bu tutar dusulerek bolunur */
+  pesinat?: number;
   para_birimi?: ParaBirimi | string;
   taksit_sayisi?: number;
   preset_id?: string;
@@ -355,6 +359,8 @@ export async function updateParentSignContract(body: {
   bitis_tarihi: string;
   haftalik_ders_saati?: number;
   ucret?: number;
+  /** Odenen pesinat; taksitler ucretten bu tutar dusulerek bolunur */
+  pesinat?: number;
   para_birimi?: ParaBirimi | string;
   taksit_sayisi?: number;
   sozlesme_turu?: SozlesmeTuruKey | string;

@@ -364,6 +364,7 @@ async function rebuildContractMergedHtml(existing, kayitJson) {
     bitis_tarihi: String(existing.bitis_tarihi || '').slice(0, 10),
     haftalik_ders_saati: Number(existing.haftalik_ders_saati) || 0,
     ucret: Number(existing.ucret) || 0,
+    pesinat: Number(existing.pesinat) || 0,
     taksit_sayisi,
     para_birimi,
     kurum_kodu,
@@ -526,7 +527,7 @@ export default async function handler(req, res) {
       const { data: row, error } = await supabaseAdmin
         .from('parent_sign_contracts')
         .select(
-          'id,merged_html,contract_number,status,signed_at,institution_id,preset_id,signature_png_base64,kayit_formu_json,program_adi,sinif,baslangic_tarihi,bitis_tarihi,ucret,taksit_sayisi,para_birimi,ogrenci_ad,ogrenci_soyad,veli_ad,veli_soyad,telefon,adres,student_id,ogrenci_user_id'
+          'id,merged_html,contract_number,status,signed_at,institution_id,preset_id,signature_png_base64,kayit_formu_json,program_adi,sinif,baslangic_tarihi,bitis_tarihi,ucret,pesinat,taksit_sayisi,para_birimi,ogrenci_ad,ogrenci_soyad,veli_ad,veli_soyad,telefon,adres,student_id,ogrenci_user_id'
         )
         .eq('signing_token', signingToken)
         .maybeSingle();
@@ -1244,6 +1245,20 @@ export default async function handler(req, res) {
           ? Math.min(48, Math.max(1, Math.round(Number(existing.taksit_sayisi))))
           : 1;
 
+      // Peşinat: gövdede yoksa kayıttaki değer korunur.
+      const pesinatPatchRaw = body.pesinat;
+      const pesinatPatchParsed =
+        pesinatPatchRaw !== undefined && pesinatPatchRaw !== null && String(pesinatPatchRaw).trim() !== ''
+          ? Number(pesinatPatchRaw)
+          : NaN;
+      const pesinat = Math.min(
+        Math.max(0, Number(fee) || 0),
+        Math.max(
+          0,
+          Number.isFinite(pesinatPatchParsed) ? pesinatPatchParsed : Number(existing.pesinat) || 0
+        )
+      );
+
       const kurum_kodu = institutionCodeFromRow(inst || { id: institutionId });
       const verifyToken = String(existing.verify_token || '');
       const base = publicBaseUrl();
@@ -1286,14 +1301,22 @@ export default async function handler(req, res) {
           const odeme_sekli = normalizeOdemeSekli(body.odeme_sekli ?? kj0.odeme_sekli);
           const kkTahsil = Boolean(body.kk_tahsil_edildi);
           const planTaksitN = odeme_sekli === 'kredi_karti_tek' ? 1 : taksit_sayisi;
-          let taksit_kartlari = buildTaksitPlan(feeNum, planTaksitN, bas, taksitVadeleriBody, taksitTutarlariBody);
+          let taksit_kartlari = buildTaksitPlan(
+            feeNum,
+            planTaksitN,
+            bas,
+            taksitVadeleriBody,
+            taksitTutarlariBody,
+            pesinat
+          );
           taksit_kartlari = applyKkTahsilToPlan(taksit_kartlari, odeme_sekli, kkTahsil);
           const planN = Math.max(1, taksit_kartlari.length);
           contractTaksitSayisi = planN;
-          const ort = planN > 0 ? Math.round(feeNum / planN) : 0;
+          const kalanNum = Math.max(0, feeNum - pesinat);
+          const ort = planN > 0 ? Math.round(kalanNum / planN) : 0;
           const pb = normalizeParaBirimi(body.para_birimi ?? existing.para_birimi);
           const pbLbl = paraBirimiLabel(pb);
-          const muhasebe_ozet2 = `Öğrenci: ${ogrenci_ad} ${ogrenci_soyad} | Program: ${program_adi} | Sınıf: ${sinif} | Toplam: ${feeNum} ${pbLbl} | ${odemeSekliLabelTr(odeme_sekli)} | ${planN} taksit | ~${ort} ${pbLbl}/taksit | E-posta: ${String(kj0.eposta || '')}`;
+          const muhasebe_ozet2 = `Öğrenci: ${ogrenci_ad} ${ogrenci_soyad} | Program: ${program_adi} | Sınıf: ${sinif} | Toplam: ${feeNum} ${pbLbl} | ${pesinat > 0 ? `Peşinat: ${pesinat} ${pbLbl} | Kalan: ${kalanNum} ${pbLbl} | ` : ''}${odemeSekliLabelTr(odeme_sekli)} | ${planN} taksit | ~${ort} ${pbLbl}/taksit | E-posta: ${String(kj0.eposta || '')}`;
           nextKayitJson = {
             ...kj0,
             phase: 'ready_to_sign',
@@ -1309,7 +1332,14 @@ export default async function handler(req, res) {
             taksitTutarlariBody ||
             (existingTaksit.length > 0 && (feeChanged || taksitChanged || basChanged)))
         ) {
-          const fresh = buildTaksitPlan(feeNum, taksit_sayisi, bas, taksitVadeleriBody, taksitTutarlariBody);
+          const fresh = buildTaksitPlan(
+            feeNum,
+            taksit_sayisi,
+            bas,
+            taksitVadeleriBody,
+            taksitTutarlariBody,
+            pesinat
+          );
           const taksit_kartlari = mergeTaksitPlans(existingTaksit, fresh);
           const pbUpd = normalizeParaBirimi(body.para_birimi ?? existing.para_birimi);
           nextKayitJson = { ...kj0, taksit_kartlari, para_birimi: pbUpd };
@@ -1330,6 +1360,7 @@ export default async function handler(req, res) {
           bitis_tarihi: bit,
           haftalik_ders_saati: hours,
           ucret: fee,
+          pesinat,
           taksit_sayisi: contractTaksitSayisi,
           para_birimi,
           kurum_kodu,
@@ -1359,6 +1390,7 @@ export default async function handler(req, res) {
         bitis_tarihi: bit,
         haftalik_ders_saati: hours,
         ucret: fee,
+        pesinat,
         taksit_sayisi: contractTaksitSayisi,
         para_birimi: normalizeParaBirimi(body.para_birimi ?? existing.para_birimi),
         kurum_kodu,
@@ -1616,6 +1648,14 @@ export default async function handler(req, res) {
         fee = 0;
         taksit_sayisi = 1;
       }
+      // Veli peşinat ödediyse taksitler kalan tutara göre kurulur.
+      const pesinatParsed =
+        body.pesinat !== undefined && body.pesinat !== null && String(body.pesinat).trim() !== ''
+          ? Number(body.pesinat)
+          : NaN;
+      const pesinat = regFormFirst || !Number.isFinite(pesinatParsed)
+        ? 0
+        : Math.min(fee, Math.max(0, pesinatParsed));
 
       const kurum_kodu = institutionCodeFromRow(inst || { id: institutionId });
       const cnum = contractNumber(kurum_kodu);
@@ -1633,7 +1673,7 @@ export default async function handler(req, res) {
       let kayit_formu_json = {};
       const postTaksitKartlari =
         !regFormFirst && fee > 0
-          ? buildTaksitPlan(fee, taksit_sayisi, bas, taksitVadeleriPost, taksitTutarlariPost)
+          ? buildTaksitPlan(fee, taksit_sayisi, bas, taksitVadeleriPost, taksitTutarlariPost, pesinat)
           : [];
       if (regFormFirst) {
         merged_html = buildRegistrationPlaceholderHtml({
@@ -1662,6 +1702,7 @@ export default async function handler(req, res) {
           bitis_tarihi: bit,
           haftalik_ders_saati: hours,
           ucret: fee,
+          pesinat,
           taksit_sayisi,
           para_birimi,
           kurum_kodu,
@@ -1695,6 +1736,7 @@ export default async function handler(req, res) {
         bitis_tarihi: bit,
         haftalik_ders_saati: hours,
         ucret: fee,
+        pesinat,
         taksit_sayisi,
         para_birimi,
         kurum_kodu,
