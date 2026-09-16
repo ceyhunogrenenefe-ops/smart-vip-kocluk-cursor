@@ -242,6 +242,26 @@ const ORG_SYSTEM_ORDER = [
   '/muhasebe'
 ] as const;
 
+/** CRM — tek açılır grup; sıra: günlük kullanım önce */
+const CRM_ORDER = [
+  '/crm/inbox',
+  '/crm',
+  '/crm/gorevler',
+  '/crm/toplu-mesaj',
+  '/crm/dashboard',
+  '/crm/widgetler'
+] as const;
+const CRM_PATHS = new Set<string>(CRM_ORDER);
+/** Grup başlığı "CRM" olduğu için alt öğelerde tekrar edilmez */
+const CRM_LABELS: Record<string, string> = {
+  '/crm/inbox': 'Gelen Kutusu',
+  '/crm': 'Pipeline',
+  '/crm/gorevler': 'Görevler',
+  '/crm/toplu-mesaj': 'Toplu Mesaj',
+  '/crm/dashboard': 'Dashboard',
+  '/crm/widgetler': 'Widgetler'
+};
+
 const SETTINGS_PATHS = new Set(['/settings', '/webhooks']);
 const SETTINGS_ORDER = ['/settings', '/webhooks'] as const;
 
@@ -520,7 +540,8 @@ export type NavGroupKind =
   | 'settings'
   | 'studentPanel'
   | 'team'
-  | 'whatsapp';
+  | 'whatsapp'
+  | 'crm';
 
 export type StructuredNav = {
   panels: FlatNavItem[];
@@ -529,6 +550,7 @@ export type StructuredNav = {
   team: FlatNavItem[];
   academic: FlatNavItem[];
   whatsapp: FlatNavItem[];
+  crm: FlatNavItem[];
   orgSystem: FlatNavItem[];
   settings: FlatNavItem[];
   rest: FlatNavItem[];
@@ -542,6 +564,7 @@ export function structureNavFromFlat(flat: FlatNavItem[]): StructuredNav {
   const team: FlatNavItem[] = [];
   const academic: FlatNavItem[] = [];
   const whatsapp: FlatNavItem[] = [];
+  const crm: FlatNavItem[] = [];
   const orgSystem: FlatNavItem[] = [];
   const settings: FlatNavItem[] = [];
   const rest: FlatNavItem[] = [];
@@ -580,6 +603,10 @@ export function structureNavFromFlat(flat: FlatNavItem[]): StructuredNav {
     }
     if (WHATSAPP_PATHS.has(it.path)) {
       whatsapp.push(it);
+      continue;
+    }
+    if (CRM_PATHS.has(it.path)) {
+      crm.push({ ...it, label: CRM_LABELS[it.path] ?? it.label });
       continue;
     }
     if (ACADEMIC_PATHS.has(it.path)) {
@@ -624,6 +651,12 @@ export function structureNavFromFlat(flat: FlatNavItem[]): StructuredNav {
   };
   whatsapp.sort((a, b) => waRank(a.path) - waRank(b.path));
 
+  const crmRank = (p: string) => {
+    const i = (CRM_ORDER as readonly string[]).indexOf(p);
+    return i === -1 ? 99 : i;
+  };
+  crm.sort((a, b) => crmRank(a.path) - crmRank(b.path));
+
   /** Akademik Takip içinde tutarlı sıra: plan → merkez → takip türleri */
   const academicOrder = [
     '/weekly-planner',
@@ -642,7 +675,7 @@ export function structureNavFromFlat(flat: FlatNavItem[]): StructuredNav {
   };
   academic.sort((a, b) => acRank(a.path) - acRank(b.path));
 
-  return { panels, academicCenter, lessons, team, academic, whatsapp, orgSystem, settings, rest };
+  return { panels, academicCenter, lessons, team, academic, whatsapp, crm, orgSystem, settings, rest };
 }
 
 export function pathnameMatchesGroup(pathname: string, kind: NavGroupKind, items: FlatNavItem[]): boolean {
