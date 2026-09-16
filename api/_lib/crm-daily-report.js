@@ -296,6 +296,7 @@ export async function buildCrmDailyReport(institutionId, date) {
         .from('registration_leads')
         .select('id, primary_status, stage, source, last_inbound_channel, created_at')
         .eq('institution_id', institutionId)
+        .eq('is_internal', false)
         .is('deleted_at', null)
         .limit(10000)
     ),
@@ -354,6 +355,7 @@ export async function buildCrmDailyReport(institutionId, date) {
         .select('id')
         .eq('institution_id', institutionId)
         .eq('status', 'open')
+        .eq('is_internal', false)
         .gt('unread_count', 0)
         .limit(5000)
     ),
@@ -370,8 +372,10 @@ export async function buildCrmDailyReport(institutionId, date) {
   const convIds = [...new Set(inboxMsgs.map((m) => m.conversation_id).filter(Boolean))];
   const convLead = new Map();
   if (convIds.length) {
-    const convs = await safeSelect(supabaseAdmin.from('crm_conversations').select('id, lead_id').in('id', convIds));
-    for (const c of convs) convLead.set(c.id, c.lead_id);
+    const convs = await safeSelect(
+      supabaseAdmin.from('crm_conversations').select('id, lead_id, is_internal').in('id', convIds)
+    );
+    for (const c of convs) convLead.set(c.id, c.is_internal ? '__internal__' : c.lead_id);
   }
 
   let campaignMessages = [];
@@ -393,10 +397,13 @@ export async function buildCrmDailyReport(institutionId, date) {
     institutionName: inst[0]?.name || null,
     leads,
     users,
-    inboundMessages: msgs.filter((m) => m.direction === 'inbound'),
-    outboundLeadMessages: msgs.filter((m) => m.direction === 'outbound'),
-    inboxAgentMessages: inboxMsgs.map((m) => ({ ...m, lead_id: convLead.get(m.conversation_id) || null })),
-    interactions,
+    // Kurum içi adayların mesaj / not / görüşmeleri rapora girmez
+    inboundMessages: msgs.filter((m) => m.direction === 'inbound' && leadIds.has(m.lead_id)),
+    outboundLeadMessages: msgs.filter((m) => m.direction === 'outbound' && (!m.lead_id || leadIds.has(m.lead_id))),
+    inboxAgentMessages: inboxMsgs
+      .map((m) => ({ ...m, lead_id: convLead.get(m.conversation_id) || null }))
+      .filter((m) => m.lead_id !== '__internal__' && (!m.lead_id || leadIds.has(m.lead_id))),
+    interactions: interactions.filter((i) => !i.lead_id || leadIds.has(i.lead_id)),
     stageHistory: history.filter((h) => leadIds.has(h.lead_id)),
     campaigns,
     campaignMessages,

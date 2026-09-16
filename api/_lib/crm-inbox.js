@@ -423,6 +423,11 @@ export async function upsertCrmMessage({
 
   if (!conversation?.id) return { skipped: true, reason: 'conversation_failed' };
 
+  if (direction === 'inbound' && !conversation.is_internal) {
+    const { autoMarkConversationInternal } = await import('./crm-internal-contacts.js');
+    if (await autoMarkConversationInternal(conversation)) conversation = { ...conversation, is_internal: true };
+  }
+
   const resolvedSenderType = senderType || (direction === 'outbound' ? 'agent' : 'lead');
 
   const idCol = await resolveCrmMessageIdColumn();

@@ -148,12 +148,16 @@ export default async function handler(req, res) {
       let query = supabaseAdmin
         .from('crm_conversations')
         .select(
-          'id, institution_id, contact_identifier, channel, contact_name, assigned_user_id, status, lead_id, ad_source_data, last_message_at, last_message_preview, unread_count, metadata, created_at, updated_at'
+          'id, institution_id, contact_identifier, channel, contact_name, assigned_user_id, status, lead_id, ad_source_data, last_message_at, last_message_preview, unread_count, metadata, created_at, updated_at, is_internal, internal_reason'
         )
         .order('last_message_at', { ascending: false, nullsFirst: false })
         .limit(limit);
 
       if (institutionId) query = query.eq('institution_id', institutionId);
+      // Sekme: adaylar (varsayılan) | kurum içi | hepsi
+      const internal = String(req.query?.internal || body.internal || 'exclude').trim();
+      if (internal === 'only') query = query.eq('is_internal', true);
+      else if (internal !== 'all') query = query.eq('is_internal', false);
       if (status) query = query.eq('status', status);
       if (channel === 'whatsapp' || channel === 'instagram') {
         query = query.eq('channel', channel);
@@ -933,6 +937,22 @@ export default async function handler(req, res) {
       return res.status(200).json({ data });
     }
 
+    if (op === 'set_internal' && req.method === 'POST') {
+      const conversationId = String(body.conversation_id || '').trim();
+      if (!conversationId) return res.status(400).json({ error: 'conversation_id_required' });
+      const { data: conv } = await supabaseAdmin
+        .from('crm_conversations')
+        .select('*')
+        .eq('id', conversationId)
+        .maybeSingle();
+      if (!(await assertConversationAccess(conv, actor, roleSet, assignment))) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+      const { setConversationInternal } = await import('../api/_lib/crm-internal-contacts.js');
+      const data = await setConversationInternal(conv, body.internal === true, actor.sub);
+      return res.status(200).json({ data });
+    }
+
     if (op === 'update_status' && req.method === 'POST') {
       const conversationId = String(body.conversation_id || '').trim();
       const status = String(body.status || '').trim();
@@ -1086,7 +1106,7 @@ export default async function handler(req, res) {
       let cq = supabaseAdmin
         .from('crm_conversations')
         .select(
-          'id, last_message_at, last_message_preview, unread_count, assigned_user_id, status, channel, contact_name, contact_identifier, updated_at'
+          'id, last_message_at, last_message_preview, unread_count, assigned_user_id, status, channel, contact_name, contact_identifier, updated_at, is_internal'
         )
         .gt('updated_at', since)
         .order('updated_at', { ascending: false })

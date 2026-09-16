@@ -181,6 +181,11 @@ function sanitizeLeadForActor(lead, tags) {
 function applyLeadFilters(q, filters, institutionId) {
   let query = q.eq('institution_id', institutionId).is('deleted_at', null);
 
+  // Kurum içi (mevcut öğrenci / veli) kayıtlar pipeline ve raporlarda görünmez
+  if (filters.include_internal !== '1' && filters.include_internal !== 'true') {
+    query = query.eq('is_internal', false);
+  }
+
   if (filters.primary_status) {
     const statuses = String(filters.primary_status).split(',').filter(Boolean);
     if (statuses.length === 1) query = query.eq('primary_status', statuses[0]);
