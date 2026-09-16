@@ -152,14 +152,18 @@ async function realignTemplateRowWithMeta(templateRow, templateType) {
   } catch (e) {
     return { row: null, reason: e instanceof Error ? e.message : String(e) };
   }
-  if (!live?.ok || !live.body_text) return { row: null, reason: live?.error || 'meta_body_unavailable' };
+  if (!live?.ok || !live.body_text) {
+    return { row: null, reason: `${live?.error || 'meta_body_unavailable'}${live?.hint ? `: ${live.hint}` : ''}` };
+  }
 
   const candidates = [
     templateRow?.content,
     ...(Array.isArray(templateRow?.binding_candidates) ? templateRow.binding_candidates : [])
   ].filter(Boolean);
   const binding = resolveBindingFromMetaBody(live.body_text, candidates);
-  if (!binding || !binding.variables.length) return { row: null, reason: 'meta_body_unmapped' };
+  if (!binding || !binding.variables.length) {
+    return { row: null, reason: `meta_body_unmapped: ${String(live.body_text).slice(0, 300)}` };
+  }
 
   const patch = {
     content: binding.content,
@@ -180,7 +184,10 @@ export async function sendWhatsAppUsingTemplateRow(p) {
   const first = await sendWhatsAppUsingTemplateRowOnce(p);
   if (first.ok || !isParameterCountMismatch(first)) return first;
   const { row, reason } = await realignTemplateRowWithMeta(p.templateRow, p.templateType);
-  if (!row) return { ...first, realign: reason || 'failed' };
+  if (!row) {
+    console.warn('[whatsapp-outbound] şablon hizalanamadı', p.templateType, reason);
+    return { ...first, error: `${first.error || 'send_failed'} [hizalama: ${reason || 'failed'}]`, realign: reason || 'failed' };
+  }
   const second = await sendWhatsAppUsingTemplateRowOnce({ ...p, templateRow: row });
   return { ...second, realigned: true };
 }
