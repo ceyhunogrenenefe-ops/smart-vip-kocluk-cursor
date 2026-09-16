@@ -135,6 +135,9 @@ function HomeRedirect() {
     return <Navigate to="/crm/inbox" replace />;
   }
 
+  /** Ana rolü koç olan (ek admin / temsilci yetkisi olsa da) hesabın açılış sayfası koç paneli kalır */
+  if (effectiveUser.role === 'coach') return <Navigate to="/coach-dashboard" replace />;
+
   if (tags.includes('super_admin') || tags.includes('admin')) {
     return <Navigate to="/dashboard" replace />;
   }
