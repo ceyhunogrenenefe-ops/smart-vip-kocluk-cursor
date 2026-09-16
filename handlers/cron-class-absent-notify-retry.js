@@ -3,6 +3,7 @@ import { authorizeVercelOrCronSecret } from '../api/_lib/cron-auth.js';
 import { renderMessageTemplate } from '../api/_lib/template-engine.js';
 import { normalizePhoneToE164 } from '../api/_lib/phone-whatsapp.js';
 import { recordCronRun } from '../api/_lib/cron-run-log.js';
+import { getIstanbulDateString } from '../api/_lib/istanbul-time.js';
 import {
   resolveAutomationSendChannel,
   sendAutomationTemplateMessage
@@ -91,6 +92,11 @@ export default async function handler(req, res) {
       log.push({ id: row.id, skipped: 'session_not_found' });
       continue;
     }
+    // Önceki günlerin dersi için veliye geç bildirim gitmesin
+    if (String(session.lesson_date || '') < getIstanbulDateString()) {
+      log.push({ id: row.id, skipped: 'lesson_day_passed' });
+      continue;
+    }
 
     const allowAuto = await attendanceAutoWaEnabled(
       session.institution_id != null ? String(session.institution_id).trim() : ''
@@ -138,7 +144,7 @@ export default async function handler(req, res) {
     const sent = templateRow?.content
       ? await sendAutomationTemplateMessage({
           phone: parentPhone,
-          templateRow,
+          templateRow: { ...templateRow, binding_candidates: [PREVIEW_FALLBACK] },
           vars,
           templateType: TEMPLATE_TYPE
         })
