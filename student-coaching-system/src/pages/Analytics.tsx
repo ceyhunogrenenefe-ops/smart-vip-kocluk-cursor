@@ -1265,7 +1265,9 @@ export default function Analytics() {
         />
       )}
 
-      {selectedStudentId && subjectAnalysis.length > 0 && (
+      {/* Ders bazlı liste öğrenci seçilmeden de görünür: genel görünümde
+          filtrelenen tüm kayıtların hedef ve doğruluğunu gösterir. */}
+      {subjectAnalysis.length > 0 && (
         <SubjectGoalProgressList
           rangeLabel={rangeLabel}
           rows={subjectAnalysis.map((row) => ({
