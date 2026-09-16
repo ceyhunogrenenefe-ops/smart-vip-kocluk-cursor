@@ -846,6 +846,10 @@ export default async function handler(req, res) {
           conversation_id: conversationId
         });
       }
+      if (conv.lead_id) {
+        const { markLeadContacted } = await import('../api/_lib/registration-lead-contact.js');
+        await markLeadContacted(conv.lead_id);
+      }
       return res.status(200).json({ ok: true, data: saved?.message || null, send: sendResult });
     }
 

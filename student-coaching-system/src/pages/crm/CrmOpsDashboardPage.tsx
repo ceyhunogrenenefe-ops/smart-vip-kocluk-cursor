@@ -4,6 +4,7 @@ import { Clock, Globe, GraduationCap, Instagram, Loader2, MessageCircle, Trophy,
 import { toast } from 'sonner';
 import { rtListCoaches, rtOpsDashboard, type CrmOpsDashboard, type RegCoach } from '../../lib/registrationTrackingApi';
 import CrmFilterBar, { type CrmTimePreset } from './CrmFilterBar';
+import CrmAgentLeadsPanel from './CrmAgentLeadsPanel';
 import { CRM_OPS_DEMO_COACHES, CRM_OPS_DEMO_DASHBOARD } from './crmOpsDemo';
 
 function todayYmd() {
@@ -117,6 +118,7 @@ export default function CrmOpsDashboardPage() {
   const [from, setFrom] = useState(todayYmd());
   const [to, setTo] = useState(todayYmd());
   const [agentId, setAgentId] = useState('');
+  const [openAgent, setOpenAgent] = useState<{ id: string; name: string } | null>(null);
   const [coaches, setCoaches] = useState<RegCoach[]>(CRM_OPS_DEMO_COACHES);
   const [data, setData] = useState<CrmOpsDashboard | null>(null);
   const [demo, setDemo] = useState(false);
@@ -211,7 +213,7 @@ export default function CrmOpsDashboardPage() {
             <KpiCard
               label="İletişim sayısı"
               value={data?.contacts ?? 0}
-              hint="Ulaşılan / konuşulan kişi"
+              hint="Temsilcinin mesaj, not veya bilgi girdiği kişi"
               icon={MessageCircle}
               accent="bg-sky-100 text-sky-700"
             />
@@ -260,8 +262,19 @@ export default function CrmOpsDashboardPage() {
                   </thead>
                   <tbody>
                     {agents.map((a) => (
-                      <tr key={a.id} className="border-b border-slate-100 last:border-0">
-                        <td className="py-2.5 pr-3 font-medium text-slate-900">{a.name}</td>
+                      <tr
+                        key={a.id}
+                        onClick={() =>
+                          !demo && setOpenAgent((cur) => (cur?.id === a.id ? null : { id: a.id, name: a.name }))
+                        }
+                        title="Atanan adayları göster"
+                        className={`border-b border-slate-100 last:border-0 ${demo ? '' : 'cursor-pointer hover:bg-emerald-50/60'} ${
+                          openAgent?.id === a.id ? 'bg-emerald-50' : ''
+                        }`}
+                      >
+                        <td className="py-2.5 pr-3 font-medium text-emerald-800 underline decoration-emerald-200 underline-offset-2">
+                          {a.name}
+                        </td>
                         <td className="py-2.5 pr-3">{a.leads}</td>
                         <td className="py-2.5 pr-3 tabular-nums text-slate-700">{a.response_label}</td>
                         <td className="py-2.5 pr-3">{a.trial_lessons}</td>
@@ -296,6 +309,14 @@ export default function CrmOpsDashboardPage() {
               </div>
             </div>
           </div>
+
+          {openAgent ? (
+            <CrmAgentLeadsPanel
+              agentId={openAgent.id}
+              agentName={openAgent.name}
+              onClose={() => setOpenAgent(null)}
+            />
+          ) : null}
         </>
       )}
     </div>

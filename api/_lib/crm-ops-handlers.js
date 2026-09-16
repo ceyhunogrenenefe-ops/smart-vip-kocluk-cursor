@@ -74,11 +74,9 @@ export async function handleOpsDashboard(institutionId, filters = {}) {
     }
   }
 
+  // İletişim = temsilcinin mesaj / not / bilgi girişi (gelen mesaj sayılmaz)
   const contacts = all.filter(
-    (l) =>
-      inIsoRange(l.last_contact_at, fromMs, toMs) ||
-      inIsoRange(l.last_inbound_at, fromMs, toMs) ||
-      inIsoRange(l.first_contact_at, fromMs, toMs)
+    (l) => inIsoRange(l.last_contact_at, fromMs, toMs) || inIsoRange(l.first_contact_at, fromMs, toMs)
   );
   const trials = all.filter(
     (l) =>
@@ -185,7 +183,7 @@ export async function handleOpsDashboard(institutionId, filters = {}) {
 
   const seriesMap = new Map();
   for (const l of contacts) {
-    const day = String(l.last_contact_at || l.last_inbound_at || l.first_contact_at || '').slice(0, 10);
+    const day = String(l.last_contact_at || l.first_contact_at || '').slice(0, 10);
     if (!day) continue;
     if (!seriesMap.has(day)) seriesMap.set(day, { day, contacts: 0, confirmed: 0 });
     seriesMap.get(day).contacts += 1;

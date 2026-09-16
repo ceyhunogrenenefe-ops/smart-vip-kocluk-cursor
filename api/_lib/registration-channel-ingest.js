@@ -235,9 +235,8 @@ async function createLeadFromInbound({
           : 'whatsapp_inbound'),
     email: email || null,
     interested_package: interestedPackage || null,
-    notes: notes || (firstMessage ? `İlk mesaj: ${snippetOf(firstMessage, 200)}` : null),
-    first_contact_at: now,
-    last_contact_at: now
+    notes: notes || (firstMessage ? `İlk mesaj: ${snippetOf(firstMessage, 200)}` : null)
+    // first/last_contact_at yalnız temsilci iletişiminde dolar (gelen mesaj iletişim sayılmaz)
   };
   if (instagramScopedId) row.instagram_scoped_id = String(instagramScopedId);
   if (channel === 'facebook' && instagramScopedId) {
@@ -385,7 +384,6 @@ export async function ingestRegistrationChannelMessage(msg) {
       [body, lead.notes, lead.last_inbound_snippet].filter(Boolean).join('\n')
     );
     const leadPatch = {
-      last_contact_at: occurredAt,
       last_inbound_channel: msg.leadInboundChannel || channel,
       last_inbound_snippet: snip,
       last_inbound_at: occurredAt,
@@ -406,7 +404,7 @@ export async function ingestRegistrationChannelMessage(msg) {
       if (/last_inbound_|instagram_scoped|facebook_psid/i.test(e?.message || '')) {
         await supabaseAdmin
           .from('registration_leads')
-          .update({ last_contact_at: occurredAt, updated_at: new Date().toISOString() })
+          .update({ updated_at: new Date().toISOString() })
           .eq('id', lead.id);
       } else {
         console.warn('[channel-ingest] lead patch:', e instanceof Error ? e.message : e);
