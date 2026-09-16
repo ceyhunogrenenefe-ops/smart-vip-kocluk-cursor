@@ -122,7 +122,7 @@ export async function ensureClassSessionsFromWeeklySlots(lessonDate) {
 
   const { data: existing, error: exErr } = await supabaseAdmin
     .from('class_sessions')
-    .select('class_id,teacher_id,start_time,end_time,status,subject')
+    .select('id,class_id,teacher_id,start_time,end_time,status,subject,origin_slot_id')
     .eq('lesson_date', date);
   if (exErr) throw exErr;
 
@@ -145,7 +145,9 @@ export async function ensureClassSessionsFromWeeklySlots(lessonDate) {
   const toInsert = [];
   const sessionsOnDay = existing || [];
   for (const slot of slotList) {
-    if (slotCoveredBySessions(slot, sessionsOnDay, { ignoreCancelled: true })) continue;
+    // Silinen (iptal edilen) ders, zamanlanmış görev her çalıştığında geri gelmemeli.
+    // ignoreCancelled:false → o gün/saatte iptal kaydı varsa şablon kapalı sayılır.
+    if (slotCoveredBySessions(slot, sessionsOnDay, { ignoreCancelled: false })) continue;
     const row = sessionRowFromSlot(slot, date, instByClass.get(String(slot.class_id)) ?? null, null);
     if (!row.meeting_link) continue;
     toInsert.push(row);
