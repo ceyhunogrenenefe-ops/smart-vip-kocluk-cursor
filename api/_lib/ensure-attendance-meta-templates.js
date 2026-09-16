@@ -8,6 +8,7 @@ import {
   isMetaTemplateSendableStatus
 } from './meta-templates-sync.js';
 import { buildMetaTemplateCreatePayload, createOrReuseMetaMessageTemplate } from './meta-template-create.js';
+import { resolveBindingFromMetaBody } from './meta-template-binding.js';
 
 export const ATTENDANCE_META_SEED = [
   {
@@ -74,6 +75,15 @@ export const ATTENDANCE_META_SEED = [
 
 async function upsertSeedRow(seed) {
   const metaName = String(seed.metaTemplateName || seed.type).trim() || seed.type;
+  const { data: existing } = await supabaseAdmin
+    .from('message_templates')
+    .select('id, type, meta_template_name, meta_template_language, whatsapp_template_status, content')
+    .eq('type', seed.type)
+    .maybeSingle();
+  if (existing?.id) {
+    // Mevcut satırın metni/değişkenleri ezilmez: Meta'daki onaylı gövde ile uyumu bozuyordu (#132000)
+    return { ok: true, type: seed.type, row: existing, existed: true };
+  }
   const row = {
     name: seed.name,
     type: seed.type,
@@ -137,7 +147,7 @@ export async function ensureAttendanceMetaTemplates(opts = {}) {
     try {
       const metaName = String(seed.metaTemplateName || seed.type).trim() || seed.type;
       entry.meta_name = metaName;
-      const phone = await fetchMetaTemplatesFromPhoneWaba(metaName, { includeComponents: false });
+      const phone = await fetchMetaTemplatesFromPhoneWaba(metaName, { includeComponents: true });
       const matches = phone.ok ? phone.matches || [] : [];
       const approved =
         matches.find(
@@ -159,6 +169,12 @@ export async function ensureAttendanceMetaTemplates(opts = {}) {
       }
 
       if (entry.meta_approved && up?.row?.id) {
+        // Metin ve değişkenler Meta'daki onaylı gövdeden alınır; eşlenemezse mevcut satır korunur
+        const bodyText =
+          (any.components || []).find((c) => String(c?.type || '').toUpperCase() === 'BODY')?.text || '';
+        const binding = bodyText
+          ? resolveBindingFromMetaBody(bodyText, [up.row.content, seed.content].filter(Boolean))
+          : null;
         const { error: syncErr } = await supabaseAdmin
           .from('message_templates')
           .update({
@@ -167,10 +183,14 @@ export async function ensureAttendanceMetaTemplates(opts = {}) {
             whatsapp_template_status: String(entry.meta_status || 'APPROVED'),
             whatsapp_template_synced_at: new Date().toISOString(),
             is_active: true,
-            content: seed.content,
-            variables: seed.variables,
-            twilio_variable_bindings: seed.variables,
-            meta_named_body_parameters: true,
+            ...(binding && binding.variables.length
+              ? {
+                  content: binding.content,
+                  variables: binding.variables,
+                  twilio_variable_bindings: binding.variables,
+                  meta_named_body_parameters: binding.named
+                }
+              : {}),
             updated_at: new Date().toISOString()
           })
           .eq('id', up.row.id);

@@ -7,6 +7,7 @@ import {
 } from './meta-whatsapp.js';
 import { resolvePhoneWabaTemplateSendConfig } from './meta-templates-sync.js';
 import { supabaseAdmin } from './supabase-admin.js';
+import { isParameterCountMismatch, resolveBindingFromMetaBody } from './meta-template-binding.js';
 
 /** Üretim gönderimi — Meta WABA listesi API çağrılmaz (diğer şablonları bozmaz). */
 function localLanguageCandidates(preferredLang) {
@@ -138,7 +139,53 @@ export function buildTemplatePreview(templateRow, vars) {
 /**
  * `message_templates` satırını kullanarak Meta şablon gönderir.
  */
-export async function sendWhatsAppUsingTemplateRow({
+/**
+ * Meta onaylı gövdesini okuyup satırı hizalar (DB metni değişmiş, Meta şablonu eski kalmışsa).
+ * Hizalama bulunursa message_templates satırı da güncellenir; sonraki gönderimler ilk seferde tutar.
+ */
+async function realignTemplateRowWithMeta(templateRow, templateType) {
+  const metaName = resolveMetaTemplateName(templateRow, templateType);
+  const lang = normalizeMetaLanguageCode(templateRow?.meta_template_language);
+  let live;
+  try {
+    live = await resolvePhoneWabaTemplateSendConfig(metaName, lang);
+  } catch (e) {
+    return { row: null, reason: e instanceof Error ? e.message : String(e) };
+  }
+  if (!live?.ok || !live.body_text) return { row: null, reason: live?.error || 'meta_body_unavailable' };
+
+  const candidates = [
+    templateRow?.content,
+    ...(Array.isArray(templateRow?.binding_candidates) ? templateRow.binding_candidates : [])
+  ].filter(Boolean);
+  const binding = resolveBindingFromMetaBody(live.body_text, candidates);
+  if (!binding || !binding.variables.length) return { row: null, reason: 'meta_body_unmapped' };
+
+  const patch = {
+    content: binding.content,
+    variables: binding.variables,
+    twilio_variable_bindings: binding.variables,
+    meta_named_body_parameters: binding.named,
+    updated_at: new Date().toISOString()
+  };
+  if (templateRow?.id) {
+    const { error } = await supabaseAdmin.from('message_templates').update(patch).eq('id', templateRow.id);
+    if (error) console.warn('[whatsapp-outbound] realign save:', error.message);
+    else console.info('[whatsapp-outbound] şablon Meta gövdesiyle hizalandı', metaName, binding.variables);
+  }
+  return { row: { ...templateRow, ...patch } };
+}
+
+export async function sendWhatsAppUsingTemplateRow(p) {
+  const first = await sendWhatsAppUsingTemplateRowOnce(p);
+  if (first.ok || !isParameterCountMismatch(first)) return first;
+  const { row, reason } = await realignTemplateRowWithMeta(p.templateRow, p.templateType);
+  if (!row) return { ...first, realign: reason || 'failed' };
+  const second = await sendWhatsAppUsingTemplateRowOnce({ ...p, templateRow: row });
+  return { ...second, realigned: true };
+}
+
+async function sendWhatsAppUsingTemplateRowOnce({
   phone,
   templateRow,
   vars,

@@ -561,6 +561,7 @@ export async function resolvePhoneWabaTemplateSendConfig(templateName, preferred
     language_candidates,
     parameter_format: parameterFormat || (namedBody ? 'NAMED' : 'POSITIONAL'),
     meta_named_body_parameters: namedBody,
+    body_text: extractBodyComponent(pick.components)?.text || null,
     waba_id: phone.waba_id,
     approved: approved.map((m) => ({
       name: m.name,

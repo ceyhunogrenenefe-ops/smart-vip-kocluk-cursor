@@ -297,7 +297,8 @@ export async function sendAbsentNoticeForStudent({ session, className, studentId
     const sent = templateRow?.content
       ? await sendAutomationTemplateMessage({
           phone: parentPhone,
-          templateRow,
+          // Meta şablonu eski gövdede kaldıysa bu metinle değişken sırası çıkarılır
+          templateRow: { ...templateRow, binding_candidates: [FALLBACK_ABSENT] },
           vars,
           templateType: 'class_absent_notice_1'
         })
