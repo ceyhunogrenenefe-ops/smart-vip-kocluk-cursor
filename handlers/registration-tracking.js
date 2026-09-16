@@ -349,7 +349,8 @@ async function handleList(institutionId, filters, tags, actor) {
 
   query = applyLeadFilters(query, filters, institutionId);
 
-  if (!isManager(tags) && (tags.includes('coach') || tags.includes('teacher'))) {
+  // CRM temsilcisi (koç olsa da) tüm pipeline'ı görür; yalnız koç/öğretmen kendi atamalarını
+  if (!isManager(tags) && !tags.includes('crm_agent') && (tags.includes('coach') || tags.includes('teacher'))) {
     query = query.eq('assigned_user_id', actor.sub);
   }
 

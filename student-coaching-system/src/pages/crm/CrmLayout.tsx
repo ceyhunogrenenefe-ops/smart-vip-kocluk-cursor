@@ -11,6 +11,7 @@ export default function CrmLayout() {
   const navigate = useNavigate();
   const tags = userRoleTags(effectiveUser);
   const isAdmin = tags.includes('super_admin') || tags.includes('admin');
+  const canSeePipeline = isAdmin || tags.includes('crm_agent');
   const agentOnly =
     tags.includes('crm_agent') &&
     !tags.some((t) =>
@@ -97,20 +98,22 @@ export default function CrmLayout() {
                   Widgetler
                 </NavLink>
               )}
+              {canSeePipeline && (
+                <NavLink
+                  to="/crm"
+                  end
+                  className={({ isActive }) =>
+                    `inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition ${
+                      isActive ? 'bg-emerald-600 text-white' : 'text-slate-600 hover:bg-slate-100'
+                    }`
+                  }
+                >
+                  <LayoutGrid className="h-4 w-4" />
+                  Pipeline
+                </NavLink>
+              )}
               {isAdmin && (
                 <>
-                  <NavLink
-                    to="/crm"
-                    end
-                    className={({ isActive }) =>
-                      `inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition ${
-                        isActive ? 'bg-emerald-600 text-white' : 'text-slate-600 hover:bg-slate-100'
-                      }`
-                    }
-                  >
-                    <LayoutGrid className="h-4 w-4" />
-                    Pipeline
-                  </NavLink>
                   <NavLink
                     to="/crm/agents"
                     className={({ isActive }) =>
@@ -134,7 +137,7 @@ export default function CrmLayout() {
             {!agentOnly && (
               <button
                 type="button"
-                onClick={() => navigate('/dashboard')}
+                onClick={() => navigate('/')}
                 className="rounded-lg px-2 py-1 text-slate-500 hover:bg-slate-100"
               >
                 Ana panel
