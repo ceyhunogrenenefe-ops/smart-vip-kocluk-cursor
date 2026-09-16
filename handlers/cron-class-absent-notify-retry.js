@@ -55,7 +55,8 @@ export default async function handler(req, res) {
     return res.status(200).json({ ok: true, skipped: 'automation_channel_not_ready' });
   }
 
-  const sinceIso = new Date(Date.now() - 36 * 3600 * 1000).toISOString();
+  // Yalnız bugünün (TR) başarısız bildirimleri: eski günler en başta kalıp bugünküleri engellemesin
+  const sinceIso = new Date(`${getIstanbulDateString()}T00:00:00+03:00`).toISOString();
   const { data: fails, error: qErr } = await supabaseAdmin
     .from('message_logs')
     .select('id, student_id, related_id, kind, error, phone, message')
@@ -63,7 +64,7 @@ export default async function handler(req, res) {
     .eq('status', 'failed')
     .is('meta_message_id', null)
     .gte('sent_at', sinceIso)
-    .order('sent_at', { ascending: true })
+    .order('sent_at', { ascending: false })
     .limit(40);
 
   if (qErr) {
