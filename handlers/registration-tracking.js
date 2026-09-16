@@ -7,6 +7,7 @@ import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { errorMessage } from '../api/_lib/error-msg.js';
 import { isMissingTableError } from '../api/_lib/supabase-schema.js';
 import { isUuid } from '../api/_lib/uuid.js';
+import { isContactUpdate, markLeadContacted } from '../api/_lib/registration-lead-contact.js';
 import {
   normalizeTrPhone,
   normalizeGradeProgram,
@@ -145,7 +146,6 @@ async function auditLog({ institutionId, leadId, action, actorUserId, oldValue, 
 
 async function notifyUser({ title, body, targetUserId, linkUrl, senderId, institutionId }) {
   if (!targetUserId) return;
-  const dedupKey = `reg_track:${targetUserId}:${String(title).slice(0, 50)}:${Date.now().slice(0, -5)}`;
   try {
     const { data: existing } = await supabaseAdmin
       .from('platform_notifications')
@@ -200,7 +200,8 @@ function applyLeadFilters(q, filters, institutionId) {
   }
   if (filters.grade_program) query = query.eq('grade_program', filters.grade_program);
   if (filters.temperature) query = query.eq('temperature', filters.temperature);
-  if (filters.assigned_user_id) query = query.eq('assigned_user_id', filters.assigned_user_id);
+  if (filters.assigned_user_id === '_unassigned') query = query.is('assigned_user_id', null);
+  else if (filters.assigned_user_id) query = query.eq('assigned_user_id', filters.assigned_user_id);
   if (filters.academic_period_key) query = query.eq('academic_period_key', filters.academic_period_key);
   if (filters.source) query = query.ilike('source', `%${filters.source}%`);
 
@@ -683,6 +684,17 @@ async function handleUpdateLead(leadId, body, institutionId, actor, tags) {
     oldValue: existing,
     newValue: patch
   });
+
+  // Aday bilgisi girildiyse (yalnız atama / planlama değil) iletişime geçildi say
+  // Form tüm alanları yollayabilir: yalnız gerçekten değişen alanlara bakılır
+  const changedFields = Object.fromEntries(
+    Object.keys(patch)
+      .filter((k) => allowed.includes(k) && String(patch[k] ?? '') !== String(existing[k] ?? ''))
+      .map((k) => [k, true])
+  );
+  if (isContactUpdate(changedFields)) {
+    await markLeadContacted(leadId);
+  }
 
   if (patch.assigned_user_id && patch.assigned_user_id !== existing.assigned_user_id) {
     await notifyUser({
@@ -1666,6 +1678,8 @@ async function handleSendChannelMessage(body, institutionId, actor) {
     },
     occurred_at: new Date().toISOString()
   };
+
+  if (sendMeta.ok && !campaignId) await markLeadContacted(leadId, insertRow.occurred_at);
 
   const { data: saved, error: insErr } = await supabaseAdmin
     .from('registration_channel_messages')

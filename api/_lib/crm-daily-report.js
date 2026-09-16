@@ -473,6 +473,19 @@ export async function loadCrmReportRecipients(institutionId) {
   return out;
 }
 
+/** Tek alıcı gönderimi takılırsa cron süresi (300 sn) dolmasın */
+const RECIPIENT_SEND_TIMEOUT_MS = 45000;
+
+function withTimeout(promise, ms, label) {
+  let timer;
+  return Promise.race([
+    promise,
+    new Promise((resolve) => {
+      timer = setTimeout(() => resolve({ ok: false, error: `${label} zaman aşımı (${Math.round(ms / 1000)} sn)` }), ms);
+    })
+  ]).finally(() => clearTimeout(timer));
+}
+
 export async function sendCrmDailyReport(reportRow, { force = false } = {}) {
   if (!reportRow) return { sent: 0, failed: 0, skipped: 0, recipients: [] };
   if (reportRow.sent_at && !force) {
@@ -480,30 +493,33 @@ export async function sendCrmDailyReport(reportRow, { force = false } = {}) {
   }
   const { sendGatewayTextMessage } = await import('./whatsapp-gateway-send.js');
   const recipients = await loadCrmReportRecipients(reportRow.institution_id);
-  const results = [];
-  for (const r of recipients) {
-    if (!r.phone) {
-      results.push({ ...r, ok: false, error: 'Telefon numarası yok' });
-      continue;
-    }
-    let res;
-    try {
-      res = await sendGatewayTextMessage({ phone: r.phone, message: reportRow.message, allowSharedFallback: true });
-    } catch (e) {
-      res = { ok: false, error: e instanceof Error ? e.message : String(e) };
-    }
-    const ok = Boolean(res?.ok);
-    results.push({ ...r, ok, error: ok ? null : res?.error || 'Gönderilemedi' });
-    await insertWhatsAppAutomationLog({
-      studentId: null,
-      kind: CRM_DAILY_REPORT_KIND,
-      message: reportRow.message,
-      status: ok ? 'sent' : 'failed',
-      error: ok ? null : res?.error || 'send_failed',
-      phone: r.phone,
-      logDate: reportRow.report_date
-    });
-  }
+  // Alıcılara paralel ve süre sınırlı gönder (sıralı gönderimde gateway yavaşlayınca cron 300 sn'yi aşıyordu)
+  const results = await Promise.all(
+    recipients.map(async (r) => {
+      if (!r.phone) return { ...r, ok: false, error: 'Telefon numarası yok' };
+      let res;
+      try {
+        res = await withTimeout(
+          sendGatewayTextMessage({ phone: r.phone, message: reportRow.message, allowSharedFallback: true }),
+          RECIPIENT_SEND_TIMEOUT_MS,
+          'WhatsApp gönderimi'
+        );
+      } catch (e) {
+        res = { ok: false, error: e instanceof Error ? e.message : String(e) };
+      }
+      const ok = Boolean(res?.ok);
+      await insertWhatsAppAutomationLog({
+        studentId: null,
+        kind: CRM_DAILY_REPORT_KIND,
+        message: reportRow.message,
+        status: ok ? 'sent' : 'failed',
+        error: ok ? null : res?.error || 'send_failed',
+        phone: r.phone,
+        logDate: reportRow.report_date
+      });
+      return { ...r, ok, error: ok ? null : res?.error || 'Gönderilemedi' };
+    })
+  );
   const summary = {
     sent: results.filter((x) => x.ok).length,
     failed: results.filter((x) => !x.ok).length,
@@ -526,7 +542,8 @@ export async function runCrmDailyReportJob({ date = null, send = true } = {}) {
   const rows = await safeSelect(supabaseAdmin.from('registration_leads').select('institution_id').limit(20000));
   const institutions = [...new Set(rows.map((r) => r.institution_id).filter(Boolean))];
   const out = [];
-  for (const inst of institutions) {
+  // Kurumlar paralel: biri yavaşlarsa diğerinin raporu gecikmesin
+  await Promise.all(institutions.map(async (inst) => {
     try {
       const report = await saveCrmDailyReport(inst, ymd);
       const active = reportHasActivity(report.payload);
@@ -535,6 +552,6 @@ export async function runCrmDailyReportJob({ date = null, send = true } = {}) {
     } catch (e) {
       out.push({ institution_id: inst, error: e instanceof Error ? e.message : String(e) });
     }
-  }
+  }));
   return { ok: true, date: ymd, institutions: out };
 }
