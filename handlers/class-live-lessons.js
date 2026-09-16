@@ -3405,6 +3405,27 @@ export default async function handler(req, res) {
             }
           }
         }
+        // Toplu düzenlemede haftalık şablon da güncellenir; aksi halde ileri
+        // tarihler eski saat/öğretmenle yeniden üretilir.
+        const originSlotId = String(session.origin_slot_id || '').trim();
+        if (originSlotId) {
+          const slotPatch = {};
+          if (batchPatch.start_time) slotPatch.start_time = batchPatch.start_time;
+          if (batchPatch.end_time) slotPatch.end_time = batchPatch.end_time;
+          if (batchPatch.teacher_id) slotPatch.teacher_id = batchPatch.teacher_id;
+          if (batchPatch.subject) slotPatch.subject = batchPatch.subject;
+          if (Object.keys(slotPatch).length) {
+            slotPatch.updated_at = new Date().toISOString();
+            const { error: slotSyncErr } = await supabaseAdmin
+              .from('class_weekly_slots')
+              .update(slotPatch)
+              .eq('id', originSlotId);
+            if (slotSyncErr) {
+              console.warn('[class-live-lessons] slot sync', slotSyncErr.message);
+            }
+          }
+        }
+
         return res.status(200).json({
           data: primary,
           updated_count: batchRows?.length ?? peerIds.length,

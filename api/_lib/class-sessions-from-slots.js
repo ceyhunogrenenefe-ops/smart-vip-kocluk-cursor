@@ -34,6 +34,9 @@ function sessionRowFromSlot(slot, lessonDate, institutionId, scheduleBatchId) {
     status: 'scheduled',
     reminder_sent: false,
     homework_sent: false,
+    // Hangi şablondan üretildiği: ders düzenlenip saati/öğretmeni değişse bile
+    // aynı şablon o gün için ikinci bir oturum üretmesin.
+    ...(slot.id ? { origin_slot_id: slot.id } : {}),
     ...(scheduleBatchId ? { schedule_batch_id: scheduleBatchId } : {})
   };
 }
@@ -57,7 +60,7 @@ function timeRangesOverlap(startA, endA, startB, endB) {
 }
 
 /** Şablondan oturum açma: aynı gün/sınıf için aktif (iptal edilmemiş) oturum varsa tekrar oluşturma. */
-function slotCoveredBySessions(slot, sessionsOnDay, opts = {}) {
+export function slotCoveredBySessions(slot, sessionsOnDay, opts = {}) {
   const ignoreCancelled = opts.ignoreCancelled !== false;
   const slotKey = sessionKey(slot.class_id, slot.teacher_id, slot.start_time);
   const slotTeacher = String(slot.teacher_id || '').trim();
@@ -67,6 +70,10 @@ function slotCoveredBySessions(slot, sessionsOnDay, opts = {}) {
     if (String(s.class_id || '') !== String(slot.class_id || '')) continue;
     const status = String(s.status || '').toLowerCase();
     if (ignoreCancelled && status === 'cancelled') continue;
+
+    // Bu şablondan üretilmiş bir oturum o gün zaten var: düzenlenmiş olsa da
+    // (saat, öğretmen, ders adı değişmiş olabilir) yeniden üretme.
+    if (slot.id && String(s.origin_slot_id || '') === String(slot.id)) return true;
 
     const sessKey = sessionKey(s.class_id, s.teacher_id, s.start_time);
     if (sessKey === slotKey) return true;
@@ -249,7 +256,7 @@ export async function ensureClassSessionsForClassInRange(classId, dateFrom, date
 
     const { data: existing, error: exErr } = await supabaseAdmin
       .from('class_sessions')
-      .select('class_id,teacher_id,start_time,end_time,status,subject')
+      .select('id,class_id,teacher_id,start_time,end_time,status,subject,origin_slot_id')
       .eq('class_id', cid)
       .eq('lesson_date', cur);
     if (exErr) throw exErr;
