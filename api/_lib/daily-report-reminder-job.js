@@ -1,6 +1,6 @@
 /**
- * Günlük rapor hatırlatması — rapor girmeyen öğrencilere WhatsApp.
- * Kanal: koç WhatsApp Gateway (yalnızca tercihi açık + gateway bağlı koçların kendi öğrencileri).
+ * Günlük rapor hatırlatması — rapor / haftalık plan girmeyen aktif öğrenci ve velilerine WhatsApp.
+ * Kanal: koç WhatsApp Gateway (tercihi açık + gateway bağlı koçların kendi öğrencileri).
  */
 import { supabaseAdmin } from './supabase-admin.js';
 import { getIstanbulDateString, getIstanbulHour } from './istanbul-time.js';
@@ -24,6 +24,25 @@ import { resolveEffectiveSendChannel, SEND_CHANNELS } from './notification-confi
 
 export function reportReminderSendChannel() {
   return resolveEffectiveSendChannel('report_reminder') === SEND_CHANNELS.META_API ? 'meta' : 'gateway';
+}
+
+/** Kaydı biten / iptal edilen öğrenciler */
+const INACTIVE_ENROLLMENT = new Set(['withdrawn', 'cancelled', 'canceled', 'inactive', 'passive', 'archived', 'frozen']);
+
+/**
+ * Sistemde aktif öğrenci: silinmemiş, kaydı iptal edilmemiş ve bağlı kullanıcı hesabı kapatılmamış.
+ * @param {Record<string, unknown>} student
+ * @param {Map<string, boolean>} userActiveById
+ */
+export function studentActiveForReminders(student, userActiveById = new Map()) {
+  if (!student || student.deleted_at) return false;
+  const enrollment = String(student.enrollment_status || '').trim().toLowerCase();
+  if (enrollment && INACTIVE_ENROLLMENT.has(enrollment)) return false;
+  for (const key of [student.platform_user_id, student.user_id]) {
+    const id = String(key || '').trim();
+    if (id && userActiveById.has(id) && userActiveById.get(id) === false) return false;
+  }
+  return true;
 }
 
 export function reportReminderIstHour() {
@@ -128,9 +147,10 @@ export async function runDailyReportReminderJob(opts = {}) {
     };
   }
 
+  // Meta gönderimi değişken bağları, dil ve adlı parametre bilgisini ister: tüm satır
   const { data: template, error: tErr } = await supabaseAdmin
     .from('message_templates')
-    .select('content, meta_template_name, is_active')
+    .select('*')
     .eq('type', 'report_reminder')
     .maybeSingle();
   if (tErr) throw tErr;
@@ -187,15 +207,40 @@ export async function runDailyReportReminderJob(opts = {}) {
   // Yalnızca uygun koçların öğrencileri (kurum geneli tarama yok)
   const { data: students, error: sErr } = await supabaseAdmin
     .from('students')
-    .select('id,name,phone,parent_phone,email,institution_id,whatsapp_automation_enabled,coach_id')
+    .select(
+      'id,name,phone,parent_phone,email,institution_id,whatsapp_automation_enabled,coach_id,enrollment_status,deleted_at,platform_user_id,user_id'
+    )
     .in('coach_id', eligibleCoachIds)
+    .is('deleted_at', null)
     .limit(8000);
   if (sErr) throw sErr;
+
+  const linkedUserIds = [
+    ...new Set(
+      (students || [])
+        .flatMap((s) => [s.platform_user_id, s.user_id])
+        .map((x) => String(x || '').trim())
+        .filter(Boolean)
+    )
+  ];
+  /** @type {Map<string, boolean>} */
+  const userActiveById = new Map();
+  for (let i = 0; i < linkedUserIds.length; i += 500) {
+    const { data: users } = await supabaseAdmin
+      .from('users')
+      .select('id,is_active')
+      .in('id', linkedUserIds.slice(i, i + 500));
+    for (const u of users || []) userActiveById.set(String(u.id), u.is_active !== false);
+  }
 
   const studentIds = (students || []).map((s) => String(s.id));
   const periodsByStudent = await loadPeriodsForStudents(studentIds);
 
   for (const student of students || []) {
+    if (!studentActiveForReminders(student, userActiveById)) {
+      log.push({ student_id: student.id, note: 'student_inactive' });
+      continue;
+    }
     if (!studentAllowsWhatsappAutomation(student, institutionFlags)) {
       log.push({ student_id: student.id, note: 'whatsapp_automation_disabled' });
       continue;
@@ -320,11 +365,12 @@ export async function runDailyReportReminderJob(opts = {}) {
           twilio_error_code: null,
           twilio_content_sid: null,
           meta_message_id: null,
-          meta_template_name: 'gateway_plain'
+          meta_template_name: channel === 'meta' ? template.meta_template_name || 'report_reminder' : 'gateway_plain'
         });
         log.push({ student_id: student.id, coach_id: coachId, phone, role, error: errMsg });
       }
-      await waitAutoSendGap();
+      // Gateway hattı için insan benzeri aralık; Meta API'de gerek yok (cron süresi aşılmasın)
+      if (channel !== 'meta') await waitAutoSendGap();
     }
   }
 
