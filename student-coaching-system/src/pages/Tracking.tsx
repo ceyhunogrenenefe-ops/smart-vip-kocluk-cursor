@@ -228,9 +228,7 @@ export default function Tracking() {
     if (total !== solvedQuestions) {
       return `Doğru + Yanlış + Boş (${total}) = Çözülen olmalı (${solvedQuestions})`;
     }
-    if (solvedQuestions > formData.targetQuestions + 10) {
-      return 'Çözülen soru sayısı hedef + 10\'dan fazla olamaz';
-    }
+    // Hedefin fazlası çözülebilir: üst sınır kaldırıldı.
     return null;
   };
 

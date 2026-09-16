@@ -37,7 +37,7 @@ import {
   patchWeeklyPlannerEntry,
 } from '../../lib/weeklyPlannerApi';
 import { COACH_GOAL_QUANTITY_UNITS } from '../../lib/coachGoalUnits';
-import { plannerBlockDoneQuantity, completedForCoachGoal } from '../../lib/coachGoalAnalytics';
+import { plannerBlockDoneQuantity, attributeCoachGoalCompletions } from '../../lib/coachGoalAnalytics';
 import { defaultGoalUnitForSubject, sortSubjectsWithStudyTracks } from '../../lib/studyTrackSubjects';
 import {
   isTopicMarkedCompleted,
@@ -508,13 +508,30 @@ export function WeeklyPlannerCalendar({
   );
 
   const goalAggregates = useMemo(() => {
+    // Aynı dersten birden fazla hedef olabilir: günlük kayıtlar hedeflere TEK KEZ
+    // dağıtılır. Eskiden her hedef dersin tüm kayıtlarını topluyor, tek kayıt
+    // birden fazla hedefi yeşile çeviriyordu.
+    const spans = goals.map((g) => goalEffectiveSpan(g, weekStartStr, weekEndStr));
+    const rangeFrom = spans.reduce((m, sp) => (sp.start < m ? sp.start : m), weekStartStr);
+    const rangeTo = spans.reduce((m, sp) => (sp.end > m ? sp.end : m), weekEndStr);
+    const doneByGoal = attributeCoachGoalCompletions(
+      goals,
+      studentWeeklyEntries,
+      rangeFrom,
+      rangeTo,
+      entries,
+      (g) => {
+        const sp = goalEffectiveSpan(g, weekStartStr, weekEndStr);
+        return { gs: sp.start, ge: sp.end };
+      }
+    );
     return goals.map((g) => {
       const { start: gStart, end: gEnd } = goalEffectiveSpan(g, weekStartStr, weekEndStr);
       const rel = entries.filter(
         (e) => e.coach_goal_id === g.id && e.planner_date >= gStart && e.planner_date <= gEnd
       );
       const plannedSum = rel.reduce((s, e) => s + Number(e.planned_quantity || 0), 0);
-      const completedSum = completedForCoachGoal(g, studentWeeklyEntries, gStart, gEnd, entries);
+      const completedSum = Math.round(doneByGoal.get(g.id) ?? 0);
       const target = Number(g.target_quantity || 0);
       const remaining = Math.max(0, target - plannedSum);
       const over = plannedSum > target;
@@ -1019,16 +1036,12 @@ export function WeeklyPlannerCalendar({
         (g ? `${g.title} (${g.quantity_unit})` : formSubject ? `${formSubject} çalışması` : 'Görev');
       const subject = (g?.subject || formSubject || 'Genel').trim() || 'Genel';
       if (formGoalId) {
-        const available = modalGoalQuota.find((r) => r.goal.id === formGoalId)?.available ?? 0;
         const qty = Math.max(0, Math.round(Number(formPlannedQty)));
         if (qty <= 0) {
           alert('Planlanan miktar 0 olamaz.');
           return;
         }
-        if (qty > available) {
-          alert(`Bu hedef için en fazla ${available} ${g?.quantity_unit || 'birim'} planlayabilirsiniz.`);
-          return;
-        }
+        // Hedefin fazlası planlanabilir; hedef kartı aşımı ayrıca gösterir.
       }
       try {
         await createWeeklyPlannerEntry({
@@ -1100,14 +1113,7 @@ export function WeeklyPlannerCalendar({
         return;
       }
       const pq = Math.max(0, Math.round(Number(formPlannedQty)));
-      if (formGoalId) {
-        const g = goals.find((x) => x.id === formGoalId);
-        const available = modalGoalQuota.find((r) => r.goal.id === formGoalId)?.available ?? 0;
-        if (pq > available) {
-          alert(`Bu hedef için en fazla ${available} ${g?.quantity_unit || 'birim'} planlayabilirsiniz.`);
-          return;
-        }
-      }
+      // Hedefin fazlası planlanabilir; hedef kartı aşımı ayrıca gösterir.
       const patch: Record<string, unknown> = {
         title: formTitle,
         subject: formSubject,
@@ -1958,10 +1964,13 @@ export function WeeklyPlannerCalendar({
                               const st = subjectPlannerStyle(en.subject, linkedGoal?.quantity_unit);
                               const plannedN = Number(en.planned_quantity || 0);
                               const doneQty = plannerBlockDoneQuantity(en, goals, studentWeeklyEntries);
-                              const isRealized = doneQty > 0;
-                              const miss = isPast && !isRealized && en.status === 'planned';
+                              const isRealized = plannedN > 0 ? doneQty >= plannedN : doneQty > 0;
+                              const isPartial = !isRealized && doneQty > 0;
+                              const miss = isPast && !isRealized && !isPartial && en.status === 'planned';
                               const toneCls = isRealized
                                 ? 'border-emerald-500 ring-1 ring-emerald-200 bg-emerald-50 text-emerald-950 dark:bg-emerald-950/50 dark:ring-emerald-900/50 dark:text-emerald-100'
+                                : isPartial
+                                  ? 'border-sky-500 ring-1 ring-sky-200 bg-sky-50 text-sky-950 dark:bg-sky-950/40 dark:ring-sky-900/45 dark:text-sky-100'
                                 : plannedN > 0
                                   ? 'border-orange-500 ring-1 ring-orange-200 bg-orange-50 text-orange-950 dark:bg-orange-950/40 dark:ring-orange-900/45 dark:text-orange-100'
                                   : miss
@@ -2175,11 +2184,14 @@ export function WeeklyPlannerCalendar({
                             const st = subjectPlannerStyle(en.subject, linkedGoal?.quantity_unit);
                             const plannedN = Number(en.planned_quantity || 0);
                             const doneQty = plannerBlockDoneQuantity(en, goals, studentWeeklyEntries);
-                            const isRealized = doneQty > 0;
+                            const isRealized = plannedN > 0 ? doneQty >= plannedN : doneQty > 0;
+                            const isPartial = !isRealized && doneQty > 0;
                             const hasPlan = plannedN > 0;
-                            const miss = isPast && !isRealized && en.status === 'planned';
+                            const miss = isPast && !isRealized && !isPartial && en.status === 'planned';
                             const toneCls = isRealized
                               ? 'border-emerald-500 ring-1 ring-emerald-200 bg-emerald-50 text-emerald-950 dark:bg-emerald-950/50 dark:ring-emerald-900/50 dark:text-emerald-100'
+                              : isPartial
+                                ? 'border-sky-500 ring-1 ring-sky-200 bg-sky-50 text-sky-950 dark:bg-sky-950/40 dark:ring-sky-900/45 dark:text-sky-100'
                               : hasPlan
                                 ? 'border-orange-500 ring-1 ring-orange-200 bg-orange-50 text-orange-950 dark:bg-orange-950/40 dark:ring-orange-900/45 dark:text-orange-100'
                                 : miss
@@ -2278,10 +2290,16 @@ export function WeeklyPlannerCalendar({
                 {goalAggregates.map(({ goal, plannedSum, completedSum, target, remaining, over }) => {
                   const pct = target > 0 ? Math.min(100, Math.round((plannedSum / target) * 100)) : 0;
                   const donePct = target > 0 ? Math.min(100, Math.round((completedSum / target) * 100)) : 0;
+                  const doneRatioPct = target > 0 ? Math.round((completedSum / target) * 100) : 0;
+                  const goalReached = target > 0 && completedSum >= target;
+                  const goalExceededBy = target > 0 ? Math.max(0, completedSum - target) : 0;
                   const { start, end } = goalEffectiveSpan(goal, weekStartStr, weekEndStr);
+                  // Yeşil yalnız hedefe ulaşınca; ilk soruyla birlikte kart yeşile dönmez.
                   const cardTone =
-                    completedSum > 0
+                    goalReached
                       ? 'border-emerald-200/90 bg-gradient-to-br from-emerald-50/90 to-white dark:border-emerald-900/50 dark:from-emerald-950/35 dark:to-slate-950'
+                      : completedSum > 0
+                        ? 'border-sky-200/90 bg-gradient-to-br from-sky-50/90 to-white dark:border-sky-900/45 dark:from-sky-950/30 dark:to-slate-950'
                       : plannedSum > 0
                         ? 'border-orange-200/90 bg-gradient-to-br from-orange-50/90 to-white dark:border-orange-900/45 dark:from-orange-950/30 dark:to-slate-950'
                         : 'border-slate-100 dark:border-slate-700 bg-gradient-to-br from-white to-slate-50 dark:from-slate-900 dark:to-slate-950';
@@ -2343,8 +2361,28 @@ export function WeeklyPlannerCalendar({
                         />
                       </div>
                       <div className="mt-2 text-slate-600 dark:text-slate-300 space-y-0.5">
-                        <div>
-                          {target} {goal.quantity_unit} · Planlanan {plannedSum} · Yapılan {completedSum}
+                        <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
+                          <span>
+                            {target} {goal.quantity_unit} · Planlanan {plannedSum} · Yapılan {completedSum}
+                          </span>
+                          {target > 0 ? (
+                            <span
+                              className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-bold tabular-nums ${
+                                goalReached
+                                  ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-200'
+                                  : completedSum > 0
+                                    ? 'bg-sky-100 text-sky-800 dark:bg-sky-900/60 dark:text-sky-200'
+                                    : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'
+                              }`}
+                            >
+                              %{doneRatioPct}
+                            </span>
+                          ) : null}
+                          {goalExceededBy > 0 ? (
+                            <span className="inline-flex items-center rounded-full bg-violet-100 px-1.5 py-0.5 text-[10px] font-bold text-violet-800 tabular-nums dark:bg-violet-900/60 dark:text-violet-200">
+                              Hedef aşıldı +{goalExceededBy}
+                            </span>
+                          ) : null}
                         </div>
                         <div className="font-medium text-slate-800 dark:text-slate-100">
                           Kalan kota: {over ? `0 (aşım ${plannedSum - target})` : remaining}
@@ -2700,7 +2738,6 @@ export function WeeklyPlannerCalendar({
                 <input
                   type="number"
                   min={0}
-                  max={formGoalId && selectedGoalAvailable != null ? selectedGoalAvailable : undefined}
                   value={formPlannedQty}
                   onChange={(e) => setFormPlannedQty(Number(e.target.value))}
                   className="w-full mt-1 px-3 py-2 border rounded-lg text-sm"

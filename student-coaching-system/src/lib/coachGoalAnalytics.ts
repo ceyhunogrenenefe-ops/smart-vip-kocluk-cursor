@@ -111,28 +111,36 @@ export function dedupeCoachGoalsForAnalytics(
 ): CoachWeeklyGoalRow[] {
   const rf = clipYmd(rangeFrom);
   const rt = clipYmd(rangeTo);
-  const byKey = new Map<string, CoachWeeklyGoalRow>();
+  // Ders + birim bazında en güncel hedef dönemini bul.
+  // Eski davranış aynı dönemde tek hedef bırakıyordu; koç aynı haftaya aynı
+  // dersten iki ayrı hedef verdiğinde biri analizden düşüyor, hedef eksik
+  // görünüyordu. Artık yalnız eski (farklı dönemli) çakışan hedefler ve
+  // birebir aynı kaydedilmiş kopyalar eleniyor.
+  const bestSpanByKey = new Map<string, string>();
+  const inRange: CoachWeeklyGoalRow[] = [];
   for (const g of goals) {
     if (!goalOverlapsRange(g, rf, rt)) continue;
+    inRange.push(g);
     const key = `${normSubjectKey(g.subject)}::${coachGoalUnitKind(g)}`;
-    const prev = byKey.get(key);
-    if (!prev) {
-      byKey.set(key, g);
-      continue;
-    }
-    const prevStart = goalCalendarSpanYmd(prev)?.gs ?? '';
-    const nextStart = goalCalendarSpanYmd(g)?.gs ?? '';
-    const prevT = Number(prev.target_quantity) || 0;
-    const nextT = Number(g.target_quantity) || 0;
-    const pick =
-      nextStart > prevStart ||
-      (nextStart === prevStart && nextT > prevT) ||
-      (nextStart === prevStart && nextT === prevT && String(g.created_at) > String(prev.created_at))
-        ? g
-        : prev;
-    byKey.set(key, pick);
+    const span = goalCalendarSpanYmd(g);
+    const spanKey = `${span?.gs ?? ''}|${span?.ge ?? ''}`;
+    const prev = bestSpanByKey.get(key);
+    if (!prev || spanKey > prev) bestSpanByKey.set(key, spanKey);
   }
-  return [...byKey.values()];
+  const seenExact = new Set<string>();
+  const out: CoachWeeklyGoalRow[] = [];
+  const ordered = [...inRange].sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
+  for (const g of ordered) {
+    const key = `${normSubjectKey(g.subject)}::${coachGoalUnitKind(g)}`;
+    const span = goalCalendarSpanYmd(g);
+    const spanKey = `${span?.gs ?? ''}|${span?.ge ?? ''}`;
+    if (bestSpanByKey.get(key) !== spanKey) continue;
+    const exactKey = `${key}::${spanKey}::${String(g.title || '').trim().toLocaleLowerCase('tr-TR')}::${Number(g.target_quantity) || 0}`;
+    if (seenExact.has(exactKey)) continue;
+    seenExact.add(exactKey);
+    out.push(g);
+  }
+  return out;
 }
 
 /**
@@ -167,10 +175,12 @@ export function totalCoachQuestionCompletedInRange(
   rangeTo: string,
   plannerEntries: WeeklyPlannerEntryRow[] = []
 ): number {
+  const deduped = dedupeCoachGoalsForAnalytics(goals, rangeFrom, rangeTo);
+  const done = attributeCoachGoalCompletions(deduped, entries, rangeFrom, rangeTo, plannerEntries);
   let sum = 0;
-  for (const g of dedupeCoachGoalsForAnalytics(goals, rangeFrom, rangeTo)) {
+  for (const g of deduped) {
     if (!isQuestionCoachGoal(g)) continue;
-    sum += completedForCoachGoal(g, entries, rangeFrom, rangeTo, plannerEntries);
+    sum += done.get(g.id) ?? 0;
   }
   return Math.round(sum);
 }
@@ -185,10 +195,13 @@ export function coachQuestionCompletedInYmdRange(
   analysisRangeFrom: string,
   analysisRangeTo: string
 ): number {
+  const deduped = dedupeCoachGoalsForAnalytics(goals, analysisRangeFrom, analysisRangeTo);
+  const done = attributeCoachGoalCompletions(deduped, weeklyEntries, ymdFrom, ymdTo);
   let sum = 0;
-  for (const g of dedupeCoachGoalsForAnalytics(goals, analysisRangeFrom, analysisRangeTo)) {
+  for (const g of deduped) {
     if (!isQuestionCoachGoal(g)) continue;
-    sum += completedForCoachGoal(g, weeklyEntries, ymdFrom, ymdTo);
+    if (!goalOverlapsRange(g, ymdFrom, ymdTo)) continue;
+    sum += done.get(g.id) ?? 0;
   }
   return Math.round(sum);
 }
@@ -209,21 +222,6 @@ export function goalClipRangeYmd(
   return { clipFrom, clipTo };
 }
 
-function entriesForSubjectInRange(
-  entries: WeeklyEntry[],
-  subject: string,
-  rangeFrom: string,
-  rangeTo: string
-): WeeklyEntry[] {
-  const sub = normSubjectKey(subject);
-  const rf = clipYmd(rangeFrom);
-  const rt = clipYmd(rangeTo);
-  return entries.filter((e) => {
-    const d = clipYmd(e.date);
-    if (!d || d < rf || d > rt) return false;
-    return normSubjectKey(e.subject) === sub;
-  });
-}
 
 function normSubjectKey(s: string | null | undefined): string {
   return String(s ?? '')
@@ -261,7 +259,8 @@ export function effectivePlannerEntryDone(
 ): number {
   const planned = Math.max(0, Number(row.planned_quantity || 0));
   const kind = coachGoalUnitKind(g);
-  const clamp = (n: number) => (planned > 0 ? Math.min(Math.max(0, n), planned) : Math.max(0, n));
+  // Hedefin fazlası yapılabilir: planlanana kırpmıyoruz, aşım görünür kalsın.
+  const clamp = (n: number) => Math.max(0, n);
 
   let fromWeekly = 0;
   const wid = row.weekly_entry_id;
@@ -300,7 +299,7 @@ export function plannerBlockDoneQuantity(
     done = Math.max(done, planned);
   }
 
-  return planned > 0 ? Math.min(done, planned) : done;
+  return done;
 }
 
 /** Yalnızca seçili analiz aralığı ∩ hedef takvimi içindeki plan blokları */
@@ -319,36 +318,6 @@ function plannerRowsForGoalInAnalysisClip(
   });
 }
 
-function completedFromPlannerForGoal(
-  g: CoachWeeklyGoalRow,
-  plannerEntries: WeeklyPlannerEntryRow[],
-  weeklyEntries: WeeklyEntry[],
-  analysisRangeFrom: string,
-  analysisRangeTo: string
-): number {
-  return plannerRowsForGoalInAnalysisClip(g, plannerEntries, analysisRangeFrom, analysisRangeTo).reduce(
-    (s, e) => s + effectivePlannerEntryDone(g, e, weeklyEntries),
-    0
-  );
-}
-
-/** Koç hedefinin dersi + tarih aralığındaki günlük kayıt (takvim şart değil) */
-function completedFromEntriesForGoal(
-  g: CoachWeeklyGoalRow,
-  entries: WeeklyEntry[],
-  rangeFrom: string,
-  rangeTo: string
-): number {
-  const clip = goalClipRangeYmd(g, rangeFrom, rangeTo);
-  if (!clip) return 0;
-  const { clipFrom, clipTo } = clip;
-  const rel = entriesForSubjectInRange(entries, g.subject, clipFrom, clipTo);
-  const kind = coachGoalUnitKind(g);
-  if (kind === 'sayfa') return rel.reduce((s, e) => s + effectivePagesRead(e), 0);
-  if (kind === 'dakika') return rel.reduce((s, e) => s + effectiveScreenMinutes(e), 0);
-  return rel.reduce((s, e) => s + (e.solvedQuestions || 0), 0);
-}
-
 function plannedFromPlannerForGoal(
   g: CoachWeeklyGoalRow,
   plannerEntries: WeeklyPlannerEntryRow[],
@@ -361,25 +330,173 @@ function plannedFromPlannerForGoal(
   );
 }
 
+type GoalAmountType = 'soru' | 'sayfa' | 'dakika';
+
+function amountTypeForGoal(g: CoachWeeklyGoalRow): GoalAmountType {
+  const kind = coachGoalUnitKind(g);
+  if (kind === 'sayfa') return 'sayfa';
+  if (kind === 'dakika') return 'dakika';
+  return 'soru';
+}
+
+function entryAmountForType(e: WeeklyEntry, t: GoalAmountType): number {
+  if (t === 'sayfa') return Math.max(0, effectivePagesRead(e));
+  if (t === 'dakika') return Math.max(0, effectiveScreenMinutes(e));
+  return Math.max(0, Number(e.solvedQuestions || 0));
+}
+
+/** Günlük kayıttan otomatik üretilen takvim bloğu (sync-weekly-entry-planner) */
+function isAutoSyncedPlannerRow(row: WeeklyPlannerEntryRow): boolean {
+  return String(row.id || '').startsWith('wpe-sync-');
+}
+
+export type GoalSpanResolver = (g: CoachWeeklyGoalRow) => { gs: string; ge: string } | null;
+
 /**
- * Koç hedefi gerçekleşen — günlük kayıt + takvim bloklarındaki yapılan (max).
- * Öğrenci takvime blok koymuş olmasa da günlük kayıttan sayılır; blokta
- * completed_quantity varsa o da yeşile yansır.
+ * Her hedefin gerçekleşen miktarını, günlük kayıtları hedeflere TEK KEZ
+ * dağıtarak hesaplar.
+ *
+ * Eski davranış: her hedef, kendi dersindeki TÜM günlük kayıtları topluyordu.
+ * Aynı dersten iki hedef varsa (ör. Matematik 100 soru + Matematik 50 problem)
+ * tek bir kayıt ikisine birden sayılıyor, iki hedef birden yeşile dönüyordu.
+ *
+ * Kurallar:
+ * 1. Öğrencinin takvimde bir bloğa kaydettiği çalışma (bloğa bağlı günlük kayıt)
+ *    yalnız o bloğun hedefine sayılır.
+ * 2. Bağsız günlük kayıtlar, aynı ders ve birim türündeki hedeflere
+ *    başlangıç tarihi ve oluşturulma sırasıyla hedef dolana kadar dağıtılır.
+ *    Tüm hedefler dolduysa artan son uygun hedefe yazılır; hedef aşımı görünür.
+ * 3. Günlük kayda bağlanmadan elle "tamamlandı" işaretlenen bloklar ayrıca
+ *    hesaplanır ve kayıt tarafıyla büyük olanı alınır. Öğrenci hem bloğu
+ *    işaretleyip hem günlük kayıt girdiğinde aynı çalışma iki kez sayılmaz.
+ */
+export function attributeCoachGoalCompletions(
+  goals: CoachWeeklyGoalRow[],
+  entries: WeeklyEntry[],
+  rangeFrom: string,
+  rangeTo: string,
+  plannerEntries: WeeklyPlannerEntryRow[] = [],
+  resolveSpan?: GoalSpanResolver
+): Map<string, number> {
+  const rf = clipYmd(rangeFrom);
+  const rt = clipYmd(rangeTo);
+  const fromEntries = new Map<string, number>();
+  const clipOf = new Map<string, { from: string; to: string }>();
+  const goalById = new Map<string, CoachWeeklyGoalRow>();
+
+  for (const g of goals) {
+    goalById.set(g.id, g);
+    fromEntries.set(g.id, 0);
+    if (!rf || !rt || rf > rt) continue;
+    const span = resolveSpan ? resolveSpan(g) : goalCalendarSpanYmd(g);
+    if (!span) continue;
+    const from = span.gs >= rf ? span.gs : rf;
+    const to = span.ge <= rt ? span.ge : rt;
+    if (from <= to) clipOf.set(g.id, { from, to });
+  }
+  const inClip = (goalId: string, ymd: string) => {
+    const c = clipOf.get(goalId);
+    return Boolean(c && ymd >= c.from && ymd <= c.to);
+  };
+  const add = (goalId: string, n: number) => {
+    if (n > 0) fromEntries.set(goalId, (fromEntries.get(goalId) || 0) + n);
+  };
+
+  // 1) Öğrencinin bloğa bağladığı günlük kayıt → yalnız o hedef
+  const explicitLink = new Map<string, string>();
+  for (const p of plannerEntries) {
+    if (!p.weekly_entry_id || !p.coach_goal_id) continue;
+    if (isAutoSyncedPlannerRow(p)) continue;
+    if (!goalById.has(p.coach_goal_id)) continue;
+    const wid = String(p.weekly_entry_id);
+    if (!explicitLink.has(wid)) explicitLink.set(wid, String(p.coach_goal_id));
+  }
+  const consumed = new Set<string>();
+  for (const e of entries) {
+    const gid = explicitLink.get(String(e.id));
+    if (!gid) continue;
+    const g = goalById.get(gid);
+    if (!g) continue;
+    const d = clipYmd(e.date);
+    if (!inClip(gid, d)) continue;
+    const t = amountTypeForGoal(g);
+    add(gid, entryAmountForType(e, t));
+    consumed.add(`${e.id}::${t}`);
+  }
+
+  // 2) Bağsız kayıtlar → aynı ders + birim türündeki hedeflere sırayla
+  const groups = new Map<string, CoachWeeklyGoalRow[]>();
+  for (const g of goals) {
+    if (!clipOf.has(g.id)) continue;
+    const key = `${normSubjectKey(g.subject)}::${amountTypeForGoal(g)}`;
+    const arr = groups.get(key) || [];
+    arr.push(g);
+    groups.set(key, arr);
+  }
+  const orderedEntries = [...entries].sort((a, b) => clipYmd(a.date).localeCompare(clipYmd(b.date)));
+  for (const [key, arr] of groups) {
+    const sep = key.lastIndexOf('::');
+    const subjectKey = key.slice(0, sep);
+    const t = key.slice(sep + 2) as GoalAmountType;
+    arr.sort((a, b) => {
+      const sa = clipOf.get(a.id)!.from;
+      const sb = clipOf.get(b.id)!.from;
+      if (sa !== sb) return sa < sb ? -1 : 1;
+      return String(a.created_at || '').localeCompare(String(b.created_at || ''));
+    });
+    for (const e of orderedEntries) {
+      if (normSubjectKey(e.subject) !== subjectKey) continue;
+      if (consumed.has(`${e.id}::${t}`)) continue;
+      let amount = entryAmountForType(e, t);
+      if (amount <= 0) continue;
+      const d = clipYmd(e.date);
+      const eligible = arr.filter((g) => inClip(g.id, d));
+      if (!eligible.length) continue;
+      for (const g of eligible) {
+        if (amount <= 0) break;
+        const target = Math.max(0, Number(g.target_quantity) || 0);
+        const room = Math.max(0, target - (fromEntries.get(g.id) || 0));
+        const give = Math.min(amount, room);
+        if (give > 0) {
+          add(g.id, give);
+          amount -= give;
+        }
+      }
+      if (amount > 0) add(eligible[eligible.length - 1].id, amount);
+    }
+  }
+
+  // 3) Elle tamamlanan bloklar (otomatik senkron blokları hariç) → büyük olan
+  const out = new Map<string, number>();
+  for (const g of goals) {
+    let manual = 0;
+    if (clipOf.has(g.id)) {
+      for (const p of plannerEntries) {
+        if (p.coach_goal_id !== g.id || isAutoSyncedPlannerRow(p)) continue;
+        if (!inClip(g.id, clipYmd(p.planner_date))) continue;
+        manual += effectivePlannerEntryDone(g, p, entries);
+      }
+    }
+    out.set(g.id, Math.max(fromEntries.get(g.id) || 0, manual));
+  }
+  return out;
+}
+
+/**
+ * Tek hedefin gerçekleşen miktarı. Aynı öğrencinin diğer hedefleri `allGoals`
+ * ile verilirse günlük kayıtlar hedefler arasında paylaştırılır (çift sayım yok).
  */
 export function completedForCoachGoal(
   g: CoachWeeklyGoalRow,
   entries: WeeklyEntry[],
   rangeFrom: string,
   rangeTo: string,
-  plannerEntries: WeeklyPlannerEntryRow[] = []
+  plannerEntries: WeeklyPlannerEntryRow[] = [],
+  allGoals?: CoachWeeklyGoalRow[]
 ): number {
   if (!goalOverlapsRange(g, rangeFrom, rangeTo)) return 0;
-  const fromEntries = completedFromEntriesForGoal(g, entries, rangeFrom, rangeTo);
-  const fromPlanner =
-    plannerEntries.length > 0
-      ? completedFromPlannerForGoal(g, plannerEntries, entries, rangeFrom, rangeTo)
-      : 0;
-  return Math.max(fromEntries, fromPlanner);
+  const pool = allGoals && allGoals.some((x) => x.id === g.id) ? allGoals : [g];
+  return attributeCoachGoalCompletions(pool, entries, rangeFrom, rangeTo, plannerEntries).get(g.id) ?? 0;
 }
 
 /** Seçili aralıkta öğrencinin planladığı miktar (planlanan toplam) */
@@ -463,11 +580,12 @@ export function computeCoachGoalRangeAnalytics(
     other: { target: 0, planned: 0, completed: 0, goalCount: 0 },
   };
 
+  const doneByGoal = attributeCoachGoalCompletions(activeGoals, entries, rf, rt, plannerEntries);
   for (const g of activeGoals) {
     const kind = coachGoalUnitKind(g);
     const t = coachTargetInAnalysisRange(g, rf, rt);
     const p = plannedForCoachGoal(g, plannerEntries, rf, rt);
-    const c = completedForCoachGoal(g, entries, rf, rt, plannerEntries);
+    const c = doneByGoal.get(g.id) ?? 0;
     acc[kind].target += t;
     acc[kind].planned += p;
     acc[kind].completed += c;
@@ -559,25 +677,30 @@ export function coachSubjectProgressInRange(
     { kind: CoachGoalUnitKind; target: number; completed: number }
   >();
 
+  const doneByGoal = attributeCoachGoalCompletions(activeGoals, entries, rf, rt, plannerEntries);
   for (const g of activeGoals) {
     const sub = String(g.subject || '').trim() || 'Diğer';
     const kind = coachGoalUnitKind(g);
     const prev = bySubject.get(sub) || { kind, target: 0, completed: 0 };
     prev.target += coachTargetInAnalysisRange(g, rf, rt);
-    prev.completed += completedForCoachGoal(g, entries, rf, rt, plannerEntries);
+    prev.completed += doneByGoal.get(g.id) ?? 0;
     bySubject.set(sub, prev);
   }
 
   const entryStats: Record<string, { correct: number; wrong: number; blank: number; solved: number }> =
     {};
+  const countedEntryForSubject = new Set<string>();
   for (const g of activeGoals) {
     const clip = goalClipRangeYmd(g, rf, rt);
     if (!clip) continue;
     const sub = String(g.subject || '').trim() || 'Diğer';
     for (const e of entries) {
+      const statKey = `${sub}::${e.id}`;
+      if (countedEntryForSubject.has(statKey)) continue;
       const d = clipYmd(e.date);
       if (d < clip.clipFrom || d > clip.clipTo) continue;
       if (normSubjectKey(e.subject) !== normSubjectKey(g.subject)) continue;
+      countedEntryForSubject.add(statKey);
       if (!entryStats[sub]) entryStats[sub] = { correct: 0, wrong: 0, blank: 0, solved: 0 };
       entryStats[sub].correct += e.correctAnswers || 0;
       entryStats[sub].wrong += e.wrongAnswers || 0;
