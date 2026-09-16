@@ -58,3 +58,36 @@ test('classifyLeadSource buckets website / instagram / whatsapp', () => {
   assert.equal(ig.count, 1);
   assert.equal(web.pct, 66.7);
 });
+
+test('filterBulkAudience: sınıf + pipeline sütunu ve sayaçlar', async () => {
+  const { filterBulkAudience, bulkColumnIdForLead } = await import('./crm-ops-metrics.js');
+  const leads = [
+    { id: 'a', stage: 'trial_lesson_scheduled', grade_program: 'grade_11', primary_status: 'tracking' },
+    { id: 'b', stage: 'trial_lesson_completed', grade_program: 'yks', primary_status: 'tracking' },
+    { id: 'c', stage: 'new_lead', grade_program: 'grade_11', primary_status: 'tracking' },
+    { id: 'd', stage: 'confirmed', grade_program: 'grade_11', primary_status: 'confirmed' },
+    { id: 'e', stage: 'lost', grade_program: null, primary_status: 'lost' }
+  ];
+  assert.equal(bulkColumnIdForLead(leads[3]), 'confirmed');
+
+  // Varsayılan: yalnız açık (takipteki) lead'ler
+  const def = filterBulkAudience(leads, {});
+  assert.deepEqual(def.items.map((l) => l.id), ['a', 'b', 'c']);
+
+  // 11. sınıf + deneme dersi
+  const r = filterBulkAudience(leads, { grades: 'grade_11', columns: 'trial' });
+  assert.deepEqual(r.items.map((l) => l.id), ['a']);
+  assert.equal(r.facets.columns.trial, 1);
+  assert.equal(r.facets.columns.incoming, 1);
+  assert.equal(r.facets.columns.confirmed, 1);
+  assert.equal(r.facets.grades.grade_11, 1);
+  assert.equal(r.facets.grades.yks, 1);
+
+  // Birden fazla sınıf, kesin kayıtlılar
+  const k = filterBulkAudience(leads, { grades: ['grade_11', 'unspecified'], columns: 'confirmed,lost' });
+  assert.deepEqual(k.items.map((l) => l.id), ['d', 'e']);
+
+  // Eski segment parametresi hâlâ çalışır
+  const legacy = filterBulkAudience(leads, { segment: 'trial_no_show' });
+  assert.deepEqual(legacy.items.map((l) => l.id), ['a']);
+});
