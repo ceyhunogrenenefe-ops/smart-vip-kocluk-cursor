@@ -1,6 +1,6 @@
 /**
  * Günlük rapor hatırlatması — rapor / haftalık plan girmeyen aktif öğrenci ve velilerine WhatsApp.
- * Kanal: koç WhatsApp Gateway (tercihi açık + gateway bağlı koçların kendi öğrencileri).
+ * Kanal: koçun WhatsApp gateway hattı; hat bağlı değilse Meta onaylı report_reminder şablonu.
  */
 import { supabaseAdmin } from './supabase-admin.js';
 import { getIstanbulDateString, getIstanbulHour } from './istanbul-time.js';
@@ -70,22 +70,17 @@ async function coachCanSendDailyReport(coachId) {
   }
   if (!coachPrefsCache.get(cid)) return { ok: false, reason: 'disabled_by_coach' };
 
-  // Meta yalnızca NOTIFY_CHANNEL_REPORT_REMINDER=meta_api ile (test); varsayılan gateway
+  // Gateway bağlı değilse gönderim atlanmaz: message-service Meta şablonuna düşer (allowMetaFallback)
   if (reportReminderSendChannel() === 'meta') {
     return { ok: true };
   }
-
   if (!coachGatewayCache.has(cid)) {
     coachGatewayCache.set(cid, await getCoachGatewayHealth(cid));
   }
-  const gw = coachGatewayCache.get(cid);
-  if (!gw?.connected) {
-    return { ok: false, reason: 'gateway_disconnected', gateway: gw };
-  }
-  return { ok: true, gateway: gw };
+  return { ok: true, gateway: coachGatewayCache.get(cid) };
 }
 
-/** Tercihi açık koçlar; gateway kanalında yalnızca bağlı oturumu olanlar */
+/** Günlük rapor tercihi açık koçlar (gateway bağlı olmasa da — Meta yedeği) */
 async function resolveEligibleCoachIds() {
   const { data: prefsRows, error } = await supabaseAdmin
     .from('coach_whatsapp_notification_prefs')
@@ -286,6 +281,7 @@ export async function runDailyReportReminderJob(opts = {}) {
     const body = renderMessageTemplate(template.content, tmplVars);
 
     for (const { phone, role, kind } of recipients) {
+      let lastSendViaMeta = false;
       const dedupeKey = `${student.id}:${kind}:${phone}`;
       const phoneDedupeKey = reportReminderPhoneKey(student.id, phone);
 
@@ -304,6 +300,7 @@ export async function runDailyReportReminderJob(opts = {}) {
         });
 
         const usedChannel = sent.channel || 'coach_gateway';
+        lastSendViaMeta = usedChannel === 'meta_api';
 
         const { error: insErr } = await supabaseAdmin.from('message_logs').insert({
           student_id: student.id,
@@ -370,7 +367,7 @@ export async function runDailyReportReminderJob(opts = {}) {
         log.push({ student_id: student.id, coach_id: coachId, phone, role, error: errMsg });
       }
       // Gateway hattı için insan benzeri aralık; Meta API'de gerek yok (cron süresi aşılmasın)
-      if (channel !== 'meta') await waitAutoSendGap();
+      if (channel !== 'meta' && !lastSendViaMeta) await waitAutoSendGap();
     }
   }
 
