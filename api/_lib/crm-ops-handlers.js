@@ -52,6 +52,7 @@ export async function handleOpsDashboard(institutionId, filters = {}) {
       'id, first_name, last_name, full_name, assigned_user_id, primary_status, stage, confirmed_at, created_at, last_contact_at, last_inbound_at, first_contact_at, source, last_inbound_channel'
     )
     .eq('institution_id', institutionId)
+    .eq('is_internal', false)
     .is('deleted_at', null);
   if (assignee) leadQ = leadQ.eq('assigned_user_id', assignee);
   const { data: leads, error } = await leadQ.limit(8000);
@@ -101,11 +102,9 @@ export async function handleOpsDashboard(institutionId, filters = {}) {
       .lte('occurred_at', end)
       .limit(8000);
     const { data: msgs } = await mq;
-    messages = msgs || [];
-    if (assignee) {
-      const allow = new Set(all.map((l) => l.id));
-      messages = messages.filter((m) => allow.has(m.lead_id));
-    }
+    // Yalnız rapora giren (kurum içi olmayan, temsilci filtresine uyan) adayların mesajları
+    const allow = new Set(all.map((l) => l.id));
+    messages = (msgs || []).filter((m) => allow.has(m.lead_id));
   } catch {
     messages = [];
   }
@@ -383,6 +382,7 @@ export async function handleListSegmentLeads(institutionId, filters = {}) {
       'id, first_name, last_name, full_name, phone, normalized_phone, stage, grade_program, assigned_user_id, primary_status'
     )
     .eq('institution_id', institutionId)
+    .eq('is_internal', false)
     .is('deleted_at', null)
     .order('created_at', { ascending: false })
     .limit(5000);

@@ -35,6 +35,7 @@ import {
   crmSetTags,
   crmTakeConversation,
   crmUpdateStatus,
+  crmSetInternal,
   type CrmConversation,
   type CrmInboundStatus,
   type CrmMessage,
@@ -107,6 +108,11 @@ export default function CrmInboxPage() {
   const [q, setQ] = useState('');
   const [channelFilter, setChannelFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('open');
+  /** Adaylar: reklam / yeni kişiler · Kurum içi: mevcut öğrenci, veli, personel */
+  const [internalTab, setInternalTab] = useState<'exclude' | 'only'>('exclude');
+  const [markingInternal, setMarkingInternal] = useState(false);
+  const internalTabRef = useRef(internalTab);
+  internalTabRef.current = internalTab;
   const [draft, setDraft] = useState('');
   const [loadingList, setLoadingList] = useState(true);
   const [loadingMsgs, setLoadingMsgs] = useState(false);
@@ -156,7 +162,8 @@ export default function CrmInboxPage() {
       const res = await crmListConversations({
         q: q || undefined,
         channel: channelFilter || undefined,
-        status: statusFilter || undefined
+        status: statusFilter || undefined,
+        internal: internalTab
       });
       setConversations(res.data || []);
     } catch (e) {
@@ -164,7 +171,7 @@ export default function CrmInboxPage() {
     } finally {
       setLoadingList(false);
     }
-  }, [q, channelFilter, statusFilter]);
+  }, [q, channelFilter, statusFilter, internalTab]);
 
   const loadMessages = useCallback(async (id: string) => {
     setLoadingMsgs(true);
@@ -280,6 +287,12 @@ export default function CrmInboxPage() {
               const map = new Map(prev.map((c) => [c.id, c]));
               let newConv = false;
               for (const c of res.data!.conversations!) {
+                // Açık sekmeye ait olmayan konuşmayı listeye alma / listeden çıkar
+                const wantInternal = internalTabRef.current === 'only';
+                if (c.is_internal !== undefined && Boolean(c.is_internal) !== wantInternal) {
+                  map.delete(c.id);
+                  continue;
+                }
                 if (!map.has(c.id)) newConv = true;
                 map.set(c.id, { ...(map.get(c.id) || ({} as CrmConversation)), ...c });
               }
@@ -477,6 +490,29 @@ export default function CrmInboxPage() {
       <div className="flex min-h-0 flex-1 overflow-hidden">
       <aside className="flex w-full max-w-sm flex-col border-r border-slate-200 bg-slate-50/80 sm:w-80">
         <div className="space-y-2 border-b border-slate-200 p-3">
+          <div className="grid grid-cols-2 gap-1 rounded-lg bg-slate-200/70 p-1 text-xs font-semibold">
+            {(
+              [
+                { id: 'exclude', label: 'Adaylar' },
+                { id: 'only', label: 'Kurum içi' }
+              ] as const
+            ).map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => {
+                  setInternalTab(t.id);
+                  setSelectedId(null);
+                }}
+                className={`rounded-md px-2 py-1.5 transition ${
+                  internalTab === t.id ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'
+                }`}
+                title={t.id === 'only' ? 'Mevcut öğrenci, veli ve personel mesajları — raporlara girmez' : 'Reklam ve yeni kişiler'}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
           <div className="relative">
             <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
             <input
@@ -579,10 +615,53 @@ export default function CrmInboxPage() {
                     {selected?.contact_name || selected?.contact_identifier || '…'}
                   </h2>
                   {selected && <ChannelBadge channel={selected.channel} contactIdentifier={selected.contact_identifier} adSourceData={selected.ad_source_data as Record<string, unknown> | null} />}
+                  {selected?.is_internal ? (
+                    <span
+                      className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-800"
+                      title={selected.internal_reason === 'student_phone' ? 'Kayıtlı öğrenci / veli numarası' : 'Elle işaretlendi'}
+                    >
+                      Kurum içi
+                    </span>
+                  ) : null}
                 </div>
                 <p className="text-xs text-slate-500">{selected?.contact_identifier}</p>
               </div>
               <div className="flex items-center gap-2">
+              {selected ? (
+                <button
+                  type="button"
+                  disabled={markingInternal}
+                  onClick={() => {
+                    const next = !selected.is_internal;
+                    setMarkingInternal(true);
+                    void crmSetInternal(selected.id, next)
+                      .then((r) => {
+                        setSelected(r.data);
+                        toast.success(
+                          next
+                            ? 'Kurum içi olarak işaretlendi — raporlara girmeyecek'
+                            : 'Kurum içi işareti kaldırıldı — aday olarak sayılacak'
+                        );
+                        setConversations((prev) => prev.filter((c) => c.id !== selected.id));
+                        setSelectedId(null);
+                      })
+                      .catch((err) => toast.error(err instanceof Error ? err.message : 'İşaretlenemedi'))
+                      .finally(() => setMarkingInternal(false));
+                  }}
+                  className={`rounded-lg border px-2 py-1 text-xs font-semibold disabled:opacity-50 ${
+                    selected.is_internal
+                      ? 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
+                      : 'border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100'
+                  }`}
+                  title={
+                    selected.is_internal
+                      ? 'Aday olarak say: pipeline ve raporlara girer'
+                      : 'Mevcut öğrenci / veli / personel: raporlardan çıkar'
+                  }
+                >
+                  {selected.is_internal ? 'Adaya çevir' : 'Kurum içi'}
+                </button>
+              ) : null}
               {selected && !selected.assigned_user_id ? (
                 <button
                   type="button"

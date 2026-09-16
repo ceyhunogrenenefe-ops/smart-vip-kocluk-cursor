@@ -14,6 +14,7 @@ import {
 import { normalizeInstagramMessagingEvent } from './instagram-messaging-normalize.js';
 import { normalizeInstagramCommentChange } from './instagram-comments-normalize.js';
 import { normalizeFacebookFeedCommentChange } from './facebook-comments-normalize.js';
+import { autoMarkLeadInternal } from './crm-internal-contacts.js';
 
 function snippetOf(text, max = 140) {
   const s = String(text || '')
@@ -376,6 +377,11 @@ export async function ingestRegistrationChannelMessage(msg) {
       return { skipped: true, reason: 'table_missing' };
     }
     throw e;
+  }
+
+  if (lead?.id && direction === 'inbound' && channel === 'whatsapp') {
+    // Mevcut öğrenci / veli numarası → kurum içi (pipeline ve raporlara girmez)
+    await autoMarkLeadInternal(lead.id, normalizedPhone || phoneRaw);
   }
 
   if (lead?.id && direction === 'inbound') {

@@ -20,6 +20,9 @@ export type CrmConversation = {
   unread_count?: number;
   created_at?: string;
   updated_at?: string;
+  /** Mevcut öğrenci / veli / personel — raporlara girmez */
+  is_internal?: boolean;
+  internal_reason?: string | null;
 };
 
 export type CrmMessage = {
@@ -84,6 +87,8 @@ export function crmListConversations(opts: {
   status?: string;
   channel?: string;
   institution_id?: string;
+  /** exclude (adaylar, varsayılan) | only (kurum içi) | all */
+  internal?: 'exclude' | 'only' | 'all';
 } = {}) {
   return inboxGet<{ data: CrmConversation[] }>('list_conversations', opts);
 }
@@ -175,6 +180,13 @@ export function crmSetTags(conversationId: string, tags: string[]) {
   return inboxPost<{ data: CrmConversation }>('set_tags', {
     conversation_id: conversationId,
     tags
+  });
+}
+
+export function crmSetInternal(conversationId: string, internal: boolean) {
+  return inboxPost<{ data: CrmConversation }>('set_internal', {
+    conversation_id: conversationId,
+    internal
   });
 }
 
