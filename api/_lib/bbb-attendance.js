@@ -228,7 +228,12 @@ export async function applyAutoAttendanceForClassSession(session, classStudentId
   const prepared = [];
   for (const sid of classStudentIds) {
     if (priorMap.has(sid)) continue;
-    const status = statusByStudent.get(sid) || 'absent';
+    // Öğretmenin elle işaretlediği "izinli" ve "geç" kayıtları otomatik yoklama ezmez.
+    const manual = String(priorMap.get(sid) || '').trim().toLowerCase();
+    const status =
+      manual === 'excused' || manual === 'late'
+        ? manual
+        : statusByStudent.get(sid) || 'absent';
     prepared.push({
       session_id: session.id,
       student_id: sid,

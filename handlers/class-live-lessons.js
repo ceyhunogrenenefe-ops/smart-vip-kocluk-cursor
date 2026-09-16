@@ -2516,7 +2516,12 @@ export default async function handler(req, res) {
           session_id: sessionId,
           student_id: studentId,
           status,
-          camera_status: status === 'absent' ? 'n_a' : camera_status === 'off' ? 'off' : 'on',
+          camera_status:
+            status === 'absent' || status === 'excused'
+              ? 'n_a'
+              : camera_status === 'off'
+                ? 'off'
+                : 'on',
           marked_by: actor.sub,
           marked_at: new Date().toISOString(),
           student_name: nameById.get(studentId) || null

@@ -1,6 +1,6 @@
 /**
  * Yoklama özeti — öğretmen UI, PDF/CSV, WhatsApp, koç raporu için tek kaynak.
- * DB: status present|absent|late ; camera_status on|off|n_a|null
+ * DB: status present|absent|late|excused ; camera_status on|off|n_a|null
  */
 
 import { normalizeAttendanceStatus, normalizeCameraStatus } from './attendance-notice-templates.js';
@@ -8,7 +8,8 @@ import { normalizeAttendanceStatus, normalizeCameraStatus } from './attendance-n
 export const ATTENDANCE_STATUS_TR = {
   present: '✅ Derse Katıldı',
   absent: '❌ Derse Katılmadı',
-  late: '🕐 Derse Geç Katıldı'
+  late: '🕐 Derse Geç Katıldı',
+  excused: '🟡 İzinli'
 };
 
 export const CAMERA_STATUS_TR = {
@@ -27,7 +28,7 @@ export function attendanceStatusLabelTr(status) {
 
 export function cameraStatusLabelTr(status, cameraStatus) {
   const st = normalizeAttendanceStatus(status);
-  if (st === 'absent') return '—';
+  if (st === 'absent' || st === 'excused') return '—';
   const cam = String(cameraStatus || '').trim().toLowerCase();
   if (cam === 'on' || cam === 'open') return CAMERA_STATUS_TR.on;
   if (cam === 'off' || cam === 'closed') return CAMERA_STATUS_TR.off;
@@ -41,6 +42,7 @@ export function buildAttendanceSummary(rows = []) {
   const presentStudents = [];
   const lateStudents = [];
   const absentStudents = [];
+  const excusedStudents = [];
   const cameraOpenStudents = [];
   const cameraClosedStudents = [];
 
@@ -49,13 +51,14 @@ export function buildAttendanceSummary(rows = []) {
     const name = String(raw?.student_name || raw?.name || '').trim() || studentId || 'Öğrenci';
     const status = normalizeAttendanceStatus(raw?.status);
     const camera =
-      status === 'absent'
+      status === 'absent' || status === 'excused'
         ? 'n_a'
         : normalizeCameraStatus(status, raw?.camera_status == null ? 'on' : raw.camera_status);
     const entry = { student_id: studentId, name, status, camera_status: camera };
 
     if (status === 'present') presentStudents.push(entry);
     else if (status === 'late') lateStudents.push(entry);
+    else if (status === 'excused') excusedStudents.push(entry);
     else absentStudents.push(entry);
 
     if (status === 'present' || status === 'late') {
@@ -65,15 +68,21 @@ export function buildAttendanceSummary(rows = []) {
   }
 
   return {
-    total: presentStudents.length + lateStudents.length + absentStudents.length,
+    total:
+      presentStudents.length +
+      lateStudents.length +
+      absentStudents.length +
+      excusedStudents.length,
     present: presentStudents.length,
     late: lateStudents.length,
     absent: absentStudents.length,
+    excused: excusedStudents.length,
     cameraOpen: cameraOpenStudents.length,
     cameraClosed: cameraClosedStudents.length,
     presentStudents,
     lateStudents,
     absentStudents,
+    excusedStudents,
     cameraOpenStudents,
     cameraClosedStudents
   };
@@ -105,6 +114,7 @@ export function formatCoachAttendanceSummaryMessage({
     `✅ Katılan: ${s.present}`,
     `🕐 Geç Katılan: ${s.late}`,
     `❌ Katılmayan: ${s.absent}`,
+    ...(s.excused ? [`🟡 İzinli: ${s.excused}`] : []),
     `🎥 Kamerası Açık: ${s.cameraOpen}`,
     `🚫 Kamerası Kapalı: ${s.cameraClosed}`,
     '',

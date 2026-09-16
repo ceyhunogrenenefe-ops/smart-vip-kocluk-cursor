@@ -8,14 +8,18 @@ export const ATTENDANCE_CAMERA_OFF_TEMPLATE =
 
 export function normalizeAttendanceStatus(raw) {
   const v = String(raw || '').trim().toLowerCase();
-  if (v === 'present' || v === 'absent' || v === 'late') return v;
+  if (v === 'present' || v === 'absent' || v === 'late' || v === 'excused') return v;
+  // Türkçe girişler (panel, içe aktarma, entegrasyon)
+  if (v === 'izinli' || v === 'i̇zinli' || v === 'mazeretli') return 'excused';
+  if (v === 'gec' || v === 'geç') return 'late';
   return 'absent';
 }
 
 /** Katılmadı → n_a; katıldı/geç → on | off | null (eksik) */
 export function normalizeCameraStatus(attendanceStatus, raw) {
   const st = normalizeAttendanceStatus(attendanceStatus);
-  if (st === 'absent') return 'n_a';
+  // İzinli öğrenciden kamera beklenmez, devamsızlık gibi kamera dışı sayılır.
+  if (st === 'absent' || st === 'excused') return 'n_a';
   const parsed = parseCameraStatusInput(st, raw);
   if (parsed === 'on' || parsed === 'off' || parsed === 'n_a') return parsed;
   // BBB / eski çağrılar: belirtilmemişse açık varsay

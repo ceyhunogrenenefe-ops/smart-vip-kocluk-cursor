@@ -233,12 +233,14 @@ function computeStats(rows) {
         class_name: r.class_name,
         present: 0,
         absent: 0,
-        late: 0
+        late: 0,
+        excused: 0
       });
     }
     const c = byClass.get(cid);
     if (r.status === 'present') c.present += 1;
     else if (r.status === 'late') c.late += 1;
+    else if (r.status === 'excused') c.excused += 1;
     else c.absent += 1;
 
     const tid = String(r.teacher_id || '');
@@ -249,13 +251,15 @@ function computeStats(rows) {
         marked: 0,
         present: 0,
         absent: 0,
-        late: 0
+        late: 0,
+        excused: 0
       });
     }
     const t = byTeacher.get(tid);
     t.marked += 1;
     if (r.status === 'present') t.present += 1;
     else if (r.status === 'late') t.late += 1;
+    else if (r.status === 'excused') t.excused += 1;
     else t.absent += 1;
   }
 
@@ -460,7 +464,8 @@ export async function buildAttendanceReport({
 
   const normalizeSt = (raw) => {
     const v = String(raw || '').trim().toLowerCase();
-    if (v === 'present' || v === 'absent' || v === 'late') return v;
+    if (v === 'present' || v === 'absent' || v === 'late' || v === 'excused') return v;
+    if (v === 'izinli' || v === 'mazeretli') return 'excused';
     return 'absent';
   };
 
@@ -490,7 +495,8 @@ export async function buildAttendanceReport({
         status: st,
         marked_at: a.marked_at || null,
         marked_by: a.marked_by || null,
-        camera_status: String(a.camera_status || '').trim() || (st === 'absent' ? 'n_a' : null)
+        camera_status:
+          String(a.camera_status || '').trim() || (st === 'absent' || st === 'excused' ? 'n_a' : null)
       };
     })
     .filter(Boolean);
@@ -499,6 +505,7 @@ export async function buildAttendanceReport({
   if (statusFilter === 'absent') out = out.filter((r) => r.status === 'absent');
   else if (statusFilter === 'present') out = out.filter((r) => r.status === 'present');
   else if (statusFilter === 'late') out = out.filter((r) => r.status === 'late');
+  else if (statusFilter === 'excused') out = out.filter((r) => r.status === 'excused');
   else if (statusFilter === 'camera_off') {
     out = out.filter((r) => (r.status === 'present' || r.status === 'late') && r.camera_status === 'off');
   }
@@ -510,9 +517,11 @@ export async function buildAttendanceReport({
   let present = 0;
   let absent = 0;
   let late = 0;
+  let excused = 0;
   for (const r of out) {
     if (r.status === 'present') present += 1;
     else if (r.status === 'late') late += 1;
+    else if (r.status === 'excused') excused += 1;
     else absent += 1;
   }
 
@@ -528,6 +537,7 @@ export async function buildAttendanceReport({
     present,
     absent,
     late,
+    excused,
     records: out.length,
     session_count: sessionList.length
   };
