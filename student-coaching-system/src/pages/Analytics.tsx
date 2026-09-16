@@ -67,6 +67,7 @@ import {
   Radar
 } from 'recharts';
 import { StudyInsightWidgets } from '../components/analytics/StudyInsightWidgets';
+import { GoalProgressOverview, SubjectGoalProgressList } from '../components/analytics/GoalProgressOverview';
 
 function ymd(d: Date): string {
   return d.toISOString().split('T')[0];
@@ -1229,62 +1230,55 @@ export default function Analytics() {
       )}
 
       {coachGoalAnalytics && (
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
-          <p className="text-sm text-gray-600 mb-3">
-            Koç hedefleri ({rangeLabel}) — koçun verdiği kota; çözülen günlük kayıt (takvime bağlı değil).
-          </p>
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-            {[
-              {
-                key: 'soru',
-                label: 'Soru',
-                target: coachGoalAnalytics.questionTarget,
-                completed: coachGoalAnalytics.questionCompleted,
-                pct: coachGoalAnalytics.questionRealizationPct,
-                color: 'text-blue-600',
-              },
-              {
-                key: 'paragraf',
-                label: 'Paragraf',
-                target: coachGoalAnalytics.paragraf.target,
-                completed: coachGoalAnalytics.paragraf.completed,
-                pct: coachGoalAnalytics.paragraf.realizationPct,
-                color: 'text-violet-600',
-              },
-              {
-                key: 'problem',
-                label: 'Problem',
-                target: coachGoalAnalytics.problem.target,
-                completed: coachGoalAnalytics.problem.completed,
-                pct: coachGoalAnalytics.problem.realizationPct,
-                color: 'text-amber-600',
-              },
-              {
-                key: 'sayfa',
-                label: 'Kitap / sayfa',
-                target: coachGoalAnalytics.sayfa.target,
-                completed: coachGoalAnalytics.sayfa.completed,
-                pct: coachGoalAnalytics.sayfa.realizationPct,
-                color: 'text-emerald-600',
-              },
-            ]
-              .filter((b) => b.target > 0 || b.completed > 0)
-              .map((b) => (
-                <div key={b.key} className="rounded-lg border border-slate-100 bg-slate-50/80 p-3 space-y-1">
-                  <p className="text-xs text-gray-500">{b.label}</p>
-                  <p className="text-sm text-slate-700">
-                    Koç hedefi: <span className={`font-bold ${b.color}`}>{b.target}</span>
-                  </p>
-                  <p className="text-sm text-slate-800">
-                    Çözülen: <span className={`font-bold ${b.color}`}>{b.completed}</span>
-                  </p>
-                  <p className="text-xs font-semibold text-slate-600">
-                    Oran: %{b.pct}
-                  </p>
-                </div>
-              ))}
-          </div>
-        </div>
+        <GoalProgressOverview
+          rangeLabel={rangeLabel}
+          items={[
+            {
+              key: 'soru',
+              label: 'Soru',
+              unit: 'soru',
+              target: coachGoalAnalytics.questionTarget,
+              completed: coachGoalAnalytics.questionCompleted,
+            },
+            {
+              key: 'paragraf',
+              label: 'Paragraf',
+              unit: 'paragraf',
+              target: coachGoalAnalytics.paragraf.target,
+              completed: coachGoalAnalytics.paragraf.completed,
+            },
+            {
+              key: 'problem',
+              label: 'Problem',
+              unit: 'problem',
+              target: coachGoalAnalytics.problem.target,
+              completed: coachGoalAnalytics.problem.completed,
+            },
+            {
+              key: 'sayfa',
+              label: 'Kitap okuma',
+              unit: 'sayfa',
+              target: coachGoalAnalytics.sayfa.target,
+              completed: coachGoalAnalytics.sayfa.completed,
+            },
+          ]}
+        />
+      )}
+
+      {selectedStudentId && subjectAnalysis.length > 0 && (
+        <SubjectGoalProgressList
+          rangeLabel={rangeLabel}
+          rows={subjectAnalysis.map((row) => ({
+            subject: row.subject,
+            unit: (row as { birim?: string }).birim ?? 'Soru',
+            target: Number(row.hedef) || 0,
+            completed: Number(row.çözülen) || 0,
+            successPct: Number(row.başarı) || 0,
+            correct: Number(row.doğru) || 0,
+            wrong: Number(row.yanlış) || 0,
+            blank: Number(row.boş) || 0,
+          }))}
+        />
       )}
 
       <StudyInsightWidgets
@@ -1714,14 +1708,23 @@ export default function Analytics() {
           <h3 className="text-lg font-semibold text-slate-800 mb-4">Ders Bazlı Başarı (%)</h3>
           <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={subjectAnalysis}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-                <XAxis dataKey="subject" tick={{ fontSize: 11 }} />
-                <YAxis tick={{ fontSize: 11 }} />
-                <Tooltip
-                  contentStyle={{ borderRadius: 8, border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+              <BarChart data={subjectAnalysis} margin={{ top: 8, right: 8, left: -12, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" vertical={false} />
+                <XAxis dataKey="subject" tick={{ fontSize: 11, fill: '#475569' }} tickLine={false} axisLine={{ stroke: '#CBD5E1' }} />
+                <YAxis
+                  domain={[0, 100]}
+                  ticks={[0, 25, 50, 75, 100]}
+                  tickFormatter={(v: number) => `%${v}`}
+                  tick={{ fontSize: 11, fill: '#64748B' }}
+                  tickLine={false}
+                  axisLine={false}
                 />
-                <Bar dataKey="başarı" radius={[4, 4, 0, 0]}>
+                <Tooltip
+                  cursor={{ fill: '#F1F5F9' }}
+                  formatter={(value: number) => [`%${value}`, 'Doğruluk']}
+                  contentStyle={{ borderRadius: 10, border: '1px solid #E2E8F0', boxShadow: '0 8px 20px -8px rgb(15 23 42 / 0.25)' }}
+                />
+                <Bar dataKey="başarı" radius={[6, 6, 0, 0]} maxBarSize={44}>
                   {subjectAnalysis.map((entry, index) => (
                     <Cell
                       key={`cell-${index}`}
@@ -1772,27 +1775,46 @@ export default function Analytics() {
           <h3 className="text-lg font-semibold text-slate-800 mb-4">Hedef vs Gerçekleşen</h3>
           <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={targetVsActual}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-                <XAxis dataKey="subject" tick={{ fontSize: 11 }} />
-                <YAxis tick={{ fontSize: 11 }} />
+              <BarChart data={targetVsActual} margin={{ top: 8, right: 8, left: -12, bottom: 0 }} barGap={4}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" vertical={false} />
+                <XAxis dataKey="subject" tick={{ fontSize: 11, fill: '#475569' }} tickLine={false} axisLine={{ stroke: '#CBD5E1' }} />
+                <YAxis tick={{ fontSize: 11, fill: '#64748B' }} tickLine={false} axisLine={false} allowDecimals={false} />
                 <Tooltip
-                  contentStyle={{ borderRadius: 8, border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                  cursor={{ fill: '#F1F5F9' }}
+                  formatter={(value: number, name: string) => [value, name]}
+                  contentStyle={{ borderRadius: 10, border: '1px solid #E2E8F0', boxShadow: '0 8px 20px -8px rgb(15 23 42 / 0.25)' }}
                 />
-                <Bar dataKey="hedef" fill="#3B82F6" radius={[4, 4, 0, 0]} name="Hedef" />
-                <Bar dataKey="çözülen" fill="#10B981" radius={[4, 4, 0, 0]} name="Çözülen" />
+                <Bar dataKey="hedef" fill="#CBD5E1" radius={[6, 6, 0, 0]} name="Hedef" maxBarSize={36} />
+                <Bar dataKey="çözülen" radius={[6, 6, 0, 0]} name="Gerçekleşen" maxBarSize={36}>
+                  {targetVsActual.map((row, index) => (
+                    <Cell
+                      key={`tva-${index}`}
+                      fill={
+                        row.hedef > 0 && row.çözülen > row.hedef
+                          ? '#7C3AED'
+                          : row.hedef > 0 && row.çözülen >= row.hedef
+                            ? '#059669'
+                            : '#0284C7'
+                      }
+                    />
+                  ))}
+                </Bar>
               </BarChart>
             </ResponsiveContainer>
           </div>
-          <div className="flex items-center justify-center gap-6 mt-4">
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded-full bg-blue-500"></div>
-              <span className="text-sm text-gray-600">Hedef</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded-full bg-green-500"></div>
-              <span className="text-sm text-gray-600">Çözülen</span>
-            </div>
+          <div className="mt-4 flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-xs text-slate-600">
+            <span className="inline-flex items-center gap-1.5">
+              <span className="h-2.5 w-2.5 rounded-sm bg-slate-300" /> Hedef
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="h-2.5 w-2.5 rounded-sm bg-sky-600" /> Devam ediyor
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="h-2.5 w-2.5 rounded-sm bg-emerald-600" /> Hedefe ulaşıldı
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="h-2.5 w-2.5 rounded-sm bg-violet-600" /> Hedef aşıldı
+            </span>
           </div>
         </div>
 
