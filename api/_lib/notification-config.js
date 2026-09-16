@@ -66,12 +66,12 @@ export const NOTIFICATION_DEFINITIONS = [
     templateType: 'report_reminder',
     nameTr: 'Günlük rapor hatırlatma',
     descriptionTr:
-      'Rapor girmeyen öğrenciye 22:00 TR; yalnızca o öğrencinin koçunun WhatsApp gateway hesabından (koç panelinden aç/kapat).',
+      'Rapor girmeyen aktif öğrenci ve velisine 22:00 TR; koçun WhatsApp gateway hattından, hat bağlı değilse Meta onaylı şablonla (koç panelinden aç/kapat).',
     sendChannel: SEND_CHANNELS.COACH_GATEWAY,
     mode: 'automatic',
     cronJobKey: 'daily_report_reminder',
     coachScoped: true,
-    allowMetaFallback: false
+    allowMetaFallback: true
   },
   {
     id: 'lesson_reminder',

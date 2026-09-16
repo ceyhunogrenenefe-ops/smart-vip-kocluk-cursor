@@ -18,8 +18,11 @@ test('studentActiveForReminders: yalnız sistemde aktif öğrenciler', async () 
   assert.equal(studentActiveForReminders({ enrollment_status: 'confirmed', user_id: 'bilinmeyen' }, users), true);
 });
 
-test('rapor hatırlatması koç gateway kanalından gider', async () => {
+test('rapor hatırlatması koç gateway, bağlı değilse Meta', async () => {
   delete process.env.NOTIFY_CHANNEL_REPORT_REMINDER;
   const { resolveEffectiveSendChannel, SEND_CHANNELS } = await import('./notification-config.js');
   assert.equal(resolveEffectiveSendChannel('report_reminder'), SEND_CHANNELS.COACH_GATEWAY);
+  const { getNotificationDefinition } = await import('./notification-config.js');
+  // Koç hattı bağlı değilse Meta şablonuna düşer
+  assert.equal(getNotificationDefinition('report_reminder').allowMetaFallback, true);
 });
