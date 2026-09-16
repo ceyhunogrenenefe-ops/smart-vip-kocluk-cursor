@@ -1065,7 +1065,9 @@ export default async function handler(req, res) {
             const instId = String(details.class.institution_id || institutionId || '').trim() || null;
             if (instId) await backfillClassSessionInstitutionId(classId, instId);
             await backfillClassWeeklySlotMeetingLinks(classId);
-            await ensureClassSessionsForClassInRange(classId, from, to);
+            // İptal edilen ders, liste her yenilendiğinde şablondan yeniden üretilmemeli.
+            // ignoreCancelled:false → o gün/saatte iptal kaydı varsa slot 'kapalı' sayılır.
+            await ensureClassSessionsForClassInRange(classId, from, to, { ignoreCancelled: false });
             if (String(req.query.materialize || '') === '1') {
               await backfillClassSessionMeetingLinksInRange(classId, from, to);
               await backfillScheduledConsecutiveBbbAlignment(classId, from, to, { skipLiveCheck: true });
@@ -3274,11 +3276,17 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: 'teacher_id_required', code: 'teacher_id_invalid' });
       }
       if (!details.teacher_ids.includes(tid)) {
-        return res.status(400).json({
-          error:
-            'Bu öğretmen sınıfın atanmış öğretmenleri arasında değil. Önce sınıf ayarlarından öğretmeni ekleyin.',
-          code: 'teacher_not_in_class'
-        });
+        // Yönetici/koordinatör herhangi bir öğretmeni atayabilir: 400 yerine sınıfa bağla.
+        if (canAssignAnyClassTeacher(role, roleTags)) {
+          await ensureClassTeacherLink(session.class_id, tid);
+          details.teacher_ids.push(tid);
+        } else {
+          return res.status(400).json({
+            error:
+              'Bu öğretmen sınıfın atanmış öğretmenleri arasında değil. Önce sınıf ayarlarından öğretmeni ekleyin.',
+            code: 'teacher_not_in_class'
+          });
+        }
       }
       patch.teacher_id = tid;
     }
