@@ -251,6 +251,8 @@ type AuthLoginUserPayload = {
   email: string;
   phone?: string;
   role: SystemUser['role'];
+  /** Ek yetkiler (ör. koç + CRM temsilcisi) — sunucu users.roles */
+  roles?: SystemUser['roles'];
   studentId?: string;
   coachId?: string;
   institutionId?: string;
@@ -430,9 +432,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           const parsed = JSON.parse(savedUser);
           if (parsed && parsed.id && parsed.email) {
             let normalized = applyTrialAccountCoachOnly(parsed as SystemUser);
-            const jwtSub = peekJwtClaims(getAuthToken())?.sub;
+            const claims = peekJwtClaims(getAuthToken());
+            const jwtSub = claims?.sub;
             if (jwtSub && jwtSub !== 'anonymous' && normalized.id !== jwtSub) {
               normalized = { ...normalized, id: jwtSub };
+            }
+            // Eski oturumlarda roles kaydedilmemişti: token'daki yetkilerle tamamla
+            if (
+              jwtSub &&
+              normalized.id === jwtSub &&
+              Array.isArray(claims?.roles) &&
+              claims.roles.length &&
+              !normalized.roles?.length
+            ) {
+              normalized = { ...normalized, roles: claims.roles as SystemUser['roles'] };
             }
             /** Öğrenci API’leri JWT ister; token yoksa eski oturumu yükleme (my-student 403 / boş analiz) */
             if (String(normalized.role || '').toLowerCase() === 'student' && !getAuthToken()) {
@@ -560,6 +573,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         email: u.email,
         phone: u.phone,
         role: u.role,
+        // Ek roller atılırsa koç + temsilci gibi hesaplar CRM'e yetkisiz görünür
+        ...(Array.isArray(u.roles) && u.roles.length ? { roles: u.roles } : {}),
         studentId: u.studentId,
         coachId: u.coachId,
         institutionId: u.institutionId,
