@@ -4,6 +4,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import {
   BarChart3,
   Building2,
+  Briefcase,
   ChevronLeft,
   ChevronRight,
   LayoutDashboard,
@@ -64,6 +65,7 @@ export default function Sidebar({
     nav.team.length > 0 ||
     nav.academic.length > 0 ||
     nav.whatsapp.length > 0 ||
+    nav.crm.length > 0 ||
     nav.orgSystem.length > 0 ||
     nav.settings.length > 0;
 
@@ -286,6 +288,16 @@ export default function Sidebar({
               pathname={location.pathname}
               collapsed={railCollapsed}
               onNavigate={go}
+            />
+            <SidebarNavGroup
+              id="crm"
+              label="CRM"
+              icon={Briefcase}
+              items={nav.crm}
+              pathname={location.pathname}
+              collapsed={railCollapsed}
+              onNavigate={go}
+              itemMatchExact
             />
             <SidebarNavGroup
               id="org"

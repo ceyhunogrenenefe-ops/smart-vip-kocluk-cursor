@@ -16,6 +16,7 @@ export default function MobileAdminHubPage() {
       ...nav.orgSystem.filter((it) => it.path !== '/user-management'),
       ...nav.team,
       ...nav.whatsapp,
+      ...nav.crm.map((it) => ({ ...it, label: `CRM ${it.label}` })),
       ...nav.rest,
       ...nav.settings.filter((it) => it.path !== '/my-profile')
     ];

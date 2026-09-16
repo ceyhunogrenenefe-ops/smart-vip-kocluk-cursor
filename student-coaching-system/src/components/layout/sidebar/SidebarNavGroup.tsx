@@ -8,7 +8,7 @@ import type { FlatNavItem, NavGroupKind } from './navModel';
 import { pathnameMatchesGroup } from './navModel';
 
 type Props = {
-  /** lessons | academic | org | settings | studentPanel | team | whatsapp */
+  /** lessons | academic | org | settings | studentPanel | team | whatsapp | crm */
   id: NavGroupKind;
   label: string;
   icon: LucideIcon;
