@@ -541,6 +541,10 @@ export default function ClassLiveLessons() {
   const [sessionEditScope, setSessionEditScope] = useState<'single' | 'batch'>('single');
   const [sessionEditBusy, setSessionEditBusy] = useState(false);
   const [slotEditBusy, setSlotEditBusy] = useState(false);
+  // Hatalar pencere içinde gösterilir; sayfa başındaki uyarı modal açıkken görünmüyordu.
+  const [sessionEditError, setSessionEditError] = useState<string | null>(null);
+  const [slotEditError, setSlotEditError] = useState<string | null>(null);
+  const [esStatus, setEsStatus] = useState<'scheduled' | 'completed' | 'cancelled'>('scheduled');
   const [reminderBusyId, setReminderBusyId] = useState<string | null>(null);
   const [esSubject, setEsSubject] = useState('');
   const [esDate, setEsDate] = useState('');
@@ -1273,7 +1277,15 @@ export default function ClassLiveLessons() {
   };
 
   const createSlot = async () => {
-    if (!selectedClassId || !slotSubject.trim() || scheduleBusy) return;
+    if (scheduleBusy) return;
+    if (!selectedClassId) {
+      toast.error('Önce sınıf seçin.');
+      return;
+    }
+    if (!slotSubject.trim()) {
+      toast.error('Ders adı girin.');
+      return;
+    }
     const teacherId = effectiveSlotTeacherId;
     if (!teacherId) {
       alert('Öğretmen seçin.');
@@ -1298,10 +1310,14 @@ export default function ClassLiveLessons() {
       if (!res.ok) {
         const errText = [j.error, j.code === 'bbb_create_failed' ? 'BBB sunucusu yanıt vermedi.' : '', j.code === 'subject_meeting_link_required' ? 'BBB API tanımlı değil veya link zorunlu.' : '', j.code === 'teacher_time_conflict' ? 'Aynı öğretmen o saatte başka bir dersi veriyor. Aynı dersi farklı sınıfa ekleyebilirsiniz.' : ''].filter(Boolean).join(' ');
         setError(errText || 'Ders şablonu eklenemedi');
+        toast.error(errText || 'Ders şablonu eklenemedi');
         return;
       }
-      setSlotSubject('');
+      // Ders adı korunur: öğretmen aynı dersi başka gün/saate hemen ekleyebilsin.
+      // Eskiden alan boşaldığı için ikinci ekleme sessizce engelleniyor, form kilitli görünüyordu.
       setSlotMeetingLink('');
+      setError(null);
+      toast.success('Ders şablona eklendi. Gün veya saati değiştirip tekrar ekleyebilirsiniz.');
       await loadAll();
       await loadWeekSessions();
     } finally {
@@ -1310,7 +1326,15 @@ export default function ClassLiveLessons() {
   };
 
   const bulkScheduleSessions = async () => {
-    if (!selectedClassId || !slotSubject.trim() || scheduleBusy) return;
+    if (scheduleBusy) return;
+    if (!selectedClassId) {
+      toast.error('Önce sınıf seçin.');
+      return;
+    }
+    if (!slotSubject.trim()) {
+      toast.error('Ders adı girin.');
+      return;
+    }
     const teacherId = effectiveSlotTeacherId;
     if (!teacherId) {
       alert('Öğretmen seçin.');
@@ -1343,7 +1367,7 @@ export default function ClassLiveLessons() {
       const n = Array.isArray(j.data) ? j.data.length : 0;
       const skipped = Array.isArray(j.skipped) ? j.skipped : [];
       setError(null);
-      setSlotSubject('');
+      // Ders adı korunur; ardışık oturum oluşturma engellenmesin.
       setSlotMeetingLink('');
       await loadAll();
       await loadWeekSessions();
@@ -1731,12 +1755,30 @@ export default function ClassLiveLessons() {
     setEsLink(displayMeetingLinkForRow(s, 'class', window.location.origin) || s.meeting_link || '');
     setEsHomework(s.homework || '');
     setEsTeacherId(s.teacher_id);
+    setEsStatus(
+      s.status === 'completed' || s.status === 'cancelled' ? s.status : 'scheduled'
+    );
+    setSessionEditError(null);
     setError(null);
+  };
+
+  /** Gecikme/erken bitiş: başlangıç ve bitişi birlikte kaydırır (dk). */
+  const shiftSessionMinutes = (minutes: number) => {
+    const shift = (hhmm: string) => {
+      const [h, m] = String(hhmm || '00:00').split(':').map((x) => Number(x) || 0);
+      let total = h * 60 + m + minutes;
+      total = ((total % 1440) + 1440) % 1440;
+      return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
+    };
+    setEsStart((prev) => shift(prev));
+    setEsEnd((prev) => shift(prev));
+    setSessionEditError(null);
   };
 
   const saveSessionEdit = async () => {
     if (!editingSession) return;
     setSessionEditBusy(true);
+    setSessionEditError(null);
     setError(null);
     try {
       const res = await apiFetch('/api/class-live-lessons', {
@@ -1749,6 +1791,7 @@ export default function ClassLiveLessons() {
           end_time: esEnd.length === 5 ? `${esEnd}:00` : esEnd,
           meeting_link: meetingLinkForSave(esLink, editingSession, 'class', window.location.origin),
           homework: esHomework.trim() || null,
+          status: esStatus,
           ...(sessionEditScope === 'batch' && sessionEditPeerCount > 1 ? { apply_scope: 'batch' } : {}),
           ...(esTeacherId.trim() && esTeacherId.trim() !== editingSession.teacher_id
             ? { teacher_id: esTeacherId.trim() }
@@ -1757,9 +1800,15 @@ export default function ClassLiveLessons() {
       });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError(String(j.error || 'Oturum güncellenemedi'));
+        const msg =
+          j.code === 'teacher_time_conflict'
+            ? `${j.error || 'Çakışma'} — farklı bir saat seçin veya öğretmeni değiştirin.`
+            : String(j.error || 'Oturum güncellenemedi');
+        setSessionEditError(msg);
+        toast.error(msg);
         return;
       }
+      toast.success('Ders güncellendi.');
       setEditingSession(null);
       await loadWeekSessions();
       await loadBatchSessionsPool();
@@ -1775,6 +1824,7 @@ export default function ClassLiveLessons() {
 
   const openEditSlot = (s: SlotRow) => {
     setEditingSlotRow(s);
+    setSlotEditError(null);
     setSlDay(s.day_of_week);
     setSlSubject(s.subject);
     setSlStart(String(s.start_time || '').slice(0, 5));
@@ -1788,6 +1838,7 @@ export default function ClassLiveLessons() {
   const saveSlotEdit = async () => {
     if (!editingSlotRow) return;
     setSlotEditBusy(true);
+    setSlotEditError(null);
     setError(null);
     try {
       const res = await apiFetch('/api/class-live-lessons', {
@@ -1808,9 +1859,15 @@ export default function ClassLiveLessons() {
       });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError(String(j.error || 'Şablon güncellenemedi'));
+        const msg =
+          j.code === 'teacher_time_conflict'
+            ? `${j.error || 'Çakışma'} — farklı bir saat seçin veya öğretmeni değiştirin.`
+            : String(j.error || 'Şablon güncellenemedi');
+        setSlotEditError(msg);
+        toast.error(msg);
         return;
       }
+      toast.success('Haftalık şablon güncellendi.');
       setEditingSlotRow(null);
       await loadAll();
       await loadWeekSessions();
@@ -2334,10 +2391,18 @@ export default function ClassLiveLessons() {
                     // Aynı saat satırında (ör. 17:00 + 17:50 Etüt) yalnızca
                     // tam başlangıç saati eşleşen oturum şablonu gizler; saat
                     // bazlı bloklama 2. dilimi düşürürdü.
+                    // İptal edilen oturum da şablonu kapatır; aksi halde ders silinince
+                    // haftalık şablon satırı aynı hücrede yeniden belirir ve silinmemiş gibi görünür.
+                    const sessionsHereAll = weekSessions.filter(
+                      (s) =>
+                        s.class_id === selectedClassId &&
+                        s.lesson_date === colIso &&
+                        Number(String(s.start_time).slice(0, 2)) === hour
+                    );
                     const coveredTemplateStarts = new Set(
-                      sessionsHere
-                        .filter((s) => s.status !== 'cancelled')
-                        .map((s) => `${s.teacher_id}|${String(s.start_time || '').slice(0, 5)}`)
+                      sessionsHereAll.map(
+                        (s) => `${s.teacher_id}|${String(s.start_time || '').slice(0, 5)}`
+                      )
                     );
                     const templatesHere = classSlots.filter((s) => {
                       if (s.day_of_week !== dowSlotFromIso(colIso)) return false;
@@ -2791,6 +2856,11 @@ export default function ClassLiveLessons() {
                 </label>
               </fieldset>
             ) : null}
+            {sessionEditError ? (
+              <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+                {sessionEditError}
+              </div>
+            ) : null}
             <label className="block text-sm">
               <span className="text-slate-600">Ders</span>
               <input
@@ -2828,6 +2898,42 @@ export default function ClassLiveLessons() {
                 />
               </label>
             </div>
+            <div className="rounded-lg bg-slate-50 p-3 ring-1 ring-slate-100">
+              <p className="text-xs font-semibold text-slate-600">Gecikme / erken bitiş</p>
+              <p className="mt-0.5 text-xs text-slate-500">
+                Başlangıç ve bitiş saatini birlikte kaydırır. Kaydet’e basınca çakışma kontrolü yapılır.
+              </p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {[-15, -10, -5, 5, 10, 15, 20, 30].map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    disabled={sessionEditBusy}
+                    onClick={() => shiftSessionMinutes(m)}
+                    className="min-h-[36px] rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:border-indigo-300 hover:text-indigo-700 disabled:opacity-60"
+                  >
+                    {m > 0 ? `+${m}` : m} dk
+                  </button>
+                ))}
+              </div>
+            </div>
+            <label className="block text-sm">
+              <span className="text-slate-600">Ders durumu</span>
+              <select
+                value={esStatus}
+                onChange={(e) =>
+                  setEsStatus(e.target.value as 'scheduled' | 'completed' | 'cancelled')
+                }
+                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2"
+              >
+                <option value="scheduled">Planlandı</option>
+                <option value="completed">Tamamlandı</option>
+                <option value="cancelled">İptal edildi</option>
+              </select>
+              <span className="mt-1 block text-xs text-slate-500">
+                İptal edilen ders takvimden kalkar ve şablondan yeniden oluşturulmaz.
+              </span>
+            </label>
             <label className="block text-sm">
               <span className="text-slate-600">Öğretmen</span>
               <select
@@ -2917,6 +3023,11 @@ export default function ClassLiveLessons() {
                 ))}
               </select>
             </label>
+            {slotEditError ? (
+              <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+                {slotEditError}
+              </div>
+            ) : null}
             <label className="block text-sm">
               <span className="text-slate-600">Ders</span>
               <input
