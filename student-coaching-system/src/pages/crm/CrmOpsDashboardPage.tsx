@@ -244,7 +244,7 @@ export default function CrmOpsDashboardPage() {
             <div className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm xl:col-span-3">
               <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-800">
                 <Users className="h-4 w-4 text-emerald-700" />
-                Acente performans karşılaştırması
+                Temsilci performans karşılaştırması
               </h3>
               <div className="overflow-x-auto">
                 <table className="min-w-full text-left text-sm">

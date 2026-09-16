@@ -231,7 +231,7 @@ export default function RegistrationTrackingPanel({ isManager, institutionId }: 
     setLeads((cur) => cur.map((l) => (l.id === leadId ? { ...l, assigned_user_id: assignedUserId } : l)));
     try {
       await rtUpdateLead(leadId, { assigned_user_id: assignedUserId });
-      toast.success(assignedUserId ? 'Ajan atandı' : 'Atama kaldırıldı');
+      toast.success(assignedUserId ? 'Temsilci atandı' : 'Atama kaldırıldı');
       const perf = await rtStaffPerformance().catch(() => null);
       if (perf?.data?.agents) setAgentLoads(perf.data.agents);
     } catch (e) {
@@ -448,7 +448,7 @@ export default function RegistrationTrackingPanel({ isManager, institutionId }: 
             })
           }
         >
-          <option value="">Ajan / koç: Tümü</option>
+          <option value="">Temsilci / koç: Tümü</option>
           {coaches.map((c) => (
             <option key={c.id} value={c.id}>
               {c.name}

@@ -161,7 +161,7 @@ export default function RegLeadCard({
               value={lead.assigned_user_id || ''}
               onChange={(e) => onAssign(lead.id, e.target.value || null)}
             >
-              <option value="">Ajan ata</option>
+              <option value="">Temsilci ata</option>
               {agents.map((a) => (
                 <option key={a.id} value={a.id}>
                   {a.name}

@@ -1,11 +1,11 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { BarChart3, Bell, Inbox, LayoutGrid, LogOut, Puzzle, Send, Users } from 'lucide-react';
+import { BarChart3, Bell, FileBarChart, Inbox, LayoutGrid, LogOut, Puzzle, Send, Users } from 'lucide-react';
 import CrmAlarmHost from './CrmAlarmHost';
 import CrmLiveOpsHost from './CrmLiveOpsHost';
 import { useAuth } from '../../context/AuthContext';
 import { userRoleTags } from '../../config/rolePermissions';
 
-/** İzole CRM kabuğu — saf crm_agent ana sidebar / faturalama görmez */
+/** İzole CRM kabuğu — yalnız temsilci (crm_agent) ana sidebar / faturalama görmez */
 export default function CrmLayout() {
   const { effectiveUser, logout } = useAuth();
   const navigate = useNavigate();
@@ -63,6 +63,17 @@ export default function CrmLayout() {
                 Toplu mesaj
               </NavLink>
               <NavLink
+                to="/crm/gunluk-rapor"
+                className={({ isActive }) =>
+                  `inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition ${
+                    isActive ? 'bg-emerald-600 text-white' : 'text-slate-600 hover:bg-slate-100'
+                  }`
+                }
+              >
+                <FileBarChart className="h-4 w-4" />
+                Günlük rapor
+              </NavLink>
+              <NavLink
                 to="/crm/inbox"
                 className={({ isActive }) =>
                   `inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition ${
@@ -109,7 +120,7 @@ export default function CrmLayout() {
                     }
                   >
                     <Users className="h-4 w-4" />
-                    Ajanlar
+                    Temsilciler
                   </NavLink>
                 </>
               )}
@@ -118,7 +129,7 @@ export default function CrmLayout() {
           <div className="flex items-center gap-2 text-sm sm:gap-3">
             <span className="hidden max-w-[160px] truncate text-slate-600 sm:inline">
               {effectiveUser?.name || effectiveUser?.email}
-              {agentOnly ? ' · Ajan' : ''}
+              {agentOnly ? ' · Temsilci' : ''}
             </span>
             {!agentOnly && (
               <button
@@ -133,7 +144,7 @@ export default function CrmLayout() {
               type="button"
               onClick={() => {
                 logout();
-                navigate('/login', { replace: true });
+                navigate('/crm/giris', { replace: true });
               }}
               className="inline-flex items-center gap-1 rounded-lg bg-slate-900 px-3 py-1.5 text-white hover:bg-slate-800"
             >

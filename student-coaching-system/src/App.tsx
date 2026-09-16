@@ -94,6 +94,8 @@ import CrmHome from './pages/crm/CrmHome';
 import CrmOpsDashboardPage from './pages/crm/CrmOpsDashboardPage';
 import CrmTasksPage from './pages/crm/CrmTasksPage';
 import CrmBulkMessagePage from './pages/crm/CrmBulkMessagePage';
+import CrmLoginPage from './pages/crm/CrmLoginPage';
+import CrmDailyReportPage from './pages/crm/CrmDailyReportPage';
 import OzelDersTalepleriPage from './pages/OzelDersTalepleriPage';
 import TeacherVitrineProfilePage from './pages/TeacherVitrineProfilePage';
 import TeacherAvailabilityPage from './pages/TeacherAvailabilityPage';
@@ -125,7 +127,7 @@ function HomeRedirect() {
   if (!effectiveUser) return <Navigate to="/login" replace />;
   const tags = userRoleTags(effectiveUser);
 
-  /** Yalnız CRM ajanı → izole inbox */
+  /** Yalnız CRM temsilcisi → izole inbox */
   if (
     tags.includes('crm_agent') &&
     !tags.some((t) => ['super_admin', 'admin', 'coach', 'teacher', 'student', 'vendor_admin'].includes(t))
@@ -426,6 +428,7 @@ function App() {
               </ProtectedRoute>
             } />
 
+            <Route path="/crm/giris" element={<CrmLoginPage />} />
             <Route
               path="/crm"
               element={
@@ -438,6 +441,7 @@ function App() {
               <Route path="dashboard" element={<CrmOpsDashboardPage />} />
               <Route path="gorevler" element={<CrmTasksPage />} />
               <Route path="toplu-mesaj" element={<CrmBulkMessagePage />} />
+              <Route path="gunluk-rapor" element={<CrmDailyReportPage />} />
               <Route path="inbox" element={<CrmInboxPage />} />
               <Route
                 path="widgetler"

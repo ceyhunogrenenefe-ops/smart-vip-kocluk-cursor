@@ -114,6 +114,7 @@ export const routeLoaders = {
   'cron/solution-appointment-reminders': () => import('../handlers/cron-solution-appointment-reminders.js'),
   'cron/crm-task-reminders': () => import('../handlers/cron-crm-task-reminders.js'),
   'cron/crm-reply-sla': () => import('../handlers/cron-crm-reply-sla.js'),
+  'cron/crm-daily-report': () => import('../handlers/cron-crm-daily-report.js'),
   'cron/crm-instagram-sync': () => import('../handlers/cron-crm-instagram-sync.js'),
   'ozel-ders-talepleri': () => import('../handlers/ozel-ders-talepleri.js'),
   'site-leads': () => import('../handlers/site-leads.js'),

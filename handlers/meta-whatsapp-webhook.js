@@ -185,6 +185,14 @@ async function applyDeliveryStatus(wamid, status, errors) {
     await supabaseAdmin.from('kitap_siparisleri').update(patch).eq('id', order.id);
   }
 
+  // CRM toplu mesaj / inbox teslimat durumu (ulaştı / okundu / hata)
+  try {
+    const { applyCrmDeliveryStatus } = await import('../api/_lib/crm-delivery-status.js');
+    await applyCrmDeliveryStatus(id, st, errText);
+  } catch (e) {
+    console.warn('[meta-webhook] crm delivery status:', e instanceof Error ? e.message : e);
+  }
+
   if (st === 'failed' && errText) {
     try {
       await supabaseAdmin

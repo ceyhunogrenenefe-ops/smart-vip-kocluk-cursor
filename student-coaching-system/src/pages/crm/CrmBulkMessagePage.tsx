@@ -2,9 +2,26 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Loader2, Send } from 'lucide-react';
 import { toast } from 'sonner';
 import { crmListMetaTemplates, type CrmMetaTemplate } from '../../lib/crmInboxApi';
-import { rtBulkTemplateSend, rtListCoaches, rtSegmentLeads, type RegCoach } from '../../lib/registrationTrackingApi';
+import {
+  rtBulkTemplateSend,
+  rtListBulkCampaigns,
+  rtListCoaches,
+  rtSegmentLeads,
+  type RegCoach
+} from '../../lib/registrationTrackingApi';
 import { GRADE_LABEL, GRADE_PROGRAMS, STAGE_LABELS } from '../../lib/registrationTrackingConfig';
 import { CrmTemplateSendPreviewModal, fillTemplatePreview } from './CrmTemplateModals';
+import { BulkCampaignTable } from './CrmDailyReportPage';
+
+type CampaignRow = Awaited<ReturnType<typeof rtListBulkCampaigns>>['data']['items'][number];
+
+function newCampaignId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
+  });
+}
 
 /** CRM Pipeline sütunları + kapanan kayıtlar (backend CRM_BULK_PIPELINE_COLUMNS ile aynı id’ler) */
 const PIPELINE_FILTERS = [
@@ -90,7 +107,21 @@ export default function CrmBulkMessagePage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
+  const [campaigns, setCampaigns] = useState<CampaignRow[]>([]);
   const requestSeq = useRef(0);
+
+  const loadCampaigns = useCallback(async () => {
+    try {
+      const res = await rtListBulkCampaigns();
+      setCampaigns(res.data?.items || []);
+    } catch {
+      setCampaigns([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadCampaigns();
+  }, [loadCampaigns]);
 
   useEffect(() => {
     void Promise.all([
@@ -162,6 +193,9 @@ export default function CrmBulkMessagePage() {
     const filled = fillTemplatePreview(selected.body || '', tplParams, selected.variableNames || []);
     const ids = sendable.map((r) => r.lead_id);
     const idSet = new Set(ids);
+    // Parçalar tek kampanyada toplanır: ulaştı / beklemede analizi ve günlük rapor için
+    const campaignId = newCampaignId();
+    const campaignFilters = { grades, columns, ...(agentId ? { assigned_user_id: agentId } : {}) };
     setSending(true);
     setPreviewOpen(false);
     setQueue((rows) => rows.map((r) => (idSet.has(r.lead_id) ? { ...r, status: 'sending', error: null } : r)));
@@ -177,7 +211,10 @@ export default function CrmBulkMessagePage() {
           template_language: selected.language,
           template_params: tplParams,
           template_body: filled,
-          channel: 'whatsapp'
+          channel: 'whatsapp',
+          campaign_id: campaignId,
+          planned_count: ids.length,
+          filters: campaignFilters
         });
         const byId = Object.fromEntries((res.data?.results || []).map((r) => [r.lead_id, r]));
         for (const id of chunk) {
@@ -203,6 +240,7 @@ export default function CrmBulkMessagePage() {
     }
     setSending(false);
     toast.success(`${sent} gönderildi · ${failed} hatalı`);
+    void loadCampaigns();
   };
 
   const badge = (s: QueueRow['status']) => {
@@ -419,6 +457,29 @@ export default function CrmBulkMessagePage() {
               </tbody>
             </table>
           </div>
+        )}
+      </div>
+
+      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h3 className="text-sm font-semibold">Gönderim geçmişi</h3>
+            <p className="text-[11px] text-slate-500">
+              Ulaştı / okundu bilgisi WhatsApp’tan geldikçe güncellenir. Ulaştı bilgisi gelmeyenler beklemede görünür.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => void loadCampaigns()}
+            className="text-xs font-semibold text-emerald-700 hover:underline"
+          >
+            Yenile
+          </button>
+        </div>
+        {campaigns.length ? (
+          <BulkCampaignTable rows={campaigns} />
+        ) : (
+          <p className="text-sm text-slate-500">Henüz kayıtlı toplu gönderim yok.</p>
         )}
       </div>
 

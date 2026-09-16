@@ -249,6 +249,7 @@ const CRM_ORDER = [
   '/crm/gorevler',
   '/crm/toplu-mesaj',
   '/crm/dashboard',
+  '/crm/gunluk-rapor',
   '/crm/widgetler'
 ] as const;
 const CRM_PATHS = new Set<string>(CRM_ORDER);
@@ -259,6 +260,7 @@ const CRM_LABELS: Record<string, string> = {
   '/crm/gorevler': 'Görevler',
   '/crm/toplu-mesaj': 'Toplu Mesaj',
   '/crm/dashboard': 'Dashboard',
+  '/crm/gunluk-rapor': 'Günlük Rapor',
   '/crm/widgetler': 'Widgetler'
 };
 
@@ -345,6 +347,7 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
       { path: '/crm/dashboard', icon: BarChart3, label: 'CRM Dashboard' },
       { path: '/crm/gorevler', icon: ClipboardCheck, label: 'CRM Görevler' },
       { path: '/crm/toplu-mesaj', icon: MessageCircle, label: 'CRM Toplu mesaj' },
+      { path: '/crm/gunluk-rapor', icon: FileText, label: 'CRM Günlük Rapor' },
       { path: '/crm/inbox', icon: ClipboardList, label: 'CRM Inbox' },
       { path: '/crm/widgetler', icon: Puzzle, label: 'CRM Widgetler' },
       { path: '/crm', icon: ClipboardList, label: 'CRM Pipeline' },
@@ -377,12 +380,13 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
   }
 
 
-  // CRM ajanı (yalnız inbox)
+  // CRM temsilcisi (yalnız inbox)
   if (tags.includes('crm_agent') && !tags.some((t) => ['super_admin', 'admin', 'coach', 'teacher', 'student', 'vendor_admin'].includes(t as string))) {
     return [
       { path: '/crm/dashboard', icon: BarChart3, label: 'CRM Dashboard' },
       { path: '/crm/gorevler', icon: ClipboardCheck, label: 'CRM Görevler' },
       { path: '/crm/toplu-mesaj', icon: MessageCircle, label: 'CRM Toplu mesaj' },
+      { path: '/crm/gunluk-rapor', icon: FileText, label: 'CRM Günlük Rapor' },
       { path: '/crm/inbox', icon: ClipboardList, label: 'CRM Gelen Kutusu' },
     ];
   }
@@ -440,6 +444,7 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
     { path: '/crm/dashboard', icon: BarChart3, label: 'CRM Dashboard' },
     { path: '/crm/gorevler', icon: ClipboardCheck, label: 'CRM Görevler' },
     { path: '/crm/toplu-mesaj', icon: MessageCircle, label: 'CRM Toplu mesaj' },
+    { path: '/crm/gunluk-rapor', icon: FileText, label: 'CRM Günlük Rapor' },
     { path: '/crm/inbox', icon: ClipboardList, label: 'CRM Inbox' },
     { path: '/crm/widgetler', icon: Puzzle, label: 'CRM Widgetler' },
     { path: '/crm', icon: ClipboardList, label: 'CRM Pipeline' },

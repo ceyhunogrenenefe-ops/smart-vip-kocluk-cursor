@@ -1640,11 +1640,15 @@ async function handleSendChannelMessage(body, institutionId, actor) {
     }
   }
 
+  const campaignId = isUuid(body.campaign_id) ? String(body.campaign_id) : null;
   const insertRow = {
     institution_id: institutionId,
     lead_id: leadId,
     channel,
     direction: 'outbound',
+    ...(campaignId ? { campaign_id: campaignId } : {}),
+    delivery_status: sendMeta.ok ? (sendMeta.provider === 'gateway' ? 'gateway_sent' : 'accepted') : 'send_failed',
+    delivery_error: sendMeta.ok ? null : sendMeta.error ? String(sendMeta.error).slice(0, 500) : null,
     phone: lead.phone || null,
     normalized_phone: lead.normalized_phone || null,
     external_contact_id: channel === 'instagram' ? lead.instagram_scoped_id || null : null,
@@ -1703,6 +1707,24 @@ async function handleBulkTemplateSend(body, institutionId, actor) {
   if (!leadIds.length) throw new Error('lead_ids gerekli');
   if (!templateName && !templateBody) throw new Error('Şablon veya metin gerekli');
 
+  const campaignId = isUuid(body.campaign_id) ? String(body.campaign_id) : null;
+  if (campaignId) {
+    // İlk parça kampanyayı açar; sonraki parçalar aynı kaydı kullanır
+    const { error: campErr } = await supabaseAdmin.from('crm_bulk_campaigns').upsert(
+      {
+        id: campaignId,
+        institution_id: institutionId,
+        created_by: actor?.sub || null,
+        template_name: templateName || null,
+        channel: body.channel || 'whatsapp',
+        filters: body.filters && typeof body.filters === 'object' ? body.filters : null,
+        planned_count: Math.max(0, Number(body.planned_count) || leadIds.length)
+      },
+      { onConflict: 'id', ignoreDuplicates: true }
+    );
+    if (campErr) console.warn('[bulk-template-send] campaign:', campErr.message);
+  }
+
   const results = [];
   const MAX_PER_REQUEST = 80;
   for (const leadId of leadIds.slice(MAX_PER_REQUEST)) {
@@ -1720,14 +1742,16 @@ async function handleBulkTemplateSend(body, institutionId, actor) {
           template_language: body.template_language || 'tr',
           template_params: body.template_params || [],
           template_param_names: body.template_param_names || null,
-          template_body: templateBody
+          template_body: templateBody,
+          campaign_id: campaignId
         },
         institutionId,
         actor
       );
       results.push({
         lead_id: leadId,
-        ok: Boolean(send?.send?.ok || send?.message),
+        // Kayıt tutulsa bile gönderim başarısızsa "gönderildi" sayılmaz
+        ok: Boolean(send?.send?.ok),
         status: send?.send?.ok ? 'sent' : 'error',
         error: send?.send?.error || send?.warning || null
       });
@@ -1855,6 +1879,81 @@ export default async function handler(req, res) {
       return res.status(200).json({ data });
     }
 
+    if (op === 'daily-report') {
+      const { saveCrmDailyReport } = await import('../api/_lib/crm-daily-report.js');
+      const { istanbulYmd } = await import('../api/_lib/crm-ops-metrics.js');
+      const date = /^\d{4}-\d{2}-\d{2}$/.test(String(filters.date || '')) ? String(filters.date) : istanbulYmd();
+      let row = null;
+      if (filters.refresh !== '1' && date < istanbulYmd()) {
+        const { data: stored } = await supabaseAdmin
+          .from('crm_daily_reports')
+          .select('*')
+          .eq('institution_id', institutionId)
+          .eq('report_date', date)
+          .maybeSingle();
+        row = stored || null;
+      }
+      // Bugün veya arşivde yoksa canlı hesapla ve arşive yaz
+      if (!row) row = await saveCrmDailyReport(institutionId, date);
+      return res.status(200).json({ data: row });
+    }
+
+    if (op === 'daily-report-list') {
+      const { data: rows, error: listErr } = await supabaseAdmin
+        .from('crm_daily_reports')
+        .select('report_date, generated_at, sent_at, payload')
+        .eq('institution_id', institutionId)
+        .order('report_date', { ascending: false })
+        .limit(120);
+      if (listErr) throw listErr;
+      const items = (rows || []).map((r) => ({
+        report_date: r.report_date,
+        generated_at: r.generated_at,
+        sent_at: r.sent_at,
+        new_leads: r.payload?.sources?.total ?? 0,
+        contacted: r.payload?.conversations?.contacted ?? 0,
+        confirmed: r.payload?.status?.confirmed ?? 0,
+        bulk_sent: r.payload?.bulk?.totals?.attempted ?? 0
+      }));
+      return res.status(200).json({ data: { items } });
+    }
+
+    if (op === 'bulk-campaigns') {
+      const { summarizeCampaignMessages } = await import('../api/_lib/crm-delivery-status.js');
+      const { campaignFilterLabel } = await import('../api/_lib/crm-daily-report.js');
+      const { data: camps, error: campErr } = await supabaseAdmin
+        .from('crm_bulk_campaigns')
+        .select('id, template_name, planned_count, created_by, created_at, filters')
+        .eq('institution_id', institutionId)
+        .order('created_at', { ascending: false })
+        .limit(30);
+      if (campErr) throw campErr;
+      const ids = (camps || []).map((c) => c.id);
+      let msgs = [];
+      if (ids.length) {
+        const { data: m } = await supabaseAdmin
+          .from('registration_channel_messages')
+          .select('campaign_id, delivery_status, payload')
+          .in('campaign_id', ids)
+          .limit(20000);
+        msgs = m || [];
+      }
+      const creatorIds = [...new Set((camps || []).map((c) => c.created_by).filter(Boolean))];
+      const { data: creators } = creatorIds.length
+        ? await supabaseAdmin.from('users').select('id, name').in('id', creatorIds)
+        : { data: [] };
+      const nameById = Object.fromEntries((creators || []).map((u) => [u.id, u.name]));
+      const items = (camps || []).map((c) => ({
+        id: c.id,
+        template_name: c.template_name,
+        audience: campaignFilterLabel(c.filters),
+        created_at: c.created_at,
+        created_by_name: nameById[c.created_by] || null,
+        ...summarizeCampaignMessages(msgs.filter((x) => x.campaign_id === c.id), c.planned_count)
+      }));
+      return res.status(200).json({ data: { items } });
+    }
+
     if (op === 'inbound-health') {
       if (!isManager(tags) && role !== 'super_admin') return res.status(403).json({ error: 'forbidden' });
       const data = await diagnoseRegistrationInbound(institutionId);
@@ -1917,6 +2016,15 @@ export default async function handler(req, res) {
       if (op === 'snooze-task') {
         const data = await handleSnoozeTask(body, institutionId, actor);
         return res.status(200).json({ data });
+      }
+      if (op === 'daily-report-send') {
+        if (!isManager(tags)) return res.status(403).json({ error: 'forbidden', message: 'Raporu yalnız yönetici gönderebilir' });
+        const { saveCrmDailyReport, sendCrmDailyReport } = await import('../api/_lib/crm-daily-report.js');
+        const { istanbulYmd } = await import('../api/_lib/crm-ops-metrics.js');
+        const date = /^\d{4}-\d{2}-\d{2}$/.test(String(body.date || '')) ? String(body.date) : istanbulYmd();
+        const report = await saveCrmDailyReport(institutionId, date);
+        const delivery = await sendCrmDailyReport(report, { force: Boolean(body.force) });
+        return res.status(200).json({ data: { delivery, report_date: date } });
       }
       if (op === 'bulk-template-send') {
         const data = await handleBulkTemplateSend(body, institutionId, actor);

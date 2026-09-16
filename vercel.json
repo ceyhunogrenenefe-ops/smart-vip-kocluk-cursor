@@ -158,6 +158,10 @@
       "schedule": "* * * * *"
     },
     {
+      "path": "/api/cron/crm-daily-report",
+      "schedule": "0 18 * * *"
+    },
+    {
       "path": "/api/cron/crm-instagram-sync",
       "schedule": "*/2 * * * *"
     },
