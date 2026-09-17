@@ -339,6 +339,50 @@ export async function listPublicTeacherReviews(teacherId, { limit = 50 } = {}) {
   return enrichGenericReviewerNames(mapped);
 }
 
+/**
+ * Onay ekranı: yorumun hangi öğretmene ve hangi derse yapıldığı.
+ * teacher_reviews.teacher_id = users.id; class_session_id → class_sessions → classes.
+ */
+async function attachTeacherAndLessonInfo(reviews) {
+  if (!reviews.length) return reviews;
+  const teacherIds = [...new Set(reviews.map((r) => r.teacher_id).filter(Boolean).map(String))];
+  const sessionIds = [...new Set(reviews.map((r) => r.class_session_id).filter(Boolean).map(String))];
+
+  const teacherName = new Map();
+  if (teacherIds.length) {
+    const { data: users } = await supabaseAdmin.from('users').select('id, name, email').in('id', teacherIds);
+    for (const u of users || []) teacherName.set(String(u.id), u.name || u.email || null);
+  }
+
+  const sessionInfo = new Map();
+  if (sessionIds.length) {
+    const { data: sessions } = await supabaseAdmin
+      .from('class_sessions')
+      .select('id, class_id, subject, lesson_date, start_time')
+      .in('id', sessionIds);
+    const classIds = [...new Set((sessions || []).map((x) => x.class_id).filter(Boolean))];
+    const className = new Map();
+    if (classIds.length) {
+      const { data: classes } = await supabaseAdmin.from('classes').select('id, name').in('id', classIds);
+      for (const c of classes || []) className.set(String(c.id), c.name);
+    }
+    for (const x of sessions || []) {
+      sessionInfo.set(String(x.id), {
+        subject: x.subject || null,
+        lesson_date: x.lesson_date || null,
+        lesson_time: x.start_time ? String(x.start_time).slice(0, 5) : null,
+        class_name: className.get(String(x.class_id)) || null
+      });
+    }
+  }
+
+  return reviews.map((r) => ({
+    ...r,
+    teacher_name: teacherName.get(String(r.teacher_id)) || null,
+    lesson: r.class_session_id ? sessionInfo.get(String(r.class_session_id)) || null : null
+  }));
+}
+
 export async function listPendingTeacherReviews({ limit = 100 } = {}) {
   const lim = Math.min(Math.max(Number(limit) || 100, 1), 200);
   const { data, error } = await supabaseAdmin
@@ -360,7 +404,7 @@ export async function listPendingTeacherReviews({ limit = 100 } = {}) {
     }
     out.push(mapped);
   }
-  return out;
+  return attachTeacherAndLessonInfo(out);
 }
 
 async function resolveDisplayNameForReview(row) {
