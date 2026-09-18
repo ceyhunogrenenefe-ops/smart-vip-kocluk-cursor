@@ -1,0 +1,15 @@
+{
+  "name": "Online VIP CRM",
+  "short_name": "VIP CRM",
+  "description": "Online VIP Dershane CRM — gelen kutusu, pipeline ve bildirimler",
+  "id": "/crm/",
+  "start_url": "/crm/inbox",
+  "scope": "/crm/",
+  "display": "standalone",
+  "background_color": "#f1f5f9",
+  "theme_color": "#047857",
+  "lang": "tr",
+  "icons": [
+    { "src": "/logo-mark-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" }
+  ]
+}

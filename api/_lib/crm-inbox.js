@@ -308,6 +308,7 @@ export async function upsertCrmMessage({
 
   const now = new Date().toISOString();
   const preview = snippet(body);
+  const isNewConversation = !conversation;
 
   if (!conversation) {
     const row = {
@@ -435,6 +436,16 @@ export async function upsertCrmMessage({
       if (uid) conversation = { ...conversation, assigned_user_id: uid };
     } catch (e) {
       console.warn('[crm-inbox] auto assign:', e instanceof Error ? e.message : e);
+    }
+  }
+
+  // FAZ 4: sorumlu temsilciye (atanmamışsa yöneticilere) CRM içi + push bildirimi
+  if (direction === 'inbound') {
+    try {
+      const { notifyInboundMessage } = await import('./crm-notify.js');
+      await notifyInboundMessage({ conversation, isNewConversation, snippet: body });
+    } catch (e) {
+      console.warn('[crm-inbox] notify:', e instanceof Error ? e.message : e);
     }
   }
 

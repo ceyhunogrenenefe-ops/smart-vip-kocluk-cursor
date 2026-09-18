@@ -118,6 +118,18 @@ async function notifyAgentInApp({ task, text, institutionId }) {
       priority: 'high',
       link_url: reminderLink(task.id, task.lead_id)
     });
+    // FAZ 4: sekme kapalıyken de telefona / tarayıcıya düşsün
+    try {
+      const { sendPushToUser } = await import('./crm-notify.js');
+      await sendPushToUser(task.assigned_to, {
+        title: 'CRM görev hatırlatması (5 dk)',
+        body: text.slice(0, 300),
+        url: reminderLink(task.id, task.lead_id),
+        tag: `task-${task.id}`
+      });
+    } catch (e) {
+      console.warn('[crm-task-reminders] push:', e instanceof Error ? e.message : e);
+    }
     return true;
   } catch (e) {
     console.warn('[crm-task-reminders] notify:', e instanceof Error ? e.message : e);

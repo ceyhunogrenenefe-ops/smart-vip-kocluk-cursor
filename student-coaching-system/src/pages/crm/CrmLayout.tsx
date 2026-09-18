@@ -1,12 +1,19 @@
+import { useEffect } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { BarChart3, Bell, FileBarChart, Inbox, LayoutGrid, LogOut, Puzzle, Send, Users } from 'lucide-react';
 import CrmAlarmHost from './CrmAlarmHost';
 import CrmLiveOpsHost from './CrmLiveOpsHost';
+import CrmNotificationBell from './CrmNotificationBell';
+import { ensureCrmManifest } from '../../lib/crmPush';
 import { useAuth } from '../../context/AuthContext';
 import { userRoleTags } from '../../config/rolePermissions';
 
 /** İzole CRM kabuğu — yalnız temsilci (crm_agent) ana sidebar / faturalama görmez */
 export default function CrmLayout() {
+  // FAZ 4: CRM'i telefonda "Ana ekrana ekle" ile uygulama gibi açabilmek için manifest
+  useEffect(() => {
+    ensureCrmManifest();
+  }, []);
   const { effectiveUser, logout } = useAuth();
   const navigate = useNavigate();
   const tags = userRoleTags(effectiveUser);
@@ -130,6 +137,7 @@ export default function CrmLayout() {
             </nav>
           </div>
           <div className="flex items-center gap-2 text-sm sm:gap-3">
+            <CrmNotificationBell />
             <span className="hidden max-w-[160px] truncate text-slate-600 sm:inline">
               {effectiveUser?.name || effectiveUser?.email}
               {agentOnly ? ' · Temsilci' : ''}
