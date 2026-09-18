@@ -461,10 +461,13 @@ export default function ClassLiveLessons() {
           }
         : undefined;
     try {
-      const kind = s.lesson_date ? 'session' : 'slot';
+      // Mobil takvimdeki şablon satırları "slot-<uuid>" kimliği taşır; sunucu bugünün oturumuna eşler
+      const isSlotRow = String(s.id || '').startsWith('slot-');
+      const joinId = isSlotRow ? String(s.id).slice(5) : s.id;
+      const kind = isSlotRow || !s.lesson_date ? 'slot' : 'session';
       if (!isStudentView) markPostLessonHomeworkPrompt();
       if (shouldUsePanelBbbJoin(s, url)) {
-        await openBbbJoin('class-live-lessons', s.id, { kind, etut: etutCtx });
+        await openBbbJoin('class-live-lessons', joinId, { kind, etut: etutCtx });
         return;
       }
       if (url && isExternalMeetingPlatform(url)) {
@@ -473,7 +476,7 @@ export default function ClassLiveLessons() {
         return;
       }
       if (needsBbbJoinFlow(url)) {
-        await openBbbJoin('class-live-lessons', s.id, { kind, etut: etutCtx });
+        await openBbbJoin('class-live-lessons', joinId, { kind, etut: etutCtx });
       } else if (url) {
         if (etutCtx) startEtutSession(etutCtx);
         window.open(url, '_blank', 'noopener,noreferrer');
