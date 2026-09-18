@@ -265,8 +265,31 @@ export function crmListCanned() {
   return inboxGet<{ data: Array<{ id: string; title: string; body: string }> }>('list_canned');
 }
 
-export function crmInboundStatus() {
-  return inboxGet<{ data: CrmInboundStatus }>('inbound_status');
+const INBOUND_CACHE_KEY = 'crm_inbound_status_v1';
+
+/** Son bilinen bağlantı durumu: Meta’dan cevap gelene kadar “kopmuş” görünmesin */
+export function readCachedInboundStatus(): CrmInboundStatus | null {
+  try {
+    const raw = localStorage.getItem(INBOUND_CACHE_KEY);
+    return raw ? (JSON.parse(raw) as CrmInboundStatus) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeCachedInboundStatus(value: CrmInboundStatus | null | undefined) {
+  if (!value) return;
+  try {
+    localStorage.setItem(INBOUND_CACHE_KEY, JSON.stringify(value));
+  } catch {
+    /* depolama kapalı olabilir */
+  }
+}
+
+export async function crmInboundStatus() {
+  const res = await inboxGet<{ data: CrmInboundStatus }>('inbound_status');
+  writeCachedInboundStatus(res?.data);
+  return res;
 }
 
 export function crmEnsureInbound() {

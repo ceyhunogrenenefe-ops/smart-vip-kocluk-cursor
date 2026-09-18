@@ -21,6 +21,7 @@ import {
   crmAssignConversation,
   crmEnsureInbound,
   crmInboundStatus,
+  readCachedInboundStatus,
   crmListAgents,
   crmCreateMetaTemplate,
   crmListCanned,
@@ -119,7 +120,9 @@ export default function CrmInboxPage() {
   const [sending, setSending] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [agents, setAgents] = useState<Array<{ id: string; name: string; email: string }>>([]);
-  const [inbound, setInbound] = useState<CrmInboundStatus | null>(null);
+  const [inbound, setInbound] = useState<CrmInboundStatus | null>(() => readCachedInboundStatus());
+  /** Meta durumu sorgulanırken sarı “Hattı bağla” uyarısı gösterilmez */
+  const [inboundChecking, setInboundChecking] = useState(true);
   const [binding, setBinding] = useState(false);
   const [canned, setCanned] = useState<Array<{ id: string; title: string; body: string }>>([]);
   const [metaTemplates, setMetaTemplates] = useState<CrmMetaTemplate[]>([]);
@@ -238,7 +241,10 @@ export default function CrmInboxPage() {
 
   useEffect(() => {
     void crmInboundStatus()
-      .then((res) => setInbound(res.data || null))
+      .then((res) => {
+        if (res.data) setInbound(res.data);
+      })
+      .finally(() => setInboundChecking(false))
       .catch(() => undefined);
     void crmListCanned()
       .then((res) => setCanned(res.data || []))
@@ -461,6 +467,7 @@ export default function CrmInboxPage() {
 
   const lineLabel = inbound?.display_phone || inbound?.company_line || '0850 303 40 14';
   const inboundOk = Boolean(inbound?.bound_to_production);
+  const inboundPending = inboundChecking && !inbound;
 
   return (
     <div className="flex h-[calc(100vh-5.5rem)] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -468,19 +475,25 @@ export default function CrmInboxPage() {
         className={`flex flex-wrap items-center justify-between gap-2 border-b px-3 py-2 text-xs ${
           inboundOk
             ? 'border-emerald-100 bg-emerald-50/90 text-emerald-900'
-            : 'border-amber-100 bg-amber-50/90 text-amber-950'
+            : inboundPending
+              ? 'border-slate-100 bg-slate-50 text-slate-600'
+              : 'border-amber-100 bg-amber-50/90 text-amber-950'
         }`}
       >
         <p className="min-w-0 leading-snug">
           <span className="font-semibold">Kurumsal WhatsApp {lineLabel}</span>
           <span className="mx-1.5 text-current/50">·</span>
-          {inboundOk
-            ? 'WhatsApp 0850 bağlı.'
-            : inbound?.hint || 'WhatsApp hattını bağlayın.'}{' '}
-          {inbound?.social?.ok
-            ? `Facebook/Instagram: ${inbound.social.page_name || 'sayfa bağlı'}.`
-            : inbound?.social?.hint ||
-              'Instagram / Facebook için Widgetler’den bağlayın (Kommo gibi tek tık).'}
+          {inboundPending
+            ? 'Bağlantı durumu kontrol ediliyor…'
+            : inboundOk
+              ? 'WhatsApp 0850 bağlı.'
+              : inbound?.hint || 'WhatsApp hattını bağlayın.'}{' '}
+          {inboundPending
+            ? null
+            : inbound?.social?.ok
+              ? `Facebook/Instagram: ${inbound.social.page_name || 'sayfa bağlı'}.`
+              : inbound?.social?.hint ||
+                'Instagram / Facebook için Widgetler’den bağlayın (Kommo gibi tek tık).'}
         </p>
         {isAdmin && (
           <div className="flex shrink-0 items-center gap-1.5">
@@ -509,7 +522,7 @@ export default function CrmInboxPage() {
             }}
             className="shrink-0 rounded-lg border border-current/20 bg-white/80 px-2.5 py-1 text-[11px] font-semibold hover:bg-white disabled:opacity-60"
           >
-            {binding ? 'Bağlanıyor…' : inboundOk ? 'Hattı yenile' : 'Hattı bağla'}
+            {binding ? 'Bağlanıyor…' : inboundOk || inboundPending ? 'Hattı yenile' : 'Hattı bağla'}
           </button>
           </div>
         )}
