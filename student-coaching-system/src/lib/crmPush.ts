@@ -59,20 +59,74 @@ export async function getPushState(): Promise<PushState> {
   return on ? 'on' : 'off';
 }
 
-export async function enablePush(): Promise<PushState> {
-  const state = await getPushState();
-  if (state === 'unsupported' || state === 'ios_needs_install' || state === 'denied') return state;
-  const permission = await Notification.requestPermission();
-  if (permission !== 'granted') return permission === 'denied' ? 'denied' : 'off';
-  const reg = await navigator.serviceWorker.register(SW_URL, { scope: SW_SCOPE });
-  await navigator.serviceWorker.ready;
-  const { data } = await inbox<{ data: { public_key: string } }>('push_key');
-  let sub = await reg.pushManager.getSubscription();
-  if (!sub) {
-    sub = await reg.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: urlBase64ToUint8Array(data.public_key)
+function withTimeout<T>(p: Promise<T>, ms: number, msg: string): Promise<T> {
+  return Promise.race([p, new Promise<T>((_, rej) => setTimeout(() => rej(new Error(msg)), ms))]);
+}
+
+/** Service worker aktif olana kadar bekle (navigator.serviceWorker.ready sayfa kapsam dışındaysa hiç çözülmez) */
+function waitActive(reg: ServiceWorkerRegistration): Promise<ServiceWorkerRegistration> {
+  if (reg.active) return Promise.resolve(reg);
+  const sw = reg.installing || reg.waiting;
+  return new Promise((resolve) => {
+    if (!sw) return resolve(reg);
+    sw.addEventListener('statechange', () => {
+      if (sw.state === 'activated') resolve(reg);
     });
+  });
+}
+
+function pushServiceError(e: unknown) {
+  const name = e instanceof DOMException ? e.name : '';
+  const msg = e instanceof Error ? e.message : String(e);
+  if (name === 'NotAllowedError') return new Error('Bildirim izni verilmedi.');
+  if (name === 'AbortError' || /push service/i.test(msg)) {
+    return new Error(
+      'Tarayıcının bildirim servisine bağlanılamadı. Brave kullanıyorsanız Ayarlar → Gizlilik → “Anlık mesajlaşma için Google hizmetlerini kullan” açık olmalı; aksi halde Chrome / Edge ile deneyin.'
+    );
+  }
+  return new Error(`Bildirim aboneliği oluşturulamadı: ${msg}`);
+}
+
+export async function enablePush(): Promise<PushState> {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window) || typeof Notification === 'undefined') {
+    return isIos() && !isStandalone() ? 'ios_needs_install' : 'unsupported';
+  }
+  // İzin isteği tıklamadan hemen sonra (başka await olmadan) — Safari / Edge aksi halde sessizce reddeder
+  let permission = Notification.permission;
+  if (permission === 'default') permission = await Notification.requestPermission();
+  if (permission !== 'granted') return permission === 'denied' ? 'denied' : 'off';
+
+  let reg: ServiceWorkerRegistration;
+  try {
+    reg = await navigator.serviceWorker.register(SW_URL, { scope: SW_SCOPE });
+  } catch (e) {
+    throw new Error(`Bildirim servisi yüklenemedi: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  await withTimeout(waitActive(reg), 15000, 'Bildirim servisi başlatılamadı (zaman aşımı). Sayfayı yenileyip tekrar deneyin.');
+
+  const { data } = await inbox<{ data: { public_key: string } }>('push_key');
+  const appKey = urlBase64ToUint8Array(data.public_key);
+  let sub = await reg.pushManager.getSubscription();
+  if (sub) {
+    // Eski / farklı anahtarla oluşmuş abonelik varsa yenile
+    const current = sub.options?.applicationServerKey;
+    const same =
+      current && new Uint8Array(current).length === appKey.length && new Uint8Array(current).every((b, i) => b === appKey[i]);
+    if (!same) {
+      await sub.unsubscribe().catch(() => undefined);
+      sub = null;
+    }
+  }
+  if (!sub) {
+    try {
+      sub = await withTimeout(
+        reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: appKey }),
+        20000,
+        'push service timeout'
+      );
+    } catch (e) {
+      throw pushServiceError(e);
+    }
   }
   await inbox('push_subscribe', { subscription: sub.toJSON() });
   setPushFlag(true);
