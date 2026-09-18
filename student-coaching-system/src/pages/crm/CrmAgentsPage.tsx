@@ -8,6 +8,7 @@ import {
   crmAdminPromoteAgent,
   crmListPresence
 } from '../../lib/crmInboxApi';
+import CrmAssignmentPanel from './CrmAssignmentPanel';
 
 type AgentRow = {
   id: string;
@@ -124,6 +125,8 @@ export default function CrmAgentsPage() {
           sistem ayarlarını göremez.
         </p>
       </div>
+
+      <CrmAssignmentPanel agents={agents} />
 
       <div className="grid gap-6 lg:grid-cols-2">
         <form

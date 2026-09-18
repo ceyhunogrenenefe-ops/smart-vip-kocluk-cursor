@@ -260,6 +260,17 @@ async function createLeadFromInbound({
     console.warn('[channel-ingest] auto lead create failed:', error.message || error);
     return null;
   }
+  // FAZ 2: yeni aday otomatik dağıtım (kayıtlı öğrenci/veli numarası dağıtılmaz)
+  try {
+    const { isInternalPhone } = await import('./crm-internal-contacts.js');
+    const internal = channel === 'whatsapp' && (await isInternalPhone(normalizedPhone || phone));
+    if (data?.id && !internal) {
+      const { assignLeadIfUnassigned } = await import('./crm-assignment.js');
+      await assignLeadIfUnassigned(data.id, institutionId);
+    }
+  } catch (e) {
+    console.warn('[channel-ingest] auto assign:', e instanceof Error ? e.message : e);
+  }
   return data;
 }
 

@@ -156,6 +156,10 @@ export default async function handler(req, res) {
       if (institutionId) query = query.eq('institution_id', institutionId);
       // Sekme: adaylar (varsayılan) | kurum içi | hepsi
       const internal = String(req.query?.internal || body.internal || 'exclude').trim();
+      // FAZ 2: Benimkiler / Atanmamış
+      const assignedFilter = String(req.query?.assigned || body.assigned || '').trim();
+      if (assignedFilter === 'mine') query = query.eq('assigned_user_id', actor.sub);
+      else if (assignedFilter === 'unassigned') query = query.is('assigned_user_id', null);
       if (internal === 'only') query = query.eq('is_internal', true);
       else if (internal !== 'all') query = query.eq('is_internal', false);
       if (status) query = query.eq('status', status);
@@ -879,6 +883,9 @@ export default async function handler(req, res) {
         .select('*')
         .maybeSingle();
       if (error) throw error;
+      // FAZ 2: aday da aynı temsilciye geçer
+      const { syncConversationLeadAssignee } = await import('../api/_lib/crm-assignment.js');
+      await syncConversationLeadAssignee(conversationId, actor.sub).catch(() => null);
       return res.status(200).json({ data });
     }
 
@@ -934,6 +941,10 @@ export default async function handler(req, res) {
         .select('*')
         .maybeSingle();
       if (error) throw error;
+      if (Object.prototype.hasOwnProperty.call(patch, 'assigned_user_id')) {
+        const { syncConversationLeadAssignee } = await import('../api/_lib/crm-assignment.js');
+        await syncConversationLeadAssignee(conversationId, patch.assigned_user_id).catch(() => null);
+      }
       return res.status(200).json({ data });
     }
 

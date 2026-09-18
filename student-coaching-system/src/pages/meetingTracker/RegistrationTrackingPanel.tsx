@@ -50,6 +50,7 @@ import {
   type CrmFilterPrefs
 } from '../../lib/registrationTrackingConfig';
 import RegLeadCard from './registrationTracking/RegLeadCard';
+import { useAuth } from '../../context/AuthContext';
 import RegLeadDrawer from './registrationTracking/RegLeadDrawer';
 import CrmKanbanBoard from './registrationTracking/CrmKanbanBoard';
 
@@ -71,6 +72,8 @@ function useDebouncedValue<T>(value: T, ms = 350) {
 
 export default function RegistrationTrackingPanel({ isManager, institutionId }: Props) {
   const [params, setParams] = useSearchParams();
+  const { effectiveUser } = useAuth();
+  const myUserId = effectiveUser?.id ? String(effectiveUser.id) : '';
   const rawView = params.get('rt_view');
   const viewMode: ViewMode = rawView === 'list' ? 'list' : 'kanban'; // excel kaldırıldı
   const quickFilter = params.get('rt_quick') || '';
@@ -449,6 +452,8 @@ export default function RegistrationTrackingPanel({ isManager, institutionId }: 
           }
         >
           <option value="">Temsilci / koç: Tümü</option>
+          {myUserId ? <option value={myUserId}>Benim adaylarım</option> : null}
+          <option value="_unassigned">Atanmamış</option>
           {coaches.map((c) => (
             <option key={c.id} value={c.id}>
               {c.name}

@@ -169,11 +169,12 @@ export const CRM_BULK_PIPELINE_COLUMNS = [
   {
     id: 'contact',
     label: "Görüşülen Lead'ler",
-    stages: ['first_contact_completed', 'presentation_scheduled', 'offer_sent']
+    stages: ['first_contact_completed', 'needs_identified', 'presentation_scheduled', 'program_offered', 'offer_sent']
   },
   { id: 'trial', label: 'Deneme Dersi Planlanan / Yapılan', stages: ['trial_lesson_scheduled', 'trial_lesson_completed'] },
-  { id: 'thinking', label: 'Düşünülüyor', stages: ['considering', 'follow_up', 'postponed'] },
-  { id: 'payment', label: 'Ödeme Bekleniyor', stages: ['payment_pending'] },
+  { id: 'thinking', label: 'Düşünülüyor', stages: ['considering', 'spouse_discussion', 'follow_up', 'postponed'] },
+  { id: 'payment', label: 'Kayıt / Ödeme Bekleniyor', stages: ['registration_pending', 'payment_pending'] },
+  { id: 'cold', label: 'Cevapsız / İlgisiz', stages: ['no_response', 'unreachable', 'not_interested'] },
   { id: 'confirmed', label: 'Kesin Kayıt', status: 'confirmed' },
   { id: 'lost', label: 'Kaybedildi', status: 'lost' }
 ];
@@ -212,10 +213,10 @@ export function filterBulkAudience(leads, filters = {}) {
       const legacy = (leads || []).filter(
         (l) => String(l.primary_status || 'tracking') === 'tracking' && stageSet.has(String(l.stage || ''))
       );
-      return filterBulkAudience(legacy, { grades: [...grades], columns: ['incoming', 'contact', 'trial', 'thinking', 'payment'] });
+      return filterBulkAudience(legacy, { grades: [...grades], columns: ['incoming', 'contact', 'trial', 'thinking', 'payment', 'cold'] });
     }
   }
-  const openColumns = ['incoming', 'contact', 'trial', 'thinking', 'payment'];
+  const openColumns = ['incoming', 'contact', 'trial', 'thinking', 'payment', 'cold'];
   const colOk = (id) => (columns.size ? columns.has(id) : openColumns.includes(id));
   const gradeOf = (l) => String(l.grade_program || 'unspecified');
 

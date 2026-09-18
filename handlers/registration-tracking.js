@@ -253,7 +253,8 @@ function applyLeadFilters(q, filters, institutionId) {
     if (b) query = query.lte('created_at', b.end);
   }
 
-  if (filters.coach_id) query = query.eq('assigned_user_id', filters.coach_id);
+  if (filters.coach_id === '_unassigned') query = query.is('assigned_user_id', null);
+  else if (filters.coach_id) query = query.eq('assigned_user_id', filters.coach_id);
 
   return query;
 }
@@ -710,6 +711,12 @@ async function handleUpdateLead(leadId, body, institutionId, actor, tags) {
     await markLeadContacted(leadId);
   }
 
+  if (patch.assigned_user_id !== undefined && patch.assigned_user_id !== existing.assigned_user_id) {
+    // FAZ 2: adayın sohbetleri de aynı temsilciye geçer
+    const { syncLeadConversationsAssignee } = await import('../api/_lib/crm-assignment.js');
+    await syncLeadConversationsAssignee(leadId, patch.assigned_user_id).catch(() => null);
+  }
+
   if (patch.assigned_user_id && patch.assigned_user_id !== existing.assigned_user_id) {
     await notifyUser({
       title: 'Kayıt adayı size atandı',
@@ -1136,6 +1143,11 @@ async function handleBulk(body, institutionId, actor, tags) {
     .eq('institution_id', institutionId)
     .select('id');
   if (error) throw error;
+
+  if (patch.assigned_user_id !== undefined) {
+    const { syncLeadConversationsAssignee } = await import('../api/_lib/crm-assignment.js');
+    for (const row of data || []) await syncLeadConversationsAssignee(row.id, patch.assigned_user_id).catch(() => null);
+  }
 
   await auditLog({
     institutionId,

@@ -129,6 +129,59 @@ export default async function handler(req, res) {
       return res.status(201).json({ data: created });
     }
 
+    // FAZ 2 — otomatik dağıtım ayarları
+    if (op === 'assignment_settings') {
+      const inst = String(body.institution_id || req.query?.institution_id || actor.institution_id || '').trim() || PLATFORM_PRIMARY_INSTITUTION_ID;
+      const { getCrmSettings, updateCrmSettings, listRoundRobinAgents } = await import('../api/_lib/crm-assignment.js');
+      if (req.method === 'POST' && typeof body.round_robin_enabled === 'boolean') {
+        await updateCrmSettings(inst, { round_robin_enabled: body.round_robin_enabled }, actor.sub);
+      }
+      const settings = await getCrmSettings(inst);
+      const pool = await listRoundRobinAgents(inst);
+      const { count: unassignedLeads } = await supabaseAdmin
+        .from('registration_leads')
+        .select('id', { count: 'exact', head: true })
+        .eq('institution_id', inst)
+        .eq('primary_status', 'tracking')
+        .eq('is_internal', false)
+        .is('assigned_user_id', null)
+        .is('deleted_at', null);
+      const { count: unassignedConvs } = await supabaseAdmin
+        .from('crm_conversations')
+        .select('id', { count: 'exact', head: true })
+        .eq('institution_id', inst)
+        .eq('is_internal', false)
+        .in('status', ['open', 'pending'])
+        .is('assigned_user_id', null);
+      return res.status(200).json({
+        data: {
+          round_robin_enabled: settings.round_robin_enabled !== false,
+          next_after_user_id: settings.rr_last_user_id || null,
+          pool,
+          unassigned_leads: unassignedLeads || 0,
+          unassigned_conversations: unassignedConvs || 0
+        }
+      });
+    }
+
+    if (op === 'set_round_robin' && req.method === 'POST') {
+      const userId = String(body.user_id || '').trim();
+      if (!userId) return res.status(400).json({ error: 'user_id_required' });
+      const { error: rrErr } = await supabaseAdmin
+        .from('crm_user_assignments')
+        .update({ in_round_robin: body.in_round_robin !== false, updated_at: new Date().toISOString() })
+        .eq('user_id', userId);
+      if (rrErr) throw rrErr;
+      return res.status(200).json({ ok: true });
+    }
+
+    if (op === 'distribute_unassigned' && req.method === 'POST') {
+      const inst = String(body.institution_id || actor.institution_id || '').trim() || PLATFORM_PRIMARY_INSTITUTION_ID;
+      const { distributeUnassigned } = await import('../api/_lib/crm-assignment.js');
+      const result = await distributeUnassigned(inst);
+      return res.status(result.ok ? 200 : 400).json(result.ok ? { data: result } : { error: result.error });
+    }
+
     if (op === 'promote_agent' && req.method === 'POST') {
       const userId = String(body.user_id || '').trim();
       const institutionId =
@@ -234,7 +287,7 @@ export default async function handler(req, res) {
         let aq = supabaseAdmin
           .from('crm_user_assignments')
           .select(
-            'id, user_id, institution_id, can_access_unassigned_pool, is_active, notes, users:user_id(id, name, email, role, roles, is_active)'
+            'id, user_id, institution_id, can_access_unassigned_pool, is_active, in_round_robin, notes, users:user_id(id, name, email, role, roles, is_active)'
           )
           .order('created_at', { ascending: false });
         // institution_id null atamaları da getir (filtreyi JS'te yumuşat)

@@ -138,6 +138,8 @@ export default function CrmInboxPage() {
   const [statusFilter, setStatusFilter] = useState('open');
   /** Adaylar: reklam / yeni kişiler · Kurum içi: mevcut öğrenci, veli, personel */
   const [internalTab, setInternalTab] = useState<'all' | 'exclude' | 'only'>('all');
+  /** FAZ 2: sorumlu filtresi */
+  const [assignedFilter, setAssignedFilter] = useState<'' | 'mine' | 'unassigned'>('');
   const [markingInternal, setMarkingInternal] = useState(false);
   const internalTabRef = useRef(internalTab);
   internalTabRef.current = internalTab;
@@ -193,7 +195,8 @@ export default function CrmInboxPage() {
         q: q || undefined,
         channel: channelFilter || undefined,
         status: statusFilter || undefined,
-        internal: internalTab
+        internal: internalTab,
+        assigned: assignedFilter || undefined
       });
       setConversations(res.data || []);
     } catch (e) {
@@ -201,7 +204,7 @@ export default function CrmInboxPage() {
     } finally {
       setLoadingList(false);
     }
-  }, [q, channelFilter, statusFilter, internalTab]);
+  }, [q, channelFilter, statusFilter, internalTab, assignedFilter]);
 
   const deleteConversation = async (conv: CrmConversation) => {
     const who = conv.contact_name || conv.contact_identifier;
@@ -620,6 +623,16 @@ export default function CrmInboxPage() {
               <option value="whatsapp">WhatsApp</option>
               <option value="instagram">Instagram</option>
               <option value="facebook">Facebook</option>
+            </select>
+            <select
+              value={assignedFilter}
+              onChange={(e) => setAssignedFilter(e.target.value as '' | 'mine' | 'unassigned')}
+              className="flex-1 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs"
+              aria-label="Sorumlu"
+            >
+              <option value="">Herkes</option>
+              <option value="mine">Benimkiler</option>
+              <option value="unassigned">Atanmamış</option>
             </select>
             <select
               value={statusFilter}
