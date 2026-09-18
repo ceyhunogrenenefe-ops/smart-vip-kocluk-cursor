@@ -472,9 +472,16 @@ export default async function handler(req, res) {
       const { data, error } = await q;
       if (error) throw error;
       const vendor_orders = await decorateVendorOrdersWithPackageContents(data || []);
+      // Kargo etiketi "Gönderen" bölümü
+      const { data: sender } = await supabaseAdmin
+        .from('commerce_vendors')
+        .select('id, name, contact_phone, contact_email, address_line1, address_line2, district, city, postal_code')
+        .eq('id', vendorId)
+        .maybeSingle();
       return res.status(200).json({
         ok: true,
         vendor_orders,
+        vendor: sender || null,
         paid_only: VENDOR_ORDERS_PAID_ONLY,
         deployMarker: VENDOR_PAID_MARKER,
       });
