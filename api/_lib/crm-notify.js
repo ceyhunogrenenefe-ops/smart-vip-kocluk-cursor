@@ -32,9 +32,10 @@ async function getVapid() {
   let { data } = await supabaseAdmin.from('crm_push_config').select('*').eq('id', 1).maybeSingle();
   if (!data) {
     const keys = webpush.generateVAPIDKeys();
-    await supabaseAdmin
+    const { error: upErr } = await supabaseAdmin
       .from('crm_push_config')
       .upsert({ id: 1, vapid_public_key: keys.publicKey, vapid_private_key: keys.privateKey }, { onConflict: 'id', ignoreDuplicates: true });
+    if (upErr) console.error('[crm-push] vapid save failed', upErr.message);
     ({ data } = await supabaseAdmin.from('crm_push_config').select('*').eq('id', 1).maybeSingle());
   }
   if (!data) throw new Error('push_config_unavailable');
