@@ -1033,6 +1033,27 @@ export default async function handler(req, res) {
       });
     }
 
+    if (op === 'delete_conversation' && req.method === 'POST') {
+      // Kalıcı silme: mesajlar FK ON DELETE CASCADE ile gider; aday kartı ve raporlar kalır
+      if (!isAdmin) {
+        return res.status(403).json({ error: 'forbidden', hint: 'Sohbeti yalnızca yönetici silebilir.' });
+      }
+      const conversationId = String(body.conversation_id || '').trim();
+      if (!conversationId) return res.status(400).json({ error: 'conversation_id_required' });
+      const { data: conv } = await supabaseAdmin
+        .from('crm_conversations')
+        .select('id, institution_id')
+        .eq('id', conversationId)
+        .maybeSingle();
+      if (!conv) return res.status(404).json({ error: 'conversation_not_found' });
+      if (institutionId && conv.institution_id && String(conv.institution_id) !== String(institutionId)) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+      const { error: delErr } = await supabaseAdmin.from('crm_conversations').delete().eq('id', conversationId);
+      if (delErr) throw delErr;
+      return res.status(200).json({ ok: true, data: { deleted_id: conversationId } });
+    }
+
     if (op === 'delete_message' && req.method === 'POST') {
       const messageId = String(body.message_id || body.id || '').trim();
       if (!messageId) return res.status(400).json({ error: 'message_id_required' });

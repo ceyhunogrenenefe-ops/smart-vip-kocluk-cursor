@@ -183,6 +183,13 @@ export function crmSetTags(conversationId: string, tags: string[]) {
   });
 }
 
+/** Sohbeti kalıcı siler (mesajları dahil; aday kartı kalır). Yalnız yönetici. */
+export function crmDeleteConversation(conversationId: string) {
+  return inboxPost<{ ok: boolean; data: { deleted_id: string } }>('delete_conversation', {
+    conversation_id: conversationId
+  });
+}
+
 export function crmSetInternal(conversationId: string, internal: boolean) {
   return inboxPost<{ data: CrmConversation }>('set_internal', {
     conversation_id: conversationId,

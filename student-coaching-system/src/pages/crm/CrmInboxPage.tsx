@@ -37,6 +37,7 @@ import {
   crmTakeConversation,
   crmUpdateStatus,
   crmSetInternal,
+  crmDeleteConversation,
   type CrmConversation,
   type CrmInboundStatus,
   type CrmMessage,
@@ -175,6 +176,26 @@ export default function CrmInboxPage() {
       setLoadingList(false);
     }
   }, [q, channelFilter, statusFilter, internalTab]);
+
+  const deleteConversation = async (conv: CrmConversation) => {
+    const who = conv.contact_name || conv.contact_identifier;
+    const ok = window.confirm(
+      `“${who}” sohbeti ve tüm mesajları kalıcı olarak silinsin mi?\n\nAday kartı ve raporlar etkilenmez. Kişi yeniden yazarsa yeni sohbet açılır.`
+    );
+    if (!ok) return;
+    try {
+      await crmDeleteConversation(conv.id);
+      setConversations((prev) => prev.filter((c) => c.id !== conv.id));
+      if (selectedId === conv.id) {
+        setSelectedId(null);
+        setSelected(null);
+        setMessages([]);
+      }
+      toast.success('Sohbet silindi');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Silinemedi');
+    }
+  };
 
   const toggleInternal = async (conv: CrmConversation) => {
     if (markingInternal) return;
@@ -667,6 +688,28 @@ export default function CrmInboxPage() {
                     >
                       {c.is_internal ? 'Adaya çevir' : 'Kurum içi yap'}
                     </span>
+                    {isAdmin ? (
+                      <span
+                        role="button"
+                        tabIndex={0}
+                        aria-label="Sohbeti sil"
+                        title="Sohbeti sil"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void deleteConversation(c);
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            void deleteConversation(c);
+                          }
+                        }}
+                        className="rounded-md border border-slate-200 bg-white p-1 text-slate-400 hover:border-red-200 hover:bg-red-50 hover:text-red-600"
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </span>
+                    ) : null}
                   </div>
                 </button>
               );
@@ -718,6 +761,17 @@ export default function CrmInboxPage() {
                   }
                 >
                   {selected.is_internal ? 'Adaya çevir' : 'Kurum içi'}
+                </button>
+              ) : null}
+              {selected && isAdmin ? (
+                <button
+                  type="button"
+                  onClick={() => void deleteConversation(selected)}
+                  title="Sohbeti sil"
+                  aria-label="Sohbeti sil"
+                  className="rounded-lg border border-slate-200 p-1.5 text-slate-500 hover:border-red-200 hover:bg-red-50 hover:text-red-600"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
                 </button>
               ) : null}
               {selected && !selected.assigned_user_id ? (
