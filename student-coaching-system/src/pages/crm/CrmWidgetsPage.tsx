@@ -49,6 +49,8 @@ export default function CrmWidgetsPage() {
   const [diagLoading, setDiagLoading] = useState(false);
 
   const socialOk = Boolean(inbound?.social?.ok);
+  /** Sayfa bağlı, secret ve yeni Login for Business yapılandırması kayıtlı: kurulum yönergeleri gizlenir */
+  const setupDone = socialOk && Boolean(login?.has_app_secret) && Boolean(login?.uses_slim_config);
   const pageName = inbound?.social?.page_name || '';
 
   const refresh = useCallback(async () => {
@@ -268,8 +270,39 @@ export default function CrmWidgetsPage() {
         id="instagram-facebook-bagla"
         className="rounded-2xl border-2 border-pink-200 bg-gradient-to-r from-purple-50 via-white to-blue-50 p-4 shadow-sm sm:p-5"
       >
-        <p className="text-xs font-semibold uppercase tracking-wide text-pink-700">Şimdi bağla</p>
+        <p className="text-xs font-semibold uppercase tracking-wide text-pink-700">{setupDone ? 'Bağlı' : 'Şimdi bağla'}</p>
         <h3 className="mt-1 text-lg font-semibold text-slate-900">Instagram + Facebook</h3>
+        {setupDone ? (
+          <p className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-emerald-50 px-3 py-1.5 text-sm font-medium text-emerald-800 ring-1 ring-emerald-200">
+            ✓ Bağlı — sayfa: {pageName || 'Online VIP'} · kurulum tamamlandı
+          </p>
+        ) : socialOk ? (
+          <p className="mt-2 text-sm font-medium text-emerald-700">Bağlı sayfa: {pageName || 'ok'}</p>
+        ) : null}
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <button
+            type="button"
+            disabled={binding}
+            onClick={() => void connectSocial()}
+            className="rounded-xl bg-gradient-to-r from-purple-600 to-pink-600 px-4 py-3 text-sm font-semibold text-white shadow hover:opacity-95 disabled:opacity-60"
+          >
+            {binding ? 'Bağlanıyor…' : socialOk ? 'Instagram’ı yenile' : 'Instagram’ı bağla'}
+          </button>
+          <button
+            type="button"
+            disabled={binding}
+            onClick={() => void connectSocial()}
+            className="rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white shadow hover:bg-blue-700 disabled:opacity-60"
+          >
+            {binding ? 'Bağlanıyor…' : socialOk ? 'Facebook’u yenile' : 'Facebook’u bağla'}
+          </button>
+        </div>
+        {setupDone ? (
+          <details className="mt-3 rounded-xl bg-white/80 p-3 text-sm ring-1 ring-slate-200">
+            <summary className="cursor-pointer text-xs font-semibold text-slate-600">
+              Kurulum ayrıntıları (yalnız yeniden kurulum veya hata durumunda gerekir)
+            </summary>
+            <div className="mt-2">
         <p className="mt-1 text-sm text-slate-600">
           «URL Engellendi» = Facebook bu adresi henüz kaydetmemiş. Aşağıdaki satırları SmartKocluk →
           Facebook Login → <strong>Valid OAuth Redirect URIs</strong> alanına <em>aynen</em> yapıştırın
@@ -299,9 +332,6 @@ export default function CrmWidgetsPage() {
             </div>
           ))}
         </div>
-        {socialOk ? (
-          <p className="mt-2 text-sm font-medium text-emerald-700">Bağlı sayfa: {pageName || 'ok'}</p>
-        ) : null}
         <div id="meta-app-secret" className="mt-3 rounded-xl bg-white p-3 ring-1 ring-slate-200">
           <p className="text-sm font-semibold text-slate-900">
             1. adım — SmartKocluk Facebook App Secret
@@ -333,24 +363,6 @@ export default function CrmWidgetsPage() {
               {savingSecret ? 'Kaydediliyor…' : 'Secret’ı kaydet'}
             </button>
           </div>
-        </div>
-        <div className="mt-4 grid gap-3 sm:grid-cols-2">
-          <button
-            type="button"
-            disabled={binding}
-            onClick={() => void connectSocial()}
-            className="rounded-xl bg-gradient-to-r from-purple-600 to-pink-600 px-4 py-3 text-sm font-semibold text-white shadow hover:opacity-95 disabled:opacity-60"
-          >
-            {binding ? 'Bağlanıyor…' : socialOk ? 'Instagram’ı yenile' : 'Instagram’ı bağla'}
-          </button>
-          <button
-            type="button"
-            disabled={binding}
-            onClick={() => void connectSocial()}
-            className="rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white shadow hover:bg-blue-700 disabled:opacity-60"
-          >
-            {binding ? 'Bağlanıyor…' : socialOk ? 'Facebook’u yenile' : 'Facebook’u bağla'}
-          </button>
         </div>
         <div className="mt-3 rounded-xl bg-amber-50 p-3 text-xs leading-relaxed text-amber-950 ring-1 ring-amber-200">
           <p className="font-semibold">Invalid Scopes / 1349246 — izinler yapılandırmada, URL’de değil</p>
@@ -418,6 +430,139 @@ export default function CrmWidgetsPage() {
             </div>
           )}
         </div>
+            </div>
+          </details>
+        ) : (
+          <>
+        <p className="mt-1 text-sm text-slate-600">
+          «URL Engellendi» = Facebook bu adresi henüz kaydetmemiş. Aşağıdaki satırları SmartKocluk →
+          Facebook Login → <strong>Valid OAuth Redirect URIs</strong> alanına <em>aynen</em> yapıştırın
+          (www / slash değişmesin). Client OAuth Login ve Web OAuth Login açık olsun.
+        </p>
+        <div className="mt-3 space-y-1.5 rounded-xl bg-white/90 p-3 ring-1 ring-amber-200">
+          {(
+            login?.whitelist_uris || [
+              'https://www.dersonlinevipkocluk.com/api/meta/facebook-oauth',
+              'https://www.dersonlinevipkocluk.com/crm/widgetler'
+            ]
+          ).map((uri) => (
+            <div key={uri} className="flex flex-wrap items-center gap-2">
+              <code className="min-w-0 flex-1 break-all rounded bg-amber-50 px-2 py-1 text-[12px] text-slate-800">
+                {uri}
+              </code>
+              <button
+                type="button"
+                className="shrink-0 rounded-md bg-slate-900 px-2 py-1 text-[11px] font-semibold text-white"
+                onClick={() => {
+                  void navigator.clipboard.writeText(uri);
+                  toast.success('URI kopyalandı — Meta’ya yapıştırın');
+                }}
+              >
+                Kopyala
+              </button>
+            </div>
+          ))}
+        </div>
+        <div id="meta-app-secret" className="mt-3 rounded-xl bg-white p-3 ring-1 ring-slate-200">
+          <p className="text-sm font-semibold text-slate-900">
+            1. adım — SmartKocluk Facebook App Secret
+            {login?.has_app_secret ? (
+              <span className="ml-2 text-xs font-medium text-emerald-700">kayıtlı</span>
+            ) : (
+              <span className="ml-2 text-xs font-medium text-amber-700">zorunlu</span>
+            )}
+          </p>
+          <p className="mt-1 text-xs text-slate-600">
+            developers.facebook.com → SmartKocluk → Ayarlar → Temel → App secret → Göster. Instagram
+            Login secret (<code>b35d…</code>) değil.
+          </p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <input
+              type="password"
+              value={appSecret}
+              onChange={(e) => setAppSecret(e.target.value)}
+              placeholder="Facebook App Secret"
+              className="min-w-[220px] flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+              autoComplete="off"
+            />
+            <button
+              type="button"
+              disabled={savingSecret || !appSecret.trim()}
+              onClick={() => void saveSecret()}
+              className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50"
+            >
+              {savingSecret ? 'Kaydediliyor…' : 'Secret’ı kaydet'}
+            </button>
+          </div>
+        </div>
+        <div className="mt-3 rounded-xl bg-amber-50 p-3 text-xs leading-relaxed text-amber-950 ring-1 ring-amber-200">
+          <p className="font-semibold">Invalid Scopes / 1349246 — izinler yapılandırmada, URL’de değil</p>
+          <p className="mt-1">
+            SmartKocluk bir <strong>Login for Business</strong> uygulaması.{' '}
+            <code className="rounded bg-white px-1">pages_messaging</code> ve{' '}
+            <code className="rounded bg-white px-1">pages_manage_metadata</code> klasik Facebook
+            Login <code className="rounded bg-white px-1">scope</code> satırında geçersiz. DM için
+            bunları yeni yapılandırmanın izin listesine ekleyin.
+          </p>
+          <p className="mt-1">
+            Eski config’teki{' '}
+            <code className="rounded bg-white px-1">
+              {login?.blocked_asset_ids?.[0] || '52570416778031'}
+            </code>{' '}
+            ve{' '}
+            <code className="rounded bg-white px-1">
+              {login?.blocked_asset_ids?.[1] || '23850842047630381'}
+            </code>{' '}
+            varlıklarını eklemeyin — 1349246 verir.
+          </p>
+          <ol className="mt-2 list-decimal space-y-1 pl-4">
+            <li>developers.facebook.com → SmartKocluk → <strong>Facebook Login for Business</strong></li>
+            <li>
+              <strong>Create configuration</strong> (User access token). Assets: yalnızca Online VIP
+              sayfası + bağlı Instagram.
+            </li>
+            <li>
+              Permissions:{' '}
+              <code className="rounded bg-white px-1">
+                {(login?.config_permissions || [
+                  'pages_show_list',
+                  'pages_messaging',
+                  'pages_manage_metadata',
+                  'instagram_basic',
+                  'instagram_manage_messages',
+                  'instagram_manage_comments'
+                ]).join(', ')}
+              </code>
+            </li>
+            <li>Kaydet → config ID’yi aşağıya yapıştırın → Instagram’ı bağla.</li>
+          </ol>
+          {login?.uses_slim_config ? (
+            <p className="mt-2 font-medium text-emerald-800">
+              Yeni yapılandırma kayıtlı: {login.config_id}
+            </p>
+          ) : (
+            <div className="mt-3 flex flex-wrap gap-2">
+              <input
+                value={configId}
+                onChange={(e) => setConfigId(e.target.value.replace(/\D/g, ''))}
+                placeholder="Yeni config ID (yalnızca Online VIP)"
+                className="min-w-[220px] flex-1 rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm"
+                inputMode="numeric"
+                autoComplete="off"
+              />
+              <button
+                type="button"
+                disabled={savingConfig || configId.length < 10}
+                onClick={() => void saveConfig()}
+                className="rounded-lg bg-amber-900 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50"
+              >
+                {savingConfig ? 'Kaydediliyor…' : 'Yeni config’i kaydet'}
+              </button>
+            </div>
+          )}
+        </div>
+          </>
+        )}
       </section>
 
       <section
