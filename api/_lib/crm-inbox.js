@@ -562,7 +562,12 @@ export async function syncInstagramMessagingToCrm(events, { institutionId, chann
     const norm = normalizeInstagramMessagingEvent(ev);
     if (norm.isEcho) continue;
     if (!norm.senderId || !norm.hasInboundContent) continue;
-    const contactName = await lookupSocialProfileName(norm.senderId).catch(() => null);
+    // FAZ 1: ad + kullanıcı adı + fotoğraf; isim yoksa @kullanıcıadı
+    const { lookupSocialProfile, applyConversationProfile } = await import('./social-profile.js');
+    const profile = await lookupSocialProfile(norm.senderId, { channel: ch }).catch(() => null);
+    const contactName =
+      profile?.name || (profile?.username ? `@${profile.username}` : null) ||
+      (await lookupSocialProfileName(norm.senderId).catch(() => null));
     let body = norm.text || '[medya / ek]';
     if (norm.isAd && ch === 'facebook' && body.startsWith('[Instagram reklamından')) {
       body = body.replace('[Instagram reklamından sohbet]', '[Facebook reklamından sohbet]');
@@ -581,6 +586,9 @@ export async function syncInstagramMessagingToCrm(events, { institutionId, chann
       adSourceData: extractAdSourceData({ channel: ch, messagingEvent: ev }),
       payload: ev
     });
+    if (r?.conversation_id && profile) {
+      await applyConversationProfile(r.conversation_id, profile).catch(() => null);
+    }
     if (r?.skipped) {
       skipped += 1;
       const reason = String(r.reason || 'skipped');
@@ -623,6 +631,10 @@ export async function syncInstagramCommentsToCrm(changes, { institutionId } = {}
       },
       payload: change
     });
+    if (r?.conversation_id && norm.fromUsername) {
+      const { applyConversationProfile } = await import('./social-profile.js');
+      await applyConversationProfile(r.conversation_id, null, { usernameHint: norm.fromUsername }).catch(() => null);
+    }
     if (r?.skipped) skipped += 1;
     else processed += 1;
   }
