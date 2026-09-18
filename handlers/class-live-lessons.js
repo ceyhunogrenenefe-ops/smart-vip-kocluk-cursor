@@ -780,14 +780,53 @@ async function resolveStaffBbbJoinUrl(actor, row, ensured) {
   });
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function istanbulTodayYmdForJoin() {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Istanbul' }).format(new Date());
+}
+
+/** Haftalık şablon satırı için bugünün (İstanbul) tarihli oturumu varsa onu döndür */
+async function findTodaySessionForSlot(slot) {
+  if (!slot?.class_id || !slot?.start_time) return null;
+  const { data } = await supabaseAdmin
+    .from('class_sessions')
+    .select('*')
+    .eq('class_id', slot.class_id)
+    .eq('lesson_date', istanbulTodayYmdForJoin())
+    .eq('start_time', slot.start_time)
+    .neq('status', 'cancelled')
+    .order('updated_at', { ascending: false })
+    .limit(1);
+  return data?.[0] || null;
+}
+
 async function handleClassLiveBbbJoin(req, res, actor, role) {
-  const slotMode = String(req.query?.kind || 'session').trim() === 'slot';
+  // Mobil öğrenci takvimi şablon satırlarını "slot-<uuid>" kimliğiyle gönderebiliyor
+  const rawId = String(req.query?.id || '').trim();
+  let slotMode = String(req.query?.kind || 'session').trim() === 'slot';
+  if (rawId.startsWith('slot-')) {
+    slotMode = true;
+    req.query = { ...(req.query || {}), id: rawId.slice(5), kind: 'slot' };
+  }
+  const reqId = String(req.query?.id || '').trim();
+  if (reqId && !UUID_RE.test(reqId)) return res.status(404).json({ error: 'Kayıt bulunamadı' });
+
+  // Şablon → bugünün gerçek oturumu (öğrenci linki, yoklama ve BBB oturumu ona bağlı)
+  if (slotMode && reqId) {
+    const { data: slotRow } = await supabaseAdmin.from('class_weekly_slots').select('*').eq('id', reqId).maybeSingle();
+    const todaySession = slotRow ? await findTodaySessionForSlot(slotRow) : null;
+    if (todaySession) {
+      slotMode = false;
+      req.query = { ...(req.query || {}), id: todaySession.id, kind: 'session' };
+    }
+  }
   const table = slotMode ? 'class_weekly_slots' : 'class_sessions';
 
   return handleBbbJoinGet(req, res, {
     loadRow: async (id) => {
       const { data, error } = await supabaseAdmin.from(table).select('*').eq('id', id).maybeSingle();
-      if (error) throw error;
+      if (error) throw new Error(error.message || 'Kayıt okunamadı');
       if (!data) return data;
       const [overlaid] = await overlayPrimary4567ZoomOnMeetingRows([data]);
       return overlaid || data;

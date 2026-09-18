@@ -68,7 +68,7 @@ export default async function handler(req, res) {
     return await fn(req, res);
   } catch (e) {
     const ms = Date.now() - started;
-    const msg = e instanceof Error ? e.message : 'router_failed';
+    const msg = e instanceof Error ? e.message : String(e?.message || e?.error || '') || 'router_failed';
     console.error('[api-router]', {
       path: routePath,
       method: req.method,
