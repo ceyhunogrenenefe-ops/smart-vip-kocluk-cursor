@@ -550,16 +550,68 @@ export default async function handler(req, res) {
     }
 
     if (op === 'list_canned') {
-      const { data, error } = await supabaseAdmin
+      const includeInactive = isAdmin && String(req.query?.all || body.all || '') === '1';
+      let cq = supabaseAdmin
         .from('crm_canned_replies')
-        .select('id, title, body, channel, sort_order')
+        .select('id, category, title, body, channel, sort_order, is_active, updated_at')
         .order('sort_order', { ascending: true })
-        .limit(50);
+        .order('title', { ascending: true })
+        .limit(300);
+      if (institutionId) cq = cq.or(`institution_id.eq.${institutionId},institution_id.is.null`);
+      if (!includeInactive) cq = cq.eq('is_active', true);
+      const { data, error } = await cq;
       if (error && /crm_canned_replies|does not exist/i.test(error.message || '')) {
         return res.status(200).json({ data: [] });
       }
       if (error) throw error;
       return res.status(200).json({ data: data || [] });
+    }
+
+    // FAZ 5 — hazır mesaj yönetimi (yalnız yönetici). Mesajlar asla otomatik gönderilmez.
+    if (op === 'save_canned' && req.method === 'POST') {
+      if (!isAdmin) return res.status(403).json({ error: 'admin_only' });
+      const title = String(body.title || '').trim().slice(0, 120);
+      const text = String(body.body || '').trim().slice(0, 4000);
+      const category = String(body.category || 'Genel').trim().slice(0, 60) || 'Genel';
+      if (!title || !text) return res.status(400).json({ error: 'title_body_required', message: 'Başlık ve mesaj zorunlu' });
+      const channelRaw = String(body.channel || '').trim();
+      const row = {
+        title,
+        body: text,
+        category,
+        channel: ['whatsapp', 'instagram', 'facebook'].includes(channelRaw) ? channelRaw : null,
+        sort_order: Number.isFinite(Number(body.sort_order)) ? Math.round(Number(body.sort_order)) : 100,
+        is_active: body.is_active === undefined ? true : Boolean(body.is_active),
+        updated_by: actor.sub,
+        updated_at: new Date().toISOString()
+      };
+      const id = String(body.id || '').trim();
+      if (id) {
+        let uq = supabaseAdmin.from('crm_canned_replies').update(row).eq('id', id);
+        if (institutionId) uq = uq.or(`institution_id.eq.${institutionId},institution_id.is.null`);
+        const { data, error } = await uq.select('*').maybeSingle();
+        if (error) throw error;
+        if (!data) return res.status(404).json({ error: 'not_found' });
+        return res.status(200).json({ data });
+      }
+      const { data, error } = await supabaseAdmin
+        .from('crm_canned_replies')
+        .insert({ ...row, institution_id: institutionId || null, created_by: actor.sub })
+        .select('*')
+        .single();
+      if (error) throw error;
+      return res.status(200).json({ data });
+    }
+
+    if (op === 'delete_canned' && req.method === 'POST') {
+      if (!isAdmin) return res.status(403).json({ error: 'admin_only' });
+      const id = String(body.id || '').trim();
+      if (!id) return res.status(400).json({ error: 'id_required' });
+      let dq = supabaseAdmin.from('crm_canned_replies').delete().eq('id', id);
+      if (institutionId) dq = dq.or(`institution_id.eq.${institutionId},institution_id.is.null`);
+      const { error } = await dq;
+      if (error) throw error;
+      return res.status(200).json({ ok: true });
     }
 
     if (op === 'list_meta_templates') {

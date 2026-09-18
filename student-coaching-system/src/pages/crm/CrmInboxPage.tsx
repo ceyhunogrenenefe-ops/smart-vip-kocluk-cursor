@@ -26,6 +26,9 @@ import {
   crmListAgents,
   crmCreateMetaTemplate,
   crmListCanned,
+  fillCannedVars,
+  CANNED_CATEGORIES,
+  type CrmCannedReply,
   crmListConversations,
   crmListMessages,
   crmListMetaTemplates,
@@ -160,7 +163,9 @@ export default function CrmInboxPage() {
   /** Meta durumu sorgulanırken sarı “Hattı bağla” uyarısı gösterilmez */
   const [inboundChecking, setInboundChecking] = useState(true);
   const [binding, setBinding] = useState(false);
-  const [canned, setCanned] = useState<Array<{ id: string; title: string; body: string }>>([]);
+  const [canned, setCanned] = useState<CrmCannedReply[]>([]);
+  const [cannedCat, setCannedCat] = useState('');
+  const [cannedQ, setCannedQ] = useState('');
   const [metaTemplates, setMetaTemplates] = useState<CrmMetaTemplate[]>([]);
   const [pendingMetaTemplates, setPendingMetaTemplates] = useState<CrmMetaTemplate[]>([]);
   const [metaTplHint, setMetaTplHint] = useState<string | null>(null);
@@ -448,7 +453,13 @@ export default function CrmInboxPage() {
     }
   };
 
-  const pickCanned = (body: string) => {
+  /** Hazır mesaj yalnız taslağa yazılır; temsilci düzenleyip kendisi gönderir (otomatik gönderim yok). */
+  const pickCanned = (raw: string) => {
+    const who = selected ? contactTitle(selected) : '';
+    const body = fillCannedVars(raw, {
+      ad: who && !who.startsWith('@') && !/kullanıcısı/.test(who) && !/^\+?\d[\d\s]+$/.test(who) ? who.split(/\s+/)[0] : '',
+      temsilci: effectiveUser?.name || ''
+    }).replace(/\s*\{ad\}/g, ''); // isim bilinmiyorsa "Merhaba {ad}," → "Merhaba,"
     setDraft(slashQuery(draft) != null ? replaceSlashToken(draft, body) : body);
     setSlashOpen(false);
     composeRef.current?.focus();
@@ -504,10 +515,10 @@ export default function CrmInboxPage() {
     const cans = canned
       .filter((c) => {
         if (!q) return true;
-        const hay = `${c.title} ${c.body}`.toLocaleLowerCase('tr');
+        const hay = `${c.category} ${c.title} ${c.body}`.toLocaleLowerCase('tr');
         return hay.includes(q);
       })
-      .map((c) => ({ kind: 'canned' as const, id: c.id, title: c.title, subtitle: c.body, canned: c }));
+      .map((c) => ({ kind: 'canned' as const, id: c.id, title: `${c.category} · ${c.title}`, subtitle: c.body, canned: c }));
     return [...tpls, ...cans].slice(0, 12);
   }, [slashNeedle, metaTemplates, canned]);
 
@@ -1171,19 +1182,59 @@ export default function CrmInboxPage() {
             {canned.length > 0 && selectedId ? (
               <div>
                 <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  Hazır yanıtlar (serbest metin)
+                  Hazır mesajlar
                 </h3>
-                <div className="flex flex-col gap-1">
-                  {canned.map((c) => (
-                    <button
-                      key={c.id}
-                      type="button"
-                      onClick={() => setDraft(c.body)}
-                      className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-left text-[11px] font-medium text-slate-700 hover:bg-slate-50"
-                    >
-                      {c.title}
-                    </button>
-                  ))}
+                <p className="mb-1.5 text-[10px] leading-snug text-slate-400">
+                  Seçince yazma alanına gelir; düzenleyip siz gönderirsiniz. WhatsApp’ta 24 saati geçen konuşmalarda Meta şablonu gerekir.
+                </p>
+                <div className="mb-1.5 flex gap-1">
+                  <select
+                    value={cannedCat}
+                    onChange={(e) => setCannedCat(e.target.value)}
+                    className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-1.5 py-1 text-[11px]"
+                  >
+                    <option value="">Tüm kategoriler</option>
+                    {CANNED_CATEGORIES.filter((cat) => canned.some((c) => c.category === cat)).map((cat) => (
+                      <option key={cat} value={cat}>
+                        {cat}
+                      </option>
+                    ))}
+                    {[...new Set(canned.map((c) => c.category))]
+                      .filter((cat) => !CANNED_CATEGORIES.includes(cat))
+                      .map((cat) => (
+                        <option key={cat} value={cat}>
+                          {cat}
+                        </option>
+                      ))}
+                  </select>
+                  <input
+                    value={cannedQ}
+                    onChange={(e) => setCannedQ(e.target.value)}
+                    placeholder="Ara…"
+                    className="w-20 rounded-lg border border-slate-200 px-1.5 py-1 text-[11px]"
+                  />
+                </div>
+                <div className="flex max-h-72 flex-col gap-1 overflow-y-auto">
+                  {canned
+                    .filter((c) => !cannedCat || c.category === cannedCat)
+                    .filter((c) => {
+                      const q = cannedQ.trim().toLocaleLowerCase('tr');
+                      return !q || `${c.category} ${c.title} ${c.body}`.toLocaleLowerCase('tr').includes(q);
+                    })
+                    .map((c) => (
+                      <button
+                        key={c.id}
+                        type="button"
+                        title={c.body}
+                        onClick={() => pickCanned(c.body)}
+                        className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-left text-[11px] font-medium text-slate-700 hover:bg-slate-50"
+                      >
+                        <span className="mr-1 rounded bg-emerald-50 px-1 py-px text-[9px] font-semibold text-emerald-700">
+                          {c.category}
+                        </span>
+                        {c.title}
+                      </button>
+                    ))}
                 </div>
               </div>
             ) : null}

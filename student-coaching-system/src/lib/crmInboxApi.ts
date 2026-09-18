@@ -274,8 +274,54 @@ export function crmAddNote(conversationId: string, body: string) {
   });
 }
 
-export function crmListCanned() {
-  return inboxGet<{ data: Array<{ id: string; title: string; body: string }> }>('list_canned');
+export type CrmCannedReply = {
+  id: string;
+  category: string;
+  title: string;
+  body: string;
+  channel?: string | null;
+  sort_order: number;
+  is_active: boolean;
+  updated_at?: string;
+};
+
+/** FAZ 5 — hazır mesaj kategorileri (sıra = gösterim sırası) */
+export const CANNED_CATEGORIES = [
+  'Genel',
+  'LGS',
+  '5. Sınıf',
+  '6. Sınıf',
+  '7. Sınıf',
+  'Özel Ders',
+  'Eğitim Koçluğu',
+  'Deneme Kulübü',
+  'Fiyat Bilgisi',
+  'Program Bilgisi',
+  'Kayıt',
+  'Ödeme',
+  'Düşünecek',
+  'Eşiyle Görüşecek',
+  'Cevap Vermeyen'
+];
+
+export function crmListCanned(opts: { all?: boolean } = {}) {
+  return inboxGet<{ data: CrmCannedReply[] }>('list_canned', { all: opts.all ? '1' : undefined });
+}
+
+export function crmSaveCanned(row: Partial<CrmCannedReply>) {
+  return inboxPost<{ data: CrmCannedReply }>('save_canned', row as Record<string, unknown>);
+}
+
+export function crmDeleteCanned(id: string) {
+  return inboxPost<{ ok: boolean }>('delete_canned', { id });
+}
+
+/** {ad}, {temsilci} gibi alanları doldurur; bilinmeyenleri olduğu gibi bırakır (temsilci düzenler) */
+export function fillCannedVars(body: string, vars: Record<string, string | null | undefined>) {
+  return body.replace(/\{([a-z_ığüşöç]+)\}/gi, (m, key: string) => {
+    const v = vars[key.toLowerCase()];
+    return v && String(v).trim() ? String(v).trim() : m;
+  });
 }
 
 const INBOUND_CACHE_KEY = 'crm_inbound_status_v1';
