@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { CheckCircle2, Loader2, Puzzle, Search } from 'lucide-react';
 import { toast } from 'sonner';
 import {
+  readCachedInboundStatus,
   crmEnsureInbound,
   crmFacebookLoginStart,
   crmInboundStatus,
@@ -35,7 +36,7 @@ function widgetInstalled(id: string, inbound: CrmInboundStatus | null): boolean 
 export default function CrmWidgetsPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const [inbound, setInbound] = useState<CrmInboundStatus | null>(null);
+  const [inbound, setInbound] = useState<CrmInboundStatus | null>(() => readCachedInboundStatus());
   const [login, setLogin] = useState<CrmFacebookLoginStart | null>(null);
   const [loading, setLoading] = useState(true);
   const [binding, setBinding] = useState(false);
@@ -134,8 +135,17 @@ export default function CrmWidgetsPage() {
       .finally(() => setBinding(false));
   }, [refresh]);
 
-  const startOAuth = (url?: string | null) => {
-    if (!login?.has_app_secret) {
+  const startOAuth = async (pick: (l: CrmFacebookLoginStart | null) => string | null | undefined) => {
+    // Ayarlar henüz yüklenmediyse önce sunucudan al; “secret yok” yanlış uyarısı çıkmasın
+    let current = login;
+    if (!current) {
+      setBinding(true);
+      current = (await crmFacebookLoginStart().catch(() => null))?.data || null;
+      setBinding(false);
+      if (current) setLogin(current);
+    }
+    const url = pick(current);
+    if (!current?.has_app_secret) {
       toast.error(
         'Önce SmartKocluk Facebook App Secret’ı kaydedin (Instagram Login secret değil). Ayarlar → Temel → Göster.'
       );
@@ -150,7 +160,7 @@ export default function CrmWidgetsPage() {
     window.location.assign(url);
   };
 
-  const connectSocial = () => startOAuth(login?.authorize_url || login?.code_authorize_url);
+  const connectSocial = () => void startOAuth((l) => l?.authorize_url || l?.code_authorize_url);
 
   const refreshWhatsApp = async () => {
     setBinding(true);
