@@ -55,7 +55,22 @@ export const cvSubmitOffer = (id: string, vendor_id?: string) =>
 
 // Siparişler
 export const cvListOrders = (params?: { status?: string; limit?: number; vendor_id?: string }) =>
-  post<{ vendor_orders: CommerceVendorOrder[]; deployMarker?: string }>('orders.list', params ?? {});
+  post<{
+    vendor_orders: CommerceVendorOrder[];
+    /** Kargo etiketi “Gönderen” bilgisi */
+    vendor?: {
+      id: string;
+      name: string;
+      contact_phone?: string | null;
+      contact_email?: string | null;
+      address_line1?: string | null;
+      address_line2?: string | null;
+      district?: string | null;
+      city?: string | null;
+      postal_code?: string | null;
+    } | null;
+    deployMarker?: string;
+  }>('orders.list', params ?? {});
 export const cvGetOrder = (id: string, vendor_id?: string) =>
   post<{ vendor_order: CommerceVendorOrder }>('orders.get', { id, ...(vendor_id ? { vendor_id } : {}) });
 export const cvAcceptOrder = (id: string, vendor_id?: string) =>

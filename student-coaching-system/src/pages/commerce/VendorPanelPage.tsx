@@ -19,6 +19,7 @@ import {
   Package,
   Pencil,
   Plus,
+  Printer,
   RefreshCw,
   Search,
   Send,
@@ -56,6 +57,7 @@ import { compressCoverImage, formatBytes } from '../../lib/commerce/compressCove
 import { clearActingVendor, getActingVendor, setActingVendor, type ActingVendor } from '../../lib/commerceActingVendor';
 import { caListVendors } from '../../lib/commerceAdminApi';
 import { exportVendorOrdersToExcel } from '../../lib/vendorOrdersExport';
+import { addressLines, printShippingLabels, type ShippingLabel } from '../../lib/commerce/shippingLabel';
 import type {
   CommerceBook,
   CommerceVendorOffer,
@@ -990,8 +992,42 @@ function vendorOrderSearchHaystack(vo: VendorOrderRow) {
     .toLocaleLowerCase('tr-TR');
 }
 
+type VendorSender = NonNullable<Awaited<ReturnType<typeof cvListOrders>>['vendor']>;
+
+/** Siparişten A5 kargo etiketi */
+function shippingLabelFor(vo: VendorOrderRow, sender: VendorSender | null): ShippingLabel {
+  const order = vo.commerce_orders;
+  const addr = shippingFromVendorOrder(order);
+  const items = (vo.commerce_order_items || []).map((it) => {
+    const name =
+      it.package_name ||
+      String(it.title_snapshot || '').replace(/\s*\(\d+\s*kitap\)\s*:[\s\S]*$/i, '').trim() ||
+      it.title_snapshot;
+    const count = it.package_contents?.length ? ` (${it.package_contents.length} kitap)` : '';
+    return `${name}${count}${it.quantity > 1 ? ` ×${it.quantity}` : ''}`;
+  });
+  return {
+    orderNumber: order?.order_number || vo.id.slice(0, 8),
+    recipient: {
+      name: String(addr?.full_name || order?.customer_name || order?.student_name || '').trim(),
+      phone: addr?.phone || order?.customer_phone || null,
+      addressLines: addr ? addressLines(addr) : []
+    },
+    sender: {
+      name: sender?.name || getActingVendor()?.name || 'Satıcı',
+      phone: sender?.contact_phone || null,
+      addressLines: sender ? addressLines(sender) : []
+    },
+    studentName: order?.student_name || null,
+    className: vo.sinif || null,
+    items,
+    note: order?.notes || null
+  };
+}
+
 function Siparislerim({ onPendingChange }: { onPendingChange?: (n: number) => void }) {
   const [orders, setOrders] = useState<VendorOrderRow[]>([]);
+  const [sender, setSender] = useState<VendorSender | null>(null);
   const [loading, setLoading] = useState(true);
   const [filterStatus, setFilterStatus] = useState('');
   const [sinifFilter, setSinifFilter] = useState('');
@@ -1008,6 +1044,7 @@ function Siparislerim({ onPendingChange }: { onPendingChange?: (n: number) => vo
       const r = await cvListOrders({ status: filterStatus || undefined, limit: 200 });
       const list = (r.vendor_orders || []) as VendorOrderRow[];
       setOrders(list);
+      if (r.vendor) setSender(r.vendor);
       const pendingIds = list.filter((o) => o.status === 'pending').map((o) => o.id);
       onPendingChange?.(pendingIds.length);
 
@@ -1115,10 +1152,25 @@ function Siparislerim({ onPendingChange }: { onPendingChange?: (n: number) => vo
     } catch (e: unknown) { toast.error((e as Error).message); }
   };
 
+  const printLabels = (list: VendorOrderRow[]) => {
+    const missing = list.filter((vo) => !shippingFromVendorOrder(vo.commerce_orders));
+    if (missing.length === list.length) {
+      toast.error('Teslimat adresi olmayan sipariş için etiket basılamaz — veli kargo formunu doldurmalı.');
+      return;
+    }
+    if (missing.length) toast.message(`${missing.length} siparişin adresi yok, onlar atlandı.`);
+    printShippingLabels(
+      list.filter((vo) => shippingFromVendorOrder(vo.commerce_orders)).map((vo) => shippingLabelFor(vo, sender))
+    );
+  };
+
   const handlePreparing = async (id: string) => {
     try {
       await cvMarkPreparing(id);
-      toast.success('Sipariş hazırlanıyor olarak işaretlendi');
+      const vo = orders.find((o) => o.id === id);
+      toast.success('Sipariş hazırlanıyor olarak işaretlendi', {
+        action: vo ? { label: 'Kargo etiketi yazdır', onClick: () => printLabels([vo]) } : undefined
+      });
       load();
     } catch (e: unknown) { toast.error((e as Error).message); }
   };
@@ -1158,6 +1210,16 @@ function Siparislerim({ onPendingChange }: { onPendingChange?: (n: number) => vo
             className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-semibold text-indigo-900 hover:bg-indigo-100 disabled:opacity-50"
           >
             <Download className="h-4 w-4" /> Excel indir
+          </button>
+          <button
+            type="button"
+            onClick={() => printLabels(filteredOrders.filter((o) => o.status === 'preparing'))}
+            disabled={!filteredOrders.some((o) => o.status === 'preparing')}
+            title="Hazırlanıyor durumundaki siparişlerin A5 kargo etiketleri (her biri ayrı sayfa)"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-800 bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-40"
+          >
+            <Printer className="h-4 w-4" /> Hazırlananların etiketleri (
+            {filteredOrders.filter((o) => o.status === 'preparing').length})
           </button>
         </div>
       </div>
@@ -1342,6 +1404,16 @@ function Siparislerim({ onPendingChange }: { onPendingChange?: (n: number) => vo
                   <button onClick={() => handlePreparing(vo.id)}
                     className="flex items-center gap-1 text-xs bg-indigo-600 text-white px-3 py-1.5 rounded-lg hover:bg-indigo-700">
                     <Package className="w-3.5 h-3.5" /> Hazırlamaya Başla
+                  </button>
+                )}
+                {['confirmed', 'preparing', 'shipped'].includes(String(vo.status)) && (
+                  <button
+                    type="button"
+                    onClick={() => printLabels([vo])}
+                    className="flex items-center gap-1 text-xs border border-slate-300 bg-white text-slate-800 px-3 py-1.5 rounded-lg hover:bg-slate-50"
+                    title="A5 kargo etiketi: alıcı, gönderen ve adres"
+                  >
+                    <Printer className="w-3.5 h-3.5" /> Kargo etiketi (A5)
                   </button>
                 )}
                 {vo.status === 'preparing' && (
