@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import {
+  useSearchParams, Link } from 'react-router-dom';
 import {
   Facebook,
   FileText,
@@ -131,6 +132,12 @@ export default function CrmInboxPage() {
 
   const [conversations, setConversations] = useState<CrmConversation[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // FAZ 4: bildirimden gelen /crm/inbox?c=<id> ilgili sohbeti açar
+  const [searchParams] = useSearchParams();
+  const deepLinkId = searchParams.get('c');
+  useEffect(() => {
+    if (deepLinkId) setSelectedId(deepLinkId);
+  }, [deepLinkId]);
   const [messages, setMessages] = useState<CrmMessage[]>([]);
   const [selected, setSelected] = useState<CrmConversation | null>(null);
   const [q, setQ] = useState('');

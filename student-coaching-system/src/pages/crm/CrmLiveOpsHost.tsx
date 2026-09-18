@@ -5,6 +5,7 @@ import { useAuth } from '../../context/AuthContext';
 import { userRoleTags } from '../../config/rolePermissions';
 import { crmHeartbeat, crmListPresence, crmPoll, type CrmPresenceAgent } from '../../lib/crmInboxApi';
 import { notifyCrmDesktop, playCrmLeadChime } from '../../lib/crmLiveSound';
+import { pushFlagOn } from '../../lib/crmPush';
 
 /** CRM kabuğu: heartbeat, admin online strip, yeni konuşma sesi. */
 export default function CrmLiveOpsHost() {
@@ -75,7 +76,8 @@ export default function CrmLiveOpsHost() {
           if (knownConvRef.current.has(c.id)) continue;
           knownConvRef.current.add(c.id);
           playCrmLeadChime();
-          notifyCrmDesktop(
+          // Push açıksa bildirimi service worker gösterir (çift bildirim olmasın)
+          if (!pushFlagOn()) notifyCrmDesktop(
             'Yeni CRM lead',
             `${c.contact_name || c.contact_identifier || 'Yeni kişi'} · ${c.channel || ''}`.trim()
           );

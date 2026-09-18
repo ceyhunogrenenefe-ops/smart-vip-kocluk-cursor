@@ -948,6 +948,42 @@ export default async function handler(req, res) {
       return res.status(200).json({ data });
     }
 
+    // FAZ 4 — bildirim zili ve Web Push
+    if (op === 'notifications') {
+      const { listCrmNotifications } = await import('../api/_lib/crm-notify.js');
+      const data = await listCrmNotifications(actor.sub, { limit: req.query?.limit || body.limit });
+      return res.status(200).json({ data });
+    }
+    if (op === 'notifications_read' && req.method === 'POST') {
+      const { markCrmNotificationsRead } = await import('../api/_lib/crm-notify.js');
+      const n = await markCrmNotificationsRead(actor.sub, body.all ? [] : body.ids);
+      return res.status(200).json({ ok: true, data: { marked: n } });
+    }
+    if (op === 'push_key') {
+      const { getVapidPublicKey } = await import('../api/_lib/crm-notify.js');
+      return res.status(200).json({ data: { public_key: await getVapidPublicKey() } });
+    }
+    if (op === 'push_subscribe' && req.method === 'POST') {
+      const { saveSubscription } = await import('../api/_lib/crm-notify.js');
+      await saveSubscription(actor.sub, body.subscription, req.headers?.['user-agent'] || null);
+      return res.status(200).json({ ok: true });
+    }
+    if (op === 'push_unsubscribe' && req.method === 'POST') {
+      const { removeSubscription } = await import('../api/_lib/crm-notify.js');
+      await removeSubscription(actor.sub, body.endpoint);
+      return res.status(200).json({ ok: true });
+    }
+    if (op === 'push_test' && req.method === 'POST') {
+      const { sendPushToUser } = await import('../api/_lib/crm-notify.js');
+      const r = await sendPushToUser(actor.sub, {
+        title: 'Online VIP CRM',
+        body: 'Bildirimler açık — yeni müşteri mesajları bu cihaza gelecek.',
+        url: '/crm/inbox',
+        tag: 'crm-push-test'
+      });
+      return res.status(200).json({ ok: true, data: r });
+    }
+
     if (op === 'set_internal' && req.method === 'POST') {
       const conversationId = String(body.conversation_id || '').trim();
       if (!conversationId) return res.status(400).json({ error: 'conversation_id_required' });
