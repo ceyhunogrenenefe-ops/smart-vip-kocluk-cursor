@@ -52,6 +52,15 @@ async function resolveInstitutionId(actor) {
     .eq('id', actor.sub)
     .maybeSingle();
   if (u?.institution_id) return String(u.institution_id);
+  // Kurumu boş CRM temsilcisi: temsilci atamasındaki kurum
+  const { data: assign } = await supabaseAdmin
+    .from('crm_user_assignments')
+    .select('institution_id')
+    .eq('user_id', actor.sub)
+    .eq('is_active', true)
+    .not('institution_id', 'is', null)
+    .limit(1);
+  if (assign?.[0]?.institution_id) return String(assign[0].institution_id);
   if (roleOf(actor) === 'super_admin') return PLATFORM_PRIMARY_INSTITUTION_ID;
   return null;
 }
