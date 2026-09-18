@@ -93,6 +93,8 @@ export function crmListConversations(opts: {
   institution_id?: string;
   /** exclude (adaylar, varsayılan) | only (kurum içi) | all */
   internal?: 'exclude' | 'only' | 'all';
+  /** FAZ 2: mine (benimkiler) | unassigned (atanmamış) */
+  assigned?: 'mine' | 'unassigned';
 } = {}) {
   return inboxGet<{ data: CrmConversation[] }>('list_conversations', opts);
 }
@@ -367,6 +369,35 @@ export function crmListAgents(institutionId?: string) {
       role_users: Array<{ id: string; name: string; email: string; role: string }>;
     };
   }>('list_agents', { institution_id: institutionId });
+}
+
+export type CrmAssignmentSettings = {
+  round_robin_enabled: boolean;
+  next_after_user_id: string | null;
+  pool: Array<{ id: string; name: string }>;
+  unassigned_leads: number;
+  unassigned_conversations: number;
+};
+
+/** FAZ 2: otomatik dağıtım ayarı (enabled verilirse kaydeder) */
+export function crmAdminAssignmentSettings(enabled?: boolean) {
+  return enabled === undefined
+    ? adminGet<{ data: CrmAssignmentSettings }>('assignment_settings')
+    : adminPost<{ data: CrmAssignmentSettings }>('assignment_settings', { round_robin_enabled: enabled });
+}
+
+export function crmAdminSetRoundRobin(userId: string, inRoundRobin: boolean) {
+  return adminPost<{ ok: boolean }>('set_round_robin', { user_id: userId, in_round_robin: inRoundRobin });
+}
+
+export function crmAdminDistributeUnassigned() {
+  return adminPost<{
+    data: {
+      leads_assigned: number;
+      conversations_assigned: number;
+      per_agent: Array<{ id: string; name: string; count: number }>;
+    };
+  }>('distribute_unassigned', {});
 }
 
 export function crmAdminListAgents(institutionId?: string) {

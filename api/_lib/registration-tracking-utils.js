@@ -177,7 +177,15 @@ export const STAGES = [
   'payment_pending',
   'postponed',
   'confirmed',
-  'lost'
+  'lost',
+  // FAZ 2 satış funnel'ı
+  'needs_identified',
+  'program_offered',
+  'spouse_discussion',
+  'registration_pending',
+  'no_response',
+  'unreachable',
+  'not_interested'
 ];
 
 export const STAGE_LABELS = {
@@ -187,13 +195,20 @@ export const STAGE_LABELS = {
   presentation_scheduled: 'Tanıtım görüşmesi planlandı',
   trial_lesson_scheduled: 'Deneme dersi planlandı',
   trial_lesson_completed: 'Deneme dersi yapıldı',
-  offer_sent: 'Program ve fiyat sunuldu',
+  offer_sent: 'Fiyat verildi',
   considering: 'Veli düşünüyor',
   follow_up: 'Tekrar aranacak',
   payment_pending: 'Ödeme bekleniyor',
   postponed: 'Daha sonra aranacak',
   confirmed: 'Kesin kayıt',
-  lost: 'Olumsuz sonuçlandı'
+  lost: 'Olumsuz sonuçlandı',
+  needs_identified: 'İhtiyaç belirlendi',
+  program_offered: 'Program önerildi',
+  spouse_discussion: 'Eşiyle görüşecek',
+  registration_pending: 'Kayıt bekliyor',
+  no_response: 'Cevap vermiyor',
+  unreachable: 'Ulaşılamadı',
+  not_interested: 'İlgilenmiyor'
 };
 
 export const TEMPERATURES = ['hot', 'warm', 'cold'];

@@ -29,7 +29,8 @@ const PIPELINE_FILTERS = [
   { id: 'contact', label: "Görüşülen Lead'ler" },
   { id: 'trial', label: 'Deneme Dersi' },
   { id: 'thinking', label: 'Düşünülüyor' },
-  { id: 'payment', label: 'Ödeme Bekleniyor' },
+  { id: 'payment', label: 'Kayıt / Ödeme Bekleniyor' },
+  { id: 'cold', label: 'Cevapsız / İlgisiz' },
   { id: 'confirmed', label: 'Kesin Kayıt' },
   { id: 'lost', label: 'Kaybedildi' }
 ];

@@ -28,13 +28,20 @@ export const STAGE_LABELS: Record<string, string> = {
   presentation_scheduled: 'Tanıtım görüşmesi planlandı',
   trial_lesson_scheduled: 'Deneme dersi planlandı',
   trial_lesson_completed: 'Deneme dersi yapıldı',
-  offer_sent: 'Program ve fiyat sunuldu',
+  offer_sent: 'Fiyat verildi',
   considering: 'Veli düşünüyor',
   follow_up: 'Tekrar aranacak',
   payment_pending: 'Ödeme bekleniyor',
   postponed: 'Daha sonra aranacak',
   confirmed: 'Kesin kayıt',
-  lost: 'Olumsuz sonuçlandı'
+  lost: 'Olumsuz sonuçlandı',
+  needs_identified: 'İhtiyaç belirlendi',
+  program_offered: 'Program önerildi',
+  spouse_discussion: 'Eşiyle görüşecek',
+  registration_pending: 'Kayıt bekliyor',
+  no_response: 'Cevap vermiyor',
+  unreachable: 'Ulaşılamadı',
+  not_interested: 'İlgilenmiyor'
 };
 
 export const TEMPERATURE_LABELS: Record<string, string> = {
@@ -67,7 +74,14 @@ export const KANBAN_STAGES = [
   'considering',
   'follow_up',
   'payment_pending',
-  'postponed'
+  'postponed',
+  'needs_identified',
+  'program_offered',
+  'spouse_discussion',
+  'registration_pending',
+  'no_response',
+  'unreachable',
+  'not_interested'
 ] as const;
 
 /** Deneme dersi aşamaları (üst filtre + CRM sütunu) */
@@ -92,11 +106,12 @@ export const CRM_PIPELINE_COLUMNS: {
   {
     id: 'contact',
     label: "Görüşülen Lead'ler",
-    stages: ['first_contact_completed', 'presentation_scheduled', 'offer_sent']
+    stages: ['first_contact_completed', 'needs_identified', 'presentation_scheduled', 'program_offered', 'offer_sent']
   },
   { id: 'trial', label: 'Deneme Dersi Planlanan / Yapılan', stages: TRIAL_STAGES },
-  { id: 'thinking', label: 'Düşünülüyor', stages: ['considering', 'follow_up', 'postponed'] },
-  { id: 'payment', label: 'Ödeme Bekleniyor', stages: ['payment_pending'] },
+  { id: 'thinking', label: 'Düşünülüyor', stages: ['considering', 'spouse_discussion', 'follow_up', 'postponed'] },
+  { id: 'payment', label: 'Kayıt / Ödeme Bekleniyor', stages: ['registration_pending', 'payment_pending'] },
+  { id: 'cold', label: 'Cevapsız / İlgisiz', stages: ['no_response', 'unreachable', 'not_interested'] },
   { id: 'closed', label: 'Kayıt Tamamlandı (Kazanıldı) / Kaybedildi', stages: [], kind: 'closed' }
 ];
 
@@ -106,7 +121,8 @@ export const CRM_COLUMN_DEFAULT_STAGE: Record<string, string> = {
   contact: 'first_contact_completed',
   trial: 'trial_lesson_scheduled',
   thinking: 'considering',
-  payment: 'payment_pending'
+  payment: 'payment_pending',
+  cold: 'no_response'
 };
 
 export function crmColumnIdForLead(lead: {

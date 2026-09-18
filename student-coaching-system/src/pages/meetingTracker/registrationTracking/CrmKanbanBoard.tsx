@@ -210,7 +210,7 @@ export default function CrmKanbanBoard({
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
     >
-      <div className="grid grid-cols-2 gap-2 overflow-x-hidden sm:grid-cols-3 xl:grid-cols-6">
+      <div className="grid grid-cols-2 gap-2 overflow-x-hidden sm:grid-cols-3 xl:grid-cols-7">
         {CRM_PIPELINE_COLUMNS.map((col) => {
           const items = byColumn[col.id] || [];
           return (

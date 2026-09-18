@@ -428,6 +428,16 @@ export async function upsertCrmMessage({
     if (await autoMarkConversationInternal(conversation)) conversation = { ...conversation, is_internal: true };
   }
 
+  if (direction === 'inbound' && !conversation.is_internal && !conversation.assigned_user_id) {
+    try {
+      const { assignConversationIfUnassigned } = await import('./crm-assignment.js');
+      const uid = await assignConversationIfUnassigned(conversation);
+      if (uid) conversation = { ...conversation, assigned_user_id: uid };
+    } catch (e) {
+      console.warn('[crm-inbox] auto assign:', e instanceof Error ? e.message : e);
+    }
+  }
+
   const resolvedSenderType = senderType || (direction === 'outbound' ? 'agent' : 'lead');
 
   const idCol = await resolveCrmMessageIdColumn();
