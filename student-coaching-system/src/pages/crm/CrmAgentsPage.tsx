@@ -9,6 +9,7 @@ import {
   crmListPresence
 } from '../../lib/crmInboxApi';
 import CrmAssignmentPanel from './CrmAssignmentPanel';
+import CrmFollowUpRulesPanel from './CrmFollowUpRulesPanel';
 
 type AgentRow = {
   id: string;
@@ -126,7 +127,10 @@ export default function CrmAgentsPage() {
         </p>
       </div>
 
-      <CrmAssignmentPanel agents={agents} />
+      <div className="grid gap-6 xl:grid-cols-2">
+        <CrmAssignmentPanel agents={agents} />
+        <CrmFollowUpRulesPanel />
+      </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
         <form
