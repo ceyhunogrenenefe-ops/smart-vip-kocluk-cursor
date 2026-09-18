@@ -158,8 +158,9 @@ export function CrmTemplateSendPreviewModal({
 
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4">
-      <div className="w-full max-w-lg overflow-hidden rounded-2xl bg-white shadow-2xl dark:bg-slate-900">
-        <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3 dark:border-slate-700">
+      {/* Uzun şablonda düğmeler ekran dışına taşmasın: başlık ve alt çubuk sabit, orta alan kayar */}
+      <div className="flex max-h-[92vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl bg-white shadow-2xl dark:bg-slate-900">
+        <div className="flex shrink-0 items-center justify-between border-b border-slate-200 px-4 py-3 dark:border-slate-700">
           <div>
             <h3 className="text-base font-semibold text-slate-900 dark:text-white">Şablonu gönder</h3>
             <p className="text-xs text-slate-500">
@@ -171,7 +172,7 @@ export function CrmTemplateSendPreviewModal({
             <X className="h-5 w-5" />
           </button>
         </div>
-        <div className="space-y-3 p-4">
+        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
           <div>
             <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400">Müşterinin göreceği</p>
             <div className="rounded-2xl rounded-br-md bg-emerald-600 px-3 py-2 text-sm text-white shadow-sm">
@@ -207,7 +208,10 @@ export function CrmTemplateSendPreviewModal({
             <p className="text-[11px] text-slate-500">{channelLabel}’a gövde metin olarak gider.</p>
           ) : null}
         </div>
-        <div className="flex justify-end gap-2 border-t border-slate-200 px-4 py-3 dark:border-slate-700">
+        <div className="flex shrink-0 items-center justify-end gap-2 border-t border-slate-200 bg-white px-4 py-3 dark:border-slate-700 dark:bg-slate-900">
+          {varsMissing ? (
+            <span className="mr-auto text-[11px] text-amber-700">Göndermek için değişkenleri doldurun</span>
+          ) : null}
           <button type="button" onClick={onClose} className="rounded-lg border border-slate-200 px-4 py-2 text-sm">
             Vazgeç
           </button>
