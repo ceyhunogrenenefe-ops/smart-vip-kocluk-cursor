@@ -40,6 +40,9 @@ export type RegLead = {
   last_inbound_snippet?: string | null;
   last_inbound_at?: string | null;
   instagram_scoped_id?: string | null;
+  /** FAZ 1: Instagram kullanıcı adı / profil fotoğrafı */
+  instagram_username?: string | null;
+  contact_avatar_url?: string | null;
   created_at: string;
   updated_at: string;
 };

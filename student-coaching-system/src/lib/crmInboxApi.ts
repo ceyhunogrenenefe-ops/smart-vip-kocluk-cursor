@@ -23,6 +23,10 @@ export type CrmConversation = {
   /** Mevcut öğrenci / veli / personel — raporlara girmez */
   is_internal?: boolean;
   internal_reason?: string | null;
+  /** FAZ 1: Instagram kullanıcı adı / profil fotoğrafı */
+  contact_username?: string | null;
+  contact_avatar_url?: string | null;
+  profile_error?: string | null;
 };
 
 export type CrmMessage = {

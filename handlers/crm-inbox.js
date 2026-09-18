@@ -148,7 +148,7 @@ export default async function handler(req, res) {
       let query = supabaseAdmin
         .from('crm_conversations')
         .select(
-          'id, institution_id, contact_identifier, channel, contact_name, assigned_user_id, status, lead_id, ad_source_data, last_message_at, last_message_preview, unread_count, metadata, created_at, updated_at, is_internal, internal_reason'
+          'id, institution_id, contact_identifier, channel, contact_name, assigned_user_id, status, lead_id, ad_source_data, last_message_at, last_message_preview, unread_count, metadata, created_at, updated_at, is_internal, internal_reason, contact_username, contact_avatar_url'
         )
         .order('last_message_at', { ascending: false, nullsFirst: false })
         .limit(limit);
@@ -1127,7 +1127,7 @@ export default async function handler(req, res) {
       let cq = supabaseAdmin
         .from('crm_conversations')
         .select(
-          'id, last_message_at, last_message_preview, unread_count, assigned_user_id, status, channel, contact_name, contact_identifier, updated_at, is_internal'
+          'id, last_message_at, last_message_preview, unread_count, assigned_user_id, status, channel, contact_name, contact_identifier, updated_at, is_internal, contact_username, contact_avatar_url'
         )
         .gt('updated_at', since)
         .order('updated_at', { ascending: false })

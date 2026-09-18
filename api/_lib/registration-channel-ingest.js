@@ -555,17 +555,25 @@ export async function ingestInstagramMessagingEvents(messagingEvents, { channel 
     if (norm.isEcho) continue;
     if (!norm.senderId || !norm.hasInboundContent) continue;
 
+    // FAZ 1: yeni aday "Instagram Lead" yerine gerçek adla açılsın (önbellekli, hata olursa null)
+    const { lookupSocialProfile, applyLeadProfile } = await import('./social-profile.js');
+    const profile = await lookupSocialProfile(norm.senderId, { channel: ch }).catch(() => null);
+    const profileName = profile?.name || (profile?.username ? `@${profile.username}` : null);
+
     await ingestRegistrationChannelMessage({
       channel: ch,
       direction: 'inbound',
       externalContactId: norm.senderId,
-      contactName: null,
+      contactName: profileName,
       body: norm.text || '[medya / ek]',
       messageType: norm.messageType,
       externalMessageId: norm.messageId,
       timestamp: ev?.timestamp,
       payload: ev
     });
+    if (profile && (profile.name || profile.username || profile.profile_pic)) {
+      await applyLeadProfile({ scopedId: norm.senderId }, profile).catch(() => null);
+    }
     processed += 1;
   }
   return { processed };

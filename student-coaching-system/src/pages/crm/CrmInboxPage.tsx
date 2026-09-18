@@ -43,8 +43,34 @@ import {
   type CrmMessage,
   type CrmMetaTemplate
 } from '../../lib/crmInboxApi';
+import { contactInitials, contactSubtitle, contactTitle } from '../../lib/crmContactDisplay';
 import { playCrmLeadChime } from '../../lib/crmLiveSound';
 import { CrmTemplateCreateModal, CrmTemplateSendPreviewModal } from './CrmTemplateModals';
+
+/** Profil fotoğrafı varsa o, yoksa baş harfler */
+function ContactAvatar({ c, size = 'sm' }: { c: CrmConversation; size?: 'sm' | 'md' }) {
+  const [broken, setBroken] = useState(false);
+  const cls = size === 'md' ? 'h-9 w-9 text-xs' : 'h-8 w-8 text-[11px]';
+  if (c.contact_avatar_url && !broken) {
+    return (
+      <img
+        src={c.contact_avatar_url}
+        alt=""
+        onError={() => setBroken(true)}
+        className={`${cls} shrink-0 rounded-full object-cover ring-1 ring-slate-200`}
+        referrerPolicy="no-referrer"
+      />
+    );
+  }
+  return (
+    <span
+      aria-hidden
+      className={`${cls} inline-flex shrink-0 items-center justify-center rounded-full bg-slate-200 font-semibold text-slate-600`}
+    >
+      {contactInitials(c)}
+    </span>
+  );
+}
 
 function ChannelBadge({ channel, contactIdentifier, adSourceData }: { channel: string; contactIdentifier?: string | null; adSourceData?: Record<string, unknown> | null }) {
   const isFbFallback =
@@ -636,12 +662,18 @@ export default function CrmInboxPage() {
                   }`}
                 >
                   <div className="flex items-center justify-between gap-2">
-                    <span
-                      className={`truncate text-sm ${
-                        unread ? 'font-bold text-slate-900' : 'font-medium text-slate-800'
-                      }`}
-                    >
-                      {c.contact_name || c.contact_identifier}
+                    <span className="flex min-w-0 items-center gap-2">
+                      <ContactAvatar c={c} />
+                      <span className="min-w-0">
+                        <span
+                          className={`block truncate text-sm ${
+                            unread ? 'font-bold text-slate-900' : 'font-medium text-slate-800'
+                          }`}
+                        >
+                          {contactTitle(c)}
+                        </span>
+                        <span className="block truncate text-[11px] text-slate-500">{contactSubtitle(c)}</span>
+                      </span>
                     </span>
                     <ChannelBadge channel={c.channel} contactIdentifier={c.contact_identifier} adSourceData={c.ad_source_data as Record<string, unknown> | null} />
                   </div>
@@ -728,8 +760,9 @@ export default function CrmInboxPage() {
             <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
               <div>
                 <div className="flex items-center gap-2">
+                  {selected ? <ContactAvatar c={selected} size="md" /> : null}
                   <h2 className="font-semibold text-slate-900">
-                    {selected?.contact_name || selected?.contact_identifier || '…'}
+                    {selected ? contactTitle(selected) : '…'}
                   </h2>
                   {selected && <ChannelBadge channel={selected.channel} contactIdentifier={selected.contact_identifier} adSourceData={selected.ad_source_data as Record<string, unknown> | null} />}
                   {selected?.is_internal ? (
@@ -741,7 +774,9 @@ export default function CrmInboxPage() {
                     </span>
                   ) : null}
                 </div>
-                <p className="text-xs text-slate-500">{selected?.contact_identifier}</p>
+                <p className="text-xs text-slate-500" title={selected?.contact_identifier || ''}>
+                  {selected ? contactSubtitle(selected) : ''}
+                </p>
               </div>
               <div className="flex items-center gap-2">
               {selected ? (

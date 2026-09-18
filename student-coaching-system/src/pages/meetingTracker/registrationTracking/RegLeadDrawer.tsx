@@ -122,6 +122,19 @@ export default function RegLeadDrawer({
           {lead && (
             <p className="text-xs text-slate-500">
               {GRADE_LABEL[lead.grade_program]} · {STAGE_LABELS[lead.stage]}
+              {lead.instagram_username ? (
+                <>
+                  {' · '}
+                  <a
+                    href={`https://instagram.com/${encodeURIComponent(lead.instagram_username)}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="font-medium text-pink-700 hover:underline"
+                  >
+                    @{lead.instagram_username}
+                  </a>
+                </>
+              ) : null}
             </p>
           )}
         </div>
