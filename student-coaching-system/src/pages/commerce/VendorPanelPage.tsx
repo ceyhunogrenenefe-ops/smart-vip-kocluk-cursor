@@ -1028,6 +1028,17 @@ function shippingLabelFor(vo: VendorOrderRow, sender: VendorSender | null): Ship
 function Siparislerim({ onPendingChange }: { onPendingChange?: (n: number) => void }) {
   const [orders, setOrders] = useState<VendorOrderRow[]>([]);
   const [sender, setSender] = useState<VendorSender | null>(null);
+  /** Az önce işlem yapılan siparişler: listede yerinde kalır, vurgulanır */
+  const [actedIds, setActedIds] = useState<Set<string>>(new Set());
+  const [flashId, setFlashId] = useState<string | null>(null);
+  const actedRef = useRef<Set<string>>(new Set());
+  actedRef.current = actedIds;
+  const ordersRef = useRef<VendorOrderRow[]>([]);
+  ordersRef.current = orders;
+  // Kullanıcı filtreyi kendisi değiştirince sabitlenen siparişler bırakılır
+  useEffect(() => {
+    setActedIds(new Set());
+  }, [filterStatus]);
   const [loading, setLoading] = useState(true);
   const [filterStatus, setFilterStatus] = useState('');
   const [sinifFilter, setSinifFilter] = useState('');
@@ -1039,10 +1050,15 @@ function Siparislerim({ onPendingChange }: { onPendingChange?: (n: number) => vo
   const bootstrappedRef = useRef(false);
 
   const load = useCallback(async () => {
-    setLoading(true);
+    // Liste doluyken yenileme sessiz olur: kartlar sökülmez, sayfa yerinde kalır
+    if (!ordersRef.current.length) setLoading(true);
     try {
       const r = await cvListOrders({ status: filterStatus || undefined, limit: 200 });
-      const list = (r.vendor_orders || []) as VendorOrderRow[];
+      const fetched = (r.vendor_orders || []) as VendorOrderRow[];
+      // Filtre dışına düşse de az önce işlem yapılan sipariş ekranda kalsın (etiketini alabilmek için)
+      const fetchedIds = new Set(fetched.map((o) => o.id));
+      const kept = ordersRef.current.filter((o) => actedRef.current.has(o.id) && !fetchedIds.has(o.id));
+      const list = kept.length ? [...fetched, ...kept] : fetched;
       setOrders(list);
       if (r.vendor) setSender(r.vendor);
       const pendingIds = list.filter((o) => o.status === 'pending').map((o) => o.id);
@@ -1075,7 +1091,7 @@ function Siparislerim({ onPendingChange }: { onPendingChange?: (n: number) => vo
   useEffect(() => { load(); }, [load]);
 
   useEffect(() => {
-    const t = window.setInterval(() => { void load(); }, 45000);
+    const t = window.setInterval(() => { void load(); }, 120000);
     return () => window.clearInterval(t);
   }, [load]);
 
@@ -1111,8 +1127,9 @@ function Siparislerim({ onPendingChange }: { onPendingChange?: (n: number) => vo
 
     return [...list].sort((a, b) => {
       if (nameSort === 'newest') {
-        const pa = a.status === 'pending' ? 0 : 1;
-        const pb = b.status === 'pending' ? 0 : 1;
+        // Az önce kabul edilen / hazırlanan sipariş bekleyenlerin arasında yerinde kalsın
+        const pa = a.status === 'pending' || actedIds.has(a.id) ? 0 : 1;
+        const pb = b.status === 'pending' || actedIds.has(b.id) ? 0 : 1;
         if (pa !== pb) return pa - pb;
         const ta = new Date(
           String(a.commerce_orders?.created_at || (a as { created_at?: string }).created_at || 0)
@@ -1130,7 +1147,7 @@ function Siparislerim({ onPendingChange }: { onPendingChange?: (n: number) => vo
       if (nameSort === 'newest') return cmp;
       return nameSort === 'asc' ? cmp : -cmp;
     });
-  }, [orders, sinifFilter, searchQuery, nameSort]);
+  }, [orders, sinifFilter, searchQuery, nameSort, actedIds]);
 
   const filtersActive = Boolean(sinifFilter || searchQuery.trim());
 
@@ -1144,11 +1161,23 @@ function Siparislerim({ onPendingChange }: { onPendingChange?: (n: number) => vo
     }
   };
 
+  /** Durumu yerinde güncelle; liste yeniden yüklenirken kart kaybolmasın */
+  const markActed = (id: string, status: string) => {
+    setOrders((prev) => prev.map((o) => (o.id === id ? ({ ...o, status } as VendorOrderRow) : o)));
+    setActedIds((prev) => new Set(prev).add(id));
+    setFlashId(id);
+    window.setTimeout(() => setFlashId((cur) => (cur === id ? null : cur)), 4000);
+  };
+
   const handleAccept = async (id: string) => {
     try {
       await cvAcceptOrder(id);
-      toast.success('Sipariş kabul edildi');
-      load();
+      markActed(id, 'confirmed');
+      const vo = orders.find((o) => o.id === id);
+      toast.success('Sipariş kabul edildi', {
+        action: vo ? { label: 'Kargo etiketi yazdır', onClick: () => printLabels([{ ...vo, status: 'confirmed' } as VendorOrderRow]) } : undefined
+      });
+      void load();
     } catch (e: unknown) { toast.error((e as Error).message); }
   };
 
@@ -1167,11 +1196,12 @@ function Siparislerim({ onPendingChange }: { onPendingChange?: (n: number) => vo
   const handlePreparing = async (id: string) => {
     try {
       await cvMarkPreparing(id);
+      markActed(id, 'preparing');
       const vo = orders.find((o) => o.id === id);
       toast.success('Sipariş hazırlanıyor olarak işaretlendi', {
         action: vo ? { label: 'Kargo etiketi yazdır', onClick: () => printLabels([vo]) } : undefined
       });
-      load();
+      void load();
     } catch (e: unknown) { toast.error((e as Error).message); }
   };
 
@@ -1301,7 +1331,12 @@ function Siparislerim({ onPendingChange }: { onPendingChange?: (n: number) => vo
           const addr = shippingFromVendorOrder(order);
           const displayName = vendorOrderDisplayName(vo) || '—';
           return (
-            <div key={vo.id} className="border border-gray-200 rounded-xl p-4 bg-white">
+            <div
+              key={vo.id}
+              className={`border rounded-xl p-4 bg-white transition-shadow ${
+                flashId === vo.id ? 'border-emerald-400 ring-2 ring-emerald-200 shadow-md' : 'border-gray-200'
+              }`}
+            >
               <div className="flex justify-between items-start mb-3">
                 <div>
                   <div className="flex items-center gap-2 flex-wrap">
