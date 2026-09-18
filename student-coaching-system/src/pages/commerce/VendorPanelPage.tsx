@@ -1035,12 +1035,12 @@ function Siparislerim({ onPendingChange }: { onPendingChange?: (n: number) => vo
   actedRef.current = actedIds;
   const ordersRef = useRef<VendorOrderRow[]>([]);
   ordersRef.current = orders;
+  const [loading, setLoading] = useState(true);
+  const [filterStatus, setFilterStatus] = useState('');
   // Kullanıcı filtreyi kendisi değiştirince sabitlenen siparişler bırakılır
   useEffect(() => {
     setActedIds(new Set());
   }, [filterStatus]);
-  const [loading, setLoading] = useState(true);
-  const [filterStatus, setFilterStatus] = useState('');
   const [sinifFilter, setSinifFilter] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [nameSort, setNameSort] = useState<'newest' | 'asc' | 'desc'>('newest');
