@@ -6,6 +6,7 @@ import { requireAuthenticatedActor } from '../api/_lib/auth.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { actorRoleSet, actorIsAdminLike } from '../api/_lib/actor-roles.js';
 import crypto from 'crypto';
+import { PLATFORM_PRIMARY_INSTITUTION_ID } from '../api/_lib/quota-enforce.js';
 
 function parseBody(req) {
   const b = req.body;
@@ -72,8 +73,9 @@ export default async function handler(req, res) {
         .trim();
       const name = String(body.name || body.full_name || '').trim();
       const password = String(body.password || body.password_hash || '').trim();
+      // Kurumsuz süper admin oluşturursa temsilci kurumsuz kalıyor, CRM ekranları 400 veriyordu
       const institutionId =
-        String(body.institution_id || actor.institution_id || '').trim() || null;
+        String(body.institution_id || actor.institution_id || '').trim() || PLATFORM_PRIMARY_INSTITUTION_ID;
       const canPool = body.can_access_unassigned_pool !== false;
 
       if (!email) return res.status(400).json({ error: 'email_required' });
