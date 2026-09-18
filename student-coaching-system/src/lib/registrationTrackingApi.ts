@@ -502,3 +502,28 @@ export function rtListBulkCampaigns() {
     };
   }>('bulk-campaigns', { method: 'GET' });
 }
+
+/** FAZ 3 — takip planı adımı */
+export type FollowUpStep = { days: number; task_type: string; title: string };
+export type FollowUpRules = Record<string, FollowUpStep[]>;
+
+export function rtGetFollowUpRules() {
+  return rtFetch<{ data: { rules: FollowUpRules; defaults: FollowUpRules } }>('follow-up-rules', { method: 'GET' });
+}
+
+export function rtSaveFollowUpRules(rules: FollowUpRules) {
+  return rtFetch<{ data: { rules: FollowUpRules } }>('follow-up-rules', {
+    method: 'POST',
+    body: JSON.stringify({ rules })
+  });
+}
+
+export function rtCreateFollowUps(body: {
+  lead_id: string;
+  stage: string;
+  steps?: Array<FollowUpStep & { due_at: string }>;
+}) {
+  return rtFetch<{
+    data: { created: Array<{ id: string; title: string; due_at: string; task_type: string }>; cancelled: number };
+  }>('create-follow-ups', { method: 'POST', body: JSON.stringify(body) });
+}

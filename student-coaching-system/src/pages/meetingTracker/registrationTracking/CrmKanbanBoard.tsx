@@ -17,6 +17,7 @@ import {
   rtConfirmLead,
   rtReopenLead,
   rtUpdateLead,
+  rtCreateFollowUps,
   type RegCoach,
   type RegLead
 } from '../../../lib/registrationTrackingApi';
@@ -26,6 +27,7 @@ import {
   crmColumnIdForLead
 } from '../../../lib/registrationTrackingConfig';
 import RegLeadCard from './RegLeadCard';
+import { loadFollowUpRules, planFollowUps } from '../../../lib/followUpPlan';
 
 type Props = {
   leads: RegLead[];
@@ -193,7 +195,20 @@ export default function CrmKanbanBoard({
         const stage = CRM_COLUMN_DEFAULT_STAGE[toCol] || lead.stage;
         patchLocal({ stage, primary_status: 'tracking' });
         await rtUpdateLead(leadId, { stage });
-        toast.success('Aşama güncellendi');
+        // FAZ 3: bu aşamanın takip planı varsa tek tıkla oluşturma önerisi
+        const plan = planFollowUps(stage, await loadFollowUpRules().catch(() => null));
+        toast.success('Aşama güncellendi', {
+          action: plan.length
+            ? {
+                label: plan.length > 1 ? `${plan.length} takip görevi oluştur` : 'Takip görevi oluştur',
+                onClick: () => {
+                  void rtCreateFollowUps({ lead_id: leadId, stage })
+                    .then((r) => toast.success(`${r.data.created.length} takip görevi oluşturuldu`))
+                    .catch((e) => toast.error(e instanceof Error ? e.message : 'Oluşturulamadı'));
+                }
+              }
+            : undefined
+        });
       }
     } catch (err) {
       onLeadsChange(snapshot);

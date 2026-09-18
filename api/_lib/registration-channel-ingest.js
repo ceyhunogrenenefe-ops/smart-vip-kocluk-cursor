@@ -396,6 +396,13 @@ export async function ingestRegistrationChannelMessage(msg) {
   }
 
   if (lead?.id && direction === 'inbound') {
+    // FAZ 3: müşteri yeniden yazdı → bekleyen otomatik takipler yeniden değerlendirilsin
+    try {
+      const { flagFollowUpsForReview } = await import('./crm-follow-up.js');
+      await flagFollowUpsForReview(lead.id, occurredAt);
+    } catch (e) {
+      console.warn('[channel-ingest] follow-up review:', e instanceof Error ? e.message : e);
+    }
     const snip = snippetOf(body);
     const inferredGrade = inferGradeProgramFromText(
       [body, lead.notes, lead.last_inbound_snippet].filter(Boolean).join('\n')

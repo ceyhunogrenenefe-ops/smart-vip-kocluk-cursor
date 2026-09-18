@@ -37,6 +37,7 @@ import {
   formatTry,
   CRM_MESSAGE_TEMPLATES
 } from '../../../lib/registrationTrackingConfig';
+import FollowUpSuggestion from './FollowUpSuggestion';
 
 type Props = {
   leadId: string | null;
@@ -63,6 +64,8 @@ export default function RegLeadDrawer({
   const [loading, setLoading] = useState(false);
   const [detail, setDetail] = useState<RegLeadDetail | null>(null);
   const [saving, setSaving] = useState(false);
+  /** FAZ 3: aşama değişince takip planı önerisi */
+  const [followUpStage, setFollowUpStage] = useState<string | null>(null);
   const [showConfirm, setShowConfirm] = useState(false);
   const [showLost, setShowLost] = useState(false);
 
@@ -90,9 +93,11 @@ export default function RegLeadDrawer({
   const saveGeneral = async (patch: Record<string, unknown>) => {
     if (!leadId) return;
     setSaving(true);
+    const prevStage = detail?.lead?.stage;
     try {
       await rtUpdateLead(leadId, patch);
       toast.success('Kaydedildi');
+      if (typeof patch.stage === 'string' && patch.stage !== prevStage) setFollowUpStage(patch.stage);
       await load();
       onUpdated();
     } catch (e) {
@@ -161,6 +166,20 @@ export default function RegLeadDrawer({
       </div>
 
       <div className="flex-1 overflow-y-auto p-4">
+        {followUpStage && leadId ? (
+          <div className="mb-3">
+            <FollowUpSuggestion
+              leadId={leadId}
+              stage={followUpStage}
+              onDismiss={() => setFollowUpStage(null)}
+              onDone={() => {
+                setFollowUpStage(null);
+                void load();
+                onUpdated();
+              }}
+            />
+          </div>
+        ) : null}
         {loading && (
           <div className="flex justify-center py-12">
             <Loader2 className="h-8 w-8 animate-spin text-indigo-600" />
@@ -981,6 +1000,18 @@ function TasksTab({
   const [dueLocal, setDueLocal] = useState(localDueValue(1));
   const [assignee, setAssignee] = useState(effectiveUser?.id || '');
   const [busy, setBusy] = useState(false);
+  const [taskType, setTaskType] = useState('call_parent');
+
+  /** FAZ 3: hazır “sonraki işlem” kısayolları (başlık, tür ve tarih doldurur) */
+  const quick = (days: number, type: string, label: string, hour = 10) => {
+    const d = new Date();
+    d.setDate(d.getDate() + days);
+    d.setHours(hour, 0, 0, 0);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    setDueLocal(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`);
+    setTitle(label);
+    setTaskType(type);
+  };
 
   const complete = async (taskId: string) => {
     const result = window.prompt('Görüşme sonucu:');
@@ -1003,11 +1034,11 @@ function TasksTab({
         lead_id: leadId,
         title: title.trim(),
         description: title.trim(),
-        task_type: 'call_parent',
+        task_type: taskType,
         due_at: due,
         assigned_to: assignee || undefined,
         next_action_at: due,
-        next_action_type: 'call_parent'
+        next_action_type: taskType
       });
       toast.success('Alarm / takip kuruldu');
       onChanged();
@@ -1021,7 +1052,25 @@ function TasksTab({
   return (
     <div className="space-y-3">
       <div className="rounded-xl border border-amber-200 bg-amber-50/70 p-3">
-        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-amber-800">Alarm kur</p>
+        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-amber-800">Sonraki işlem / alarm kur</p>
+        <div className="mb-2 flex flex-wrap gap-1.5">
+          {[
+            { days: 2, type: 'whatsapp', label: '2 gün sonra mesaj gönder', short: '+2 gün mesaj' },
+            { days: 3, type: 'call_parent', label: '3 gün sonra ara', short: '+3 gün ara' },
+            { days: 5, type: 'other', label: '5 gün sonra hatırlat', short: '+5 gün hatırlat' },
+            { days: 7, type: 'call_parent', label: '7 gün sonra takip', short: '+7 gün takip' },
+            { days: 1, type: 'payment_followup', label: 'Ödeme kontrolü yap', short: 'Ödeme kontrolü' }
+          ].map((q) => (
+            <button
+              key={q.short}
+              type="button"
+              onClick={() => quick(q.days, q.type, q.label)}
+              className="rounded-full border border-amber-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-amber-900 hover:bg-amber-100"
+            >
+              {q.short}
+            </button>
+          ))}
+        </div>
         <input
           className="mb-2 w-full rounded-lg border border-amber-200 bg-white px-2 py-1.5 text-sm"
           value={title}
@@ -1070,9 +1119,22 @@ function TasksTab({
             key={String(t.id)}
             className={`rounded-lg border p-3 text-sm ${overdue ? 'border-red-400 bg-red-50 dark:bg-red-950/30' : 'border-slate-200 dark:border-slate-700'}`}
           >
-            <div className="font-medium">{String(t.title)}</div>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="font-medium">{String(t.title)}</span>
+              {t.auto_generated ? (
+                <span className="rounded-full bg-sky-100 px-1.5 py-0.5 text-[10px] font-semibold text-sky-800">Takip planı</span>
+              ) : null}
+              {t.status === 'cancelled' ? (
+                <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500">İptal</span>
+              ) : null}
+            </div>
             <div className="text-xs text-slate-500">{formatIstanbul(String(t.due_at))}</div>
-            {t.status !== 'completed' && (
+            {t.review_required && t.status !== 'completed' && t.status !== 'cancelled' ? (
+              <div className="mt-1 rounded-md bg-violet-50 px-2 py-1 text-[11px] font-medium text-violet-800 ring-1 ring-violet-200">
+                Yeniden değerlendir: {String(t.review_reason || 'Müşteri yeniden yazdı')}
+              </div>
+            ) : null}
+            {t.status !== 'completed' && t.status !== 'cancelled' && (
               <button
                 type="button"
                 onClick={() => complete(String(t.id))}

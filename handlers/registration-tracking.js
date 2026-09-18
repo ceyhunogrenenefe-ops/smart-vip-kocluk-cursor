@@ -1939,6 +1939,13 @@ export default async function handler(req, res) {
       return res.status(200).json({ data: row });
     }
 
+    // FAZ 3: takip planları (herkes okur; yönetici değiştirir)
+    if (op === 'follow-up-rules' && req.method === 'GET') {
+      const { getFollowUpRules, DEFAULT_FOLLOW_UP_RULES } = await import('../api/_lib/crm-follow-up.js');
+      const rules = await getFollowUpRules(institutionId);
+      return res.status(200).json({ data: { rules, defaults: DEFAULT_FOLLOW_UP_RULES } });
+    }
+
     if (op === 'daily-report-list') {
       const { data: rows, error: listErr } = await supabaseAdmin
         .from('crm_daily_reports')
@@ -2048,6 +2055,30 @@ export default async function handler(req, res) {
       }
       if (op === 'create-task') {
         const data = await handleCreateTask(body, institutionId, actor);
+        return res.status(201).json({ data });
+      }
+      if (op === 'follow-up-rules') {
+        if (!isManager(tags)) return res.status(403).json({ error: 'forbidden', message: 'Takip planlarını yalnız yönetici değiştirir' });
+        const { saveFollowUpRules } = await import('../api/_lib/crm-follow-up.js');
+        const rules = await saveFollowUpRules(institutionId, body.rules || {}, actor.sub);
+        return res.status(200).json({ data: { rules } });
+      }
+      if (op === 'create-follow-ups') {
+        const leadId = String(body.lead_id || '').trim();
+        const stage = String(body.stage || '').trim();
+        if (!leadId || !stage) return res.status(400).json({ error: 'lead_id_and_stage_required' });
+        const { createFollowUpTasks } = await import('../api/_lib/crm-follow-up.js');
+        const steps = Array.isArray(body.steps)
+          ? body.steps
+              .map((s) => ({
+                days: Number(s?.days) || 0,
+                task_type: String(s?.task_type || 'call_parent'),
+                title: String(s?.title || '').trim().slice(0, 120) || 'Takip',
+                due_at: s?.due_at && !Number.isNaN(Date.parse(s.due_at)) ? new Date(s.due_at).toISOString() : null
+              }))
+              .filter((s) => s.due_at)
+          : null;
+        const data = await createFollowUpTasks({ leadId, stage, institutionId, actorId: actor.sub, steps });
         return res.status(201).json({ data });
       }
       if (op === 'complete-task') {
