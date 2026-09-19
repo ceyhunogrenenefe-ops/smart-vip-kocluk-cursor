@@ -81,6 +81,7 @@ export const routeLoaders = {
   'private-live-pro': () => import('../handlers/private-live-pro.js'),
   'class-schedule-plans': () => import('../handlers/class-schedule-plans.js'),
   'academic-center-links': () => import('../handlers/academic-center-links.js'),
+  'exam-calendar': () => import('../handlers/exam-calendar.js'),
   'academic-center-bbb-join': () => import('../handlers/academic-center-bbb-join.js'),
   'parent-sign-contracts': () => import('../handlers/parent-sign-contracts.js'),
   'parent-sign-class-presets': () => import('../handlers/parent-sign-class-presets.js'),

@@ -125,7 +125,7 @@ const STUDENT_TABS: MobileTabItem[] = [
     path: '/academic-center',
     label: 'Merkez',
     icon: Sparkles,
-    matchPaths: ['/kitap-magazasi', '/sepet', '/kitap-odeme']
+    matchPaths: ['/kitap-magazasi', '/sepet', '/kitap-odeme', '/deneme-takvimi']
   },
 
   { path: '/soru-sor', label: 'Soru', icon: CircleHelp },

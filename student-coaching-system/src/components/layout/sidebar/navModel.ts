@@ -194,7 +194,8 @@ export const MOBILE_ACADEMIC_MATCH_PATHS = [
   '/soru-analitik',
   '/student-dashboard',
   '/student-analytics',
-  '/exam-tracking'
+  '/exam-tracking',
+  '/deneme-takvimi'
 ] as const;
 
 const ACADEMIC_CENTER_PATH = '/academic-center';
@@ -204,6 +205,7 @@ const ACADEMIC_PATHS = new Set([
   '/tracking',
   '/book-tracking',
   '/exam-tracking',
+  '/deneme-takvimi',
   '/edesis',
   '/edesis-analiz',
   '/written-exam',
@@ -288,6 +290,7 @@ const ACADEMIC_LABELS: Record<string, string> = {
   '/tracking': 'Haftalık Takip',
   '/book-tracking': 'Kitap Takibi',
   '/exam-tracking': 'Sınav Takibi',
+  '/deneme-takvimi': 'Deneme Sınav Takvimi',
   '/edesis': 'Edesis',
   '/edesis-analiz': 'Edesis sınav analizi',
   '/written-exam': 'Yazılı Takibi',
@@ -327,6 +330,7 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
       { path: '/class-lesson-topic-progress', icon: MapPin, label: 'Grup dersi konu ilerlemesi' },
       { path: '/coach-stats', icon: BarChart3, label: 'Koç İstatistikleri' },
       { path: '/academic-center', icon: Sparkles, label: 'Akademik Merkez' },
+      { path: '/deneme-takvimi', icon: CalendarDays, label: 'Deneme Sınav Takvimi' },
       ...privateLiveNavForRoles(['super_admin']),
       { path: '/private-lesson-assignments', icon: UserCheck, label: 'Özel ders atamaları' },
       { path: '/class-live-lessons', icon: Calendar, label: 'Canlı Grup Dersi' },
@@ -399,6 +403,7 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
     return [
       { path: '/student-analytics', icon: BarChart3, label: 'Analizlerim' },
       { path: '/exam-tracking', icon: ClipboardList, label: 'Deneme analizi' },
+      { path: '/deneme-takvimi', icon: CalendarDays, label: 'Deneme Sınav Takvimi' },
       { path: '/edesis-analiz', icon: BarChart3, label: 'Edesis sınav analizi' },
       { path: '/kitap-magazasi', icon: ShoppingBag, label: 'Kitap Mağazası' },
     ];
@@ -422,6 +427,7 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
     { path: '/academic-center', icon: Sparkles, label: 'Akademik Merkez' },
     { path: '/book-tracking', icon: BookMarked, label: 'Kitap Takibi' },
     { path: '/exam-tracking', icon: ClipboardList, label: 'Sınav Takibi (Denemelerim)' },
+    { path: '/deneme-takvimi', icon: CalendarDays, label: 'Deneme Sınav Takvimi' },
     { path: '/edesis', icon: CloudDownload, label: 'Edesis' },
     { path: '/edesis-analiz', icon: BarChart3, label: 'Edesis sınav analizi' },
     { path: '/reports', icon: FileCheck, label: 'Raporlar' },
@@ -470,6 +476,7 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
     { path: '/soru-havuzu', icon: CircleHelp, label: 'Soru Havuzu' },
     { path: '/academic-center', icon: Sparkles, label: 'Akademik Merkez' },
     { path: '/edesis-analiz', icon: BarChart3, label: 'Edesis sınav analizi' },
+    { path: '/deneme-takvimi', icon: CalendarDays, label: 'Deneme Sınav Takvimi' },
     ...privateLiveNavForRoles(['teacher']),
     { path: '/class-live-lessons', icon: Calendar, label: 'Canlı Grup Dersi' },
     { path: '/attendance-report', icon: ClipboardList, label: 'Yoklama raporu' },
@@ -495,6 +502,7 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
     { path: '/academic-center', icon: Sparkles, label: 'Akademik Merkez' },
     { path: '/book-tracking', icon: BookMarked, label: 'Kitap Takibi' },
     { path: '/exam-tracking', icon: ClipboardList, label: 'Sınav Takibi (Denemelerim)' },
+    { path: '/deneme-takvimi', icon: CalendarDays, label: 'Deneme Sınav Takvimi' },
     { path: '/edesis', icon: CloudDownload, label: 'Edesis' },
     { path: '/edesis-analiz', icon: BarChart3, label: 'Edesis sınav analizi' },
     { path: '/topic-tracking', icon: CheckSquare, label: 'Konu Takibi' },

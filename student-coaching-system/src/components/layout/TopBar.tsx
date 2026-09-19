@@ -56,6 +56,7 @@ export default function TopBar({ onMenuClick, drawerOpen = false, hideMenuButton
       '/edu-panel': 'Ödevlerim ve Animasyonlarım',
       '/edu-derslerim': 'Ödevlerim ve Animasyonlarım',
       '/exam-tracking': 'Sınav Takibi (Denemelerim)',
+      '/deneme-takvimi': 'Deneme Sınav Takvimi',
       '/topics': 'Konu Havuzu',
       '/analytics': 'Analiz Paneli',
       '/reports': 'Raporlar',
