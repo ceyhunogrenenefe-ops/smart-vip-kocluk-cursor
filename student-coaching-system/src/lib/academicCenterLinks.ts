@@ -19,13 +19,13 @@ function gradeBlob(classLevel: unknown, className?: unknown): string {
     .replace(/ç/g, 'c');
 }
 
-/** 5–6 (4 veya 7 yok) → class56 kartı; 4 → class47. 7 etüt → class78. */
+/** 5–6 (4 veya 7 yok) → class56 kartı; 4 → class47. 7. sınıf etüt ve deneme → class78. */
 function primary4567StudyExamRoom(
   classLevel: unknown,
   className?: unknown,
   kind: 'study' | 'exam' = 'exam'
 ): 'class47' | 'class56' | 'class78' {
-  if (kind === 'study' && isSeventhGrade(classLevel, className)) return 'class78';
+  if (isSeventhGrade(classLevel, className)) return 'class78';
   const blob = gradeBlob(classLevel, className);
   const has56 = /(?:^|[^\d])([56])(?:[a-z]|\.|\s|$)/.test(blob);
   const has47 = /(?:^|[^\d])([47])(?:[a-z]|\.|\s|$)/.test(blob);
@@ -77,10 +77,10 @@ export const EXAM_ENTRY_DEFS: {
 }[] = [
   { key: 'lise', label: 'Lise deneme sınavı giriş', accent: 'from-blue-500 to-indigo-600' },
   { key: 'yos', label: 'YÖS deneme sınavı giriş', accent: 'from-rose-500 to-orange-600' },
-  { key: 'class47', label: '4-7. sınıf deneme sınıfı giriş', accent: 'from-amber-500 to-orange-600' },
+  { key: 'class47', label: '4-6. sınıf deneme sınıfı giriş', accent: 'from-amber-500 to-orange-600' },
   { key: 'class34', label: '3. sınıf deneme sınıfı giriş', accent: 'from-emerald-500 to-teal-600' },
   { key: 'class56', label: '5-6. sınıf deneme sınıfı giriş', accent: 'from-violet-500 to-purple-600' },
-  { key: 'class78', label: '8. sınıf / LGS deneme sınıfı giriş', accent: 'from-fuchsia-500 to-pink-600' }
+  { key: 'class78', label: '7-8. sınıf / LGS deneme sınıfı giriş', accent: 'from-fuchsia-500 to-pink-600' }
 ];
 
 export const STUDY_ENTRY_DEFS: {
@@ -144,7 +144,7 @@ export const defaultAcademicCenterLinks: AcademicCenterLinks = {
     class47: PRIMARY_4567_ZOOM_URL,
     class34: 'https://kurumsal.ornek.edu/tr/deneme-34',
     class56: PRIMARY_4567_ZOOM_URL,
-    class78: 'https://kurumsal.ornek.edu/tr/deneme-78',
+    class78: LGS8_ETUT_ZOOM_URL,
     optic: 'https://kurumsal.ornek.edu/tr/sanal-optik',
     exam: 'https://kurumsal.ornek.edu/tr/deneme'
   },
@@ -162,6 +162,8 @@ export function coerceAcademicCenterLinks(next: Partial<AcademicCenterLinks> | n
   if (!exams.lise && exams.exam) exams.lise = exams.exam;
   exams.class47 = PRIMARY_4567_ZOOM_URL;
   exams.class56 = PRIMARY_4567_ZOOM_URL;
+  // 7–8 / LGS deneme sınavı — etüt ile aynı sabit Zoom
+  exams.class78 = LGS8_ETUT_ZOOM_URL;
   const studyClasses = { ...d.studyClasses, ...(next.studyClasses || {}) };
   studyClasses.class47 = PRIMARY_4567_ZOOM_URL;
   studyClasses.class56 = PRIMARY_4567_ZOOM_URL;

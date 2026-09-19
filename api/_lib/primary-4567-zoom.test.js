@@ -50,7 +50,8 @@ describe('primary 4-7 Zoom', () => {
     );
     assert.equal(
       primary4567ZoomIfApplicable({ subject: 'ETÜT', className: '8A', classLevel: 'LGS' }),
-      null
+      null,
+      '8. sınıf etüt değişmez'
     );
   });
 
@@ -67,7 +68,7 @@ describe('primary 4-7 Zoom', () => {
     assert.equal(isPrimary4567JoinSubject('DENEME ANALİZİ'), false);
   });
 
-  it('returns 4-6 Zoom for etüt; 7th-grade etüt uses LGS8 Zoom; deneme stays on 4-7 Zoom', () => {
+  it('returns 4-6 Zoom for etüt; 7th grade etüt and 7th/8th grade deneme use LGS8 Zoom', () => {
     assert.equal(
       primary4567ZoomIfApplicable({ subject: 'ETÜT', className: '5A', classLevel: '5' }),
       PRIMARY_4567_ZOOM_URL
@@ -78,7 +79,7 @@ describe('primary 4-7 Zoom', () => {
     );
     assert.equal(
       primary4567ZoomIfApplicable({ subject: 'DENEME SINAVI', className: '7A', classLevel: 7 }),
-      PRIMARY_4567_ZOOM_URL
+      LGS8_ETUT_ZOOM_URL
     );
     assert.equal(
       primary4567ZoomIfApplicable({ subject: 'ÖDEV TAKİBİ', className: '7A', classLevel: '7' }),
@@ -86,15 +87,34 @@ describe('primary 4-7 Zoom', () => {
     );
     assert.equal(
       primary4567ZoomIfApplicable({ subject: 'ETÜT', className: '8A', classLevel: '8' }),
-      null
+      null,
+      '8. sınıf etüt değişmez'
     );
+    assert.equal(
+      primary4567ZoomIfApplicable({ subject: 'DENEME SINAVI', className: '8A 2026-2027 DÖNEM', classLevel: 'LGS' }),
+      LGS8_ETUT_ZOOM_URL
+    );
+    assert.equal(
+      primary4567ZoomIfApplicable({ subject: 'DENEME SINAVI SÖZEL', className: '', classLevel: 'LGS' }),
+      LGS8_ETUT_ZOOM_URL
+    );
+    assert.equal(
+      primary4567ZoomIfApplicable({ subject: 'DENEME SINAVI', className: '5A', classLevel: 5 }),
+      PRIMARY_4567_ZOOM_URL,
+      '5. sınıf deneme 4-7 Zoom kalır'
+    );
+    // Etüt / deneme dışı dersler ve lise değişmez
+    assert.equal(primary4567ZoomIfApplicable({ subject: 'TÜRKÇE', className: '8A', classLevel: 'LGS' }), null);
+    assert.equal(primary4567ZoomIfApplicable({ subject: 'DENEME ANALİZİ', className: '8A', classLevel: '8' }), null);
+    assert.equal(primary4567ZoomIfApplicable({ subject: 'DENEME SINAVI', className: 'TYT-1', classLevel: 'TYT' }), null);
+    assert.equal(primary4567ZoomIfApplicable({ subject: 'ETÜT', className: '11A', classLevel: '11' }), null);
     assert.equal(
       primary4567ZoomIfApplicable({ subject: 'MATEMATİK', className: '4A', classLevel: 4 }),
       null
     );
   });
 
-  it('forces class47/56 to 4-7 Zoom and class78 study to LGS8 Zoom', () => {
+  it('forces class47/56 to 4-7 Zoom and class78 study + exam to LGS8 Zoom', () => {
     const links = linksForInstitution(
       {
         default: {
@@ -117,7 +137,7 @@ describe('primary 4-7 Zoom', () => {
     assert.equal(links.studyClasses.class47, PRIMARY_4567_ZOOM_URL);
     assert.equal(links.studyClasses.class56, PRIMARY_4567_ZOOM_URL);
     assert.equal(links.studyClasses.class78, LGS8_ETUT_ZOOM_URL);
-    assert.equal(links.exams.class78, 'https://evil.example/deneme78');
+    assert.equal(links.exams.class78, LGS8_ETUT_ZOOM_URL);
     assert.ok(!String(links.exams.class47).includes('6946337643'));
     assert.ok(String(links.exams.class47).includes('9448152197'));
     assert.ok(String(links.studyClasses.class78).includes('6946337643'));

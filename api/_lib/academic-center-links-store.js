@@ -19,7 +19,7 @@ const DEFAULT_EXAMS = {
   class47: PRIMARY_4567_ZOOM_URL,
   class34: 'https://kurumsal.ornek.edu/tr/deneme-34',
   class56: PRIMARY_4567_ZOOM_URL,
-  class78: 'https://kurumsal.ornek.edu/tr/deneme-78',
+  class78: LGS8_ETUT_ZOOM_URL,
   optic: 'https://kurumsal.ornek.edu/tr/sanal-optik',
   exam: 'https://kurumsal.ornek.edu/tr/deneme'
 };
@@ -38,10 +38,10 @@ export const DEFAULT_ACADEMIC_LINKS = {
 export const ACADEMIC_EXAM_ROOM_LABELS = {
   lise: 'Lise Deneme Sınavı',
   yos: 'YÖS Deneme Sınavı',
-  class47: '4-7. Sınıf Deneme Sınavı',
+  class47: '4-6. Sınıf Deneme Sınavı',
   class34: '3. Sınıf Deneme Sınavı',
   class56: '5-6. Sınıf Deneme Sınavı',
-  class78: '8. Sınıf / LGS Deneme Sınavı'
+  class78: '7-8. Sınıf / LGS Deneme Sınavı'
 };
 
 export const ACADEMIC_STUDY_ROOM_LABELS = {
@@ -105,8 +105,9 @@ export function linksForInstitution(store, institutionId) {
   merged.exams.class56 = PRIMARY_4567_ZOOM_URL;
   merged.studyClasses.class47 = PRIMARY_4567_ZOOM_URL;
   merged.studyClasses.class56 = PRIMARY_4567_ZOOM_URL;
-  // 7–8 / LGS etüt — 8. sınıf Zoom (7. sınıf etüt de buraya)
+  // 7–8 / LGS etüt ve deneme — aynı sabit Zoom
   merged.studyClasses.class78 = LGS8_ETUT_ZOOM_URL;
+  merged.exams.class78 = LGS8_ETUT_ZOOM_URL;
   return merged;
 }
 
