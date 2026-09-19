@@ -58,6 +58,30 @@ describe('extractEdesisAnswerKeyLessons', () => {
     assert.equal(rows.filter((r) => r.kitapcikTuru === 'C').length, 0, 'boş kitapçık atlanır');
   });
 
+  it('counts distinct questions, not the highest dersSoruNumarasi (TYT Sosyal: Coğrafya 6-10 = 5 soru)', () => {
+    const key = {
+      result: {
+        kitapciklar: [
+          {
+            kitapcikTuru: 'B',
+            cevaplar: [
+              ...[1, 2, 3, 4, 5].map((n) => q('B', 30, 4, 40 + n, n, 'Tarih')),
+              ...[6, 7, 8, 9, 10].map((n) => q('B', 31, 4, 40 + n, n, 'Coğrafya'))
+            ]
+          }
+        ]
+      }
+    };
+    const rows = extractEdesisAnswerKeyLessons(key);
+    assert.deepEqual(
+      rows.map((r) => [r.lessonName, r.questionCount]),
+      [
+        ['Tarih', 5],
+        ['Coğrafya', 5]
+      ]
+    );
+  });
+
   it('returns [] for unexpected payloads', () => {
     assert.deepEqual(extractEdesisAnswerKeyLessons(null), []);
     assert.deepEqual(extractEdesisAnswerKeyLessons({ result: {} }), []);
@@ -76,6 +100,26 @@ describe('pickEdesisBookletLessons with answer key fallback', () => {
   it('uses B answer key ids instead of A structure ids', () => {
     const b = pickEdesisBookletLessons(structure, 'B');
     assert.deepEqual(b.map((l) => `${l.lessonId}:${l.dersGrupId}`), ['21:8', '22:9']);
+  });
+
+  it('takes question counts from the A structure when lesson count matches', () => {
+    const s2 = {
+      rows: [
+        { kitapcikTuru: 'A', lessonId: 1, dersGrupId: 1, questionCount: 5 },
+        { kitapcikTuru: 'A', lessonId: 2, dersGrupId: 1, questionCount: 5 }
+      ],
+      answerKeyLessons: [
+        { kitapcikTuru: 'B', lessonId: 11, dersGrupId: 3, questionCount: 5 },
+        { kitapcikTuru: 'B', lessonId: 12, dersGrupId: 3, questionCount: 10 }
+      ]
+    };
+    assert.deepEqual(
+      pickEdesisBookletLessons(s2, 'B').map((l) => [l.lessonId, l.dersGrupId, l.questionCount]),
+      [
+        [11, 3, 5],
+        [12, 3, 5]
+      ]
+    );
   });
 
   it('keeps structure rows for A', () => {
