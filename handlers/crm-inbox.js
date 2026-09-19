@@ -1000,6 +1000,22 @@ export default async function handler(req, res) {
       return res.status(200).json({ data });
     }
 
+    // FAZ 6 — Bugünkü İşlerim (temsilci: yalnız kendisi) + satış paneli (yönetici: tüm ekip / seçili temsilci)
+    if (op === 'today_board') {
+      const { buildSalesBoard } = await import('../api/_lib/crm-sales-board.js');
+      const q = { ...(req.query || {}), ...body };
+      const agentParam = String(q.agent || '').trim();
+      const channelParam = String(q.channel || '').trim();
+      const adParam = String(q.ad || '').trim();
+      const data = await buildSalesBoard({
+        institutionId,
+        userId: isAdmin ? agentParam || null : actor.sub,
+        channel: ['whatsapp', 'instagram', 'facebook'].includes(channelParam) ? channelParam : '',
+        ad: ['ad', 'organic'].includes(adParam) ? adParam : ''
+      });
+      return res.status(200).json({ data: { ...data, scope: isAdmin && !agentParam ? 'team' : 'self', is_admin: isAdmin } });
+    }
+
     // FAZ 4 — bildirim zili ve Web Push
     if (op === 'notifications') {
       const { listCrmNotifications } = await import('../api/_lib/crm-notify.js');

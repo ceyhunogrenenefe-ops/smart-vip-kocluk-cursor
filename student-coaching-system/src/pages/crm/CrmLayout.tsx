@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { BarChart3, Bell, FileBarChart, Inbox, LayoutGrid, LogOut, Puzzle, Send, Users } from 'lucide-react';
+import { BarChart3, Bell, CalendarCheck, FileBarChart, Inbox, LayoutGrid, LogOut, Puzzle, Send, Users } from 'lucide-react';
 import CrmAlarmHost from './CrmAlarmHost';
 import CrmLiveOpsHost from './CrmLiveOpsHost';
 import CrmNotificationBell from './CrmNotificationBell';
@@ -37,6 +37,17 @@ export default function CrmLayout() {
               <h1 className="font-serif text-xl font-semibold tracking-tight text-slate-900">CRM</h1>
             </div>
             <nav className="flex flex-wrap items-center gap-1">
+              <NavLink
+                to="/crm/bugun"
+                className={({ isActive }) =>
+                  `inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition ${
+                    isActive ? 'bg-emerald-600 text-white' : 'text-slate-600 hover:bg-slate-100'
+                  }`
+                }
+              >
+                <CalendarCheck className="h-4 w-4" />
+                {isAdmin ? 'Bugün / SLA' : 'Bugünkü işlerim'}
+              </NavLink>
               <NavLink
                 to="/crm/dashboard"
                 className={({ isActive }) =>

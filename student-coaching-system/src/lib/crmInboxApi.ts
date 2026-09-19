@@ -501,3 +501,72 @@ export function crmListPresence(onlineOnly = false) {
     data: { ok?: boolean; items?: CrmPresenceAgent[]; online_count?: number; error?: string };
   }>('list_presence', onlineOnly ? { online_only: '1' } : undefined);
 }
+
+/** FAZ 6 — Bugünkü İşlerim / satış paneli */
+export type CrmSla = 'green' | 'yellow' | 'orange' | 'red';
+export type CrmBoardWaiting = {
+  conversation_id: string;
+  contact_name?: string | null;
+  contact_username?: string | null;
+  contact_identifier?: string | null;
+  channel: string;
+  assigned_user_id?: string | null;
+  assigned_name?: string | null;
+  lead_id?: string | null;
+  preview?: string | null;
+  waiting_since: string;
+  waiting_minutes: number;
+  sla: CrmSla;
+  is_ad: boolean;
+  ad_label?: string | null;
+};
+export type CrmBoardTask = {
+  id: string;
+  lead_id?: string | null;
+  lead_name?: string;
+  lead_stage?: string | null;
+  title: string;
+  task_type?: string | null;
+  priority?: string | null;
+  due_at: string;
+  assigned_to?: string | null;
+  auto_generated?: boolean;
+  review_required?: boolean;
+};
+export type CrmBoardAgent = {
+  user_id: string | null;
+  name: string;
+  waiting: number;
+  green: number;
+  yellow: number;
+  orange: number;
+  red: number;
+  replied_today: number;
+  avg_response_min: number | null;
+  overdue_tasks: number;
+  today_tasks: number;
+  new_leads_today: number;
+};
+export type CrmTodayBoard = {
+  generated_at: string;
+  sla_thresholds: number[];
+  scope: 'team' | 'self';
+  is_admin: boolean;
+  totals: Omit<CrmBoardAgent, 'user_id' | 'name'>;
+  waiting: CrmBoardWaiting[];
+  tasks: { overdue: CrmBoardTask[]; today: CrmBoardTask[] };
+  new_leads: Array<{
+    id: string;
+    full_name?: string | null;
+    parent_full_name?: string | null;
+    source?: string | null;
+    stage?: string | null;
+    assigned_user_id?: string | null;
+    created_at: string;
+  }>;
+  agents: CrmBoardAgent[];
+};
+
+export function crmTodayBoard(filters: { agent?: string; channel?: string; ad?: string } = {}) {
+  return inboxGet<{ data: CrmTodayBoard }>('today_board', filters);
+}

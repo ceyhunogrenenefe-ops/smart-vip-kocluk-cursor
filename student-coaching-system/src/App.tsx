@@ -92,6 +92,7 @@ import CrmAgentsPage from './pages/crm/CrmAgentsPage';
 import CrmWidgetsPage from './pages/crm/CrmWidgetsPage';
 import CrmHome from './pages/crm/CrmHome';
 import CrmOpsDashboardPage from './pages/crm/CrmOpsDashboardPage';
+import CrmTodayPage from './pages/crm/CrmTodayPage';
 import CrmTasksPage from './pages/crm/CrmTasksPage';
 import CrmBulkMessagePage from './pages/crm/CrmBulkMessagePage';
 import CrmLoginPage from './pages/crm/CrmLoginPage';
@@ -441,6 +442,7 @@ function App() {
               }
             >
               <Route index element={<CrmHome />} />
+              <Route path="bugun" element={<CrmTodayPage />} />
               <Route path="dashboard" element={<CrmOpsDashboardPage />} />
               <Route path="gorevler" element={<CrmTasksPage />} />
               <Route path="toplu-mesaj" element={<CrmBulkMessagePage />} />
