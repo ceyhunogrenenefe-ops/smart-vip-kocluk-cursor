@@ -1,16 +1,18 @@
 /**
- * Paragraf çözme, problem çözme ve kitap okuma — ders havuzundan bağımsız,
+ * Paragraf çözme, problem çözme, kitap okuma ve deneme sınavı — ders havuzundan bağımsız,
  * her kademede ayrı "ders" satırı olarak listelenir (konu havuzuna dokunulmaz).
  */
 
-export const STUDY_TRACK_SUBJECTS = ['Paragraf Çözme', 'Problem Çözme', 'Kitap Okuma'] as const;
+export const STUDY_TRACK_SUBJECTS = ['Paragraf Çözme', 'Problem Çözme', 'Kitap Okuma', 'Deneme Sınavı'] as const;
 
 export type StudyTrackSubjectName = (typeof STUDY_TRACK_SUBJECTS)[number];
 
 const TRACK_TOPICS: Record<StudyTrackSubjectName, string[]> = {
   'Paragraf Çözme': ['Günlük paragraf', 'Haftalık paragraf hedefi', 'Tekrar / deneme'],
   'Problem Çözme': ['Günlük problem', 'Haftalık problem hedefi', 'Konu testi / tekrar'],
-  'Kitap Okuma': ['Sayfa hedefi', 'Kitap bitirme', 'Günlük okuma']
+  'Kitap Okuma': ['Sayfa hedefi', 'Kitap bitirme', 'Günlük okuma'],
+  // Öğrenci çözdüğü denemenin doğru / yanlış / boş sayısını girer (soru birimi)
+  'Deneme Sınavı': ['Genel deneme', 'Branş denemesi', 'Deneme tekrarı / analiz']
 };
 
 export function isStudyTrackSubject(subject: string): boolean {
@@ -51,8 +53,9 @@ export function studyTracksForClassLevel(
   const out: Record<string, string[]> = {};
   const n = numericGrade(classLevel as number | string);
 
-  // Kitap okuma: tüm kademeler
+  // Kitap okuma ve deneme sınavı: tüm kademeler
   out['Kitap Okuma'] = [...TRACK_TOPICS['Kitap Okuma']];
+  out['Deneme Sınavı'] = [...TRACK_TOPICS['Deneme Sınavı']];
 
   const isLgs = key === 'LGS';
   const isYks = key.startsWith('YKS-');
