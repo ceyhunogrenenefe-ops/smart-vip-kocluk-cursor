@@ -255,7 +255,8 @@ export function WeeklyPlannerCalendar({
 
   const [goals, setGoals] = useState<CoachWeeklyGoalRow[]>([]);
   const [entries, setEntries] = useState<WeeklyPlannerEntryRow[]>([]);
-  const [screenTimeByDate, setScreenTimeByDate] = useState<Map<string, number>>(() => new Map());
+  /** Sunucudaki ekran süresi kayıtları (gün → dakika); haftalık satırlarla birleştirme aşağıda useMemo'da */
+  const [screenTimeLogs, setScreenTimeLogs] = useState<Map<string, number>>(() => new Map());
   const [screenTimeLoading, setScreenTimeLoading] = useState(false);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string>('');
@@ -378,31 +379,38 @@ export function WeeklyPlannerCalendar({
     }
   }, []);
 
+  // Not: studentWeeklyEntries'e bağlı OLMAMALI. Eskiden bağlıydı → reload yeniden oluşuyor, useEffect(reload)
+  // tekrar çalışıp sonsuz döngüye giriyordu (günde ~40 bin istek) ve grafik hiç dolmuyordu.
   const loadScreenTimeForWeek = useCallback(
     async (seq: number) => {
       setScreenTimeLoading(true);
       try {
-        const weeklyRows = studentWeeklyEntries
-          .filter((e) => e.date >= weekStartStr && e.date <= weekEndStr)
-          .map((e) => ({
-            student_id: studentId,
-            date: e.date,
-            screen_time_minutes: e.screenTimeMinutes ?? null,
-          }));
         const st = await fetchScreenTimeLogs(studentId, weekStartStr, weekEndStr);
         if (seq !== reloadSeq.current) return;
         const dedicated = new Map<string, number>();
         for (const row of st) {
           dedicated.set(String(row.log_date).slice(0, 10), Number(row.screen_minutes) || 0);
         }
-        setScreenTimeByDate(mergeScreenTimeByDate(dedicated, weeklyRows));
+        setScreenTimeLogs(dedicated);
       } catch {
-        if (seq === reloadSeq.current) setScreenTimeByDate(new Map());
+        if (seq === reloadSeq.current) setScreenTimeLogs(new Map());
       } finally {
         if (seq === reloadSeq.current) setScreenTimeLoading(false);
       }
     },
-    [studentId, weekStartStr, weekEndStr, studentWeeklyEntries]
+    [studentId, weekStartStr, weekEndStr]
+  );
+
+  /** Ekran süresi: kayıtlar + haftalık rapor satırları (gün başına en yüksek dakika) */
+  const screenTimeByDate = useMemo(
+    () =>
+      mergeScreenTimeByDate(
+        screenTimeLogs,
+        studentWeeklyEntries
+          .filter((e) => e.date >= weekStartStr && e.date <= weekEndStr)
+          .map((e) => ({ date: e.date, screen_time_minutes: e.screenTimeMinutes ?? null }))
+      ),
+    [screenTimeLogs, studentWeeklyEntries, weekStartStr, weekEndStr]
   );
 
   const reload = useCallback(
