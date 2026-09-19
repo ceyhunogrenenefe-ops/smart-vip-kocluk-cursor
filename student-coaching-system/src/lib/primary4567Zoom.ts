@@ -89,19 +89,42 @@ export function isEtutJoinSubject(subject?: unknown): boolean {
   return s.includes('etut');
 }
 
+/** Sadece deneme sınavı (analiz hariç). */
+export function isDenemeJoinSubject(subject?: unknown): boolean {
+  const s = normalizeGradeBlob(subject).trim();
+  if (!s) return false;
+  if (s.includes('analiz')) return false;
+  return s.includes('deneme');
+}
+
+/** 8A / 8. sınıf / LGS 8 veya çıplak LGS (4–7 yok). Lise / TYT hariç. */
+export function isEighthGrade(classLevel?: unknown, className?: unknown): boolean {
+  const level = normalizeGradeBlob(classLevel);
+  const name = normalizeGradeBlob(className);
+  const blob = `${level} ${name}`.trim();
+  if (!blob) return false;
+  if (/\b(tyt|ayt|yks|lise|mezun|yos)\b/.test(blob)) return false;
+  if (hasEighthGradeToken(name) || hasEighthGradeToken(level)) return true;
+  if (/\blgs\b/.test(blob) && !hasPrimary4567GradeToken(name) && !hasPrimary4567GradeToken(level)) return true;
+  return false;
+}
+
 /**
- * 4–6 (+ 7 ödev/kitap/deneme) → 4–7 Zoom.
- * 7. sınıf etüt → 8. sınıf / LGS Zoom.
+ * 7. ve 8. sınıf (LGS) deneme sınavı → 8. sınıf / LGS Zoom (sabit).
+ * 7. sınıf etüt → 8. sınıf / LGS Zoom (önceden olduğu gibi). 8. sınıf etüt ve normal dersler değişmez.
+ * 4–6 etüt / ödev / kitap / deneme ve 7. sınıf ödev / kitap → 4–7 Zoom.
  */
 export function primary4567ZoomIfApplicable(opts?: {
   subject?: unknown;
   className?: unknown;
   classLevel?: unknown;
 }): string | null {
-  if (!isPrimary4567Grade(opts?.classLevel, opts?.className)) return null;
-  if (!isPrimary4567JoinSubject(opts?.subject)) return null;
-  if (isSeventhGrade(opts?.classLevel, opts?.className) && isEtutJoinSubject(opts?.subject)) {
+  const seventh = isSeventhGrade(opts?.classLevel, opts?.className);
+  if (isDenemeJoinSubject(opts?.subject) && (seventh || isEighthGrade(opts?.classLevel, opts?.className))) {
     return LGS8_ETUT_ZOOM_URL;
   }
+  if (seventh && isEtutJoinSubject(opts?.subject)) return LGS8_ETUT_ZOOM_URL;
+  if (!isPrimary4567Grade(opts?.classLevel, opts?.className)) return null;
+  if (!isPrimary4567JoinSubject(opts?.subject)) return null;
   return PRIMARY_4567_ZOOM_URL;
 }
