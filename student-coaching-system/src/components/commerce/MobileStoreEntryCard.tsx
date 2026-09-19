@@ -7,15 +7,14 @@ import { useMobileAppShell } from '../../hooks/useMobileAppShell';
 /**
  * Mobil (native uygulama + dar ekran) öğrenci için Kitap Mağazası girişi.
  * Mobil kabukta yan menü gizli olduğundan mağazaya başka yol yoktu; alt sekmelere dokunmadan
- * Merkez ve Profil sayfalarına kart olarak eklenir. Masaüstünde ve personelde görünmez.
+ * Merkez ve Profil sayfalarına kart olarak eklenir (üst çubukta ayrıca çanta simgesi var). Masaüstünde görünmez.
  */
 export default function MobileStoreEntryCard({ className = '' }: { className?: string }) {
   const { effectiveUser } = useAuth();
   const mobileAppShell = useMobileAppShell();
   const tags = userRoleTags(effectiveUser);
-  const studentOnly =
-    tags.includes('student') && !tags.some((t) => ['super_admin', 'admin', 'coach', 'teacher'].includes(t));
-  if (!mobileAppShell || !studentOnly) return null;
+  const canShop = tags.some((t) => ['student', 'teacher', 'coach', 'admin', 'super_admin'].includes(t));
+  if (!mobileAppShell || !canShop) return null;
 
   return (
     <div
