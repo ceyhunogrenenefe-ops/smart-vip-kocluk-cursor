@@ -120,7 +120,13 @@ const STUDENT_TABS: MobileTabItem[] = [
 
   { path: '/mobile/dersler', label: 'Dersler', icon: Video, matchPaths: LESSON_MATCH },
 
-  { path: '/academic-center', label: 'Merkez', icon: Sparkles },
+  // Kitap mağazası / sepet / ödeme Merkez sekmesi altında (mobilde yan menü yok)
+  {
+    path: '/academic-center',
+    label: 'Merkez',
+    icon: Sparkles,
+    matchPaths: ['/kitap-magazasi', '/sepet', '/kitap-odeme']
+  },
 
   { path: '/soru-sor', label: 'Soru', icon: CircleHelp },
 
