@@ -5,6 +5,7 @@ import { apiFetch } from '../lib/session';
 import { useAuth } from '../context/AuthContext';
 import { useMobileAppShell } from '../hooks/useMobileAppShell';
 import { isNativeApp } from '../lib/nativeApp';
+import MobileStoreEntryCard from '../components/commerce/MobileStoreEntryCard';
 
 type ProfilePayload = {
   user: { id: string; name: string; email: string; phone?: string | null; role: string };
@@ -103,6 +104,7 @@ export default function MyProfilePage() {
 
   return (
     <div className={`mx-auto max-w-lg space-y-6 ${mobileAppShell ? 'pb-6' : 'pb-10'}`}>
+      <MobileStoreEntryCard />
       <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900 sm:p-6">
         {!mobileAppShell ? (
         <div className="mb-6 flex items-center gap-3">
