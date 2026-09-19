@@ -71,6 +71,7 @@ import MobileLessonsHubPage from './pages/MobileLessonsHubPage';
 import MobileAcademicHubPage from './pages/MobileAcademicHubPage';
 import MobileAdminHubPage from './pages/MobileAdminHubPage';
 import AcademicCenter from './pages/AcademicCenter';
+import ExamCalendarPage from './pages/ExamCalendarPage';
 import AcademicCenterBbbJoinPage from './pages/AcademicCenterBbbJoinPage';
 import ParentSignFlowPage from './pages/ParentSignFlowPage';
 import TahsilatMuhasebePage from './pages/TahsilatMuhasebePage';
@@ -342,6 +343,13 @@ function App() {
               </ProtectedRoute>
             } />
 
+            <Route path="/deneme-takvimi" element={
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/deneme-takvimi')}>
+                <Layout>
+                  <ExamCalendarPage />
+                </Layout>
+              </ProtectedRoute>
+            } />
             <Route path="/academic-center" element={
               <ProtectedRoute allowedRoles={rolesForProtectedRoute('/academic-center')}>
                 <Layout>

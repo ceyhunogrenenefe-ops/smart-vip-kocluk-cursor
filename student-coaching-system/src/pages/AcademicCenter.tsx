@@ -15,6 +15,7 @@ import {
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import MobileStoreEntryCard from '../components/commerce/MobileStoreEntryCard';
+import MobileExamCalendarCard from '../components/academic/MobileExamCalendarCard';
 import { resolveStudentRecordId } from '../lib/coachResolve';
 import { userRoleTags } from '../config/rolePermissions';
 import { startEtutSession } from '../lib/etutSession';
@@ -425,6 +426,7 @@ export default function AcademicCenter() {
     >
       {edesisTaking ? null : (
         <>
+      <MobileExamCalendarCard />
       <MobileStoreEntryCard />
       <div className="relative overflow-hidden rounded-2xl border border-indigo-100 bg-gradient-to-br from-indigo-600 via-violet-600 to-fuchsia-600 p-4 text-white shadow-xl shadow-indigo-400/25 sm:p-6">
         <div className="absolute -right-8 -top-8 h-32 w-32 rounded-full bg-white/10 blur-2xl" />
