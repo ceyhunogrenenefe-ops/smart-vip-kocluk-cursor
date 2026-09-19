@@ -1,11 +1,11 @@
 // Türkçe: Üst bar bileşeni - Yetkilendirme ile
 import React, { useEffect, useRef, useState } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { userRoleTags } from '../../config/rolePermissions';
 import { useApp } from '../../context/AppContext';
 import { cn } from '../../lib/utils';
-import { Menu, User, ChevronDown, LogOut, Undo2 } from 'lucide-react';
+import { Menu, User, ChevronDown, LogOut, Undo2, ShoppingBag } from 'lucide-react';
 import { getAuthToken } from '../../lib/session';
 import NotificationBell from '../notifications/NotificationBell';
 import { useMobileAppShell } from '../../hooks/useMobileAppShell';
@@ -181,6 +181,25 @@ export default function TopBar({ onMenuClick, drawerOpen = false, hideMenuButton
             </button>
           </div>
         )}
+
+        {/* Mobilde yan menü gizli: Kitap Mağazası'na her sayfadan erişim */}
+        {mobileAppShell &&
+        user &&
+        userRoleTags(effectiveUser).some((t) => ['student', 'teacher', 'coach', 'admin', 'super_admin'].includes(t)) ? (
+          <Link
+            to="/kitap-magazasi"
+            aria-label="Kitap Mağazası"
+            title="Kitap Mağazası"
+            className={cn(
+              'flex min-h-[44px] min-w-[44px] touch-manipulation items-center justify-center rounded-lg transition-colors hover:bg-gray-100 active:bg-gray-200',
+              location.pathname.startsWith('/kitap-magazasi') || location.pathname.startsWith('/sepet')
+                ? 'text-orange-600'
+                : 'text-gray-600'
+            )}
+          >
+            <ShoppingBag className="h-5 w-5" />
+          </Link>
+        ) : null}
 
         {user && getAuthToken() ? <NotificationBell /> : null}
 
