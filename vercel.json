@@ -158,6 +158,10 @@
       "schedule": "* * * * *"
     },
     {
+      "path": "/api/cron/crm-staff-alerts",
+      "schedule": "*/5 * * * *"
+    },
+    {
       "path": "/api/cron/crm-daily-report",
       "schedule": "0 18 * * *"
     },

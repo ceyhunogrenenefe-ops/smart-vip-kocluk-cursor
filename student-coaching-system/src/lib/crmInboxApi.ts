@@ -570,3 +570,30 @@ export type CrmTodayBoard = {
 export function crmTodayBoard(filters: { agent?: string; channel?: string; ad?: string } = {}) {
   return inboxGet<{ data: CrmTodayBoard }>('today_board', filters);
 }
+
+/** FAZ 7 — personel WhatsApp bildirimi (resmî Meta şablonu) */
+export type CrmStaffAlerts = {
+  enabled: boolean;
+  admin_user_id: string | null;
+  template_status: string | null;
+  template_checked_at: string | null;
+  template_error: string | null;
+  sent_this_month: number;
+  agents: Array<{ user_id: string; name: string; has_phone: boolean; wa_alerts_enabled: boolean }>;
+  log: Array<{
+    id: string;
+    user_id: string;
+    user_name: string;
+    event_type: string;
+    summary: string | null;
+    status: string;
+    error: string | null;
+    created_at: string;
+  }>;
+};
+
+export function crmAdminStaffAlerts(body?: Record<string, unknown>) {
+  return body
+    ? adminPost<{ data: CrmStaffAlerts }>('staff_alerts', body)
+    : adminGet<{ data: CrmStaffAlerts }>('staff_alerts');
+}

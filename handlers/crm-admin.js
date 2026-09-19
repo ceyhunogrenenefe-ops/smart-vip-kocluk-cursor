@@ -130,6 +130,94 @@ export default async function handler(req, res) {
     }
 
     // FAZ 2 — otomatik dağıtım ayarları
+    // FAZ 7 — personel WhatsApp bildirimi (resmî Meta şablonu)
+    if (op === 'staff_alerts') {
+      const inst = String(body.institution_id || req.query?.institution_id || actor.institution_id || '').trim() || PLATFORM_PRIMARY_INSTITUTION_ID;
+      const { getCrmSettings, updateCrmSettings } = await import('../api/_lib/crm-assignment.js');
+      const { ensureStaffAlertTemplate, sendStaffAlert } = await import('../api/_lib/crm-staff-alerts.js');
+      const action = String(body.action || '').trim();
+      if (req.method === 'POST') {
+        if (action === 'settings') {
+          const patch = {};
+          if (typeof body.enabled === 'boolean') patch.staff_wa_enabled = body.enabled;
+          if (body.admin_user_id !== undefined) patch.staff_wa_admin_user_id = String(body.admin_user_id || '').trim() || null;
+          if (Object.keys(patch).length) await updateCrmSettings(inst, patch, actor.sub);
+        } else if (action === 'agent') {
+          const uid = String(body.user_id || '').trim();
+          if (!uid) return res.status(400).json({ error: 'user_id_required' });
+          const { error } = await supabaseAdmin
+            .from('crm_user_assignments')
+            .update({ wa_alerts_enabled: Boolean(body.wa_alerts_enabled) })
+            .eq('user_id', uid);
+          if (error) throw error;
+        } else if (action === 'template') {
+          // Kullanıcı onayıyla: şablonu Meta'ya onaya gönder / durumunu yenile
+          await ensureStaffAlertTemplate(inst, { force: true });
+        } else if (action === 'test') {
+          const r = await sendStaffAlert({
+            institutionId: inst,
+            userId: actor.sub,
+            eventType: 'test',
+            dedupeKey: `test:${actor.sub}:${Date.now()}`,
+            summary: 'Test bildirimi',
+            detail: 'Personel WhatsApp bildirimleri çalışıyor',
+            ignoreQuiet: true
+          });
+          if (r.status !== 'sent') {
+            const hint = {
+              recipient_not_eligible: 'Hesabınız CRM temsilci listesinde değil, bildirimi kapalı ya da telefon numaranız kayıtlı değil.',
+              rate_limited: 'Son 1 saatte 6 mesaj sınırına ulaşıldı.'
+            }[r.error] || r.error || r.status;
+            return res.status(400).json({ error: 'test_failed', message: `Test gönderilemedi: ${hint}` });
+          }
+        }
+      }
+      const settings = await getCrmSettings(inst);
+      const { data: assigns } = await supabaseAdmin
+        .from('crm_user_assignments')
+        .select('user_id, is_active, wa_alerts_enabled');
+      const ids = (assigns || []).map((a) => String(a.user_id));
+      const { data: users } = ids.length
+        ? await supabaseAdmin.from('users').select('id, name, phone').in('id', ids)
+        : { data: [] };
+      const byId = Object.fromEntries((users || []).map((u) => [String(u.id), u]));
+      const { data: log } = await supabaseAdmin
+        .from('crm_staff_alert_log')
+        .select('id, user_id, event_type, summary, status, error, created_at')
+        .eq('institution_id', inst)
+        .order('created_at', { ascending: false })
+        .limit(30);
+      const monthStart = new Date();
+      monthStart.setUTCDate(1);
+      monthStart.setUTCHours(0, 0, 0, 0);
+      const { count: sentThisMonth } = await supabaseAdmin
+        .from('crm_staff_alert_log')
+        .select('id', { count: 'exact', head: true })
+        .eq('institution_id', inst)
+        .eq('status', 'sent')
+        .gte('created_at', monthStart.toISOString());
+      return res.status(200).json({
+        data: {
+          enabled: settings.staff_wa_enabled === true,
+          admin_user_id: settings.staff_wa_admin_user_id || null,
+          template_status: settings.staff_wa_template_status || null,
+          template_checked_at: settings.staff_wa_template_checked_at || null,
+          template_error: settings.staff_wa_template_error || null,
+          sent_this_month: sentThisMonth || 0,
+          agents: (assigns || [])
+            .filter((a) => a.is_active !== false && byId[String(a.user_id)])
+            .map((a) => ({
+              user_id: String(a.user_id),
+              name: byId[String(a.user_id)]?.name || '',
+              has_phone: Boolean(String(byId[String(a.user_id)]?.phone || '').trim()),
+              wa_alerts_enabled: a.wa_alerts_enabled !== false
+            }))
+            .sort((x, y) => x.name.localeCompare(y.name, 'tr')),
+          log: (log || []).map((l) => ({ ...l, user_name: byId[String(l.user_id)]?.name || '' }))
+        }
+      });
+    }
+
     if (op === 'assignment_settings') {
       const inst = String(body.institution_id || req.query?.institution_id || actor.institution_id || '').trim() || PLATFORM_PRIMARY_INSTITUTION_ID;
       const { getCrmSettings, updateCrmSettings, listRoundRobinAgents } = await import('../api/_lib/crm-assignment.js');
