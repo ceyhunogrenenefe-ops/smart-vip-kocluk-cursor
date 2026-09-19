@@ -3051,7 +3051,15 @@ export function pickEdesisBookletLessons(structure, kitapcikTuru) {
     if (matchedBook?.lessons?.length) return matchedBook.lessons;
     // Structure'da yok -> deneme cevap anahtarındaki o kitapçığın kendi ders / grup kimlikleri
     const fromKey = (structure?.answerKeyLessons || []).filter((r) => kitapcikCodesMatch(r.kitapcikTuru, want));
-    if (fromKey.length) return fromKey;
+    if (fromKey.length) {
+      // Kitapçıklar dersleri aynı sırada verir (sorular karışır): ders sayısı tutuyorsa soru sayısını
+      // Edesis'in doğruladığı structure (A) satırından al — optik de o düzenle doldurulur.
+      const base = canonicalEdesisStructureLessons(structure);
+      if (base.length === fromKey.length) {
+        return fromKey.map((l, i) => ({ ...l, questionCount: base[i].questionCount || l.questionCount }));
+      }
+      return fromKey;
+    }
     // Paylaşımlı structure — kitapcikTuru yalnızca ingest’te kullanılır
     return canonicalEdesisStructureLessons(structure);
   }
@@ -3134,7 +3142,8 @@ export function extractEdesisAnswerKeyLessons(json) {
           lessonName: String(item?.lessonLessonName || item?.LessonLessonName || '').trim(),
           firstSoruNo: Number.POSITIVE_INFINITY,
           soruNos: new Set(),
-          maxDersSoru: 0
+          dersSoruNos: new Set(),
+          rowCount: 0
         });
       }
       const g = groups.get(key);
@@ -3144,7 +3153,8 @@ export function extractEdesisAnswerKeyLessons(json) {
         g.soruNos.add(soruNo);
         g.firstSoruNo = Math.min(g.firstSoruNo, soruNo);
       }
-      if (Number.isFinite(dersSoru)) g.maxDersSoru = Math.max(g.maxDersSoru, dersSoru);
+      if (Number.isFinite(dersSoru)) g.dersSoruNos.add(dersSoru);
+      g.rowCount += 1;
     }
     const lessons = [...groups.values()]
       .sort((a, b) => a.firstSoruNo - b.firstSoruNo)
@@ -3153,7 +3163,9 @@ export function extractEdesisAnswerKeyLessons(json) {
         lessonId: g.lessonId,
         lessonName: g.lessonName,
         dersGrupId: g.dersGrupId,
-        questionCount: Math.max(g.soruNos.size, g.maxDersSoru)
+        // Soru sayısı = o derse ait farklı soru sayısı. dersSoruNumarasi grup boyunca devam edebilir
+        // (TYT Sosyal: Tarih 1-5, Coğrafya 6-10) → en büyük numara değil, farklı numara sayısı.
+        questionCount: g.soruNos.size || g.dersSoruNos.size || g.rowCount
       }));
     out.push(...lessons);
   }
