@@ -2997,6 +2997,48 @@ export function canonicalEdesisStructureLessons(structure) {
   return [...byKey.values()];
 }
 
+/**
+ * Optik formdan gelen ders cevaplarını (genelde A düzeni) hedef kitapçığın derslerine eşler.
+ * Öncelik: aynı lessonId+dersGrupId -> aynı lessonId -> aynı ders adı -> aynı sıradaki ve aynı soru sayısındaki ders.
+ * @returns {Array<{ lesson: object, hit: object|null }>}
+ */
+export function matchIncomingToBookletLessons(bookletLessons, incoming) {
+  const list = (Array.isArray(incoming) ? incoming : []).map((d, i) => ({ ...d, __i: i }));
+  const used = new Set();
+  const take = (pred) => {
+    const hit = list.find((d) => !used.has(d.__i) && pred(d));
+    if (hit) used.add(hit.__i);
+    return hit || null;
+  };
+  const norm = (v) => String(v || '').trim().toLocaleLowerCase('tr');
+  const len = (d) => String(d.cevaplar ?? '').length;
+  const lessons = Array.isArray(bookletLessons) ? bookletLessons : [];
+  const result = lessons.map((lesson) => ({ lesson, hit: null }));
+  const passes = [
+    (l) => (d) => Number(d.lessonId) === Number(l.lessonId) && Number(d.dersGrupId) === Number(l.dersGrupId),
+    (l) => (d) => Number(d.lessonId) === Number(l.lessonId) && len(d) === l.questionCount,
+    (l) => (d) => Boolean(l.lessonName) && norm(d.lessonName) === norm(l.lessonName) && len(d) === l.questionCount
+  ];
+  for (const pass of passes) {
+    for (const r of result) {
+      if (!r.hit) r.hit = take(pass(r.lesson));
+    }
+  }
+  // Sıra eşleşmesi: kalan dersler, kalan cevaplarla aynı sırada ve aynı uzunlukta
+  const leftover = list.filter((d) => !used.has(d.__i));
+  let li = 0;
+  for (const r of result) {
+    if (r.hit) continue;
+    while (li < leftover.length && len(leftover[li]) !== r.lesson.questionCount) li += 1;
+    if (li < leftover.length) {
+      r.hit = leftover[li];
+      used.add(leftover[li].__i);
+      li += 1;
+    }
+  }
+  return result;
+}
+
 export function pickEdesisBookletLessons(structure, kitapcikTuru) {
   const rows = Array.isArray(structure?.rows) ? structure.rows : [];
   const booklets = Array.isArray(structure?.booklets) ? structure.booklets : [];
@@ -3007,6 +3049,9 @@ export function pickEdesisBookletLessons(structure, kitapcikTuru) {
     if (matchedRows.length) return matchedRows;
     const matchedBook = booklets.find((b) => kitapcikCodesMatch(b.kitapcikTuru, want));
     if (matchedBook?.lessons?.length) return matchedBook.lessons;
+    // Structure'da yok -> deneme cevap anahtarındaki o kitapçığın kendi ders / grup kimlikleri
+    const fromKey = (structure?.answerKeyLessons || []).filter((r) => kitapcikCodesMatch(r.kitapcikTuru, want));
+    if (fromKey.length) return fromKey;
     // Paylaşımlı structure — kitapcikTuru yalnızca ingest’te kullanılır
     return canonicalEdesisStructureLessons(structure);
   }
@@ -3055,6 +3100,64 @@ export function extractEdesisAnswerKeyBookletCodes(json) {
     }
   }
   return [...codes].sort();
+}
+
+/**
+ * GetDenemeCevapAnahtariLst -> kitapçık x ders satırları (structure biçiminde).
+ * Structure çoğu sınavda yalnız A döndürür; B/C/D'nin lessonId / dersGrupId'si farklı olabilir
+ * (ör. B: LessonId=20, DersGrupId=7 A'da yok -> ingest "Cevap anahtarı bulunamadı").
+ * kitapciklar[].cevaplar[] = GetDenemeCevapAnahtarForEditOutput { denemeCevapAnahtar: {...}, lessonLessonName }
+ */
+export function extractEdesisAnswerKeyLessons(json) {
+  if (!json || typeof json !== 'object') return [];
+  const root =
+    json.result && typeof json.result === 'object' && !Array.isArray(json.result) ? json.result : json;
+  const kitapciklar = root?.kitapciklar || root?.Kitapciklar || [];
+  if (!Array.isArray(kitapciklar)) return [];
+  const out = [];
+  for (const k of kitapciklar) {
+    const bookletCode = normalizeKitapcikCode(pickStrCi(k, ['kitapcikTuru', 'kitapcik']));
+    const cevaplar = k?.cevaplar || k?.Cevaplar;
+    if (!bookletCode || !Array.isArray(cevaplar) || !cevaplar.length) continue;
+    const groups = new Map();
+    for (const item of cevaplar) {
+      const row = item?.denemeCevapAnahtar || item?.DenemeCevapAnahtar || item || {};
+      const lessonId = toEdesisInt(row.lessonId ?? row.LessonId);
+      const dersGrupId = toEdesisInt(row.dersGrupId ?? row.DersGrupId);
+      if (lessonId == null) continue;
+      const key = `${lessonId}:${dersGrupId}`;
+      if (!groups.has(key)) {
+        groups.set(key, {
+          kitapcikTuru: bookletCode,
+          lessonId,
+          dersGrupId,
+          lessonName: String(item?.lessonLessonName || item?.LessonLessonName || '').trim(),
+          firstSoruNo: Number.POSITIVE_INFINITY,
+          soruNos: new Set(),
+          maxDersSoru: 0
+        });
+      }
+      const g = groups.get(key);
+      const soruNo = Number(row.soruNo ?? row.SoruNo);
+      const dersSoru = Number(row.dersSoruNumarasi ?? row.DersSoruNumarasi);
+      if (Number.isFinite(soruNo)) {
+        g.soruNos.add(soruNo);
+        g.firstSoruNo = Math.min(g.firstSoruNo, soruNo);
+      }
+      if (Number.isFinite(dersSoru)) g.maxDersSoru = Math.max(g.maxDersSoru, dersSoru);
+    }
+    const lessons = [...groups.values()]
+      .sort((a, b) => a.firstSoruNo - b.firstSoruNo)
+      .map((g) => ({
+        kitapcikTuru: g.kitapcikTuru,
+        lessonId: g.lessonId,
+        lessonName: g.lessonName,
+        dersGrupId: g.dersGrupId,
+        questionCount: Math.max(g.soruNos.size, g.maxDersSoru)
+      }));
+    out.push(...lessons);
+  }
+  return out;
 }
 
 export function summarizeEdesisAnswerKeyBooklets(json) {
@@ -3149,7 +3252,7 @@ function extractBookletCodesFromBookletsEndpoint(json) {
 }
 
 export async function fetchEdesisDenemeAnswerKeyInfo(denemeId, localCfg) {
-  const empty = { codes: [], detail: [], error: null, success: null };
+  const empty = { codes: [], detail: [], lessons: [], error: null, success: null };
   const id = String(denemeId || '').trim();
   if (!id || !/^\d+$/.test(id)) return empty;
   try {
@@ -3160,6 +3263,7 @@ export async function fetchEdesisDenemeAnswerKeyInfo(denemeId, localCfg) {
     return {
       codes: extractEdesisAnswerKeyBookletCodes(r.json),
       detail: summarizeEdesisAnswerKeyBooklets(r.json),
+      lessons: extractEdesisAnswerKeyLessons(r.json),
       error: r.json?.error?.message || (typeof r.json?.error === 'string' ? r.json.error : null),
       success: r.json?.success ?? null
     };
@@ -5091,10 +5195,12 @@ export async function fetchEdesisExamStructure(examId, cfgOverride = {}) {
   }
   let answerKeyBookletCodes = [];
   let answerKeyDetail = [];
+  let answerKeyLessons = [];
   if (denemeId) {
     const keyInfo = await fetchEdesisDenemeAnswerKeyInfo(denemeId, localCfg);
     answerKeyBookletCodes = keyInfo.codes || [];
     answerKeyDetail = keyInfo.detail || [];
+    answerKeyLessons = keyInfo.lessons || [];
   }
   if (!answerKeyBookletCodes.length && bookletEndpointCodes.length) {
     answerKeyBookletCodes = bookletEndpointCodes;
@@ -5119,6 +5225,7 @@ export async function fetchEdesisExamStructure(examId, cfgOverride = {}) {
     availableBookletCodes: listEdesisBookletCodes(structureCtx),
     answerKeyBookletCodes,
     answerKeyDetail,
+    answerKeyLessons,
     denemeOnlyBookletCodes: denemeOnlyBookletCodes(structureCtx),
     denemeId: denemeId || null,
     bookletPdfs: resolvedPdfs,

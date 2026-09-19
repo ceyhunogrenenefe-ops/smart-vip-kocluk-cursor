@@ -54,6 +54,7 @@ import {
   googleDrivePreviewUrl,
   rewriteBookletFilesForBrowser,
   pickEdesisBookletLessons,
+  matchIncomingToBookletLessons,
   listEdesisBookletCodes,
   denemeOnlyBookletCodes,
   kitapcikAllowedForExam,
@@ -2385,13 +2386,10 @@ export default async function handler(req, res) {
       }
 
       const incoming = Array.isArray(body.dersCevaplari) ? body.dersCevaplari : [];
-      const byKey = new Map();
-      for (const d of incoming) {
-        byKey.set(`${Number(d.lessonId)}:${Number(d.dersGrupId)}`, d);
-      }
+      // B/C/D kitapçığının ders / grup kimlikleri A'dan farklı olabilir; optik A düzeniyle gelir -> eşle
+      const matchedLessons = matchIncomingToBookletLessons(bookletLessons, incoming);
       const dersCevaplari = [];
-      for (const lesson of bookletLessons) {
-        const hit = byKey.get(`${lesson.lessonId}:${lesson.dersGrupId}`);
+      for (const { lesson, hit } of matchedLessons) {
         const cevaplar = String(hit?.cevaplar ?? '');
         if (cevaplar.length !== lesson.questionCount) {
           return res.status(400).json({
