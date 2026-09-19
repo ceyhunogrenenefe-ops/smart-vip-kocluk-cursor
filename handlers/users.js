@@ -591,6 +591,17 @@ export default async function handler(req, res) {
         }
       }
 
+      // Form yalnız `role` gönderdiğinde (ör. öğrenci düzenleme) `roles` eski kalıyordu:
+      // role=student ama roles=["coach"] → kullanıcı koç görünmeye devam ediyordu.
+      if (!Object.prototype.hasOwnProperty.call(raw, 'roles') && body.role !== undefined) {
+        const nextRole = String(body.role || '').trim();
+        if (nextRole === 'student') {
+          body.roles = ['student'];
+        } else if (nextRole && !priorRoles.includes(nextRole)) {
+          body.roles = [...new Set([nextRole, ...priorRoles.filter((r) => r !== 'student')])];
+        }
+      }
+
       if (actor.role === 'admin' && body.institution_id !== undefined) {
         if (!hasInstitutionAccess(actor, body.institution_id)) {
           return res.status(403).json({ error: 'institution_forbidden' });
