@@ -285,11 +285,17 @@ export function formatSiteLeadMessage(parsed) {
   return lines.join('\n');
 }
 
-export function siteLeadIdempotencyKey(parsed, bodyText) {
+/**
+ * Aynı gönderim hem tarayıcıdan (crm-site-lead.js) hem site sunucusundan gelebilir.
+ * Anahtar telefon + form türü + 30 dakikalık kova olduğu için ikisi aynı kaydı üretir
+ * ve ingest katmanı ikincisini yok sayar. Alan adları iki tarafta farklı olsa bile eşleşir.
+ */
+export function siteLeadIdempotencyKey(parsed) {
   const phone = parsed.normalizedPhone || parsed.phone || 'nophone';
-  const bucket = Math.floor(Date.now() / (10 * 60 * 1000));
-  const hash = createHash('sha1').update(String(bodyText || '')).digest('hex').slice(0, 16);
-  return `siteform:${phone}:${hash}:${bucket}`.slice(0, 120);
+  const kind = String(parsed.formKind || 'form').toLowerCase().slice(0, 24) || 'form';
+  const bucket = Math.floor(Date.now() / (30 * 60 * 1000));
+  const hash = createHash('sha1').update(`${phone}|${kind}|${bucket}`).digest('hex').slice(0, 16);
+  return `siteform:${phone}:${kind}:${hash}`.slice(0, 120);
 }
 
 export function siteLeadNotes(parsed) {
@@ -325,7 +331,7 @@ export async function ingestSiteLead(raw) {
     contactName: parsed.name,
     body,
     messageType: 'website_form',
-    externalMessageId: siteLeadIdempotencyKey(parsed, body),
+    externalMessageId: siteLeadIdempotencyKey(parsed),
     timestamp: Math.floor(Date.now() / 1000),
     payload: {
       source: parsed.source,
