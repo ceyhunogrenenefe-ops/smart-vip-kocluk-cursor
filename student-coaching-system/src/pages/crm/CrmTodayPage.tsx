@@ -170,6 +170,12 @@ export default function CrmTodayPage() {
           <p className="mt-1 text-sm text-slate-600">
             Cevap bekleyen müşteriler, gecikmiş ve bugünkü görevler, bugün gelen lead’ler. Liste dakikada bir yenilenir.
           </p>
+          {board?.go_live_date ? (
+            <p className="mt-0.5 text-xs text-slate-500">
+              CRM kullanımı {new Date(`${board.go_live_date}T12:00:00`).toLocaleDateString('tr-TR')} tarihinde başladı —
+              öncesindeki eski konuşmalar listelenmez.
+            </p>
+          ) : null}
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {isAdmin ? (

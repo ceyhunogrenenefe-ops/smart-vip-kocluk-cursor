@@ -38,6 +38,14 @@ export async function listRoundRobinAgents(institutionId) {
     .sort((a, b) => a.name.localeCompare(b.name, 'tr') || a.id.localeCompare(b.id));
 }
 
+/** CRM canlı kullanım başlangıcı (İstanbul gün başı, ISO). Tanımsızsa null → tüm kayıtlar. */
+export async function getGoLiveIso(institutionId) {
+  const settings = await getCrmSettings(institutionId);
+  const ymd = String(settings.go_live_date || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return null;
+  return new Date(`${ymd}T00:00:00+03:00`).toISOString();
+}
+
 /** Saf: sıradaki temsilci (son atanandan sonraki; listede yoksa ilk) */
 export function nextInRotation(agentIds, lastId) {
   if (!agentIds.length) return null;
@@ -145,7 +153,9 @@ export async function distributeUnassigned(institutionId) {
   let last = settings.rr_last_user_id;
   const perAgent = Object.fromEntries(ids.map((id) => [id, 0]));
 
-  const { data: leads } = await supabaseAdmin
+  // Canlı kullanım öncesi eski kayıtlar dağıtıma girmez
+  const goLive = await getGoLiveIso(institutionId);
+  let leadQuery = supabaseAdmin
     .from('registration_leads')
     .select('id')
     .eq('institution_id', institutionId)
@@ -155,6 +165,8 @@ export async function distributeUnassigned(institutionId) {
     .is('deleted_at', null)
     .order('created_at', { ascending: true })
     .limit(2000);
+  if (goLive) leadQuery = leadQuery.gte('created_at', goLive);
+  const { data: leads } = await leadQuery;
   for (const l of leads || []) {
     last = nextInRotation(ids, last);
     await supabaseAdmin.from('registration_leads').update({ assigned_user_id: last }).eq('id', l.id).is('assigned_user_id', null);
@@ -162,7 +174,7 @@ export async function distributeUnassigned(institutionId) {
     perAgent[last] += 1;
   }
 
-  const { data: convs } = await supabaseAdmin
+  let convQuery = supabaseAdmin
     .from('crm_conversations')
     .select('id, lead_id')
     .eq('institution_id', institutionId)
@@ -170,6 +182,8 @@ export async function distributeUnassigned(institutionId) {
     .in('status', ['open', 'pending'])
     .is('assigned_user_id', null)
     .limit(2000);
+  if (goLive) convQuery = convQuery.gte('last_message_at', goLive);
+  const { data: convs } = await convQuery;
   let convAssigned = 0;
   for (const c of convs || []) {
     let uid = null;

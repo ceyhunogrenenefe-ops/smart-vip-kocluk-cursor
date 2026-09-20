@@ -5,6 +5,7 @@
  */
 import { supabaseAdmin } from './supabase-admin.js';
 import { getOnDutyUserIds } from './crm-shifts.js';
+import { getGoLiveIso } from './crm-assignment.js';
 
 export const SLA_THRESHOLDS = [5, 15, 30];
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -69,7 +70,10 @@ async function userNames(ids) {
  *   userId null → tüm kurum (yönetici görünümü)
  */
 export async function buildSalesBoard({ institutionId, userId = null, channel = '', ad = '', now = Date.now() }) {
-  const since = new Date(now - 8 * DAY_MS).toISOString();
+  // CRM canlı kullanım başlangıcından öncesi panele / uyarılara girmez
+  const goLive = await getGoLiveIso(institutionId).catch(() => null);
+  const windowStart = new Date(now - 8 * DAY_MS).toISOString();
+  const since = goLive && goLive > windowStart ? goLive : windowStart;
   const dayStart = istanbulDayStart(now);
   const dayEnd = dayStart + DAY_MS;
 
@@ -134,7 +138,7 @@ export async function buildSalesBoard({ institutionId, userId = null, channel = 
         st.response_minutes.push((ep.end - ep.start) / 60000);
       }
     }
-    if (waitingSince) {
+    if (waitingSince && (!goLive || waitingSince >= new Date(goLive).getTime())) {
       const minutes = Math.max(0, Math.round((now - waitingSince) / 60000));
       const level = slaLevel(minutes);
       st.waiting += 1;
@@ -247,6 +251,7 @@ export async function buildSalesBoard({ institutionId, userId = null, channel = 
     generated_at: new Date(now).toISOString(),
     sla_thresholds: SLA_THRESHOLDS,
     on_duty: onDuty,
+    go_live_date: goLive ? goLive.slice(0, 10) : null,
     totals,
     waiting,
     tasks,
