@@ -37,6 +37,8 @@ export default function EdesisHataKarnesiPage() {
   const { effectiveUser } = useAuth();
   const tags = userRoleTags(effectiveUser);
   const isStaff = tags.some((t) => ['super_admin', 'admin', 'coach', 'teacher'].includes(t));
+  // "Öğrenci olarak görüntüle"de oturum yöneticinin; hangi öğrenci olduğunu açıkça gönder
+  const viewedStudentId = String(effectiveUser?.studentId || '').trim();
 
   const [loading, setLoading] = useState(true);
   const [mine, setMine] = useState<EdesisStudentReport[]>([]);
@@ -55,7 +57,7 @@ export default function EdesisHataKarnesiPage() {
         setSets(r.items || []);
         if (r.error) setMineNote(r.error);
       } else {
-        const r = await fetchEdesisStudentReports();
+        const r = await fetchEdesisStudentReports(viewedStudentId || undefined);
         setMine(r.items || []);
         setMineNote(r.hint || r.error || '');
       }
@@ -64,7 +66,7 @@ export default function EdesisHataKarnesiPage() {
     } finally {
       setLoading(false);
     }
-  }, [isStaff]);
+  }, [isStaff, viewedStudentId]);
 
   useEffect(() => {
     void load();
