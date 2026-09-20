@@ -912,6 +912,19 @@ export default function CrmInboxPage() {
                         <p className="whitespace-pre-wrap break-words">
                           {m.body || (m.media_url ? '[medya]' : '')}
                         </p>
+                        {/* Instagram / Facebook eki: bağlantıyı aç (WhatsApp medyası meta-media: ile gelir, açılamaz) */}
+                        {m.media_url && /^https?:\/\//i.test(m.media_url) ? (
+                          <a
+                            href={m.media_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className={`mt-1 inline-flex items-center gap-1 text-[11px] font-medium underline ${
+                              mine ? 'text-emerald-50' : 'text-emerald-700'
+                            }`}
+                          >
+                            Eki aç
+                          </a>
+                        ) : null}
                         <p className={`mt-1 text-[10px] ${mine ? 'text-emerald-100' : 'text-slate-400'}`}>
                           {formatTime(m.created_at)}
                           {m.delivery_status ? ` · ${m.delivery_status}` : ''}

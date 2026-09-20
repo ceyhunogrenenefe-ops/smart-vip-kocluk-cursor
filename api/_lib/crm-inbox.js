@@ -3,6 +3,7 @@
  * Şirket hattı (0850 303 40 14) WA Cloud + Instagram DM + Facebook Messenger.
  */
 import { supabaseAdmin } from './supabase-admin.js';
+import { instagramAttachmentSummary, whatsappInboundBody } from './crm-inbound-labels.js';
 import {
   ensureCrmInboxSchema,
   resolveCrmMessageIdColumn,
@@ -530,22 +531,8 @@ export async function syncWhatsAppValueToCrm(value, { institutionId } = {}) {
     const from = String(m?.from || '').trim();
     if (!from) continue;
     const type = String(m?.type || 'text').toLowerCase();
-    let textBody = null;
-    let mediaUrl = null;
-    if (type === 'text') textBody = m?.text?.body != null ? String(m.text.body) : null;
-    else if (type === 'button') textBody = m?.button?.text != null ? String(m.button.text) : '[button]';
-    else if (type === 'interactive') {
-      textBody =
-        m?.interactive?.button_reply?.title ||
-        m?.interactive?.list_reply?.title ||
-        '[interactive]';
-    } else if (['image', 'audio', 'video', 'document', 'sticker'].includes(type)) {
-      const caption = m?.[type]?.caption;
-      textBody = caption ? String(caption) : `[${type}]`;
-      mediaUrl = m?.[type]?.id ? `meta-media:${m[type].id}` : null;
-    } else {
-      textBody = `[${type}]`;
-    }
+    // Etiketler tek yerde: "[unsupported]" yerine ne olduğu ve ne yapılacağı yazar
+    const { body: textBody, mediaUrl } = whatsappInboundBody(m);
     const payload = {
       channel: 'whatsapp',
       contactIdentifier: from,
@@ -589,7 +576,8 @@ export async function syncInstagramMessagingToCrm(events, { institutionId, chann
     const contactName =
       profile?.name || (profile?.username ? `@${profile.username}` : null) ||
       (await lookupSocialProfileName(norm.senderId).catch(() => null));
-    let body = norm.text || '[medya / ek]';
+    const attach = instagramAttachmentSummary(ev?.message);
+    let body = norm.text || attach.body || '[Medya / ek]';
     if (norm.isAd && ch === 'facebook' && body.startsWith('[Instagram reklamından')) {
       body = body.replace('[Instagram reklamından sohbet]', '[Facebook reklamından sohbet]');
     }
@@ -598,6 +586,7 @@ export async function syncInstagramMessagingToCrm(events, { institutionId, chann
       contactIdentifier: norm.senderId,
       contactName,
       body,
+      mediaUrl: attach.mediaUrl,
       messageType: norm.messageType,
       messageId: norm.messageId,
       timestamp: ev?.timestamp,
