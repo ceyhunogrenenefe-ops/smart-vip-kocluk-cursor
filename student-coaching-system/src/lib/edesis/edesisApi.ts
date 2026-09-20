@@ -850,3 +850,71 @@ export async function fetchEdesisAssignTargets(): Promise<{
   if (!res.ok) throw new Error(j.error || res.statusText);
   return j;
 }
+
+/* ── Hata karnesi (Edesis) ─────────────────────────────────────────────── */
+
+export type EdesisStudentReport = {
+  id: string;
+  analizId: string;
+  title: string;
+  reportType: string;
+  reportUrl: string;
+  reportDate: string | null;
+};
+
+export type EdesisHataKarnesiSet = {
+  id: string;
+  title: string;
+  isGenerated: boolean;
+  studentCount: number;
+  completedCount: number;
+  pendingCount: number;
+  failedCount: number;
+  examCount: number;
+  createdAt: string | null;
+};
+
+export type EdesisHataKarnesiReport = {
+  id: string;
+  edesisStudentId: string;
+  studentName: string;
+  classroom: string;
+  reportUrl: string | null;
+  answerKeyUrl: string | null;
+  completedAt: string | null;
+};
+
+async function edesisGet<T>(qs: string): Promise<T> {
+  const res = await apiFetch(`/api/edesis-sync?${qs}`);
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(j.message || j.error || res.statusText);
+  return j as T;
+}
+
+/** Öğrencinin kendi karneleri (öğrenci) veya seçili öğrencininki (koç / yönetici) */
+export function fetchEdesisStudentReports(studentId?: string) {
+  const qs = new URLSearchParams({ op: 'hata-karnesi-student' });
+  if (studentId) qs.set('studentId', studentId);
+  return edesisGet<{
+    ok: boolean;
+    items: EdesisStudentReport[];
+    studentName?: string;
+    classroom?: string;
+    error?: string | null;
+    hint?: string;
+  }>(qs.toString());
+}
+
+/** Karne setleri (personel) */
+export function fetchEdesisHataKarnesiSets() {
+  return edesisGet<{ ok: boolean; items: EdesisHataKarnesiSet[]; error?: string | null }>(
+    'op=hata-karnesi-list'
+  );
+}
+
+/** Bir karne setindeki öğrenci karneleri (personel; koç yalnız kendi öğrencileri) */
+export function fetchEdesisHataKarnesiReports(hataKarnesiId: string) {
+  return edesisGet<{ ok: boolean; items: EdesisHataKarnesiReport[]; error?: string | null }>(
+    `op=hata-karnesi-reports&hataKarnesiId=${encodeURIComponent(hataKarnesiId)}`
+  );
+}

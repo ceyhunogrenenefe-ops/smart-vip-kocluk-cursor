@@ -118,6 +118,8 @@ export const ROUTE_ALLOWED_ROLES = {
   '/kitap-pazaryeri/kuponlar': ['super_admin', 'admin'],
   '/kitap-pazaryeri/raporlar': ['super_admin', 'admin'],
   '/kitap-pazaryeri/ayarlar': ['super_admin', 'admin'],
+  // Edesis hata karneleri — öğrenci yalnız kendi karnesi (sunucu zorlar)
+  '/hata-karnesi': ['student', 'super_admin', 'admin', 'coach', 'teacher'],
   // Deneme sınav takvimi — öğrenci yalnız kendi sınıfı (sunucu filtreler)
   '/deneme-takvimi': ['student', 'super_admin', 'admin', 'coach', 'teacher'],
   // Öğrenci/Veli Kitap Mağazası
