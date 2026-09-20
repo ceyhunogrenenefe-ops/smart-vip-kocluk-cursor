@@ -130,6 +130,45 @@ export default async function handler(req, res) {
     }
 
     // FAZ 2 — otomatik dağıtım ayarları
+    // Vardiya (nöbet) yönetimi — kim hangi gün/saat görevde
+    if (op === 'shifts') {
+      const inst = String(body.institution_id || req.query?.institution_id || actor.institution_id || '').trim() || PLATFORM_PRIMARY_INSTITUTION_ID;
+      const { listShifts, saveShift, deleteShift, onDutyUserIdsAt } = await import('../api/_lib/crm-shifts.js');
+      const action = String(body.action || '').trim();
+      if (req.method === 'POST') {
+        if (action === 'save') {
+          const r = await saveShift({
+            institutionId: inst,
+            id: body.id,
+            userId: body.user_id,
+            dayOfWeek: body.day_of_week,
+            startTime: body.start_time,
+            endTime: body.end_time,
+            isActive: body.is_active !== false,
+            note: body.note,
+            actorId: actor.sub
+          });
+          if (r?.error) return res.status(400).json({ error: 'invalid', message: r.error });
+        } else if (action === 'delete') {
+          const id = String(body.id || '').trim();
+          if (!id) return res.status(400).json({ error: 'id_required' });
+          await deleteShift(inst, id);
+        }
+      }
+      const shifts = await listShifts(inst);
+      const ids = [...new Set(shifts.map((s) => String(s.user_id)))];
+      const { data: users } = ids.length
+        ? await supabaseAdmin.from('users').select('id, name').in('id', ids)
+        : { data: [] };
+      const names = Object.fromEntries((users || []).map((u) => [String(u.id), u.name || '']));
+      return res.status(200).json({
+        data: {
+          shifts: shifts.map((s) => ({ ...s, user_name: names[String(s.user_id)] || '' })),
+          on_duty: shifts.length ? onDutyUserIdsAt(shifts) : null
+        }
+      });
+    }
+
     // FAZ 7 — personel WhatsApp bildirimi (resmî Meta şablonu)
     if (op === 'staff_alerts') {
       const inst = String(body.institution_id || req.query?.institution_id || actor.institution_id || '').trim() || PLATFORM_PRIMARY_INSTITUTION_ID;

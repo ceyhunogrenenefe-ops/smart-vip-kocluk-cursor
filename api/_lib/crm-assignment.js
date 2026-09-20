@@ -49,8 +49,20 @@ export async function pickNextAgent(institutionId) {
   const settings = await getCrmSettings(institutionId);
   if (!settings.round_robin_enabled) return null;
   const agents = await listRoundRobinAgents(institutionId);
+  // Vardiya tanımlıysa yalnız o an görevde olanlar sıraya girer (kimse görevde değilse herkes)
+  let pool = agents;
+  try {
+    const { getOnDutyUserIds } = await import('./crm-shifts.js');
+    const onDuty = await getOnDutyUserIds(institutionId);
+    if (Array.isArray(onDuty) && onDuty.length) {
+      const filtered = agents.filter((a) => onDuty.includes(a.id));
+      if (filtered.length) pool = filtered;
+    }
+  } catch {
+    /* vardiya okunamazsa eski davranış */
+  }
   const next = nextInRotation(
-    agents.map((a) => a.id),
+    pool.map((a) => a.id),
     settings.rr_last_user_id
   );
   if (!next) return null;

@@ -4,6 +4,7 @@
  * Salt okuma; hiçbir mesaj göndermez, hiçbir kaydı değiştirmez.
  */
 import { supabaseAdmin } from './supabase-admin.js';
+import { getOnDutyUserIds } from './crm-shifts.js';
 
 export const SLA_THRESHOLDS = [5, 15, 30];
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -216,12 +217,18 @@ export async function buildSalesBoard({ institutionId, userId = null, channel = 
   ]);
   for (const w of waiting) w.assigned_name = names[String(w.assigned_user_id)] || null;
 
+  const onDuty = await getOnDutyUserIds(institutionId, now).catch(() => null);
   const avg = (arr) => (arr.length ? Math.round(arr.reduce((a, b) => a + b, 0) / arr.length) : null);
   const allResponses = [];
   const agents = [...agentStats.values()].map((s) => {
     allResponses.push(...s.response_minutes);
     const { response_minutes, ...rest } = s;
-    return { ...rest, name: s.user_id ? names[String(s.user_id)] || 'Temsilci' : 'Atanmamış', avg_response_min: avg(response_minutes) };
+    return {
+      ...rest,
+      name: s.user_id ? names[String(s.user_id)] || 'Temsilci' : 'Atanmamış',
+      on_duty: onDuty == null ? null : Boolean(s.user_id && onDuty.includes(String(s.user_id))),
+      avg_response_min: avg(response_minutes)
+    };
   });
   agents.sort((a, b) => b.red - a.red || b.waiting - a.waiting || b.overdue_tasks - a.overdue_tasks);
 
@@ -239,6 +246,7 @@ export async function buildSalesBoard({ institutionId, userId = null, channel = 
   return {
     generated_at: new Date(now).toISOString(),
     sla_thresholds: SLA_THRESHOLDS,
+    on_duty: onDuty,
     totals,
     waiting,
     tasks,
