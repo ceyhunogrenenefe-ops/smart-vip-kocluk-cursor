@@ -1622,9 +1622,30 @@ async function handleSendChannelMessage(body, institutionId, actor) {
           }
         }
       } else {
+      // Müşteri cevapları kurumun 0850 hattından (Meta) gitmeli — QR ağ geçidi temsilcinin
+      // kendi numarasıdır, müşteri gelen mesajı 0850'den aldığı için cevabı da oradan görmeli.
       const { sendGatewayTextMessage, gatewaySendConfigured } = await import('../api/_lib/whatsapp-gateway-send.js');
       const { sendMetaTextMessage, metaWhatsAppConfigured } = await import('../api/_lib/meta-whatsapp.js');
-      if (typeof gatewaySendConfigured === 'function' && gatewaySendConfigured()) {
+      const metaReady = typeof metaWhatsAppConfigured === 'function' && metaWhatsAppConfigured();
+      if (metaReady) {
+        try {
+          const meta = await sendMetaTextMessage({ toE164: phone, text });
+          sendMeta = { ok: true, provider: 'meta', error: null, raw: meta };
+          externalMessageId = meta?.messageId || null;
+        } catch (metaErr) {
+          const msg = metaErr instanceof Error ? metaErr.message : String(metaErr);
+          // 24 saat penceresi kapalıysa serbest metin gönderilemez; başka numaradan göndermek yerine
+          // temsilciyi onaylı şablona yönlendir.
+          sendMeta = {
+            ok: false,
+            provider: 'meta',
+            error: /131047|24|re-?engagement|outside/i.test(msg)
+              ? `0850 hattından gönderilemedi: müşteri 24 saattir yazmadı. Onaylı şablon ile gönderin. (${msg})`
+              : `0850 hattından gönderilemedi: ${msg}`
+          };
+        }
+      } else if (typeof gatewaySendConfigured === 'function' && gatewaySendConfigured()) {
+        // Meta hiç yapılandırılmamışsa son çare: QR ağ geçidi
         const gw = await sendGatewayTextMessage({
           phone,
           message: text,
@@ -1637,10 +1658,6 @@ async function handleSendChannelMessage(body, institutionId, actor) {
           raw: gw
         };
         externalMessageId = gw?.messageId || gw?.id || null;
-      } else if (typeof metaWhatsAppConfigured === 'function' && metaWhatsAppConfigured()) {
-        const meta = await sendMetaTextMessage({ toE164: phone, text });
-        sendMeta = { ok: true, provider: 'meta', error: null, raw: meta };
-        externalMessageId = meta?.messageId || null;
       } else {
         sendMeta = {
           ok: false,
