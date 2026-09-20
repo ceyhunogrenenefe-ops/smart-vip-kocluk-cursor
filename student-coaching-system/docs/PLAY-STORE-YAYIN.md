@@ -143,5 +143,12 @@ Giriş sonrası Haftalık Plan ve Denemeler menülerini inceleyebilirsiniz.
 | Alan | Değer |
 |------|--------|
 | applicationId | com.dersonlinevipkocluk.student |
-| versionName | 1.0.0 |
-| versionCode | 1 |
+| versionName | 1.0.3 |
+| versionCode | 4 |
+
+## Sürüm geçmişi
+
+| versionName | versionCode | İçerik |
+|---|---|---|
+| 1.0.3 | 4 | Kitap Mağazası mobil girişi, Deneme Sınav Takvimi, haftalık plan ekran süresi düzeltmesi, plana Deneme Sınavı alanı, CRM bildirimleri |
+| 1.0.2 | 3 | Önceki sürüm |
