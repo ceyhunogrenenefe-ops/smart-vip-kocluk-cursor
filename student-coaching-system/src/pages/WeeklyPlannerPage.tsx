@@ -5,12 +5,12 @@ import { userRoleTags } from '../config/rolePermissions';
 import { WeeklyPlannerCalendar } from '../components/weeklyPlanner/WeeklyPlannerCalendar';
 import { AcademicCenterQuickLinks } from '../components/academic/AcademicCenterQuickLinks';
 import { Users, AlertCircle } from 'lucide-react';
-import { resolveStudentRecordId } from '../lib/coachResolve';
+import { resolveCoachRecordId, resolveStudentRecordId } from '../lib/coachResolve';
 import { cn } from '../lib/utils';
 import { useMobileAppShell } from '../hooks/useMobileAppShell';
 
 export default function WeeklyPlannerPage() {
-  const { students } = useApp();
+  const { students, coaches } = useApp();
   const { effectiveUser, linkedStudent, linkedStudentError, linkedStudentLoading, refreshLinkedStudent } = useAuth();
   const tags = userRoleTags(effectiveUser);
   const mobileAppShell = useMobileAppShell();
@@ -18,15 +18,30 @@ export default function WeeklyPlannerPage() {
 
   const isStudentUi = tags.includes('student');
   const isCoachUi = tags.includes('coach') && !tags.includes('student');
-  const coachId = String(effectiveUser?.coachId || '').trim();
+  /** Oturumdaki coaches.id boş kalabiliyor → e-posta ile de çöz (yoksa liste filtrelenmiyordu) */
+  const coachId = useMemo(
+    () =>
+      String(
+        resolveCoachRecordId(effectiveUser?.role, effectiveUser?.coachId, effectiveUser?.email, coaches, {
+          roles: tags,
+          platformUserId: effectiveUser?.id
+        }) ||
+          effectiveUser?.coachId ||
+          ''
+      ).trim(),
+    [effectiveUser?.role, effectiveUser?.coachId, effectiveUser?.email, effectiveUser?.id, coaches, tags]
+  );
+  const isAdminUi = tags.includes('super_admin') || tags.includes('admin');
 
-  /** Koç: yalnızca kendi öğrencileri (admin+koç hesaplarda kurum geneli listelenmesin) */
+  /** Koç: yalnızca kendi öğrencileri (yönetici hesaplarda kurum geneli kalır) */
   const rosterStudents = useMemo(() => {
-    if (isCoachUi && coachId && !tags.includes('super_admin')) {
-      return students.filter((s) => String(s.coachId || '').trim() === coachId);
+    if (isCoachUi && !isAdminUi) {
+      return students.filter((s) => coachId && String(s.coachId || '').trim() === coachId);
     }
     return students;
-  }, [students, isCoachUi, coachId, tags]);
+  }, [students, isCoachUi, isAdminUi, coachId]);
+  /** Koç kaydı eşleşmediyse liste boş kalır — tüm öğrencileri göstermek yerine uyar */
+  const coachRosterUnresolved = isCoachUi && !isAdminUi && !coachId;
 
   const resolvedStudentId = useMemo(
     () =>
@@ -163,6 +178,16 @@ export default function WeeklyPlannerPage() {
               </option>
             ))}
           </select>
+        </div>
+      ) : null}
+
+      {coachRosterUnresolved ? (
+        <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-900">
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>
+            Koç kaydınız hesabınızla eşleşmedi, bu yüzden öğrenci listesi boş. Yöneticinize bildirin — koç kaydındaki
+            e-posta ile giriş e-postanız aynı olmalı.
+          </span>
         </div>
       ) : null}
 
