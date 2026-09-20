@@ -555,6 +555,8 @@ export type CrmTodayBoard = {
   scope: 'team' | 'self';
   is_admin: boolean;
   on_duty?: string[] | null;
+  /** CRM canlı kullanım başlangıcı — öncesi listelenmez */
+  go_live_date?: string | null;
   totals: Omit<CrmBoardAgent, 'user_id' | 'name'>;
   waiting: CrmBoardWaiting[];
   tasks: { overdue: CrmBoardTask[]; today: CrmBoardTask[] };
