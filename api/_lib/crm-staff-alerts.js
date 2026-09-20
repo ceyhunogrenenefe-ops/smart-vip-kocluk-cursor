@@ -11,6 +11,7 @@ import { createOrReuseMetaMessageTemplate } from './meta-template-create.js';
 import { fetchMetaTemplatesFromPhoneWaba, isMetaTemplateSendableStatus } from './meta-templates-sync.js';
 import { normalizePhoneToE164 } from './phone-whatsapp.js';
 import { buildSalesBoard, istanbulDayStart } from './crm-sales-board.js';
+import { alertRecipients, getOnDutyUserIds } from './crm-shifts.js';
 
 export const STAFF_ALERT_TEMPLATE = 'crm_staff_alert';
 export const STAFF_ALERT_BODY =
@@ -226,6 +227,8 @@ export async function runStaffAlertsJob({ now = Date.now() } = {}) {
     if (!tpl.approved) continue;
     if (isQuietHour(now)) continue;
     const adminId = st.staff_wa_admin_user_id ? String(st.staff_wa_admin_user_id) : null;
+    // Vardiya: o an görevde olan temsilciler (null → vardiya tanımlı değil)
+    const onDuty = await getOnDutyUserIds(inst, now);
 
     // 1) SLA: yalnız son 2 saatte başlayan beklemeler
     const board = await buildSalesBoard({ institutionId: inst, now });
@@ -235,23 +238,31 @@ export async function runStaffAlertsJob({ now = Date.now() } = {}) {
       const who = contactLabel(w);
       const ch = CHANNEL_TR[w.channel] || w.channel;
       const base = `${w.conversation_id}:${since}`;
-      if (w.waiting_minutes >= 15 && w.assigned_user_id) {
-        tally(
-          await sendStaffAlert({
-            institutionId: inst,
-            userId: w.assigned_user_id,
-            eventType: 'sla_15',
-            dedupeKey: `sla15:${base}`,
-            summary: `${w.waiting_minutes} dakikadır cevap bekleyen müşteri`,
-            detail: `${who} (${ch})`,
-            now
-          }),
-          'sla_15'
-        );
+      const offDuty = Boolean(onDuty && w.assigned_user_id && !onDuty.includes(String(w.assigned_user_id)));
+      const note = offDuty ? ` — nöbet: ${w.assigned_name || 'sorumlu temsilci'} görevde değil` : '';
+      if (w.waiting_minutes >= 15) {
+        for (const uid of alertRecipients({ assignedUserId: w.assigned_user_id, onDuty })) {
+          tally(
+            await sendStaffAlert({
+              institutionId: inst,
+              userId: uid,
+              eventType: 'sla_15',
+              dedupeKey: `sla15:${base}:${uid}`,
+              summary: `${w.waiting_minutes} dakikadır cevap bekleyen müşteri`,
+              detail: `${who} (${ch})${note}`,
+              now
+            }),
+            'sla_15'
+          );
+        }
       }
       if (w.waiting_minutes >= 30) {
-        const targets = new Set([w.assigned_user_id, adminId].filter(Boolean).map(String));
-        for (const uid of targets) {
+        for (const uid of alertRecipients({
+          assignedUserId: w.assigned_user_id,
+          onDuty,
+          adminUserId: adminId,
+          includeAdmin: true
+        })) {
           const isAdminCopy = uid === adminId && uid !== String(w.assigned_user_id || '');
           tally(
             await sendStaffAlert({
@@ -260,7 +271,9 @@ export async function runStaffAlertsJob({ now = Date.now() } = {}) {
               eventType: 'sla_30',
               dedupeKey: `sla30:${base}:${uid}`,
               summary: `KIRMIZI: ${w.waiting_minutes} dakikadır cevapsız müşteri`,
-              detail: isAdminCopy ? `${who} (${ch}) — temsilci: ${w.assigned_name || 'atanmamış'}` : `${who} (${ch})`,
+              detail: isAdminCopy
+                ? `${who} (${ch}) — temsilci: ${w.assigned_name || 'atanmamış'}${note}`
+                : `${who} (${ch})${note}`,
               now
             }),
             'sla_30'

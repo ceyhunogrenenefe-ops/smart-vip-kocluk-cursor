@@ -368,7 +368,18 @@ export default function CrmTodayPage() {
                         onClick={() => a.user_id && setAgent(a.user_id)}
                         title={a.user_id ? 'Bu temsilcinin listesini aç' : undefined}
                       >
-                        <td className="py-2 pr-2 font-medium text-slate-900">{a.name}</td>
+                        <td className="py-2 pr-2 font-medium text-slate-900">
+                          {a.name}
+                          {a.on_duty === true ? (
+                            <span className="ml-1.5 rounded bg-emerald-50 px-1.5 py-px text-[10px] font-semibold text-emerald-700">
+                              görevde
+                            </span>
+                          ) : a.on_duty === false ? (
+                            <span className="ml-1.5 rounded bg-slate-100 px-1.5 py-px text-[10px] text-slate-500">
+                              vardiya dışı
+                            </span>
+                          ) : null}
+                        </td>
                         <td className="px-2 text-right tabular-nums">{a.waiting}</td>
                         <td className="px-2 text-right tabular-nums text-emerald-700">{a.green || ''}</td>
                         <td className="px-2 text-right tabular-nums text-amber-700">{a.yellow || ''}</td>

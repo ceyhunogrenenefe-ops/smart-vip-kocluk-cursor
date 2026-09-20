@@ -542,6 +542,8 @@ export type CrmBoardAgent = {
   orange: number;
   red: number;
   replied_today: number;
+  /** null = vardiya tanımlı değil */
+  on_duty?: boolean | null;
   avg_response_min: number | null;
   overdue_tasks: number;
   today_tasks: number;
@@ -552,6 +554,7 @@ export type CrmTodayBoard = {
   sla_thresholds: number[];
   scope: 'team' | 'self';
   is_admin: boolean;
+  on_duty?: string[] | null;
   totals: Omit<CrmBoardAgent, 'user_id' | 'name'>;
   waiting: CrmBoardWaiting[];
   tasks: { overdue: CrmBoardTask[]; today: CrmBoardTask[] };
@@ -596,4 +599,22 @@ export function crmAdminStaffAlerts(body?: Record<string, unknown>) {
   return body
     ? adminPost<{ data: CrmStaffAlerts }>('staff_alerts', body)
     : adminGet<{ data: CrmStaffAlerts }>('staff_alerts');
+}
+
+/** Vardiya (nöbet) — kim hangi gün/saat görevde */
+export type CrmShift = {
+  id: string;
+  user_id: string;
+  user_name?: string;
+  day_of_week: number;
+  start_time: string;
+  end_time: string;
+  is_active: boolean;
+  note?: string | null;
+};
+
+export function crmAdminShifts(body?: Record<string, unknown>) {
+  return body
+    ? adminPost<{ data: { shifts: CrmShift[]; on_duty: string[] | null } }>('shifts', body)
+    : adminGet<{ data: { shifts: CrmShift[]; on_duty: string[] | null } }>('shifts');
 }
