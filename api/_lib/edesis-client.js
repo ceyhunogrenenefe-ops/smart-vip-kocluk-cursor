@@ -6060,3 +6060,107 @@ export const EDESIS_EMPTY_LIST_HELP = {
     ]
   }
 };
+
+/* ── Hata karnesi (Edesis HataKarneleri modülü) ─────────────────────────────
+ * Koçluk sisteminde gösterim: öğrenci kendi karnesini, koç/öğretmen öğrencisininkini,
+ * yönetici tümünü görür. PDF Edesis'te üretilir; burada yalnız listelenir ve linklenir. */
+
+function hataKarnesiFileUrl(raw, localCfg) {
+  const v = String(raw || '').trim();
+  if (!v) return null;
+  return resolveEdesisFileUrl(v, localCfg) || v;
+}
+
+/** Karne setleri (dönem bazlı). Edesis: HataKarneleri/GetAll */
+export async function fetchEdesisHataKarneleri(cfgOverride = {}, { donemId = null, maxResultCount = 50 } = {}) {
+  const cfg = { ...getEdesisConfig(), ...cfgOverride };
+  const localCfg = { ...cfg, baseUrl: cfg.baseUrl || cfg.bases[0] };
+  const qs = new URLSearchParams({ SkipCount: '0', MaxResultCount: String(maxResultCount), Sorting: 'creationTime DESC' });
+  if (donemId != null && String(donemId).trim()) qs.set('DonemId', String(donemId).trim());
+  const r = await fetchEdesisJsonPreferAbp(localCfg, `/api/services/app/HataKarneleri/GetAll?${qs.toString()}`);
+  if (!isReachableEdesisResponse(r)) {
+    return { items: [], httpStatus: r.status, error: r.json?.error?.message || `hata_karnesi_${r.status}` };
+  }
+  const rows = unwrapList(r.json);
+  const items = rows
+    .map((row) => {
+      const hk = row?.hataKarnesi || row?.HataKarnesi || row;
+      if (!hk) return null;
+      return {
+        id: String(hk.id ?? ''),
+        title: String(hk.title || 'Hata karnesi').trim(),
+        isGenerated: hk.isGenerated === true,
+        studentCount: Number(hk.ogrenciCount) || 0,
+        completedCount: Number(hk.completedCount) || 0,
+        pendingCount: Number(hk.pendingCount) || 0,
+        failedCount: Number(hk.failedCount) || 0,
+        examCount: Number(hk.sinavCount) || 0,
+        createdAt: hk.creationTime || null
+      };
+    })
+    .filter((x) => x && x.id);
+  return { items, httpStatus: r.status, error: null };
+}
+
+/** Bir karne setindeki öğrenci karneleri (PDF linkleri). Edesis: GetHataKarnesiRaporlarForHub */
+export async function fetchEdesisHataKarnesiReports(hataKarnesiId, cfgOverride = {}) {
+  const id = String(hataKarnesiId || '').trim();
+  if (!id) return { items: [], error: 'hataKarnesiId_required' };
+  const cfg = { ...getEdesisConfig(), ...cfgOverride };
+  const localCfg = { ...cfg, baseUrl: cfg.baseUrl || cfg.bases[0] };
+  const r = await fetchEdesisJsonPreferAbp(
+    localCfg,
+    `/api/services/app/OgrenciAnalizRapor/GetHataKarnesiRaporlarForHub?hataKarnesiId=${encodeURIComponent(id)}`
+  );
+  if (!isReachableEdesisResponse(r)) {
+    return { items: [], httpStatus: r.status, error: r.json?.error?.message || `hata_karnesi_rapor_${r.status}` };
+  }
+  const items = unwrapList(r.json)
+    .map((row) => ({
+      id: String(row?.id ?? ''),
+      edesisStudentId: row?.ogrenciId != null ? String(row.ogrenciId) : '',
+      studentName: String(row?.ogrenciAdSoyad || '').trim(),
+      classroom: String(row?.sinifSube || '').trim(),
+      reportUrl: hataKarnesiFileUrl(row?.raporUrl, localCfg),
+      answerKeyUrl: hataKarnesiFileUrl(row?.cevapAnahtariUrl, localCfg),
+      completedAt: row?.tamamlanmaZamani || null
+    }))
+    .filter((x) => x.edesisStudentId);
+  return { items, httpStatus: r.status, error: null };
+}
+
+/** Bir öğrencinin tüm rapor / hata karnesi geçmişi. Edesis: GetStudentReportTimeline */
+export async function fetchEdesisStudentReportTimeline(edesisStudentId, cfgOverride = {}, { donemId = null } = {}) {
+  const sid = String(edesisStudentId || '').trim();
+  if (!sid) return { items: [], error: 'edesisStudentId_required' };
+  const cfg = { ...getEdesisConfig(), ...cfgOverride };
+  const localCfg = { ...cfg, baseUrl: cfg.baseUrl || cfg.bases[0] };
+  const qs = new URLSearchParams({ ogrenciId: sid });
+  if (donemId != null && String(donemId).trim()) qs.set('donemId', String(donemId).trim());
+  const r = await fetchEdesisJsonPreferAbp(
+    localCfg,
+    `/api/services/app/OgrenciAnalizRapor/GetStudentReportTimeline?${qs.toString()}`
+  );
+  if (!isReachableEdesisResponse(r)) {
+    return { items: [], httpStatus: r.status, error: r.json?.error?.message || `rapor_timeline_${r.status}` };
+  }
+  const root = r.json?.result && typeof r.json.result === 'object' ? r.json.result : r.json;
+  const rows = Array.isArray(root?.raporlar) ? root.raporlar : unwrapList(root);
+  const items = rows
+    .map((row) => ({
+      id: String(row?.id ?? ''),
+      analizId: row?.analizId != null ? String(row.analizId) : '',
+      title: String(row?.analizAdi || 'Rapor').trim(),
+      reportType: String(row?.raporTuru || '').trim(),
+      reportUrl: hataKarnesiFileUrl(row?.raporUrl, localCfg),
+      reportDate: row?.analizTarihi || row?.createdAt || null
+    }))
+    .filter((x) => x.reportUrl);
+  return {
+    items,
+    studentName: String(root?.ogrenciAdSoyad || '').trim(),
+    classroom: String(root?.sinifSube || '').trim(),
+    httpStatus: r.status,
+    error: null
+  };
+}

@@ -47,6 +47,9 @@ import {
   createEdesisStudent,
   createEdesisParent,
   fetchEdesisExamStructure,
+  fetchEdesisHataKarneleri,
+  fetchEdesisHataKarnesiReports,
+  fetchEdesisStudentReportTimeline,
   loadEdesisExamBookletPdf,
   loadEdesisHataKarnesiPdf,
   absorbEdesisBookletSource,
@@ -101,6 +104,7 @@ let syncInFlight = null;
 /** Öğrencinin kendi Edesis sonuç / karne / sınava giriş ops */
 const STUDENT_ALLOWED_OPS = new Set([
   'student-results',
+  'hata-karnesi-student',
   'exam-karne-pdf',
   'exam-hata-karnesi-pdf',
   'exam-detail',
@@ -1679,6 +1683,76 @@ export default async function handler(req, res) {
           hint: 'Edesis hata karnesi (boş + yanlış sorular) — hata kitapçığı değildir'
         });
       }
+    }
+
+    // ── Hata karnesi (Edesis HataKarneleri) ────────────────────────────────
+    // Öğrenci: yalnız kendi karnesi (studentId sunucuda kendi kartına sabitlenir)
+    // Koç / öğretmen: yalnız kendi öğrencisi · Yönetici: tümü
+    if (op === 'hata-karnesi-student') {
+      const studentId = String(req.query?.studentId || req.body?.studentId || '').trim();
+      let edesisStudentId = String(req.query?.edesisStudentId || req.body?.edesisStudentId || '').trim();
+      let studentName = '';
+      if (studentId) {
+        try {
+          const st = isStaff ? await assertStudentAccess(actor, tags, studentId) : studentSelf;
+          if (st) {
+            studentName = String(st.name || '');
+            if (!edesisStudentId) edesisStudentId = String(st.edesis_ogrenci_id || '').trim();
+          }
+        } catch (e) {
+          return res.status(403).json({ error: 'forbidden', message: errorMessage(e) });
+        }
+      }
+      if (!edesisStudentId) {
+        return res.status(200).json({
+          ok: false,
+          items: [],
+          error: 'edesis_student_id_missing',
+          hint: 'Bu öğrenci Edesis ile eşleşmemiş — Edesis sayfasından öğrenciyi eşleyin.'
+        });
+      }
+      const cfg = getEdesisConfig();
+      if (!cfg.apiKey) return res.status(400).json({ error: 'EDESIS_API_KEY_missing' });
+      const donemId = String(req.query?.donemId || req.body?.donemId || '').trim() || null;
+      const r = await fetchEdesisStudentReportTimeline(edesisStudentId, cfg, { donemId });
+      return res.status(200).json({
+        ok: !r.error,
+        items: r.items,
+        studentName: r.studentName || studentName,
+        classroom: r.classroom || '',
+        edesisStudentId,
+        error: r.error || null
+      });
+    }
+
+    if (op === 'hata-karnesi-list') {
+      if (!isStaff) return res.status(403).json({ error: 'forbidden' });
+      const cfg = getEdesisConfig();
+      if (!cfg.apiKey) return res.status(400).json({ error: 'EDESIS_API_KEY_missing' });
+      const donemId = String(req.query?.donemId || req.body?.donemId || '').trim() || null;
+      const r = await fetchEdesisHataKarneleri(cfg, { donemId });
+      return res.status(200).json({ ok: !r.error, items: r.items, error: r.error || null });
+    }
+
+    if (op === 'hata-karnesi-reports') {
+      if (!isStaff) return res.status(403).json({ error: 'forbidden' });
+      const hataKarnesiId = String(req.query?.hataKarnesiId || req.body?.hataKarnesiId || '').trim();
+      if (!hataKarnesiId) return res.status(400).json({ error: 'hataKarnesiId_required' });
+      const cfg = getEdesisConfig();
+      if (!cfg.apiKey) return res.status(400).json({ error: 'EDESIS_API_KEY_missing' });
+      const r = await fetchEdesisHataKarnesiReports(hataKarnesiId, cfg);
+      let items = r.items;
+      // Koç / öğretmen: yalnız kendi öğrencileri
+      if (!actorIsSuper(actor, tags) && actor?.coach_id) {
+        const { data: mine } = await supabaseAdmin
+          .from('students')
+          .select('edesis_ogrenci_id')
+          .eq('coach_id', actor.coach_id)
+          .not('edesis_ogrenci_id', 'is', null);
+        const allowed = new Set((mine || []).map((x) => String(x.edesis_ogrenci_id)));
+        items = items.filter((x) => allowed.has(String(x.edesisStudentId)));
+      }
+      return res.status(200).json({ ok: !r.error, items, error: r.error || null });
     }
 
     if (op === 'list-grades') {
