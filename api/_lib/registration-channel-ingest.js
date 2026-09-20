@@ -3,6 +3,7 @@
  * Telefon (WA) veya Instagram scoped id ile lead eşler; yoksa yeni lead açabilir.
  */
 import { supabaseAdmin } from './supabase-admin.js';
+import { instagramAttachmentSummary, whatsappInboundBody } from './crm-inbound-labels.js';
 import { upsertCrmMessage, extractAdSourceData, toMetaWaContactId } from './crm-inbox.js';
 import {
   inferGradeProgramFromText,
@@ -531,20 +532,7 @@ export async function ingestWhatsAppCloudMessages(value) {
     const from = String(m?.from || '').trim();
     if (!from) continue;
     const type = String(m?.type || 'text').toLowerCase();
-    let textBody = null;
-    if (type === 'text') textBody = m?.text?.body != null ? String(m.text.body) : null;
-    else if (type === 'button') textBody = m?.button?.text != null ? String(m.button.text) : `[button]`;
-    else if (type === 'interactive') {
-      textBody =
-        m?.interactive?.button_reply?.title ||
-        m?.interactive?.list_reply?.title ||
-        `[interactive:${type}]`;
-    } else if (['image', 'audio', 'video', 'document', 'sticker'].includes(type)) {
-      const caption = m?.[type]?.caption;
-      textBody = caption ? String(caption) : `[${type}]`;
-    } else {
-      textBody = `[${type}]`;
-    }
+    const { body: textBody } = whatsappInboundBody(m);
 
     await ingestRegistrationChannelMessage({
       channel: 'whatsapp',
@@ -583,7 +571,7 @@ export async function ingestInstagramMessagingEvents(messagingEvents, { channel 
       direction: 'inbound',
       externalContactId: norm.senderId,
       contactName: profileName,
-      body: norm.text || '[medya / ek]',
+      body: norm.text || instagramAttachmentSummary(ev?.message).body || '[Medya / ek]',
       messageType: norm.messageType,
       externalMessageId: norm.messageId,
       timestamp: ev?.timestamp,
