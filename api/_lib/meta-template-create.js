@@ -67,9 +67,11 @@ export async function createOrReuseMetaMessageTemplate(payload) {
   const name = payload.name;
   const language = payload.language || 'tr';
   const existing = await fetchMetaTemplatesFromPhoneWaba(name, { includeComponents: true });
-  const hit = (existing.matches || []).find(
-    (r) => String(r.name || '').trim() === name && String(r.language || '').toLowerCase().startsWith('tr')
-  ) || (existing.matches || [])[0];
+  // Meta ad araması "içeren" eşleşme döndürür (parent_pdf_link_kurum → parent_pdf_link).
+  // Yalnız birebir aynı adlı şablon mevcut sayılır; aksi halde yeni şablon oluşturulmuyordu.
+  const exact = (existing.matches || []).filter((r) => String(r.name || '').trim() === name);
+  const hit =
+    exact.find((r) => String(r.language || '').toLowerCase().startsWith('tr')) || exact[0] || null;
   if (hit) {
     return {
       ok: true,
@@ -113,7 +115,7 @@ export async function createOrReuseMetaMessageTemplate(payload) {
 
   if (alreadyExists(json)) {
     const again = await fetchMetaTemplatesFromPhoneWaba(name);
-    const row = (again.matches || [])[0];
+    const row = (again.matches || []).find((r) => String(r.name || '').trim() === name) || null;
     return {
       ok: true,
       created: false,
