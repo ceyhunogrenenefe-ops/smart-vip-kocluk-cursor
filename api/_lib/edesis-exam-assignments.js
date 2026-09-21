@@ -338,9 +338,15 @@ export async function syncEdesisExamCatalogToDb({ institutionId, cfg } = {}) {
   const inst = String(institutionId || '').trim() || null;
   const catalog = await fetchEdesisExamsCatalog(cfg || {}, {});
   const rows = Array.isArray(catalog.rows) ? catalog.rows : [];
-  const upserts = rows
-    .map((r) => mapCatalogRowToExamUpsert(r, inst))
-    .filter(Boolean);
+  // Edesis kataloğu aynı sınavı birden çok kez döndürebiliyor (sayfalama tekrarı). Aynı toplu
+  // upsert içinde aynı anahtar iki kez olursa Postgres "ON CONFLICT DO UPDATE command cannot
+  // affect row a second time" verir → sınav kimliğine göre tekilleştir (son gelen kalır).
+  const byExamId = new Map();
+  for (const r of rows) {
+    const u = mapCatalogRowToExamUpsert(r, inst);
+    if (u && u.edesis_exam_id) byExamId.set(String(u.edesis_exam_id), u);
+  }
+  const upserts = [...byExamId.values()];
 
   if (ensured?.via === 'storage' || schemaBackendMode === 'storage') {
     const result = await storageUpsertExams(upserts);
