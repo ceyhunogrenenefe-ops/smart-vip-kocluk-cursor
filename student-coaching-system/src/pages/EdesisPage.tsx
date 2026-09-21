@@ -43,7 +43,10 @@ import {
   type EdesisPlatformStudent,
   type EdesisStatus,
   type EdesisStudentDossier,
-  type EdesisStudentResultsExam
+  type EdesisStudentResultsExam,
+  assignEdesisExam,
+  unassignEdesisExam,
+  fetchEdesisExamAssignments,
 } from '../lib/edesis/edesisApi';
 import { shareEdesisKarneWithParent } from '../lib/edesis/shareEdesisKarneWhatsApp';
 
@@ -477,6 +480,67 @@ export default function EdesisPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dossierTab]);
 
+  /** Seçili öğrenciye platformdan yapılmış deneme atamaları: examId → atama kaydı id */
+  const [studentAssignIds, setStudentAssignIds] = useState<Map<string, string>>(new Map());
+  const [assignBusyId, setAssignBusyId] = useState<string | null>(null);
+
+  const loadStudentAssignments = useCallback(async (platformId: string) => {
+    if (!platformId) {
+      setStudentAssignIds(new Map());
+      return;
+    }
+    try {
+      const r = await fetchEdesisExamAssignments();
+      const m = new Map<string, string>();
+      for (const a of r.items || []) {
+        if (a.target_type === 'student' && String(a.student_id || '') === platformId) {
+          m.set(String(a.edesis_exam_id), String(a.id));
+        }
+      }
+      setStudentAssignIds(m);
+    } catch {
+      setStudentAssignIds(new Map());
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadStudentAssignments(selectedPlatformId);
+  }, [selectedPlatformId, loadStudentAssignments]);
+
+  const assignToStudent = async (examId: string, examName: string) => {
+    if (!selectedPlatformId) {
+      toast.error('Önce öğrenci seçin');
+      return;
+    }
+    setAssignBusyId(examId);
+    try {
+      await assignEdesisExam({ edesisExamId: examId, targetType: 'student', studentIds: [selectedPlatformId] });
+      toast.success(`"${examName}" öğrenciye atandı — Sınava gir listesinde görünür`);
+      await loadStudentAssignments(selectedPlatformId);
+      await loadDossier(selectedPlatformId, selectedEdesisId || undefined);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Atanamadı');
+    } finally {
+      setAssignBusyId(null);
+    }
+  };
+
+  const unassignFromStudent = async (examId: string) => {
+    const aid = studentAssignIds.get(examId);
+    if (!aid) return;
+    setAssignBusyId(examId);
+    try {
+      await unassignEdesisExam(aid);
+      toast.success('Atama kaldırıldı');
+      await loadStudentAssignments(selectedPlatformId);
+      await loadDossier(selectedPlatformId, selectedEdesisId || undefined);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Atama kaldırılamadı');
+    } finally {
+      setAssignBusyId(null);
+    }
+  };
+
   const profile = dossier?.profile;
   const takeable = dossier?.takeable || [];
   const taken = dossier?.taken || [];
@@ -775,20 +839,50 @@ export default function EdesisPage() {
               {dossierTab === 'kurum' && (
                 <div className="space-y-2">
                   <p className="text-sm text-slate-500">
-                    Personel görünümü: programa uygun kurum online denemeleri. Öğrencinin Sınava gir
-                    listesi değildir — orada yalnızca Edesis ataması (öğrenci ID / GetOgrenciSinavIds /
-                    sınıf raporu) görünür.
+                    Programa uygun kurum online denemeleri. <strong>Öğrenciye ata</strong> ile seçili öğrencinin
+                    Sınava gir listesine eklenir (Edesis ataması gerekmez; Edesis'e bir şey yazılmaz). Koçlar yalnız
+                    kendi öğrencilerine atayabilir.
                   </p>
-                  {openOnline.map((ex) => (
-                    <ExamRow
-                      key={ex.examId}
-                      title={ex.name}
-                      type={ex.examType}
-                      date={ex.examDate}
-                      status={ex.resultStatus}
-                      extra={ex.studentCount != null ? `${ex.studentCount} öğrenci` : null}
-                    />
-                  ))}
+                  {openOnline.map((ex) => {
+                    const assigned = studentAssignIds.has(String(ex.examId));
+                    const busy = assignBusyId === String(ex.examId);
+                    return (
+                      <ExamRow
+                        key={ex.examId}
+                        title={ex.name}
+                        type={ex.examType}
+                        date={ex.examDate}
+                        status={ex.resultStatus}
+                        extra={ex.studentCount != null ? `${ex.studentCount} öğrenci` : null}
+                      >
+                        {assigned ? (
+                          <>
+                            <span className="inline-flex items-center rounded-xl bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700">
+                              ✓ Öğrenciye atandı
+                            </span>
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={() => void unassignFromStudent(String(ex.examId))}
+                              className="rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-60"
+                            >
+                              {busy ? '…' : 'Kaldır'}
+                            </button>
+                          </>
+                        ) : (
+                          <button
+                            type="button"
+                            disabled={busy || !selectedPlatformId}
+                            onClick={() => void assignToStudent(String(ex.examId), ex.name)}
+                            className="rounded-xl bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-60"
+                            title={selectedPlatformId ? 'Bu denemeyi seçili öğrencinin Sınava gir listesine ekle' : 'Öğrenci platforma bağlı değil'}
+                          >
+                            {busy ? 'Atanıyor…' : 'Öğrenciye ata'}
+                          </button>
+                        )}
+                      </ExamRow>
+                    );
+                  })}
                   {!openOnline.length && (
                     <p className="rounded-2xl border border-slate-200 bg-white p-6 text-sm text-slate-500">
                       Açık kurum denemesi yok.
