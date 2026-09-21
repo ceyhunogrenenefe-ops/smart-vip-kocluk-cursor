@@ -153,6 +153,19 @@ export default function CoachStatsPage() {
   const [selected, setSelected] = useState<{ id: string; name: string } | null>(null);
   const detailRef = useRef<HTMLDivElement | null>(null);
 
+  /** Açılır listeden seçilen koç ya da tablodan tıklanan koç */
+  const detailCoach = useMemo(() => {
+    if (isCoachOnly) return null;
+    if (coachId) {
+      const name =
+        coachOptions.find((c) => c.id === coachId)?.name ||
+        data?.coaches.find((c) => c.coach_id === coachId)?.coach_name ||
+        'Koç';
+      return { id: coachId, name };
+    }
+    return selected;
+  }, [isCoachOnly, coachId, coachOptions, data, selected]);
+
   useEffect(() => {
     if (selected) detailRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }, [selected]);
@@ -394,6 +407,33 @@ export default function CoachStatsPage() {
         </div>
       ) : null}
 
+      {/* Koç seçiliyse (listeden ya da tablodan) öğrenci öğrenci durum en üstte */}
+      <div ref={detailRef} className="scroll-mt-4">
+        {isCoachOnly && ownCoachId ? (
+          <CoachStudentBreakdown
+            coachId={ownCoachId}
+            coachName={data?.coaches[0]?.coach_name || 'Öğrencilerim'}
+            from={from}
+            to={to}
+            institutionId={institutionId || null}
+            classId={classId || null}
+          />
+        ) : detailCoach ? (
+          <CoachStudentBreakdown
+            coachId={detailCoach.id}
+            coachName={detailCoach.name}
+            from={from}
+            to={to}
+            institutionId={institutionId || null}
+            classId={classId || null}
+            onClose={() => {
+              setSelected(null);
+              if (coachId) setCoachId('');
+            }}
+          />
+        ) : null}
+      </div>
+
       <CoachWeeklyComparison
         institutionId={institutionId}
         coachId={coachId}
@@ -608,29 +648,6 @@ export default function CoachStatsPage() {
               </div>
             </div>
           ) : null}
-
-          <div ref={detailRef}>
-            {isCoachOnly && ownCoachId ? (
-              <CoachStudentBreakdown
-                coachId={ownCoachId}
-                coachName={data.coaches[0]?.coach_name || 'Öğrencilerim'}
-                from={from}
-                to={to}
-                institutionId={institutionId || null}
-                classId={classId || null}
-              />
-            ) : selected ? (
-              <CoachStudentBreakdown
-                coachId={selected.id}
-                coachName={selected.name}
-                from={from}
-                to={to}
-                institutionId={institutionId || null}
-                classId={classId || null}
-                onClose={() => setSelected(null)}
-              />
-            ) : null}
-          </div>
 
           {data.trial_lessons ? (
             <TrialLessonFunnel data={data.trial_lessons} from={data.from} to={data.to} />
