@@ -33,6 +33,54 @@ export type CoachStatRow = {
   avg_solved_per_student: number | null;
   solved_total: number;
   composite_score: number | null;
+  camera_rate?: number | null;
+  camera_on?: number;
+  camera_total?: number;
+  goal_assigned_students?: number;
+  goal_assigned_rate?: number | null;
+  absent_students?: number;
+  /** yalnız koç seçiliyken detail=1 ile gelir */
+  students?: CoachStudentStat[];
+};
+
+export type CoachStudentStat = {
+  student_id: string;
+  name: string;
+  class_level: string | null;
+  active: boolean;
+  report_filled_days: number;
+  report_expected_days: number;
+  report_rate: number | null;
+  attendance_present: number;
+  attendance_absent: number;
+  attendance_total: number;
+  attendance_rate: number | null;
+  camera_on: number;
+  camera_total: number;
+  camera_rate: number | null;
+  goals_count: number;
+  goal_target: number;
+  goal_completed: number;
+  goal_rate: number | null;
+  deneme_count: number;
+  deneme_joined: boolean;
+};
+
+export type TrialFunnelRow = {
+  grade: string;
+  label: string;
+  planned: number;
+  attended: number;
+  not_attended: number;
+  registered: number;
+  registered_attended: number;
+  attend_rate: number | null;
+  register_rate: number | null;
+};
+
+export type TrialFunnel = {
+  by_grade: TrialFunnelRow[];
+  totals: Omit<TrialFunnelRow, 'grade' | 'label'>;
 };
 
 export type CoachStatsExamDay = {
@@ -67,7 +115,11 @@ export type CoachStatsResponse = {
     avg_planner_goal_rate: number | null;
     avg_meeting_completion_rate: number | null;
     avg_composite_score: number | null;
+    avg_camera_rate?: number | null;
+    avg_goal_assigned_rate?: number | null;
   };
+  /** CRM deneme dersi hunisi (koç rolüne null) */
+  trial_lessons?: TrialFunnel | null;
   exam_days?: CoachStatsExamDay[];
   coaches: CoachStatRow[];
   metric_notes?: Record<string, string>;
@@ -88,6 +140,7 @@ export async function fetchCoachStats(opts: {
   institutionId?: string | null;
   coachId?: string | null;
   classId?: string | null;
+  detail?: boolean;
 }): Promise<CoachStatsResponse> {
   const res = await apiFetch(
     `/api/coach-stats${qs({
@@ -95,7 +148,8 @@ export async function fetchCoachStats(opts: {
       to: opts.to,
       institution_id: opts.institutionId || undefined,
       coach_id: opts.coachId || undefined,
-      class_id: opts.classId || undefined
+      class_id: opts.classId || undefined,
+      detail: opts.detail ? '1' : undefined
     })}`
   );
   if (!res.ok) {

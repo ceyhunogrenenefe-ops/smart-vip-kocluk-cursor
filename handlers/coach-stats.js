@@ -11,6 +11,10 @@
  * - planner_goal_rate: haftalık plan (koç hedefi) gerçekleşme
  * - meeting_completion_rate: koç görüşmeleri completed / (planned+completed+missed)
  * - exam_days: ortak deneme günleri (tarih bazlı katılım)
+ * - camera_rate: derse katılan (present+late) yoklamalarda kamera açık oranı
+ * - goal_assigned_rate: koçun dönemde en az 1 hedef girdiği aktif öğrenci oranı
+ * - detail=1 (+ coach_id ya da koç rolü): öğrenci bazında kırılım (coaches[].students)
+ * - trial_lessons: CRM pipeline deneme dersi hunisi (sınıf bazında; yalnız admin)
  */
 import { requireAuthenticatedActor, hasInstitutionAccess } from '../api/_lib/auth.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
@@ -24,6 +28,7 @@ import { getIstanbulDateString, addCalendarDaysYmd } from '../api/_lib/istanbul-
 import { isUuid } from '../api/_lib/uuid.js';
 import { isMissingTableError, isSchemaColumnError } from '../api/_lib/supabase-schema.js';
 import { aggregatePlannerGoalProgress } from '../api/_lib/coach-goal-progress.js';
+import { summarizeTrialFunnel, TRIAL_SCHEDULED, TRIAL_COMPLETED } from '../api/_lib/crm-trial-funnel.js';
 import {
   loadPeriodsForStudents,
   countActiveStudentDays,
@@ -97,6 +102,38 @@ function weekdayLabelTr(ymd) {
   }
 }
 
+const istanbulYmdFmt = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'Europe/Istanbul',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit'
+});
+function istanbulYmd(iso) {
+  try {
+    return istanbulYmdFmt.format(new Date(iso));
+  } catch {
+    return padYmd(iso);
+  }
+}
+
+/** öğrenci bazında sayaçlar */
+function studentAcc(map, sid) {
+  if (!map.has(sid)) {
+    map.set(sid, {
+      filledDays: new Set(),
+      attPresent: 0,
+      attAbsent: 0,
+      attTotal: 0,
+      camOn: 0,
+      camTotal: 0,
+      examDates: new Set(),
+      joined: false,
+      goalsCount: 0
+    });
+  }
+  return map.get(sid);
+}
+
 async function fetchInChunks(ids, run) {
   const list = [...ids];
   const all = [];
@@ -139,6 +176,7 @@ export default async function handler(req, res) {
     if (!institutionId) institutionId = String(actor.institution_id || '').trim();
     let filterCoachId = String(req.query?.coach_id || '').trim();
     const filterClassId = String(req.query?.class_id || '').trim();
+    const wantDetail = ['1', 'true', 'yes'].includes(String(req.query?.detail || '').toLowerCase());
     /** Koç: yalnızca kendi KPI’ları (tüm kurum / diğer koçlar görünmesin) */
     if (isCoachOnly) {
       const ownCoachId = String(actor.coach_id || '').trim();
@@ -179,7 +217,7 @@ export default async function handler(req, res) {
 
     let studentsQ = supabaseAdmin
       .from('students')
-      .select('id,name,coach_id,institution_id')
+      .select('id,name,coach_id,institution_id,class_level')
       .not('coach_id', 'is', null);
     if (institutionId) studentsQ = studentsQ.eq('institution_id', institutionId);
     if (filterCoachId) studentsQ = studentsQ.eq('coach_id', filterCoachId);
@@ -222,6 +260,8 @@ export default async function handler(req, res) {
     const dayCount = dayList.length || 1;
 
     const periodsByStudent = await loadPeriodsForStudents(studentIds);
+    /** @type {Map<string, ReturnType<typeof studentAcc>>} */
+    const perStudent = new Map();
 
     /** @type {Map<string, Set<string>>} coachId -> filled "studentId|date" */
     const filledKeysByCoach = new Map();
@@ -287,6 +327,7 @@ export default async function handler(req, res) {
 
         if (!filledStudentsByCoach.has(cid)) filledStudentsByCoach.set(cid, new Set());
         filledStudentsByCoach.get(cid).add(sid);
+        studentAcc(perStudent, sid).filledDays.add(date);
 
         const solved =
           (Number(row.solved_questions) || 0) ||
@@ -365,6 +406,7 @@ export default async function handler(req, res) {
         const goalsByCoach = new Map();
         for (const g of goalRows) {
           const sid = String(g.student_id || '');
+          if (sid) studentAcc(perStudent, sid).goalsCount += 1;
           const cid = String(g.coach_id || '') || coachByStudent.get(sid) || '';
           if (!cid) continue;
           if (!goalsByCoach.has(cid)) goalsByCoach.set(cid, []);
@@ -390,6 +432,8 @@ export default async function handler(req, res) {
     const attPresent = new Map();
     const attAbsent = new Map();
     const attTotal = new Map();
+    const camOn = new Map();
+    const camTotal = new Map();
     try {
       let sessionsQ = supabaseAdmin
         .from('class_sessions')
@@ -413,9 +457,19 @@ export default async function handler(req, res) {
         const attRows = await fetchInChunks(sessionIds, async (chunk) => {
           const { data, error } = await supabaseAdmin
             .from('class_session_attendance')
-            .select('session_id,student_id,status')
+            .select('session_id,student_id,status,camera_status')
             .in('session_id', chunk);
-          if (error) throw error;
+          if (error) {
+            if (isSchemaColumnError(error, 'camera_status')) {
+              const { data: d2, error: e2 } = await supabaseAdmin
+                .from('class_session_attendance')
+                .select('session_id,student_id,status')
+                .in('session_id', chunk);
+              if (e2) throw e2;
+              return d2 || [];
+            }
+            throw error;
+          }
           return data || [];
         });
         for (const row of attRows) {
@@ -429,12 +483,26 @@ export default async function handler(req, res) {
           }
           const st = String(row.status || '').toLowerCase();
           if (!['present', 'absent', 'late'].includes(st)) continue;
+          const acc = studentAcc(perStudent, sid);
           attTotal.set(cid, (attTotal.get(cid) || 0) + 1);
+          acc.attTotal += 1;
           if (st === 'present' || st === 'late') {
             attPresent.set(cid, (attPresent.get(cid) || 0) + 1);
+            acc.attPresent += 1;
+            // Kamera yalnız derse katılanlarda anlamlı; işaretlenmemişse sayılmaz
+            const cam = String(row.camera_status || '').toLowerCase();
+            if (cam === 'on' || cam === 'off') {
+              camTotal.set(cid, (camTotal.get(cid) || 0) + 1);
+              acc.camTotal += 1;
+              if (cam === 'on') {
+                camOn.set(cid, (camOn.get(cid) || 0) + 1);
+                acc.camOn += 1;
+              }
+            }
           }
           if (st === 'absent') {
             attAbsent.set(cid, (attAbsent.get(cid) || 0) + 1);
+            acc.attAbsent += 1;
           }
         }
       }
@@ -494,6 +562,7 @@ export default async function handler(req, res) {
 
           if (!examStudentsByCoach.has(cid)) examStudentsByCoach.set(cid, new Set());
           examStudentsByCoach.get(cid).add(sid);
+          studentAcc(perStudent, sid).examDates.add(date);
 
           if (!examDayAgg.has(date)) {
             examDayAgg.set(date, { participants: new Set(), names: new Set() });
@@ -536,6 +605,7 @@ export default async function handler(req, res) {
           }
           if (!denemeJoinByCoach.has(cid)) denemeJoinByCoach.set(cid, new Set());
           denemeJoinByCoach.get(cid).add(sid);
+          studentAcc(perStudent, sid).joined = true;
         }
       }
     } catch (e) {
@@ -576,6 +646,9 @@ export default async function handler(req, res) {
       }
     }
 
+    // Öğrenci kırılımı: tek koç seçiliyken (ağır veri tüm kuruma dökülmesin)
+    const includeStudents = wantDetail && (Boolean(filterCoachId) || isCoachOnly);
+
     const coachesOut = coachList.map((c) => {
       const cid = String(c.id);
       const roster = studentsByCoach.get(cid) || [];
@@ -611,6 +684,15 @@ export default async function handler(req, res) {
       const plannerStudentsMetRate = pct(planner.studentsMet, planner.studentsWithGoals);
       const meetingCompletionRate = pct(mDone, mTot);
       const reportStudentsRate = pct(filledStudents, denome);
+      const camOnN = camOn.get(cid) || 0;
+      const camTotN = camTotal.get(cid) || 0;
+      const cameraRate = pct(camOnN, camTotN);
+      const activeIds = rosterIds.filter((sid) =>
+        dayList.some((d) => isActiveFromPeriods(periodsByStudent.get(sid) || [], d, { coachId: cid }))
+      );
+      const goalAssigned = activeIds.filter((sid) => (perStudent.get(sid)?.goalsCount || 0) > 0).length;
+      const goalAssignedRate = pct(goalAssigned, denome);
+      const absentStudents = activeIds.filter((sid) => (perStudent.get(sid)?.attAbsent || 0) > 0).length;
       const solvedTotal = solvedByCoach.get(cid) || 0;
       const avgSolvedPerStudent =
         denome > 0 ? Math.round((10 * solvedTotal) / denome) / 10 : null;
@@ -658,7 +740,49 @@ export default async function handler(req, res) {
         meetings_total: mTot,
         avg_solved_per_student: avgSolvedPerStudent,
         solved_total: solvedTotal,
-        composite_score: compositeScore
+        composite_score: compositeScore,
+        camera_rate: cameraRate,
+        camera_on: camOnN,
+        camera_total: camTotN,
+        goal_assigned_students: goalAssigned,
+        goal_assigned_rate: goalAssignedRate,
+        absent_students: absentStudents,
+        students: includeStudents
+          ? roster
+              .map((st) => {
+                const sid = String(st.id);
+                const acc = perStudent.get(sid);
+                const expected = countActiveStudentDays([sid], dayList, periodsByStudent, cid);
+                const filled = acc?.filledDays.size || 0;
+                const goal = planner.byStudent?.[sid] || { target: 0, completed: 0 };
+                return {
+                  student_id: sid,
+                  name: st.name || 'Öğrenci',
+                  class_level: st.class_level || null,
+                  active: activeIds.includes(sid),
+                  report_filled_days: filled,
+                  report_expected_days: expected,
+                  report_rate: pct(filled, expected),
+                  attendance_present: acc?.attPresent || 0,
+                  attendance_absent: acc?.attAbsent || 0,
+                  attendance_total: acc?.attTotal || 0,
+                  attendance_rate: pct(acc?.attPresent || 0, acc?.attTotal || 0),
+                  camera_on: acc?.camOn || 0,
+                  camera_total: acc?.camTotal || 0,
+                  camera_rate: pct(acc?.camOn || 0, acc?.camTotal || 0),
+                  goals_count: acc?.goalsCount || 0,
+                  goal_target: goal.target,
+                  goal_completed: goal.completed,
+                  goal_rate: pct(goal.completed, goal.target),
+                  deneme_count: acc?.examDates.size || 0,
+                  deneme_joined: Boolean(acc?.joined)
+                };
+              })
+              .sort((a, b) => {
+                if (a.active !== b.active) return a.active ? -1 : 1;
+                return String(a.name).localeCompare(String(b.name), 'tr');
+              })
+          : undefined
       };
     });
 
@@ -705,10 +829,54 @@ export default async function handler(req, res) {
         };
       });
 
+    /** CRM deneme dersi hunisi (satış verisi — koç rolüne gösterilmez) */
+    let trialLessons = null;
+    if (!isCoachOnly) {
+      try {
+        const { data: hist, error: hErr } = await supabaseAdmin
+          .from('registration_stage_history')
+          .select('lead_id,new_stage,changed_at')
+          .in('new_stage', [TRIAL_SCHEDULED, TRIAL_COMPLETED]);
+        if (hErr) throw hErr;
+        let curQ = supabaseAdmin
+          .from('registration_leads')
+          .select('id')
+          .in('stage', [TRIAL_SCHEDULED, TRIAL_COMPLETED]);
+        const { data: cur, error: cErr } = await curQ;
+        if (cErr) throw cErr;
+        const leadIds = [
+          ...new Set([...(hist || []).map((h) => String(h.lead_id)), ...(cur || []).map((l) => String(l.id))])
+        ].filter(Boolean);
+        const leadRows = leadIds.length
+          ? await fetchInChunks(leadIds, async (chunk) => {
+              let q = supabaseAdmin
+                .from('registration_leads')
+                .select('id,grade_program,stage,primary_status,updated_at,institution_id')
+                .in('id', chunk);
+              const { data, error } = await q;
+              if (error) throw error;
+              return data || [];
+            })
+          : [];
+        const scoped = institutionId
+          ? leadRows.filter((l) => !l.institution_id || String(l.institution_id) === institutionId)
+          : leadRows;
+        trialLessons = summarizeTrialFunnel(scoped, hist || [], from, to, istanbulYmd);
+      } catch (e) {
+        if (
+          !isMissingTableError(e, 'registration_stage_history') &&
+          !isMissingTableError(e, 'registration_leads')
+        ) {
+          console.warn('[coach-stats] trial funnel:', errorMessage(e));
+        }
+      }
+    }
+
     return res.status(200).json({
       from,
       to,
       day_count: dayCount,
+      trial_lessons: trialLessons,
       institution_id: institutionId || null,
       filters: {
         coach_id: filterCoachId || null,
@@ -727,7 +895,9 @@ export default async function handler(req, res) {
         avg_deneme_join_rate: avgOf('deneme_join_rate'),
         avg_planner_goal_rate: avgOf('planner_goal_rate'),
         avg_meeting_completion_rate: avgOf('meeting_completion_rate'),
-        avg_composite_score: avgOf('composite_score')
+        avg_composite_score: avgOf('composite_score'),
+        avg_camera_rate: avgOf('camera_rate'),
+        avg_goal_assigned_rate: avgOf('goal_assigned_rate')
       },
       exam_days: examDays,
       coaches: coachesOut,
@@ -751,7 +921,13 @@ export default async function handler(req, res) {
         meeting_completion_rate:
           'Koç–öğrenci görüşmelerinde completed / (planned+completed+missed).',
         exam_days:
-          'Deneme günü bazında katılan aktif öğrenci / o gün aktif öğrenci sayısı (E-Desis tercih edilir).'
+          'Deneme günü bazında katılan aktif öğrenci / o gün aktif öğrenci sayısı (E-Desis tercih edilir).',
+        camera_rate:
+          'Derse katılan (present+late) ve kamerası işaretlenen yoklamalarda kamera açık / işaretlenen.',
+        goal_assigned_rate:
+          'Koçun seçili dönemde en az 1 haftalık hedef girdiği aktif öğrenci / aktif öğrenci.',
+        trial_lessons:
+          'CRM pipeline: dönemde deneme dersi aşamasına alınan lead; "yapıldı"ya geçen katıldı, kesin kayda dönen kayıt oldu.'
       }
     });
   } catch (e) {

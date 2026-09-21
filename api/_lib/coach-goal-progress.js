@@ -147,7 +147,14 @@ export function aggregatePlannerGoalProgress(goals, entriesByStudent, rangeFrom,
     target: Math.round(target),
     completed: Math.round(completed),
     studentsWithGoals: byStudent.size,
-    studentsMet
+    studentsMet,
+    /** öğrenci bazında hedef / gerçekleşen (koç istatistiği detay tablosu) */
+    byStudent: Object.fromEntries(
+      [...byStudent.entries()].map(([sid, st]) => [
+        sid,
+        { target: Math.round(st.target), completed: Math.round(st.completed) }
+      ])
+    )
   };
 }
 
