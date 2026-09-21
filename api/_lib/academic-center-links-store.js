@@ -108,6 +108,9 @@ export function linksForInstitution(store, institutionId) {
   // 7–8 / LGS etüt ve deneme — aynı sabit Zoom
   merged.studyClasses.class78 = LGS8_ETUT_ZOOM_URL;
   merged.exams.class78 = LGS8_ETUT_ZOOM_URL;
+  // 9-10-11 ve YKS etüt — lise deneme ile aynı sabit Zoom
+  merged.studyClasses.class911 = LISE_DENEME_ZOOM_ENTRY;
+  merged.studyClasses.yks = LISE_DENEME_ZOOM_ENTRY;
   return merged;
 }
 

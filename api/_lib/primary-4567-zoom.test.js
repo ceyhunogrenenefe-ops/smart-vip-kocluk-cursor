@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   PRIMARY_4567_ZOOM_URL,
   LGS8_ETUT_ZOOM_URL,
+  LISE_YKS_ZOOM_URL,
   isPrimary4567Grade,
   isSeventhGrade,
   isPrimary4567JoinSubject,
@@ -103,11 +104,14 @@ describe('primary 4-7 Zoom', () => {
       PRIMARY_4567_ZOOM_URL,
       '5. sınıf deneme 4-7 Zoom kalır'
     );
-    // Etüt / deneme dışı dersler ve lise değişmez
+    // Etüt / deneme dışı dersler değişmez; lise / YKS etüt + deneme → lise Zoom
     assert.equal(primary4567ZoomIfApplicable({ subject: 'TÜRKÇE', className: '8A', classLevel: 'LGS' }), null);
     assert.equal(primary4567ZoomIfApplicable({ subject: 'DENEME ANALİZİ', className: '8A', classLevel: '8' }), null);
-    assert.equal(primary4567ZoomIfApplicable({ subject: 'DENEME SINAVI', className: 'TYT-1', classLevel: 'TYT' }), null);
-    assert.equal(primary4567ZoomIfApplicable({ subject: 'ETÜT', className: '11A', classLevel: '11' }), null);
+    assert.equal(
+      primary4567ZoomIfApplicable({ subject: 'DENEME SINAVI', className: 'TYT-1', classLevel: 'TYT' }),
+      LISE_YKS_ZOOM_URL
+    );
+    assert.equal(primary4567ZoomIfApplicable({ subject: 'ETÜT', className: '11A', classLevel: '11' }), LISE_YKS_ZOOM_URL);
     assert.equal(
       primary4567ZoomIfApplicable({ subject: 'MATEMATİK', className: '4A', classLevel: 4 }),
       null
@@ -160,5 +164,35 @@ describe('primary 4-7 Zoom', () => {
     });
     assert.equal(share78.url, LGS8_ETUT_ZOOM_URL);
     assert.ok(String(share78.shareText || '').includes('6946337643'));
+  });
+});
+
+describe('9-10-11 / YKS etüt ve deneme Zoom', () => {
+  it('lise ve YKS sınıflarında etüt + deneme sabit Zoom alır', () => {
+    for (const [level, name] of [
+      ['9', '2026-2027 DÖNEM 9-A SINIFI'],
+      ['10', '2026-2027 10 A SINIFI'],
+      ['11', '2026-2027 11 B SINIFI'],
+      ['YKS SAYISAL', '2026-2027 YILDIZLAR YKS GRUBU']
+    ]) {
+      for (const subject of ['Etüt', 'ETUT', 'ETÜT', 'DENEME']) {
+        assert.equal(primary4567ZoomIfApplicable({ subject, classLevel: level, className: name }), LISE_YKS_ZOOM_URL);
+      }
+      assert.equal(primary4567ZoomIfApplicable({ subject: 'DENEME ANALİZİ', classLevel: level, className: name }), null);
+      assert.equal(primary4567ZoomIfApplicable({ subject: 'TYT MATEMATİK', classLevel: level, className: name }), null);
+    }
+  });
+
+  it('LGS / ortaokul kuralları değişmez', () => {
+    assert.equal(primary4567ZoomIfApplicable({ subject: 'Etüt', classLevel: 'LGS', className: '8B 2026-2027 DÖNEM' }), null);
+    assert.equal(primary4567ZoomIfApplicable({ subject: 'DENEME', classLevel: 'LGS', className: '8B 2026-2027 DÖNEM' }), LGS8_ETUT_ZOOM_URL);
+    assert.equal(primary4567ZoomIfApplicable({ subject: 'Etüt', classLevel: '7', className: '7A 2026-2027 DÖNEM' }), LGS8_ETUT_ZOOM_URL);
+    assert.equal(primary4567ZoomIfApplicable({ subject: 'Etüt', classLevel: '5', className: '5A 2026-2027 DÖNEM' }), PRIMARY_4567_ZOOM_URL);
+  });
+
+  it('Akademik Merkez 9-10-11 ve YKS etüt odası sabit', () => {
+    const links = linksForInstitution({ default: { studyClasses: { class911: 'bbb:auto', yks: 'bbb:auto' } } }, '');
+    assert.equal(links.studyClasses.class911, LISE_YKS_ZOOM_URL);
+    assert.equal(links.studyClasses.yks, LISE_YKS_ZOOM_URL);
   });
 });
