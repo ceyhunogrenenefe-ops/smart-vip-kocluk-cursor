@@ -207,6 +207,77 @@ async function resolveStudentEdesisScope({ edesisStudentId, platformStudentId, s
  * açık katalog (GetOgrenciBySinavId’de bu öğrenci varsa).
  * Boş/ince roster kurum geneline yayılmaz. Süresi dolmuş atama kaybolmaz (expired).
  */
+/**
+ * Öğrenciye platformda atanmış (öğrenci veya sınıf) Edesis denemelerini "Sınava gir" öğesine çevirir.
+ * Katalog satırı: canlı Edesis kataloğu → senkron tablo (edesis_exams.raw) → Edesis detay.
+ */
+async function resolveLocalAssignedExamItems({
+  platformStudentId,
+  edesisStudentId,
+  actor,
+  catalogRows = [],
+  cfg,
+  excludeIds = new Set()
+}) {
+  const sid = String(platformStudentId || '').trim();
+  if (!sid) return { items: [] };
+  let gate;
+  try {
+    gate = await resolveLocallyAssignedEdesisExamIdsForStudent({
+      studentId: sid,
+      institutionId: actor?.institution_id || null
+    });
+  } catch {
+    return { items: [] };
+  }
+  const ids = [...(gate?.examIds || [])].map(String).filter((id) => id && !excludeIds.has(id));
+  if (!ids.length) return { items: [] };
+
+  const byId = new Map();
+  for (const ex of catalogRows || []) {
+    const id = pickEdesisCatalogExamId(ex);
+    if (id) byId.set(String(id), ex);
+  }
+  const missing = ids.filter((id) => !byId.has(id));
+  if (missing.length) {
+    try {
+      const { data } = await supabaseAdmin
+        .from('edesis_exams')
+        .select('edesis_exam_id, title, exam_date, exam_type, raw')
+        .in('edesis_exam_id', missing);
+      for (const r of data || []) {
+        const raw = r.raw && typeof r.raw === 'object' ? r.raw : {};
+        byId.set(String(r.edesis_exam_id), {
+          ...raw,
+          id: raw.id ?? r.edesis_exam_id,
+          name: raw.name || r.title,
+          examDate: raw.examDate || r.exam_date,
+          examType: raw.examType || r.exam_type
+        });
+      }
+    } catch {
+      /* senkron tablo yoksa detaydan dene */
+    }
+  }
+  for (const id of ids.filter((x) => !byId.has(x)).slice(0, 12)) {
+    const detail = await fetchEdesisExamCatalogRowDetail(id, cfg).catch(() => null);
+    if (detail) byId.set(id, { id, ...detail });
+  }
+
+  const items = [];
+  for (const id of ids) {
+    const row = byId.get(id);
+    if (!row) continue;
+    const item = formatEdesisAvailableExamItem(id, row, null, {
+      studentId: sid || `edesis-${edesisStudentId}`,
+      institutionId: actor?.institution_id || null,
+      listStatus: 'takeable'
+    });
+    items.push({ ...item, localAssigned: true });
+  }
+  return { items };
+}
+
 async function loadAvailableEdesisExamsForStudent({
   edesisStudentId,
   platformStudentId,
@@ -328,7 +399,22 @@ async function loadAvailableEdesisExamsForStudent({
   // Edesis atama boşsa açık online program denemelerini öğrenci listesine taşı
   // (Sınava Gir + structure/submit aynı kaynak setini görsün).
   const openOnlineFallback = !items.length && openOnline.length > 0;
-  const visibleItems = openOnlineFallback ? openOnline : items;
+  let visibleItems = openOnlineFallback ? openOnline : items;
+
+  // Platformdan (Deneme Atama / Kurumda açık → Öğrenciye ata) atanan denemeler listeye EKLENİR.
+  // Edesis ataması gerekmez: sonuç Edesis ham optik ingest'ine öğrenci numarasıyla gider.
+  const localAssigned = await resolveLocalAssignedExamItems({
+    platformStudentId,
+    edesisStudentId,
+    actor,
+    catalogRows: fullRows,
+    cfg,
+    excludeIds: new Set([...visibleItems.map((x) => String(x.examId)), ...resultExamIds.map(String)])
+  });
+  if (localAssigned.items.length) {
+    visibleItems = [...localAssigned.items, ...visibleItems];
+  }
+  const localAssignedIds = localAssigned.items.map((x) => x.examId);
   const visibleTakeableIds = visibleItems
     .filter((x) => x.canTake && !x.hasStudentResult)
     .map((x) => x.examId);
@@ -341,7 +427,8 @@ async function loadAvailableEdesisExamsForStudent({
     meta: {
       assignmentMode: openOnlineFallback ? 'open-online-fallback' : assignmentMode,
       assignedCount: hasAssignmentSignal ? assignedCatalogRows.length : 0,
-      assignedExamIds: assignedExamIds.slice(0, 80),
+      assignedExamIds: [...assignedExamIds, ...localAssignedIds].slice(0, 120),
+      localAssignedExamIds: localAssignedIds,
       openOnlineFallback,
       takeableCount: visibleTakeableIds.length,
       takeableExamIds: visibleTakeableIds.slice(0, 40),
@@ -1402,6 +1489,35 @@ export default async function handler(req, res) {
     if (op === 'assign-exam' && (req.method === 'POST' || req.method === 'PUT')) {
       if (!isStaff) return res.status(403).json({ error: 'forbidden' });
       const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : req.body || {};
+      // Koç (admin değilse): yalnız kendi öğrencilerine; sınıf ataması diğer koçların öğrencilerini de etkiler
+      const coachOnlyAssign =
+        (tags.includes('coach') || actor.role === 'coach') &&
+        !tags.includes('admin') &&
+        !actorIsSuper(actor, tags) &&
+        actor.role !== 'admin';
+      if (coachOnlyAssign) {
+        const tType = String(body.targetType || body.target_type || '').trim();
+        if (tType !== 'student') {
+          return res.status(403).json({
+            error: 'coach_student_only',
+            hint: 'Koçlar yalnız kendi öğrencilerine tek tek atama yapabilir; sınıf ataması admin yetkisindedir.'
+          });
+        }
+        const wanted = [...new Set((body.studentIds || body.student_ids || []).map(String))];
+        const { data: own } = await supabaseAdmin
+          .from('students')
+          .select('id')
+          .eq('coach_id', String(actor.coach_id || ''))
+          .in('id', wanted.length ? wanted : ['-']);
+        const ownIds = new Set((own || []).map((r) => String(r.id)));
+        const foreign = wanted.filter((id) => !ownIds.has(id));
+        if (!actor.coach_id || foreign.length) {
+          return res.status(403).json({
+            error: 'not_your_student',
+            hint: 'Yalnız kendi öğrencilerinize deneme atayabilirsiniz.'
+          });
+        }
+      }
       try {
         const result = await createEdesisExamAssignments({
           institutionId: actor?.institution_id || null,
