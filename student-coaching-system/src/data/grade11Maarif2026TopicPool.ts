@@ -1,8 +1,8 @@
 import type { TopicPool } from '../types';
 
 /**
- * 11. Sınıf — Maarif Model 2026 müfredatı
- * Ünite · konu formatında; Fizik “Serbest düşme” alt konuları ayrı satır.
+ * 11. Sınıf — Maarif Model 2026 müfredatı (Eylül 2026 güncel tema/ünite sırası)
+ * "Tema/Ünite · Konu" formatında; sıra müfredattaki gibi korunur.
  */
 function topicsFromUnits(
   units: { unit: string; topics: string[]; expand?: Record<string, string[]> }[]
@@ -27,195 +27,295 @@ function topicsFromUnits(
 
 const EDEBIYAT_11 = topicsFromUnits([
   {
-    unit: 'Anlam Bilgisi',
-    topics: ['Paragraf anlamı', 'Cümlede anlam', 'Anlatım bozuklukları'],
+    unit: '1. Tema: Bir Diyeceğim Var!',
+    topics: [
+      'Geleneksel Türk Tiyatrosu',
+      'Öğretici Metin: Mektup',
+      'Öğretici Metin: Dilekçe',
+      'E-Posta Vasıtasıyla İletişim',
+    ],
   },
   {
-    unit: 'Hikaye ve Roman',
-    topics: ['Hikaye türleri', 'Anlatım teknikleri', 'Roman çözümleme', 'Karakter ve olay örgüsü'],
+    unit: '2. Tema: Kültür Yolculuğu',
+    topics: [
+      'Türk Dünyasından Hikâye İncelemesi',
+      'Orhun Abideleri',
+      'Divanü Lugati\'t-Türk',
+      'Âşık Tarzı Halk Şiiri',
+      'Çeviri İçi Müze Gezisi',
+    ],
   },
   {
-    unit: 'Şiir Bilgisi',
-    topics: ['Ahenk unsurları', 'Nazım biçimleri', 'İmge ve sembolizm'],
+    unit: '3. Tema: Yaşamın İzinde',
+    topics: [
+      'Roman',
+      'Biyografi',
+      'Mülakat',
+      'Radyo Tiyatrosu',
+    ],
   },
   {
-    unit: 'Tiyatro',
-    topics: ['Dramatik yapı', 'Trajedi – Komedi', 'Modern tiyatro'],
-  },
-  {
-    unit: 'Öğretici Metinler',
-    topics: ['Makale', 'Deneme', 'Fıkra', 'Eleştiri'],
-  },
-  {
-    unit: 'Dil Bilgisi',
-    topics: ['Yazım kuralları', 'Noktalama işaretleri'],
+    unit: '4. Tema: Hayatın Aynası',
+    topics: [
+      'Tiyatro',
+      'Küçürek Hikâye',
+      'Belgesel',
+      'Afiş Hazırlama',
+    ],
   },
 ]);
 
 const MATEMATIK_11 = topicsFromUnits([
   {
-    unit: 'Fonksiyonlar',
-    topics: ['Fonksiyon kavramı', 'Bileşke fonksiyon', 'Ters fonksiyon'],
+    unit: '1. Tema: Nicelikler ve Değişimler',
+    topics: [
+      'Trigonometrik Referans Fonksiyonlar',
+      'Üstel ve Logaritmik Referans Fonksiyonlar',
+      'Fonksiyonlarla Dört İşlem ve Fonksiyonların Bileşkesi',
+    ],
   },
   {
-    unit: 'Polinomlar',
-    topics: ['Polinom tanımı', 'Polinomlarda işlemler'],
+    unit: '2. Tema: Geometrik Şekiller',
+    topics: [
+      'Çokgenler',
+      'Dörtgenler',
+      'Özel Dörtgenler',
+    ],
   },
   {
-    unit: '2. Derece Denklemler',
-    topics: ['Denklem çözme', 'Eşitsizlikler', 'Parabol giriş'],
-  },
-  {
-    unit: 'Kombinatorik',
-    topics: ['Permütasyon', 'Kombinasyon', 'Olasılık'],
-  },
-  {
-    unit: 'Trigonometri',
-    topics: ['Trigonometrik oranlar', 'Birlik çember', 'Trigonometrik denklemler'],
-  },
-  {
-    unit: 'Logaritma',
-    topics: ['Logaritma kuralları', 'Logaritmik denklemler'],
-  },
-  {
-    unit: 'Diziler',
-    topics: ['Aritmetik dizi', 'Geometrik dizi'],
-  },
-  {
-    unit: 'Limit ve Süreklilik',
-    topics: ['Limit kavramı', 'Süreklilik'],
+    unit: '3. Tema: İstatistiksel Araştırma Süreci',
+    topics: [
+      'İki Nicel Değişken İlişkisini İçeren İstatistiksel Problemi Oluşturma',
+      'Verileri Toplama ve Analize Hazır Hâle Getirme',
+      'Bulgulara Ulaşma ve Bulguları Yorumlama',
+      'İstatistiksel Görsel, Özet, Sonuç, Yorum, Çıkarım veya Tahminleri Değerlendirme',
+    ],
   },
 ]);
 
 const FIZIK_11 = topicsFromUnits([
   {
-    unit: 'Kuvvet ve Hareket',
+    unit: '1. Ünite: Kuvvet ve Hareket',
     topics: [
-      'Newton’un hareket yasaları',
-      'Sürtünme kuvveti',
-      'İki boyutta hareket',
-      'Düzgün çembersel hareket',
-      'Limit hız',
-      'Serbest düşme',
+      'Newton Hareket Yasaları',
+      'Sürtünme Kuvveti',
+      'Limit Hız',
+      'Çembersel Hareket',
     ],
-    expand: {
-      'serbest düşme': [
-        'Serbest düşme tanımı',
-        'Yer çekimi ivmesi (g)',
-        'Hava direnci ihmal koşulu',
-        'Hız-zaman grafiği',
-        'Konum-zaman ilişkisi',
-        'Düşey atış ilişkisi',
-        'Eşit ivmeli hareket bağlantısı',
-      ],
-    },
   },
   {
-    unit: 'Enerji',
-    topics: ['İş – enerji', 'Güç', 'Enerji korunumu'],
+    unit: '2. Ünite: Elektrik ve Manyetizma',
+    topics: [
+      'Elektriksel Kuvvet ve Elektriksel Alan',
+      'Manyetik Alan ve Manyetik Kuvvet',
+      'İndüksiyon Akımı',
+      'Transformatörler',
+    ],
   },
   {
-    unit: 'Elektrik ve Manyetizma',
-    topics: ['Elektrik yükleri', 'Elektrik alan', 'Manyetik alan'],
+    unit: '3. Ünite: Madde ve Doğası',
+    topics: [
+      'Yarı İletkenlik',
+      'Süper İletkenlik',
+    ],
   },
   {
-    unit: 'Dalgalar ve Optik',
-    topics: ['Dalga türleri', 'Ses dalgaları', 'Işık ve yansıma', 'Kırılma'],
-  },
-  {
-    unit: 'Modern Fizik',
-    topics: ['Atom modelleri', 'Radyoaktivite'],
+    unit: '4. Ünite: Optik',
+    topics: [
+      'Işık Şiddeti, Işık Akısı ve Aydınlanma',
+      'Düzlem Aynalar',
+      'Küresel Aynalar',
+      'Kırılma',
+      'Görünür Derinlik',
+      'Fiber Optik',
+      'Prizmalar',
+    ],
   },
 ]);
 
 const KIMYA_11 = topicsFromUnits([
   {
-    unit: 'Kimyasal Tepkimeler',
-    topics: ['Tepkime türleri', 'Mol kavramı'],
+    unit: '1. Tema: Etkileşim',
+    topics: [
+      'Kimyasal Tepkimelerde Enerji',
+      'Kimyasal Tepkimelerde Hız',
+    ],
   },
   {
-    unit: 'Kimyasal Denge',
-    topics: ['Denge sabiti', 'Le Chatelier ilkesi'],
+    unit: '2. Tema: Çeşitlilik',
+    topics: [
+      'Denge',
+      'Asit ve Baz Çözeltilerinde Denge',
+      'Çözünürlük Dengesi',
+    ],
   },
   {
-    unit: 'Asit – Baz',
-    topics: ['pH – pOH', 'Titrasyon'],
-  },
-  {
-    unit: 'Elektrokimya',
-    topics: ['Piller', 'Elektroliz'],
-  },
-  {
-    unit: 'Organik Kimya Giriş',
-    topics: ['Hidrokarbonlar', 'Fonksiyonel gruplar'],
+    unit: '3. Tema: Sürdürülebilirlik',
+    topics: [
+      'Nanoteknoloji ve Sürdürülebilirlik',
+    ],
   },
 ]);
 
 const BIYOLOJI_11 = topicsFromUnits([
   {
-    unit: 'Hücre Bölünmeleri',
-    topics: ['Mitoz', 'Mayoz'],
+    unit: '1. Tema: Tepki',
+    topics: [
+      'Bitkilerde Tepki',
+      'Bitkilerde Hormonlar ve Tepki',
+      'Tropizma (Yönelim), Nasti (Irganım, İrkilme)',
+      'Hayvanlarda Tepki',
+      'Sinir Sistemi',
+      'Refleksler',
+      'Kemik, Eklem ve Kaslar',
+      'Bağışıklık',
+    ],
   },
   {
-    unit: 'Kalıtım',
-    topics: ['Mendel genetiği', 'Çaprazlama'],
-  },
-  {
-    unit: 'DNA ve Protein',
-    topics: ['DNA replikasyonu', 'Protein sentezi'],
-  },
-  {
-    unit: 'Ekoloji',
-    topics: ['Ekosistem', 'Enerji akışı', 'Madde döngüleri'],
-  },
-  {
-    unit: 'İnsan Fizyolojisi',
-    topics: ['Sinir sistemi', 'Endokrin sistem', 'Sindirim sistemi', 'Dolaşım sistemi'],
+    unit: '2. Tema: Homeostazi',
+    topics: [
+      'Homeostazi ve Canlılar İçin Önemi',
+      'Endokrin Sistem',
+      'Dolaşım Sistemi',
+      'Solunum Sistemi',
+      'Boşaltım Sistemi',
+      'Homeostazinin Sağlanamadığı Durumlarda Oluşabilecek Sağlık Problemleri',
+      'Diabetes Mellitus (Kan Şekeri Dengesinin Bozulduğu)',
+      'Diabetes İnsipidus (Osmotik Denge Bozukluğu)',
+      'Hipertansiyon (Kan Basıncı Dengesinin Bozulduğu)',
+      'Obezite (Vücut Ağırlığı Dengesinin Bozulduğu)',
+    ],
   },
 ]);
 
 const TARIH_11 = topicsFromUnits([
   {
-    unit: 'Osmanlı Yükselme',
-    topics: ['Kuruluş sonrası genişleme', 'Devlet teşkilatı'],
+    unit: '1. Ünite: Değişen Dünyada Osmanlı Devleti',
+    topics: [
+      'Osmanlı’nın Siyasi ve Askerî Mücadeleleri',
+      'Lale Devri',
+      '1755 Lizbon ve 1766 İstanbul Depremleri',
+      'Sanayi Devrimi',
+    ],
   },
   {
-    unit: 'Osmanlı Gerileme',
-    topics: ['Duraklama nedenleri', 'Islahat hareketleri'],
+    unit: '2. Ünite: Dönüşüm Sürecinde Osmanlı',
+    topics: [
+      'Fransız İhtilali',
+      'Siyasi-Askerî ve İdari Gelişmeler',
+      'Bilim-Sanat ve Teknoloji',
+      'Osmanlı’da Sanayileşme',
+    ],
   },
   {
-    unit: '19. Yüzyıl Osmanlı',
-    topics: ['Tanzimat', 'Islahat Fermanı'],
+    unit: '3. Ünite: Savaşlar Sarmalında Osmanlı',
+    topics: [
+      'Siyasi ve Askerî Gelişmeler',
+      'Kitlesel Göçler ve Salgınlar',
+      'Osmanlı Devleti’nin İnsanlık Tarihine Katkıları',
+    ],
   },
 ]);
 
 const COGRAFYA_11 = topicsFromUnits([
   {
-    unit: 'Türkiye Fiziki Coğrafya',
-    topics: ['Yer şekilleri', 'İklim'],
+    unit: '1. Ünite',
+    topics: [
+      'Mekânsal Sorunlar Karşısında Coğrafya Bilimi',
+    ],
   },
   {
-    unit: 'Beşeri Coğrafya',
-    topics: ['Nüfus', 'Yerleşme'],
+    unit: '2. Ünite',
+    topics: [
+      'Web Tabanlı CBS ile Harita Uygulamaları',
+    ],
   },
   {
-    unit: 'Ekonomik Coğrafya',
-    topics: ['Tarım', 'Sanayi', 'Enerji kaynakları'],
+    unit: '3. Ünite',
+    topics: [
+      'Su Kaynakları',
+      'Türkiye’deki Su Kaynaklarının Etkileri',
+    ],
+  },
+  {
+    unit: '4. Ünite',
+    topics: [
+      'Türkiye ve Dünyada Yerleşmelerin Mekânsal Organizasyonu',
+    ],
+  },
+  {
+    unit: '5. Ünite',
+    topics: [
+      'Tarımsal Faaliyetler',
+      'Tarımda Sürdürülebilirlik',
+      'Stratejik ve Kritik Madenler',
+      'Enerji Kaynakları',
+      'Sanayileşmenin Mekânsal Etkileri',
+    ],
+  },
+  {
+    unit: '6. Ünite',
+    topics: [
+      'Gezegen Sınırı',
+      'Küresel İklim Değişikliği',
+      'Türkiye’de Suyun Sürdürülebilir Kullanımı',
+    ],
+  },
+  {
+    unit: '7. Ünite',
+    topics: [
+      'Türkiye’nin Kültürel Hinterlandı',
+      'Tarımsal Üretim (Örnek Ülke)',
+      'Sanayileşme Süreci (Örnek Ülkeler)',
+      'Madencilik Faaliyetleri (Örnek Ülke)',
+      'Enerji Kaynakları (Örnek Ülkeler)',
+    ],
   },
 ]);
 
 const FELSEFE_11 = topicsFromUnits([
   {
-    unit: 'Felsefe Giriş',
-    topics: ['Bilgi felsefesi', 'Varlık felsefesi'],
+    unit: '1. Ünite: Çevre Sorunları ve Felsefe',
+    topics: [
+      'Çevre Problemleri',
+      'Çevre Etiği',
+    ],
   },
   {
-    unit: 'Etik',
-    topics: ['Ahlak felsefesi'],
+    unit: '2. Ünite: Teknoloji ve Hayat',
+    topics: [
+      'Teknoloji ve İnsan Hayatı',
+      'Ontolojik Problemler',
+      'Aksiyolojik Problemler',
+    ],
   },
   {
-    unit: 'Siyaset ve Sanat',
-    topics: ['Siyaset felsefesi', 'Sanat felsefesi'],
+    unit: '3. Ünite: Akıl ve İnanç',
+    topics: [
+      'Akıl-İnanç İlişkisine Yönelik Felsefi Görüşler',
+    ],
+  },
+  {
+    unit: '4. Ünite: Edebiyat ve Felsefe',
+    topics: [
+      'Dil, Edebiyat ve Felsefe İlişkisi',
+      'Edebi Unsurlara Felsefi Bakış',
+    ],
+  },
+  {
+    unit: '5. Ünite: Hayatın Anlamı',
+    topics: [
+      'Mutluluk ve Hayat İlişkisi',
+      'Varoluş ve Kendi Olma',
+    ],
+  },
+  {
+    unit: '6. Ünite: Hukuk ve Felsefe',
+    topics: [
+      'Hukukun Gereği ve Önemi',
+      'Hukukun Kaynağı',
+      'Ahlak ve Hukuk İlişkisi',
+    ],
   },
 ]);
 
@@ -271,6 +371,150 @@ export const grade11Maarif2026TopicPool: TopicPool = {
   İNGİLİZCE: { 11: INGILIZCE_11 },
   'DİN KÜLTÜRÜ': { 11: DIN_11 },
 };
+
+/**
+ * Eylül 2026 güncellemesiyle kaldırılan eski 11. sınıf konuları.
+ * Kullanıcı tarayıcısında saklanan konu havuzu (customTopics) eski varsayılanları içerdiği için
+ * yüklenirken bunlar çıkarılır; aksi halde eski ve yeni konular karışık görünür.
+ */
+export const RETIRED_GRADE11_TOPICS: Record<string, string[]> = {
+  'EDEBİYAT': [
+    'Anlam Bilgisi · Paragraf anlamı',
+    'Anlam Bilgisi · Cümlede anlam',
+    'Anlam Bilgisi · Anlatım bozuklukları',
+    'Hikaye ve Roman · Hikaye türleri',
+    'Hikaye ve Roman · Anlatım teknikleri',
+    'Hikaye ve Roman · Roman çözümleme',
+    'Hikaye ve Roman · Karakter ve olay örgüsü',
+    'Şiir Bilgisi · Ahenk unsurları',
+    'Şiir Bilgisi · Nazım biçimleri',
+    'Şiir Bilgisi · İmge ve sembolizm',
+    'Tiyatro · Dramatik yapı',
+    'Tiyatro · Trajedi – Komedi',
+    'Tiyatro · Modern tiyatro',
+    'Öğretici Metinler · Makale',
+    'Öğretici Metinler · Deneme',
+    'Öğretici Metinler · Fıkra',
+    'Öğretici Metinler · Eleştiri',
+    'Dil Bilgisi · Yazım kuralları',
+    'Dil Bilgisi · Noktalama işaretleri',
+  ],
+  'MATEMATİK': [
+    'Fonksiyonlar · Fonksiyon kavramı',
+    'Fonksiyonlar · Bileşke fonksiyon',
+    'Fonksiyonlar · Ters fonksiyon',
+    'Polinomlar · Polinom tanımı',
+    'Polinomlar · Polinomlarda işlemler',
+    '2. Derece Denklemler · Denklem çözme',
+    '2. Derece Denklemler · Eşitsizlikler',
+    '2. Derece Denklemler · Parabol giriş',
+    'Kombinatorik · Permütasyon',
+    'Kombinatorik · Kombinasyon',
+    'Kombinatorik · Olasılık',
+    'Trigonometri · Trigonometrik oranlar',
+    'Trigonometri · Birlik çember',
+    'Trigonometri · Trigonometrik denklemler',
+    'Logaritma · Logaritma kuralları',
+    'Logaritma · Logaritmik denklemler',
+    'Diziler · Aritmetik dizi',
+    'Diziler · Geometrik dizi',
+    'Limit ve Süreklilik · Limit kavramı',
+    'Limit ve Süreklilik · Süreklilik',
+  ],
+  'FİZİK': [
+    'Kuvvet ve Hareket · Newton’un hareket yasaları',
+    'Kuvvet ve Hareket · Sürtünme kuvveti',
+    'Kuvvet ve Hareket · İki boyutta hareket',
+    'Kuvvet ve Hareket · Düzgün çembersel hareket',
+    'Kuvvet ve Hareket · Limit hız',
+    'Kuvvet ve Hareket · Serbest düşme',
+    'Kuvvet ve Hareket · Serbest düşme · Serbest düşme tanımı',
+    'Kuvvet ve Hareket · Serbest düşme · Yer çekimi ivmesi (g)',
+    'Kuvvet ve Hareket · Serbest düşme · Hava direnci ihmal koşulu',
+    'Kuvvet ve Hareket · Serbest düşme · Hız-zaman grafiği',
+    'Kuvvet ve Hareket · Serbest düşme · Konum-zaman ilişkisi',
+    'Kuvvet ve Hareket · Serbest düşme · Düşey atış ilişkisi',
+    'Kuvvet ve Hareket · Serbest düşme · Eşit ivmeli hareket bağlantısı',
+    'Enerji · İş – enerji',
+    'Enerji · Güç',
+    'Enerji · Enerji korunumu',
+    'Elektrik ve Manyetizma · Elektrik yükleri',
+    'Elektrik ve Manyetizma · Elektrik alan',
+    'Elektrik ve Manyetizma · Manyetik alan',
+    'Dalgalar ve Optik · Dalga türleri',
+    'Dalgalar ve Optik · Ses dalgaları',
+    'Dalgalar ve Optik · Işık ve yansıma',
+    'Dalgalar ve Optik · Kırılma',
+    'Modern Fizik · Atom modelleri',
+    'Modern Fizik · Radyoaktivite',
+  ],
+  'KİMYA': [
+    'Kimyasal Tepkimeler · Tepkime türleri',
+    'Kimyasal Tepkimeler · Mol kavramı',
+    'Kimyasal Denge · Denge sabiti',
+    'Kimyasal Denge · Le Chatelier ilkesi',
+    'Asit – Baz · pH – pOH',
+    'Asit – Baz · Titrasyon',
+    'Elektrokimya · Piller',
+    'Elektrokimya · Elektroliz',
+    'Organik Kimya Giriş · Hidrokarbonlar',
+    'Organik Kimya Giriş · Fonksiyonel gruplar',
+  ],
+  'BİYOLOJİ': [
+    'Hücre Bölünmeleri · Mitoz',
+    'Hücre Bölünmeleri · Mayoz',
+    'Kalıtım · Mendel genetiği',
+    'Kalıtım · Çaprazlama',
+    'DNA ve Protein · DNA replikasyonu',
+    'DNA ve Protein · Protein sentezi',
+    'Ekoloji · Ekosistem',
+    'Ekoloji · Enerji akışı',
+    'Ekoloji · Madde döngüleri',
+    'İnsan Fizyolojisi · Sinir sistemi',
+    'İnsan Fizyolojisi · Endokrin sistem',
+    'İnsan Fizyolojisi · Sindirim sistemi',
+    'İnsan Fizyolojisi · Dolaşım sistemi',
+  ],
+  'TARİH': [
+    'Osmanlı Yükselme · Kuruluş sonrası genişleme',
+    'Osmanlı Yükselme · Devlet teşkilatı',
+    'Osmanlı Gerileme · Duraklama nedenleri',
+    'Osmanlı Gerileme · Islahat hareketleri',
+    '19. Yüzyıl Osmanlı · Tanzimat',
+    '19. Yüzyıl Osmanlı · Islahat Fermanı',
+  ],
+  'COĞRAFYA': [
+    'Türkiye Fiziki Coğrafya · Yer şekilleri',
+    'Türkiye Fiziki Coğrafya · İklim',
+    'Beşeri Coğrafya · Nüfus',
+    'Beşeri Coğrafya · Yerleşme',
+    'Ekonomik Coğrafya · Tarım',
+    'Ekonomik Coğrafya · Sanayi',
+    'Ekonomik Coğrafya · Enerji kaynakları',
+  ],
+  'FELSEFE': [
+    'Felsefe Giriş · Bilgi felsefesi',
+    'Felsefe Giriş · Varlık felsefesi',
+    'Etik · Ahlak felsefesi',
+    'Siyaset ve Sanat · Siyaset felsefesi',
+    'Siyaset ve Sanat · Sanat felsefesi',
+  ],
+};
+
+/** Saklanan havuzdan kaldırılmış 11. sınıf konularını ayıklar (koçun kendi eklediği konular kalır). */
+export function stripRetiredGrade11Topics(pool: TopicPool): TopicPool {
+  const next: TopicPool = { ...pool };
+  for (const [subject, retiredList] of Object.entries(RETIRED_GRADE11_TOPICS)) {
+    const levels = next[subject];
+    const current = levels?.[11] ?? levels?.['11'];
+    if (!current) continue;
+    const drop = new Set(retiredList);
+    const kept = current.filter((t) => !drop.has(t));
+    // Nesne anahtarları string olduğundan 11 ile '11' aynı alandır
+    next[subject] = { ...levels, 11: kept };
+  }
+  return next;
+}
 
 /** Belirtilen sınıf seviyesindeki konuları override havuzuyla tamamen değiştirir (birleştirmez). */
 export function replaceClassLevelTopics(
