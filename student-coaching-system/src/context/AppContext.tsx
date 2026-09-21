@@ -55,6 +55,7 @@ import { sortByFirstName } from '../lib/personNameSort';
 import { topicPool as defaultTopicPool } from '../data/mockData';
 import { mergeTopicPools } from '../lib/mergeTopicPools';
 import { stripRetiredGrade11Topics } from '../data/grade11Maarif2026TopicPool';
+import { stripRetiredGrade7Topics } from '../data/grade7Maarif2026TopicPool';
 import { mergeStudyTracksIntoSubjects, studyTracksForClassLevel } from '../lib/studyTrackSubjects';
 import {
   clearStudentCoachQuestionStatsCache,
@@ -395,8 +396,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // Topic pool - varsayılan mockData + kullanıcı ekleri (localStorage)
   const [customTopics, setCustomTopics] = useState<TopicPool>(() => {
     const stored = loadFromStorage<TopicPool>(STORAGE_KEYS.customTopics, {});
-    // Eylül 2026: kaldırılan eski 11. sınıf konuları tarayıcı hafızasından da temizlenir
-    return mergeTopicPools(defaultTopicPool, stripRetiredGrade11Topics(stored));
+    // Eylül 2026: kaldırılan eski 7. ve 11. sınıf konuları tarayıcı hafızasından da temizlenir
+    return mergeTopicPools(defaultTopicPool, stripRetiredGrade7Topics(stripRetiredGrade11Topics(stored)));
   });
   /** getTopics/getTopicsByClass: customTopics bazen kısmi kalabiliyor; her zaman varsayılan havuzla birleştir */
   const effectiveTopicPool = React.useMemo(
