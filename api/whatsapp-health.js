@@ -31,6 +31,7 @@ import {
   probeConnectedGatewaySessionIds
 } from './_lib/whatsapp-gateway-send.js';
 import { ensureAttendanceMetaTemplates } from './_lib/ensure-attendance-meta-templates.js';
+import { ensureParentPdfKurumTemplate } from './_lib/parent-pdf-meta-send.js';
 import { runYoklamaTest8FDogan } from './_lib/yoklama-test-8f-dogan.js';
 import { runCoachReportTest } from './_lib/yoklama-test-coach-report.js';
 
@@ -193,6 +194,14 @@ export default async function handler(req, res) {
 
   let attendance_meta_templates = null;
   let attendance_meta_ensure = null;
+  // Kurum adlı veli PDF şablonunu Meta onayına gönder (idempotent: varsa durumunu döner)
+  let parent_pdf_kurum_template = null;
+  if (String(req.query?.ensure_parent_pdf || '').trim() === '1') {
+    parent_pdf_kurum_template = await ensureParentPdfKurumTemplate().catch((e) => ({
+      ok: false,
+      error: e instanceof Error ? e.message : String(e)
+    }));
+  }
   let yoklama_test_8f_dogan = null;
   let coach_report_test = null;
   if (wantEnsure) {
@@ -394,6 +403,7 @@ export default async function handler(req, res) {
     automation_provider: metaReady ? 'meta_cloud_api' : twilioReady ? 'twilio' : null,
     attendance_meta_templates,
     attendance_meta_ensure,
+    parent_pdf_kurum_template,
     yoklama_test_8f_dogan,
     coach_report_test,
     gateway: {
