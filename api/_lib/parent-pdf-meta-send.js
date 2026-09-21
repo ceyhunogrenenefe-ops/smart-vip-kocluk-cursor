@@ -9,6 +9,8 @@ import {
   resolveMetaTemplateName,
   sendWhatsAppUsingTemplateRow
 } from './whatsapp-outbound.js';
+import { fetchMetaTemplatesFromPhoneWaba, isMetaTemplateSendableStatus } from './meta-templates-sync.js';
+import { createOrReuseMetaMessageTemplate } from './meta-template-create.js';
 
 export const PARENT_PDF_TEMPLATE_TYPE = 'parent_pdf_link';
 
@@ -26,6 +28,82 @@ PDF indirmek için bağlantı:
 {{link}}
 
 Smart VIP Koçluk`;
+
+/**
+ * Kurum adlı veli PDF şablonu. Eski `parent_pdf_link` metninde "Smart VIP Koçluk" imzası Meta'da
+ * sabit; bu şablonda imza {{4}} = öğrencinin kurumu. Meta onaylayana kadar eski şablon kullanılır.
+ */
+export const PARENT_PDF_KURUM_META_NAME = 'parent_pdf_link_kurum';
+export const PARENT_PDF_KURUM_BODY =
+  'Merhaba,\n\n{{1}} için {{2}} hazır.\n\nPDF indirmek için bağlantı:\n{{3}}\n\n{{4}} ailesi olarak iyi günler dileriz.';
+
+export function buildParentPdfKurumTemplatePayload() {
+  return {
+    name: PARENT_PDF_KURUM_META_NAME,
+    language: 'tr',
+    category: 'UTILITY',
+    parameter_format: 'POSITIONAL',
+    components: [
+      {
+        type: 'BODY',
+        text: PARENT_PDF_KURUM_BODY,
+        example: {
+          body_text: [
+            [
+              'Ayşe Yılmaz',
+              'Haftalık çalışma planı',
+              'https://www.dersonlinevipkocluk.com/r/ornek',
+              'Online Vip Dershane Ders ve Koçluk'
+            ]
+          ]
+        }
+      }
+    ]
+  };
+}
+
+function buildParentPdfKurumTemplateRow() {
+  return {
+    type: PARENT_PDF_TEMPLATE_TYPE,
+    name: 'Veli PDF bağlantısı — kurum adlı (Meta)',
+    content: PARENT_PDF_KURUM_BODY.replace('{{1}}', '{{student_name}}')
+      .replace('{{2}}', '{{baslik}}')
+      .replace('{{3}}', '{{link}}')
+      .replace('{{4}}', '{{kurum}}'),
+    variables: ['student_name', 'baslik', 'link', 'kurum'],
+    twilio_variable_bindings: ['student_name', 'baslik', 'link', 'kurum'],
+    meta_template_name: PARENT_PDF_KURUM_META_NAME,
+    meta_template_language: 'tr',
+    meta_named_body_parameters: false,
+    channel: 'whatsapp',
+    is_active: true,
+    whatsapp_template_status: 'APPROVED'
+  };
+}
+
+let kurumStatusCache = { at: 0, approved: false, status: null };
+const KURUM_STATUS_TTL_MS = 15 * 60 * 1000;
+
+/** Kurum adlı şablon Meta'da onaylı mı (15 dk önbellek) */
+async function kurumTemplateApproved() {
+  if (Date.now() - kurumStatusCache.at < KURUM_STATUS_TTL_MS) return kurumStatusCache.approved;
+  try {
+    const found = await fetchMetaTemplatesFromPhoneWaba(PARENT_PDF_KURUM_META_NAME, { includeComponents: false });
+    const hit = (found.matches || []).find((r) => String(r.name || '') === PARENT_PDF_KURUM_META_NAME);
+    const status = hit ? String(hit.status || 'UNKNOWN') : null;
+    kurumStatusCache = { at: Date.now(), approved: isMetaTemplateSendableStatus(status), status };
+  } catch {
+    kurumStatusCache = { at: Date.now(), approved: false, status: 'ERROR' };
+  }
+  return kurumStatusCache.approved;
+}
+
+/** Şablonu Meta'ya onaya gönderir (varsa mevcut durumu döner; tekrar çağrılabilir). */
+export async function ensureParentPdfKurumTemplate() {
+  const r = await createOrReuseMetaMessageTemplate(buildParentPdfKurumTemplatePayload());
+  kurumStatusCache = { at: 0, approved: false, status: null };
+  return r;
+}
 
 export function buildParentPdfTemplateRow() {
   return {
@@ -210,7 +288,10 @@ export async function sendParentPdfToWhatsapp({
     kurum: parentMessageSignature(institutionName)
   };
 
-  const templateRow = await loadParentPdfTemplateRow();
+  // Kurum adlı şablon onaylıysa onu, değilse eski şablonu kullan
+  const templateRow = (await kurumTemplateApproved())
+    ? buildParentPdfKurumTemplateRow()
+    : await loadParentPdfTemplateRow();
   const metaName = resolveMetaTemplateName(templateRow, PARENT_PDF_TEMPLATE_TYPE);
   const errors = [];
 
