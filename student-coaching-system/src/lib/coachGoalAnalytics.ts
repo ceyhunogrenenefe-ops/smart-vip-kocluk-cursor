@@ -2,7 +2,7 @@ import { addDays, eachDayOfInterval, eachWeekOfInterval, endOfWeek, format, max 
 import { tr } from 'date-fns/locale';
 import type { CoachWeeklyGoalRow, WeeklyPlannerEntryRow } from './weeklyPlannerApi';
 import type { WeeklyEntry } from '../types';
-import { effectivePagesRead, effectiveScreenMinutes } from './studyInsightMetrics';
+import { effectivePagesRead, goalMinutesFromEntry } from './studyInsightMetrics';
 
 function clipYmd(s: string): string {
   return String(s || '').trim().slice(0, 10);
@@ -268,7 +268,7 @@ export function effectivePlannerEntryDone(
     const linked = weeklyEntries.find((w) => w.id === wid);
     if (linked) {
       if (kind === 'sayfa') fromWeekly = effectivePagesRead(linked);
-      else if (kind === 'dakika') fromWeekly = effectiveScreenMinutes(linked);
+      else if (kind === 'dakika') fromWeekly = goalMinutesFromEntry(linked);
       else fromWeekly = Math.max(0, Number(linked.solvedQuestions || 0));
     }
   }
@@ -341,7 +341,7 @@ function amountTypeForGoal(g: CoachWeeklyGoalRow): GoalAmountType {
 
 function entryAmountForType(e: WeeklyEntry, t: GoalAmountType): number {
   if (t === 'sayfa') return Math.max(0, effectivePagesRead(e));
-  if (t === 'dakika') return Math.max(0, effectiveScreenMinutes(e));
+  if (t === 'dakika') return Math.max(0, goalMinutesFromEntry(e));
   return Math.max(0, Number(e.solvedQuestions || 0));
 }
 
@@ -534,6 +534,8 @@ export type CoachGoalRangeAnalytics = {
   paragraf: CoachGoalProgressBucket;
   problem: CoachGoalProgressBucket;
   sayfa: CoachGoalProgressBucket;
+  /** Süre (dakika) hedefleri: çalışma süresinden */
+  dakika: CoachGoalProgressBucket;
   questionRealizationPct: number;
   questionTarget: number;
   questionPlanned: number;
@@ -622,6 +624,7 @@ export function computeCoachGoalRangeAnalytics(
     paragraf: finalize('paragraf'),
     problem: finalize('problem'),
     sayfa: finalize('sayfa'),
+    dakika: finalize('dakika'),
     questionTarget,
     questionPlanned,
     questionCompleted,

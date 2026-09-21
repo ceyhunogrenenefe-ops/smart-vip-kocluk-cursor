@@ -18,6 +18,7 @@ import {
   BookOpen,
   CalendarCheck,
   Crosshair,
+  Hourglass,
   MonitorSmartphone,
   Sparkles,
   Target,
@@ -209,6 +210,30 @@ export function StudyInsightWidgets({
             hint="Doğru / çözülen"
           />
           <MiniStat
+            icon={<Hourglass className="w-4 h-4" />}
+            label="Çalışma süresi"
+            value={formatDurationFromMinutes(summary.totalStudyMinutes)}
+            hint={
+              summary.totalStudyMinutes > 0
+                ? `${summary.studyDays} gün · günde ort. ${formatDurationFromMinutes(
+                    Math.round(summary.totalStudyMinutes / Math.max(1, summary.studyDays))
+                  )}`
+                : 'Öğrencinin girdiği çalışma süresi'
+            }
+          />
+          {summary.coachGoalBreakdown &&
+          (summary.coachGoalBreakdown.dakika.target > 0 ||
+            summary.coachGoalBreakdown.dakika.completed > 0) ? (
+            <MiniStat
+              icon={<Target className="w-4 h-4" />}
+              label="Süre hedefi"
+              value={`%${summary.coachGoalBreakdown.dakika.realizationPct}`}
+              hint={`${formatDurationFromMinutes(summary.coachGoalBreakdown.dakika.completed)} / ${formatDurationFromMinutes(
+                summary.coachGoalBreakdown.dakika.target
+              )}`}
+            />
+          ) : null}
+          <MiniStat
             icon={<MonitorSmartphone className="w-4 h-4" />}
             label="Ekran süresi"
             value={formatDurationFromMinutes(summary.totalScreenMinutes)}
@@ -292,6 +317,29 @@ export function StudyInsightWidgets({
           </div>
         </div>
 
+        {daily.some((d) => d.studyMinutes > 0) ? (
+          <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4 shadow-sm">
+            <div className="flex items-center gap-2 mb-3 text-slate-800 dark:text-slate-100 font-semibold text-sm">
+              <Hourglass className="w-4 h-4 text-teal-600" />
+              Günlük çalışma süresi ({daily.length} gün)
+            </div>
+            <div className="h-48">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={daily}>
+                  <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200 dark:stroke-slate-700" />
+                  <XAxis dataKey="label" tick={{ fontSize: 10 }} />
+                  <YAxis tick={{ fontSize: 10 }} allowDecimals={false} unit=" dk" width={48} />
+                  <Tooltip
+                    contentStyle={{ borderRadius: 12 }}
+                    formatter={(v: number) => [formatDurationFromMinutes(v), 'Çalışma']}
+                  />
+                  <Bar dataKey="studyMinutes" fill="#0d9488" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        ) : null}
+
         <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4 shadow-sm">
           <div className="flex items-center gap-2 mb-3 text-slate-800 dark:text-slate-100 font-semibold text-sm">
             <CalendarCheck className="w-4 h-4 text-emerald-500" />
@@ -301,7 +349,7 @@ export function StudyInsightWidgets({
             {daily.map((d) => (
               <div
                 key={d.date}
-                title={`${d.date}: ${d.solved} soru`}
+                title={`${d.date}: ${d.solved} soru${d.studyMinutes > 0 ? ` · ${formatDurationFromMinutes(d.studyMinutes)} çalışma` : ''}`}
                 className={`h-8 w-8 rounded-lg flex items-center justify-center text-[10px] font-medium border transition-colors ${
                   d.active
                     ? 'bg-emerald-500/15 border-emerald-400 text-emerald-800 dark:text-emerald-200'
@@ -328,6 +376,11 @@ export function StudyInsightWidgets({
               <div key={row.subject} className="px-4 py-2.5 flex items-center justify-between gap-3 text-sm">
                 <span className="font-medium text-slate-800 dark:text-slate-100 truncate">{row.subject}</span>
                 <div className="flex items-center gap-3 flex-shrink-0 text-xs">
+                  {row.studyMinutes > 0 ? (
+                    <span className="text-teal-700 dark:text-teal-300">
+                      {formatDurationFromMinutes(row.studyMinutes)}
+                    </span>
+                  ) : null}
                   <span className="text-slate-500">Hedef % {row.realizationRate}</span>
                   <span
                     className={`px-2 py-0.5 rounded-md font-semibold ${
