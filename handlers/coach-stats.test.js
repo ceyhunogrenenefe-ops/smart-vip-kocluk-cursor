@@ -72,6 +72,10 @@ function from(table) {
     order() {
       return b;
     },
+    range(fromIdx, toIdx) {
+      rows = rows.slice(fromIdx, toIdx + 1);
+      return b;
+    },
     eq(col, v) {
       rows = rows.filter((r) => String(r[col]) === String(v));
       return b;

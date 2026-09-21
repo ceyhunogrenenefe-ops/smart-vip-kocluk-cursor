@@ -348,17 +348,8 @@ export async function buildAttendanceReport({
   }
 
   const allowedClassIds = await getManagedClassIds(actor);
-  let sessQ = supabaseAdmin
-    .from('class_sessions')
-    .select('id,class_id,lesson_date,start_time,end_time,subject,teacher_id,institution_id')
-    .gte('lesson_date', from)
-    .lte('lesson_date', to)
-    .order('lesson_date', { ascending: true })
-    .order('start_time', { ascending: true });
-
-  if (sessionIdF) sessQ = sessQ.eq('id', sessionIdF);
-  if (classIdF) sessQ = sessQ.eq('class_id', classIdF);
-  if (teacherIdF) sessQ = sessQ.eq('teacher_id', teacherIdF);
+  /** @type {string[]|null} */
+  let sessClassIds = null;
 
   if (!seesAllInstitutionClasses(role)) {
     if (!allowedClassIds || !allowedClassIds.length) {
@@ -375,13 +366,36 @@ export async function buildAttendanceReport({
       const intersect = institutionClassIds.filter((id) => allowedSet.has(id));
       if (intersect.length) scopedClassIds = intersect;
     }
-    sessQ = sessQ.in('class_id', scopedClassIds);
+    sessClassIds = scopedClassIds;
   } else if (effectiveInst && institutionClassIds?.length) {
-    sessQ = sessQ.in('class_id', institutionClassIds);
+    sessClassIds = institutionClassIds;
   }
 
-  const { data: sessions, error: sErr } = await sessQ;
-  if (sErr) return { error: { status: 500, body: { error: sErr.message } } };
+  // Sayfalı okuma: Supabase tek istekte en fazla 1000 satır döndürür; aylık aralıkta
+  // 2000+ oturum olunca ay sonundaki dersler rapordan düşüyordu.
+  const buildSessQ = () => {
+    let q = supabaseAdmin
+      .from('class_sessions')
+      .select('id,class_id,lesson_date,start_time,end_time,subject,teacher_id,institution_id')
+      .gte('lesson_date', from)
+      .lte('lesson_date', to)
+      .order('lesson_date', { ascending: true })
+      .order('start_time', { ascending: true })
+      .order('id', { ascending: true });
+    if (sessionIdF) q = q.eq('id', sessionIdF);
+    if (classIdF) q = q.eq('class_id', classIdF);
+    if (teacherIdF) q = q.eq('teacher_id', teacherIdF);
+    if (sessClassIds) q = q.in('class_id', sessClassIds);
+    return q;
+  };
+  const sessions = [];
+  const SESS_PAGE = 1000;
+  for (let offset = 0; offset < 50000; offset += SESS_PAGE) {
+    const { data: page, error: sErr } = await buildSessQ().range(offset, offset + SESS_PAGE - 1);
+    if (sErr) return { error: { status: 500, body: { error: sErr.message } } };
+    sessions.push(...(page || []));
+    if (!page || page.length < SESS_PAGE) break;
+  }
   let sessionList = sessions || [];
 
   const visibleStudentSet = await getVisibleStudentIdSet(
@@ -427,11 +441,20 @@ export async function buildAttendanceReport({
   const attChunks = [];
   for (let i = 0; i < sessionIds.length; i += chunkSize) {
     const slice = sessionIds.slice(i, i + chunkSize);
-    let aq = supabaseAdmin.from('class_session_attendance').select('*').in('session_id', slice);
-    if (studentIdF) aq = aq.eq('student_id', studentIdF);
-    const { data: part, error: aErr } = await aq;
-    if (aErr) return { error: { status: 500, body: { error: aErr.message } } };
-    attChunks.push(...(part || []));
+    // 80 oturum × sınıf mevcudu 1000 satırı aşabilir → sayfalı oku
+    for (let offset = 0; offset < 100000; offset += 1000) {
+      let aq = supabaseAdmin
+        .from('class_session_attendance')
+        .select('*')
+        .in('session_id', slice)
+        .order('id', { ascending: true })
+        .range(offset, offset + 999);
+      if (studentIdF) aq = aq.eq('student_id', studentIdF);
+      const { data: part, error: aErr } = await aq;
+      if (aErr) return { error: { status: 500, body: { error: aErr.message } } };
+      attChunks.push(...(part || []));
+      if (!part || part.length < 1000) break;
+    }
   }
 
   const studentIds = [...new Set(attChunks.map((r) => String(r.student_id || '').trim()).filter(Boolean))];

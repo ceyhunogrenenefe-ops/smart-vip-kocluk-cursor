@@ -134,6 +134,18 @@ function studentAcc(map, sid) {
   return map.get(sid);
 }
 
+/** Supabase tek istekte en fazla 1000 satır döndürür; id sırasıyla tüm sayfaları okur. */
+async function pagedSelect(build) {
+  const out = [];
+  for (let offset = 0; offset < 200000; offset += 1000) {
+    const { data, error } = await build().order('id', { ascending: true }).range(offset, offset + 999);
+    if (error) return { data: null, error };
+    out.push(...(data || []));
+    if (!data || data.length < 1000) break;
+  }
+  return { data: out, error: null };
+}
+
 async function fetchInChunks(ids, run) {
   const list = [...ids];
   const all = [];
@@ -276,24 +288,24 @@ export default async function handler(req, res) {
       let entryRows = [];
       try {
         entryRows = await fetchInChunks(studentIds, async (chunk) => {
-          const { data, error } = await supabaseAdmin
+          const { data, error } = await pagedSelect(() => supabaseAdmin
             .from('weekly_entries')
             .select(
               'student_id,date,subject,correct,wrong,blank,solved_questions,reading_minutes,pages_read,screen_time_minutes'
             )
             .in('student_id', chunk)
             .gte('date', from)
-            .lte('date', to);
+            .lte('date', to));
           if (error) {
             if (String(error.message || '').includes('screen_time_minutes')) {
-              const { data: d2, error: e2 } = await supabaseAdmin
+              const { data: d2, error: e2 } = await pagedSelect(() => supabaseAdmin
                 .from('weekly_entries')
                 .select(
                   'student_id,date,subject,correct,wrong,blank,solved_questions,reading_minutes,pages_read'
                 )
                 .in('student_id', chunk)
                 .gte('date', from)
-                .lte('date', to);
+                .lte('date', to));
               if (e2) throw e2;
               return d2 || [];
             }
@@ -343,7 +355,7 @@ export default async function handler(req, res) {
         let goalRows = [];
         try {
           goalRows = await fetchInChunks(studentIds, async (chunk) => {
-            const { data: overlap, error: e1 } = await supabaseAdmin
+            const { data: overlap, error: e1 } = await pagedSelect(() => supabaseAdmin
               .from('coach_weekly_goals')
               .select(
                 'id,student_id,coach_id,subject,quantity_unit,target_quantity,week_start_date,goal_start_date,goal_end_date,created_at'
@@ -352,16 +364,16 @@ export default async function handler(req, res) {
               .not('goal_start_date', 'is', null)
               .not('goal_end_date', 'is', null)
               .lte('goal_start_date', to)
-              .gte('goal_end_date', from);
+              .gte('goal_end_date', from));
             if (e1) throw e1;
 
-            const { data: legacyOpen, error: e2 } = await supabaseAdmin
+            const { data: legacyOpen, error: e2 } = await pagedSelect(() => supabaseAdmin
               .from('coach_weekly_goals')
               .select(
                 'id,student_id,coach_id,subject,quantity_unit,target_quantity,week_start_date,goal_start_date,goal_end_date,created_at'
               )
               .in('student_id', chunk)
-              .or('goal_start_date.is.null,goal_end_date.is.null');
+              .or('goal_start_date.is.null,goal_end_date.is.null'));
             if (e2) throw e2;
 
             const legacyFiltered = (legacyOpen || []).filter((row) => {
@@ -380,14 +392,14 @@ export default async function handler(req, res) {
             isSchemaColumnError(ge, 'goal_end_date')
           ) {
             goalRows = await fetchInChunks(studentIds, async (chunk) => {
-              const { data, error } = await supabaseAdmin
+              const { data, error } = await pagedSelect(() => supabaseAdmin
                 .from('coach_weekly_goals')
                 .select(
                   'id,student_id,coach_id,subject,quantity_unit,target_quantity,week_start_date,created_at'
                 )
                 .in('student_id', chunk)
                 .gte('week_start_date', from)
-                .lte('week_start_date', to);
+                .lte('week_start_date', to));
               if (error) throw error;
               return (data || []).filter((row) => {
                 const ws = padYmd(row.week_start_date);
@@ -435,15 +447,23 @@ export default async function handler(req, res) {
     const camOn = new Map();
     const camTotal = new Map();
     try {
-      let sessionsQ = supabaseAdmin
-        .from('class_sessions')
-        .select('id,lesson_date,institution_id,status,class_id')
-        .gte('lesson_date', from)
-        .lte('lesson_date', to);
-      if (institutionId) sessionsQ = sessionsQ.eq('institution_id', institutionId);
-      if (filterClassId) sessionsQ = sessionsQ.eq('class_id', filterClassId);
-      const { data: sessions, error: sessErr } = await sessionsQ;
-      if (sessErr) throw sessErr;
+      // Sayfalı: tek istekte en fazla 1000 satır gelir; aylık aralıkta oturumlar kesiliyordu
+      const sessions = [];
+      for (let offset = 0; offset < 50000; offset += 1000) {
+        let sessionsQ = supabaseAdmin
+          .from('class_sessions')
+          .select('id,lesson_date,institution_id,status,class_id')
+          .gte('lesson_date', from)
+          .lte('lesson_date', to)
+          .order('id', { ascending: true })
+          .range(offset, offset + 999);
+        if (institutionId) sessionsQ = sessionsQ.eq('institution_id', institutionId);
+        if (filterClassId) sessionsQ = sessionsQ.eq('class_id', filterClassId);
+        const { data: page, error: sessErr } = await sessionsQ;
+        if (sessErr) throw sessErr;
+        sessions.push(...(page || []));
+        if (!page || page.length < 1000) break;
+      }
       const sessionMeta = new Map();
       const sessionIds = [];
       for (const s of sessions || []) {
@@ -455,16 +475,16 @@ export default async function handler(req, res) {
 
       if (sessionIds.length && studentIds.length) {
         const attRows = await fetchInChunks(sessionIds, async (chunk) => {
-          const { data, error } = await supabaseAdmin
+          const { data, error } = await pagedSelect(() => supabaseAdmin
             .from('class_session_attendance')
             .select('session_id,student_id,status,camera_status')
-            .in('session_id', chunk);
+            .in('session_id', chunk));
           if (error) {
             if (isSchemaColumnError(error, 'camera_status')) {
-              const { data: d2, error: e2 } = await supabaseAdmin
+              const { data: d2, error: e2 } = await pagedSelect(() => supabaseAdmin
                 .from('class_session_attendance')
                 .select('session_id,student_id,status')
-                .in('session_id', chunk);
+                .in('session_id', chunk));
               if (e2) throw e2;
               return d2 || [];
             }
