@@ -63,16 +63,49 @@ type MetricKey =
   | 'avg_report_fill_rate'
   | 'avg_attendance_rate'
   | 'avg_absence_rate'
+  | 'avg_camera_rate'
+  | 'avg_goal_assigned_rate'
   | 'avg_planner_goal_rate'
   | 'deneme_participation_rate';
 
 const METRICS: { key: MetricKey; label: string; hint: string }[] = [
-  { key: 'avg_report_fill_rate', label: 'Rapor doldurma', hint: 'Aktif öğrenci×gün' },
-  { key: 'avg_attendance_rate', label: 'Ders devamlılık', hint: 'Present+geç' },
-  { key: 'avg_absence_rate', label: 'Devamsızlık', hint: 'Absent oranı' },
-  { key: 'avg_planner_goal_rate', label: 'Plan/hedef', hint: 'Haftalık soru hedefi' },
+  { key: 'avg_report_fill_rate', label: 'Rapor doldurma', hint: 'Doldurulan gün / aktif gün' },
+  { key: 'avg_attendance_rate', label: 'Ders devamlılık', hint: 'Katıldı (geç dahil) / yoklama' },
+  { key: 'avg_absence_rate', label: 'Devamsızlık', hint: 'Devamsız / yoklama' },
+  { key: 'avg_camera_rate', label: 'Kamera açık', hint: 'Derse katılanlarda' },
+  { key: 'avg_goal_assigned_rate', label: 'Hedef girilen', hint: 'Koçun hedef girdiği öğrenci' },
+  { key: 'avg_planner_goal_rate', label: 'Hedef gerçekleşme', hint: 'Çözülen / hedeflenen soru' },
   { key: 'deneme_participation_rate', label: 'Deneme katılım', hint: 'E-Desis · aktif öğrenci' }
 ];
+
+/** Yüzdenin altında gösterilecek "kaç öğrenciden" bilgisi */
+function countFor(data: CoachStatsResponse | null, key: MetricKey): string {
+  if (!data) return '';
+  const rows = data.coaches || [];
+  const sum = (f: (c: (typeof rows)[number]) => number | undefined) =>
+    rows.reduce((a, c) => a + (Number(f(c)) || 0), 0);
+  const active = data.summary.active_student_count ?? data.summary.student_count ?? 0;
+  switch (key) {
+    case 'avg_report_fill_rate':
+      return `${sum((c) => c.report_students_filled)}/${active} öğrenci doldurdu`;
+    case 'avg_attendance_rate':
+      return `${sum((c) => c.attendance_present)}/${sum((c) => c.attendance_total)} yoklama`;
+    case 'avg_absence_rate':
+      return `${sum((c) => c.absent_students)} öğrenci · ${sum((c) => c.attendance_absent)} ders`;
+    case 'avg_camera_rate': {
+      const tot = sum((c) => c.camera_total);
+      return tot ? `${sum((c) => c.camera_on)}/${tot} açık` : 'işaretlenmedi';
+    }
+    case 'avg_goal_assigned_rate':
+      return `${sum((c) => c.goal_assigned_students)}/${active} öğrenci`;
+    case 'avg_planner_goal_rate':
+      return `${sum((c) => c.planner_goal_completed)}/${sum((c) => c.planner_goal_target)} soru`;
+    case 'deneme_participation_rate':
+      return `${data.summary.deneme_participants ?? 0}/${active} öğrenci`;
+    default:
+      return '';
+  }
+}
 
 function summaryValue(data: CoachStatsResponse | null, key: MetricKey): number | null {
   if (!data?.summary) return null;
@@ -169,6 +202,8 @@ export default function CoachWeeklyComparison({
           bu: bu ?? 0,
           gecenRaw: gecen,
           buRaw: bu,
+          buCount: countFor(thisWeek, m.key),
+          gecenCount: countFor(lastWeek, m.key),
           delta: deltaPct(bu, gecen)
         };
       }),
@@ -236,7 +271,7 @@ export default function CoachWeeklyComparison({
         </div>
       ) : null}
 
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-5">
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
         {chartData.map((row) => {
           const up = (row.delta ?? 0) > 0;
           const down = (row.delta ?? 0) < 0;
@@ -248,6 +283,7 @@ export default function CoachWeeklyComparison({
               <div className="mt-1 flex items-end justify-between gap-2">
                 <div>
                   <p className="text-lg font-bold text-slate-900">{fmtPct(row.buRaw)}</p>
+                  <p className="text-[11px] font-medium text-slate-700">{row.buCount}</p>
                   <p className="text-[11px] text-slate-500">Geçen: {fmtPct(row.gecenRaw)}</p>
                 </div>
                 <span
@@ -282,7 +318,10 @@ export default function CoachWeeklyComparison({
             <XAxis dataKey="metric" tick={{ fontSize: 11 }} interval={0} />
             <YAxis domain={[0, 100]} tick={{ fontSize: 11 }} />
             <Tooltip
-              formatter={(v: number, name: string) => [`%${v}`, name === 'gecen' ? 'Geçen hafta' : 'Bu hafta']}
+              formatter={(v: number, name: string, item: { payload?: { buCount?: string; gecenCount?: string } }) => {
+                const count = name === 'gecen' ? item?.payload?.gecenCount : item?.payload?.buCount;
+                return [`%${v}${count ? ` · ${count}` : ''}`, name === 'gecen' ? 'Geçen hafta' : 'Bu hafta'];
+              }}
             />
             <Legend
               formatter={(v) => (v === 'gecen' ? 'Geçen hafta' : v === 'bu' ? 'Bu hafta' : v)}
@@ -297,7 +336,9 @@ export default function CoachWeeklyComparison({
                       ? '#e11d48'
                       : row.metric === 'Deneme katılım'
                         ? '#d97706'
-                        : '#0d9488'
+                        : row.metric === 'Kamera açık'
+                          ? '#0891b2'
+                          : '#0d9488'
                   }
                 />
               ))}
