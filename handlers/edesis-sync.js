@@ -35,6 +35,7 @@ import {
   fetchEdesisOgrenciAssignedSinavIdsDetailed,
   fetchEdesisExamCatalogRowDetail,
   fetchEdesisExamRosterStudentIds,
+  examRosterIncludesStudent,
   catalogExamAssignedToStudent,
   enrichTakeableExamDurations,
   resultRowBelongsToStudent,
@@ -294,12 +295,35 @@ async function loadAvailableEdesisExamsForStudent({
     gradeName: scope.gradeName || '',
     excludeExamIds: [...resultExamIds, ...takeableIds]
   });
-  const openOnline = openOnlineRows.slice(0, 48).map((ex) =>
+  let openOnline = openOnlineRows.slice(0, 48).map((ex) =>
     formatEdesisAvailableExamItem(pickEdesisCatalogExamId(ex), ex, null, {
       studentId: platformStudentId || `edesis-${edesisStudentId}`,
       institutionId: actor?.institution_id || null
     })
   );
+  // Açık online yedeği: Edesis'te belirli öğrencilere atanmış (kadrosu dolu) ve bu öğrenci
+  // kadroda olmayan denemeler gösterilmez — öğrencinin adına tanımlanmamış sınav görünmesin.
+  // Kadrosu okunamayan / boş denemeler eskisi gibi kalır (liste boş kalmasın diye eklenen yedek).
+  let openOnlineRosterHidden = 0;
+  if (!items.length && openOnline.length) {
+    const kept = [];
+    for (let i = 0; i < openOnline.length; i += 6) {
+      const batch = openOnline.slice(i, i + 6);
+      const rosters = await Promise.all(
+        batch.map((it) => fetchEdesisExamRosterStudentIds(it.examId, cfg).catch(() => null))
+      );
+      batch.forEach((it, j) => {
+        const roster = rosters[j];
+        const rosterKnown = Array.isArray(roster) && roster.length > 0;
+        if (rosterKnown && !examRosterIncludesStudent(roster, edesisStudentId)) {
+          openOnlineRosterHidden += 1;
+          return;
+        }
+        kept.push(it);
+      });
+    }
+    openOnline = kept;
+  }
   const abpAuth = adminAssignment?.abpAuth || getEdesisAbpAuthStatus();
   // Edesis atama boşsa açık online program denemelerini öğrenci listesine taşı
   // (Sınava Gir + structure/submit aynı kaynak setini görsün).
@@ -343,6 +367,7 @@ async function loadAvailableEdesisExamsForStudent({
       expiredCount: expired.length,
       expiredExamIds: expired.map((x) => x.examId).slice(0, 40),
       openOnlineCount: openOnline.length,
+      openOnlineRosterHidden,
       totalMs: Date.now() - t0
     }
   };
