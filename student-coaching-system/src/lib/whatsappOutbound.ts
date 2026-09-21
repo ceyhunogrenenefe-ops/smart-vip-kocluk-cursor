@@ -1,4 +1,5 @@
 import { apiFetch, getAuthToken, peekJwtClaims } from './session';
+import { displayInstitutionName } from './appBrand';
 
 export function formatWhatsAppPhone(value: string): string {
   return String(value || '').replace(/\D/g, '');
@@ -327,13 +328,14 @@ export function buildParentPdfWaMeMessage(opts: {
   title?: string;
   caption?: string;
   downloadUrl: string;
+  institutionName?: string | null;
 }): string {
   const student = String(opts.studentName || 'Öğrenci').trim() || 'Öğrenci';
   const title = String(opts.title || opts.caption || 'PDF raporu').trim() || 'PDF raporu';
   return (
     `Merhaba,\n\n${student} için ${title} hazır.\n\n` +
     `PDF indirme bağlantısı:\n${opts.downloadUrl}\n\n` +
-    `Smart VIP Koçluk`
+    displayInstitutionName(opts.institutionName)
   );
 }
 
@@ -394,6 +396,8 @@ export async function sendWhatsAppOutboundDocument(opts: {
   studentId?: string;
   studentName?: string;
   pdfTitle?: string;
+  /** Veliye giden metnin imzası: öğrencinin kurumu */
+  institutionName?: string | null;
 }): Promise<WhatsAppSendResult> {
   const target = normalizeWhatsAppPhoneForSend(opts.targetPhone);
   const coachUserId = String(opts.coachUserId || '').trim();
@@ -416,6 +420,7 @@ export async function sendWhatsAppOutboundDocument(opts: {
           to: target,
           student_id: opts.studentId || undefined,
           student_name: studentName || undefined,
+          institution_name: opts.institutionName || undefined,
           pdf_title: pdfTitle || caption || undefined,
           document_base64: base64,
           filename,
@@ -456,7 +461,8 @@ export async function sendWhatsAppOutboundDocument(opts: {
           studentName,
           title: pdfTitle,
           caption,
-          downloadUrl
+          downloadUrl,
+          institutionName: opts.institutionName
         });
         const { opened, url } = openWaMeLink(target, waMessage);
         try {

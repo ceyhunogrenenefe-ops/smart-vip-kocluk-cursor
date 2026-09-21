@@ -35,9 +35,13 @@ export function coachGoalUnitKind(g: CoachWeeklyGoalRow): CoachGoalUnitKind {
   return 'other';
 }
 
+/**
+ * Toplam soru sayısına giren hedefler. Paragraf ve problem de soru çözümüdür:
+ * kırılımda ayrı ders/kart olarak görünür ama toplam soru hedefine ve çözülene dahildir.
+ */
 export function isQuestionCoachGoal(g: CoachWeeklyGoalRow): boolean {
   const k = coachGoalUnitKind(g);
-  return k === 'soru' || k === 'tekrar';
+  return k === 'soru' || k === 'tekrar' || k === 'paragraf' || k === 'problem';
 }
 
 export function goalCalendarSpanYmd(g: CoachWeeklyGoalRow): { gs: string; ge: string } | null {
@@ -103,7 +107,12 @@ export function proratedQuestionTargetInRange(g: CoachWeeklyGoalRow, rangeFrom: 
   return proratedTargetInRange(g, rangeFrom, rangeTo);
 }
 
-/** Aynı ders+birim için çakışan eski haftalık hedefleri tek kayda indirger (analiz çift sayımını önler). */
+/**
+ * Aynı ders+birim için tarihleri çakışan eski hedefleri eler (analiz çift sayımını önler).
+ * Ardışık haftaların hedefleri (tarihleri kesişmeyen) ayrı ayrı sayılır — önceden aralık
+ * birden çok haftayı kapsayınca yalnız son haftanın hedefi kalıyor, toplam eksik görünüyordu.
+ * Birebir aynı kaydedilmiş kopyalar da elenir.
+ */
 export function dedupeCoachGoalsForAnalytics(
   goals: CoachWeeklyGoalRow[],
   rangeFrom: string,
@@ -111,31 +120,31 @@ export function dedupeCoachGoalsForAnalytics(
 ): CoachWeeklyGoalRow[] {
   const rf = clipYmd(rangeFrom);
   const rt = clipYmd(rangeTo);
-  // Ders + birim bazında en güncel hedef dönemini bul.
-  // Eski davranış aynı dönemde tek hedef bırakıyordu; koç aynı haftaya aynı
-  // dersten iki ayrı hedef verdiğinde biri analizden düşüyor, hedef eksik
-  // görünüyordu. Artık yalnız eski (farklı dönemli) çakışan hedefler ve
-  // birebir aynı kaydedilmiş kopyalar eleniyor.
-  const bestSpanByKey = new Map<string, string>();
-  const inRange: CoachWeeklyGoalRow[] = [];
-  for (const g of goals) {
-    if (!goalOverlapsRange(g, rf, rt)) continue;
-    inRange.push(g);
-    const key = `${normSubjectKey(g.subject)}::${coachGoalUnitKind(g)}`;
-    const span = goalCalendarSpanYmd(g);
-    const spanKey = `${span?.gs ?? ''}|${span?.ge ?? ''}`;
-    const prev = bestSpanByKey.get(key);
-    if (!prev || spanKey > prev) bestSpanByKey.set(key, spanKey);
-  }
+  const inRange = goals.filter((g) => goalOverlapsRange(g, rf, rt));
+  const spanOf = (g: CoachWeeklyGoalRow) => {
+    const sp = goalCalendarSpanYmd(g);
+    return { gs: sp?.gs ?? '', ge: sp?.ge ?? '', key: `${sp?.gs ?? ''}|${sp?.ge ?? ''}` };
+  };
+  const kindKey = (g: CoachWeeklyGoalRow) => `${normSubjectKey(g.subject)}::${coachGoalUnitKind(g)}`;
+
+  // Aynı ders+birimde, bu hedefle tarihi kesişen ve daha yeni dönemli (farklı span) bir hedef varsa bu eskidir
+  const superseded = (g: CoachWeeklyGoalRow) => {
+    const a = spanOf(g);
+    const k = kindKey(g);
+    return inRange.some((h) => {
+      if (h === g || kindKey(h) !== k) return false;
+      const b = spanOf(h);
+      if (b.key === a.key || b.key <= a.key) return false;
+      return overlapInclusiveDayCount(a.gs, a.ge, b.gs, b.ge) > 0;
+    });
+  };
+
   const seenExact = new Set<string>();
   const out: CoachWeeklyGoalRow[] = [];
   const ordered = [...inRange].sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
   for (const g of ordered) {
-    const key = `${normSubjectKey(g.subject)}::${coachGoalUnitKind(g)}`;
-    const span = goalCalendarSpanYmd(g);
-    const spanKey = `${span?.gs ?? ''}|${span?.ge ?? ''}`;
-    if (bestSpanByKey.get(key) !== spanKey) continue;
-    const exactKey = `${key}::${spanKey}::${String(g.title || '').trim().toLocaleLowerCase('tr-TR')}::${Number(g.target_quantity) || 0}`;
+    if (superseded(g)) continue;
+    const exactKey = `${kindKey(g)}::${spanOf(g).key}::${String(g.title || '').trim().toLocaleLowerCase('tr-TR')}::${Number(g.target_quantity) || 0}`;
     if (seenExact.has(exactKey)) continue;
     seenExact.add(exactKey);
     out.push(g);
@@ -606,9 +615,13 @@ export function computeCoachGoalRangeAnalytics(
 
   const soruB = finalize('soru');
   const tekrarB = finalize('tekrar');
-  let questionTarget = soruB.target + tekrarB.target;
-  const questionPlanned = soruB.planned + tekrarB.planned;
-  const questionCompleted = soruB.completed + tekrarB.completed;
+  const paragrafB = finalize('paragraf');
+  const problemB = finalize('problem');
+  // Toplam soru: soru + tekrar + paragraf + problem (kartlarda ayrıca ayrı gösterilir)
+  const qBuckets = [soruB, tekrarB, paragrafB, problemB];
+  let questionTarget = qBuckets.reduce((a, b) => a + b.target, 0);
+  const questionPlanned = qBuckets.reduce((a, b) => a + b.planned, 0);
+  const questionCompleted = qBuckets.reduce((a, b) => a + b.completed, 0);
   const quotaTarget = totalCoachQuestionTargetsInRange(activeGoals, rf, rt);
   if (quotaTarget > 0) questionTarget = quotaTarget;
 
@@ -621,8 +634,8 @@ export function computeCoachGoalRangeAnalytics(
   return {
     buckets,
     soru: soruB,
-    paragraf: finalize('paragraf'),
-    problem: finalize('problem'),
+    paragraf: paragrafB,
+    problem: problemB,
     sayfa: finalize('sayfa'),
     dakika: finalize('dakika'),
     questionTarget,

@@ -171,4 +171,28 @@ const goals = [A, B];
   assert.deepEqual(kept, ['A', 'B']);
 }
 
-console.log('coachGoalAttribution tests ok (12 senaryo)');
+// 13) Ardışık haftaların aynı ders hedefleri (tarihleri kesişmiyor) ikisi de sayılır
+{
+  const w1 = goal('W1', 'Matematik', 100, '2026-09-14T08:00:00Z', {
+    goal_start_date: '2026-09-14',
+    goal_end_date: '2026-09-20'
+  });
+  const w2 = goal('W2', 'Matematik', 150, '2026-09-21T08:00:00Z', {
+    week_start_date: '2026-09-21',
+    goal_start_date: '2026-09-21',
+    goal_end_date: '2026-09-27'
+  });
+  const kept = dedupeCoachGoalsForAnalytics([w1, w2], '2026-09-14', '2026-09-27').map((g) => g.id).sort();
+  assert.deepEqual(kept, ['W1', 'W2']);
+  assert.equal(totalCoachQuestionTargetsInRange([w1, w2], '2026-09-14', '2026-09-27'), 250);
+}
+
+// 14) Paragraf ve problem hedefleri toplam soru hedefine dahil
+{
+  const m = goal('M', 'Matematik', 100, '2026-09-14T08:00:00Z');
+  const pr = goal('P', 'Paragraf Çözme', 40, '2026-09-14T08:01:00Z', { quantity_unit: 'paragraf' });
+  const pb = goal('Q', 'Problem Çözme', 20, '2026-09-14T08:02:00Z', { quantity_unit: 'problem' });
+  assert.equal(totalCoachQuestionTargetsInRange([m, pr, pb], FROM, TO), 160);
+}
+
+console.log('coachGoalAttribution tests ok (14 senaryo)');

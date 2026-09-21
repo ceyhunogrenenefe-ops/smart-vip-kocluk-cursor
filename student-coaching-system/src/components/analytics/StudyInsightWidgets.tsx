@@ -153,7 +153,7 @@ export function StudyInsightWidgets({
                 icon={<Target className="w-4 h-4" />}
                 label="Koç hedefi"
                 value={`${summary.coachGoalBreakdown.questionTarget || summary.totalTarget}`}
-                hint="Koçun verdiği toplam soru kotası"
+                hint="Toplam soru kotası (paragraf + problem dahil)"
               />
               <MiniStat
                 icon={<Crosshair className="w-4 h-4" />}
