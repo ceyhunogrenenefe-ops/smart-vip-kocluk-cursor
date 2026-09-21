@@ -700,6 +700,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
             readingMinutes: e.reading_minutes || undefined,
             pagesRead: (e as { pages_read?: number }).pages_read ?? undefined,
             screenTimeMinutes: (e as { screen_time_minutes?: number }).screen_time_minutes ?? undefined,
+            studyMinutes: (e as { study_minutes?: number }).study_minutes ?? undefined,
             bookId: e.book_id || undefined,
             bookTitle: e.book_title || undefined,
             createdAt: e.created_at
@@ -1382,6 +1383,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         reading_minutes: entry.readingMinutes || null,
         pages_read: entry.pagesRead ?? null,
         screen_time_minutes: entry.screenTimeMinutes ?? null,
+        study_minutes: entry.studyMinutes ?? null,
         book_id: entry.bookId || null,
         book_title: entry.bookTitle || null,
         institution_id: resolvedInstitutionId
@@ -1402,6 +1404,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         readingMinutes: created.reading_minutes || undefined,
         pagesRead: (created as { pages_read?: number }).pages_read ?? entry.pagesRead,
         screenTimeMinutes: (created as { screen_time_minutes?: number }).screen_time_minutes ?? entry.screenTimeMinutes,
+        studyMinutes: (created as { study_minutes?: number }).study_minutes ?? entry.studyMinutes,
         bookId: created.book_id || undefined,
         bookTitle: created.book_title || undefined,
         createdAt: created.created_at
@@ -1442,6 +1445,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         reading_minutes: updatedEntry.readingMinutes,
         pages_read: updatedEntry.pagesRead,
         screen_time_minutes: updatedEntry.screenTimeMinutes,
+        study_minutes: updatedEntry.studyMinutes,
         book_id: updatedEntry.bookId,
         book_title: updatedEntry.bookTitle
       });

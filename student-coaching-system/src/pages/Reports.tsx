@@ -12,6 +12,7 @@ import {
   TrendingUp,
   TrendingDown,
   CheckCircle,
+  Hourglass,
   XCircle,
   Clock,
   Target,
@@ -36,6 +37,7 @@ import {
   ArrowDown,
   Minus
 } from 'lucide-react';
+import { formatDurationFromMinutes } from '../lib/studyInsightMetrics';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import {
@@ -230,6 +232,8 @@ export default function Reports() {
 
   const filteredEntries = getFilteredEntries();
   const stats = selectedStudentId ? getStudentStats(selectedStudentId) : null;
+  /** Seçili dönemde öğrencinin girdiği toplam çalışma süresi (dk) */
+  const studyMinutesTotal = filteredEntries.reduce((s, e) => s + (e.studyMinutes && e.studyMinutes > 0 ? e.studyMinutes : 0), 0);
 
   // Konu takibi
   const studentTopics = selectedStudentId ? getStudentTopicProgress(selectedStudentId) : [];
@@ -531,7 +535,7 @@ ${latestExam ? `📝 *Son Deneme Sonucu (${latestExam.examType}):*
 ├ Doğru: ${stats.totalCorrect}
 ├ Yanlış: ${stats.totalWrong}
 ├ Boş: ${stats.totalBlank}
-├ Başarı: %${stats.successRate}
+├ Başarı: %${stats.successRate}${studyMinutesTotal > 0 ? `\n├ Çalışma Süresi: ${formatDurationFromMinutes(studyMinutesTotal)}` : ''}
 └ Hedef Tamamlama: %${stats.realizationRate}
 
 ${aiComments.length > 0 ? `💡 *AI Koç Yorumu:*
@@ -768,11 +772,16 @@ _${institution.name}_`;
 
                 {/* Ana İstatistikler */}
                 {stats && (
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
                     <div className="bg-blue-50 rounded-xl p-4 text-center">
                       <Target className="w-6 h-6 text-blue-600 mx-auto mb-2" />
                       <p className="text-2xl font-bold text-slate-800">{stats.totalTarget}</p>
                       <p className="text-sm text-gray-500">Toplam Hedef</p>
+                    </div>
+                    <div className="bg-teal-50 rounded-xl p-4 text-center">
+                      <Hourglass className="w-6 h-6 text-teal-600 mx-auto mb-2" />
+                      <p className="text-2xl font-bold text-slate-800">{formatDurationFromMinutes(studyMinutesTotal)}</p>
+                      <p className="text-sm text-gray-500">Çalışma Süresi</p>
                     </div>
                     <div className="bg-green-50 rounded-xl p-4 text-center">
                       <BarChart3 className="w-6 h-6 text-green-600 mx-auto mb-2" />
@@ -1132,6 +1141,7 @@ _${institution.name}_`;
                           <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600">Doğru</th>
                           <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600">Yanlış</th>
                           <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600">Boş</th>
+                          <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600">Süre</th>
                           <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600">Başarı</th>
                         </tr>
                       </thead>
@@ -1152,6 +1162,9 @@ _${institution.name}_`;
                               <td className="px-4 py-3 text-sm text-center font-medium text-green-600">{entry.correctAnswers}</td>
                               <td className="px-4 py-3 text-sm text-center font-medium text-red-600">{entry.wrongAnswers}</td>
                               <td className="px-4 py-3 text-sm text-center font-medium text-gray-600">{entry.blankAnswers}</td>
+                              <td className="px-4 py-3 text-sm text-center text-teal-700">
+                                {entry.studyMinutes && entry.studyMinutes > 0 ? formatDurationFromMinutes(entry.studyMinutes) : '—'}
+                              </td>
                               <td className="px-4 py-3 text-center">
                                 <span className={`px-2 py-1 rounded-lg text-xs font-medium ${getSuccessColor(successRate)}`}>
                                   %{successRate}
@@ -1505,6 +1518,7 @@ _${institution.name}_`;
                     <th className="p-2 text-center">Çözülen</th>
                     <th className="p-2 text-center">Doğru</th>
                     <th className="p-2 text-center">Yanlış</th>
+                    <th className="p-2 text-center">Süre</th>
                     <th className="p-2 text-center">Başarı</th>
                   </tr>
                 </thead>
@@ -1522,6 +1536,9 @@ _${institution.name}_`;
                         <td className="p-2 text-center">{entry.solvedQuestions}</td>
                         <td className="p-2 text-center text-green-600">{entry.correctAnswers}</td>
                         <td className="p-2 text-center text-red-600">{entry.wrongAnswers}</td>
+                        <td className="p-2 text-center">
+                          {entry.studyMinutes && entry.studyMinutes > 0 ? formatDurationFromMinutes(entry.studyMinutes) : '—'}
+                        </td>
                         <td className="p-2 text-center">%{rate}</td>
                       </tr>
                     );
