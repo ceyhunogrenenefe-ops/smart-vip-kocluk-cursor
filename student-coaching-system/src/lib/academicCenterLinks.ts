@@ -168,6 +168,9 @@ export function coerceAcademicCenterLinks(next: Partial<AcademicCenterLinks> | n
   studyClasses.class47 = PRIMARY_4567_ZOOM_URL;
   studyClasses.class56 = PRIMARY_4567_ZOOM_URL;
   studyClasses.class78 = LGS8_ETUT_ZOOM_URL;
+  // 9-10-11 ve YKS etüt — lise deneme ile aynı sabit Zoom
+  studyClasses.class911 = LISE_DENEME_ZOOM_ENTRY;
+  studyClasses.yks = LISE_DENEME_ZOOM_ENTRY;
   return {
     studyClasses,
     exams,
