@@ -5,6 +5,7 @@ import {
   isPaidAdAttribution,
   isSiteLeadHoneypot,
   parseSiteLeadPayload,
+  siteLeadIdempotencyKey,
   siteLeadNotes
 } from './site-leads.js';
 
@@ -76,4 +77,31 @@ test('grade inferred from free-text note when sinif empty', () => {
     not: 'YKS 11. sınıf için koçluk istiyoruz'
   });
   assert.equal(p.gradeProgram, 'grade_11');
+});
+
+test('aynı gönderim tarayıcıdan da sunucudan da gelse tek kayıt olur', () => {
+  // crm-site-lead.js ham form alanlarını, site sunucusu normalize edilmiş alanları yollar
+  const browser = parseSiteLeadPayload({
+    form_kind: 'iletisim',
+    ad_soyad: 'Vildan Odabaş',
+    telefon: '05068329481',
+    sinif: '10',
+    program: '3 Günlük Ücretsiz Deneme Dersi',
+    page: 'https://onlinevipdershane.com/'
+  });
+  const server = parseSiteLeadPayload({
+    form_kind: 'iletisim',
+    ad_soyad: 'Vildan Odabaş',
+    telefon: '+905068329481',
+    sinif: '10',
+    program: '3 Günlük Ücretsiz Deneme Dersi'
+  });
+  assert.equal(siteLeadIdempotencyKey(browser), siteLeadIdempotencyKey(server));
+});
+
+test('farklı numara ve farklı form türü ayrı kayıt olur', () => {
+  const base = { form_kind: 'iletisim', ad_soyad: 'A B', telefon: '05068329481' };
+  const key = siteLeadIdempotencyKey(parseSiteLeadPayload(base));
+  assert.notEqual(key, siteLeadIdempotencyKey(parseSiteLeadPayload({ ...base, telefon: '05321112233' })));
+  assert.notEqual(key, siteLeadIdempotencyKey(parseSiteLeadPayload({ ...base, form_kind: 'kayit' })));
 });
