@@ -26,10 +26,11 @@ function normalizeGoalUnit(raw) {
   return u;
 }
 
-function completedAmountForUnit(unit, { solved, pagesRead, screenTimeMin }) {
+function completedAmountForUnit(unit, { solved, pagesRead, screenTimeMin, studyMin }) {
   const u = normalizeGoalUnit(unit);
   if (u === 'sayfa') return Math.max(0, Number(pagesRead) || 0);
-  if (u === 'dakika') return Math.max(0, Number(screenTimeMin) || 0);
+  // Süre hedefi çalışma süresinden ilerler; eski istemci göndermezse ekran süresi
+  if (u === 'dakika') return Math.max(0, Number(studyMin ?? screenTimeMin) || 0);
   return Math.max(0, Number(solved) || 0);
 }
 
@@ -109,6 +110,10 @@ export default async function handler(req, res) {
       b.screen_time_minutes != null || b.screenTimeMinutes != null
         ? Number(b.screen_time_minutes ?? b.screenTimeMinutes)
         : null;
+    const studyMinRaw =
+      b.study_minutes != null || b.studyMinutes != null ? Number(b.study_minutes ?? b.studyMinutes) : null;
+    const studyMin =
+      studyMinRaw != null && Number.isFinite(studyMinRaw) ? Math.max(0, Math.round(studyMinRaw)) : null;
 
     let goalUnit = 'soru';
     if (planner.coach_goal_id) {
@@ -127,7 +132,8 @@ export default async function handler(req, res) {
     const completedAmount = completedAmountForUnit(goalUnit, {
       solved,
       pagesRead: pagesVal,
-      screenTimeMin: screenVal
+      screenTimeMin: screenVal,
+      studyMin
     });
 
     const markTopicOnly = Boolean(b.mark_topic_only ?? b.markTopicOnly);
@@ -162,6 +168,7 @@ export default async function handler(req, res) {
         screenTimeMin != null && Number.isFinite(screenTimeMin) && screenTimeMin >= 0
           ? Math.round(screenTimeMin)
           : null,
+      study_minutes: studyMin,
       book_id: b.book_id ?? b.bookId ?? null,
       book_title: b.book_title != null ? String(b.book_title).slice(0, 500) : b.bookTitle != null ? String(b.bookTitle).slice(0, 500) : null,
       institution_id: institutionId,

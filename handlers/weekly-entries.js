@@ -25,6 +25,7 @@ const WEEKLY_ENTRY_PATCH_KEYS = [
   'reading_minutes',
   'pages_read',
   'screen_time_minutes',
+  'study_minutes',
   'book_id',
   'book_title',
   'institution_id'
@@ -39,6 +40,9 @@ function sanitizeWeeklyEntryPatch(body) {
   if (src.pagesRead !== undefined && out.pages_read === undefined) out.pages_read = src.pagesRead;
   if (src.screenTimeMinutes !== undefined && out.screen_time_minutes === undefined) {
     out.screen_time_minutes = src.screenTimeMinutes;
+  }
+  if (src.studyMinutes !== undefined && out.study_minutes === undefined) {
+    out.study_minutes = src.studyMinutes;
   }
   if (src.readingMinutes !== undefined && out.reading_minutes === undefined) {
     out.reading_minutes = src.readingMinutes;
@@ -184,6 +188,7 @@ export default async function handler(req, res) {
           reading_minutes: body.reading_minutes ?? null,
           pages_read: body.pages_read ?? body.pagesRead ?? null,
           screen_time_minutes: body.screen_time_minutes ?? body.screenTimeMinutes ?? null,
+          study_minutes: body.study_minutes ?? body.studyMinutes ?? null,
           book_id: body.book_id ?? null,
           book_title: body.book_title ?? null,
           institution_id: institutionId,
@@ -226,6 +231,7 @@ export default async function handler(req, res) {
         reading_minutes: body.reading_minutes ?? null,
         pages_read: body.pages_read ?? body.pagesRead ?? null,
         screen_time_minutes: body.screen_time_minutes ?? body.screenTimeMinutes ?? null,
+        study_minutes: body.study_minutes ?? body.studyMinutes ?? null,
         book_id: body.book_id ?? null,
         book_title: body.book_title ?? null,
         institution_id: institutionId || gate.student?.institution_id || null,

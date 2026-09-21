@@ -171,6 +171,8 @@ export interface WeeklyEntry {
   pagesRead?: number;
   /** Telefon/tablet ekran süresi (dakika) */
   screenTimeMinutes?: number;
+  /** Bu derste çalışılan süre (dakika) — süre hedefli koç hedefleri bundan ilerler */
+  studyMinutes?: number;
   bookId?: string; // Okunan kitap ID
   bookTitle?: string; // Kitap adı (quick reference)
 }

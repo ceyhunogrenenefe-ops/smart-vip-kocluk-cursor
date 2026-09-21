@@ -17,7 +17,7 @@ import {
   buildClassStudentMap,
   buildStudentDaySessionIndex,
   summarizeUnsentClassSessions,
-  shouldSkipClassLessonReminder
+  isAutoClassReminderSubject
 } from './class-lesson-reminder-logic.js';
 import {
   CLASS_LESSON_REMINDER_KIND,
@@ -111,7 +111,7 @@ export async function runClassLessonRemindersJob(opts = {}) {
   const dueSessions = (daySessions || []).filter(
     (s) =>
       !s.reminder_sent &&
-      !shouldSkipClassLessonReminder(s.subject) &&
+      isAutoClassReminderSubject(s.subject) &&
       isInReminderWindow(s.lesson_date, s.start_time, now)
   );
 

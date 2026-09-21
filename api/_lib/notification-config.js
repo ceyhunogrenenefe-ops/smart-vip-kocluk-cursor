@@ -31,7 +31,8 @@ export const NOTIFICATION_DEFINITIONS = [
     id: 'class_lesson_reminder',
     templateType: 'class_lesson_reminder',
     nameTr: 'Grup dersi hatırlatma',
-    descriptionTr: 'Ders başlamadan ~10 dk önce; ilgili koçun gateway hesabından.',
+    descriptionTr:
+      'Etüt başlamadan ~10 dk önce öğrenciye; yalnız ilgili koçun gateway hesabından (CLASS_LESSON_REMINDER_SCOPE=all ile tüm grup dersleri).',
     sendChannel: SEND_CHANNELS.COACH_GATEWAY,
     mode: 'automatic',
     cronJobKey: 'class_lesson_reminders',
@@ -66,12 +67,12 @@ export const NOTIFICATION_DEFINITIONS = [
     templateType: 'report_reminder',
     nameTr: 'Günlük rapor hatırlatma',
     descriptionTr:
-      'Rapor girmeyen aktif öğrenci ve velisine 22:00 TR; koçun WhatsApp gateway hattından, hat bağlı değilse Meta onaylı şablonla (koç panelinden aç/kapat).',
+      'Rapor girmeyen aktif öğrenci ve velisine 22:00 TR; yalnız koçun WhatsApp gateway hattından (hat bağlı değilse o koçun öğrencilerine gitmez; koç panelinden aç/kapat).',
     sendChannel: SEND_CHANNELS.COACH_GATEWAY,
     mode: 'automatic',
     cronJobKey: 'daily_report_reminder',
     coachScoped: true,
-    allowMetaFallback: true
+    allowMetaFallback: false
   },
   {
     id: 'lesson_reminder',

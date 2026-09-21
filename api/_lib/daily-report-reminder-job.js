@@ -70,17 +70,21 @@ async function coachCanSendDailyReport(coachId) {
   }
   if (!coachPrefsCache.get(cid)) return { ok: false, reason: 'disabled_by_coach' };
 
-  // Gateway bağlı değilse gönderim atlanmaz: message-service Meta şablonuna düşer (allowMetaFallback)
   if (reportReminderSendChannel() === 'meta') {
     return { ok: true };
   }
   if (!coachGatewayCache.has(cid)) {
     coachGatewayCache.set(cid, await getCoachGatewayHealth(cid));
   }
-  return { ok: true, gateway: coachGatewayCache.get(cid) };
+  const gateway = coachGatewayCache.get(cid);
+  // Yalnız koçun kendi hattı: bağlı değilse o koçun öğrencilerine gönderilmez (Meta yedeği yok)
+  if (!gateway?.connected) {
+    return { ok: false, reason: 'coach_gateway_not_connected', gateway };
+  }
+  return { ok: true, gateway };
 }
 
-/** Günlük rapor tercihi açık koçlar (gateway bağlı olmasa da — Meta yedeği) */
+/** Günlük rapor tercihi açık ve WhatsApp gateway hattı bağlı koçlar */
 async function resolveEligibleCoachIds() {
   const { data: prefsRows, error } = await supabaseAdmin
     .from('coach_whatsapp_notification_prefs')

@@ -30,11 +30,12 @@ export function goalUnitLabel(unit?: string | null): string {
 /** Öğrenci çalışma kaydından hedef birimine göre tamamlanan miktar */
 export function completedQuantityForGoalUnit(
   unit: string | null | undefined,
-  amounts: { solvedQuestions: number; pagesRead: number; screenMinutes: number }
+  amounts: { solvedQuestions: number; pagesRead: number; screenMinutes: number; studyMinutes?: number }
 ): number {
   const u = normalizeGoalUnit(unit);
   if (u === 'sayfa') return Math.max(0, amounts.pagesRead);
-  if (u === 'dakika') return Math.max(0, amounts.screenMinutes);
+  // Süre hedefi çalışılan süreden ilerler (ekran süresi telefon kullanımıdır, hedefe sayılmaz)
+  if (u === 'dakika') return Math.max(0, amounts.studyMinutes ?? 0);
   if (u === 'paragraf' || u === 'problem') return Math.max(0, amounts.solvedQuestions);
   return Math.max(0, amounts.solvedQuestions);
 }
