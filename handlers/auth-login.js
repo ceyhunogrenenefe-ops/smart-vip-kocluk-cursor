@@ -87,6 +87,29 @@ async function resolveCoachIdByEmail(normalizedEmail, altEmail) {
   }
 }
 
+/**
+ * Koç kaydı e-postası kullanıcı e-postasından farklı olabilir (ör. koç kartına eski/kısa e-posta
+ * yazılmış). E-postayla bulunamazsa kullanıcı kimliğiyle aynı id'li koç kaydına düşülür;
+ * aksi halde token'da coach_id boş kalır ve koç kendi öğrencilerine 403 alır.
+ */
+async function resolveCoachIdForUser(userId, normalizedEmail, altEmail) {
+  const byEmail = await resolveCoachIdByEmail(normalizedEmail, altEmail);
+  if (byEmail) return byEmail;
+  const uid = String(userId || '').trim();
+  if (!uid) return null;
+  try {
+    const { data: co } = await withDbTimeout(
+      supabaseAdmin.from('coaches').select('id').eq('id', uid).maybeSingle(),
+      4000,
+      'coach_lookup_by_id'
+    );
+    return co?.id ?? null;
+  } catch (e) {
+    console.warn('[auth-login] coach id lookup skipped:', e instanceof Error ? e.message : e);
+    return null;
+  }
+}
+
 async function resolveStudentIdForLogin(userId, email) {
   try {
     const resolved = await withDbTimeout(
@@ -242,7 +265,7 @@ export default async function handler(req, res) {
     if (user.role === 'student') {
       studentId = (await resolveStudentIdForLogin(user.id, user.email)) || undefined;
     } else if (user.role === 'coach' || user.role === 'teacher') {
-      coachId = (await resolveCoachIdByEmail(normalizedEmail, user.email)) || undefined;
+      coachId = (await resolveCoachIdForUser(user.id, normalizedEmail, user.email)) || undefined;
       if (coachId && !institutionId) {
         try {
           const { data: coInst } = await withDbTimeout(

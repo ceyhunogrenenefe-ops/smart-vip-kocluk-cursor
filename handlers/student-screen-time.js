@@ -22,10 +22,10 @@ const assertRead = async (actor, studentId) => {
     if (!hasInstitutionAccess(actor, st.institution_id)) return { ok: false, status: 403, student: st };
     return { ok: true, student: st };
   }
-  if (actor.role === 'coach') {
-    if (!actor.coach_id || st.coach_id !== actor.coach_id) return { ok: false, status: 403, student: st };
-    return { ok: true, student: st };
-  }
+  // Asıl rolü öğretmen olup ek rolü koç olan kullanıcılar da (roles listesi) kendi öğrencisini okur
+  const isCoach = actor.role === 'coach' || (Array.isArray(actor.roles) && actor.roles.includes('coach'));
+  if (isCoach && actor.coach_id && st.coach_id === actor.coach_id) return { ok: true, student: st };
+  if (actor.role === 'coach') return { ok: false, status: 403, student: st };
   if (actor.role === 'student' && actor.student_id === studentId) return { ok: true, student: st };
   return { ok: false, status: 403, student: st };
 };
