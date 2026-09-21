@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Bar,
   BarChart,
@@ -11,11 +11,12 @@ import {
 } from 'recharts';
 import {
   BarChart3,
+  Camera,
   CalendarRange,
+  ChevronRight,
   ClipboardList,
   Loader2,
   RefreshCw,
-  Trophy,
   Users,
   Target,
   Video
@@ -30,6 +31,8 @@ import {
   type CoachStatsResponse
 } from '../lib/coachStatsApi';
 import CoachWeeklyComparison from '../components/coachStats/CoachWeeklyComparison';
+import CoachStudentBreakdown from '../components/coachStats/CoachStudentBreakdown';
+import TrialLessonFunnel from '../components/coachStats/TrialLessonFunnel';
 
 const TZ = 'Europe/Istanbul';
 
@@ -76,15 +79,17 @@ function KpiCard({
   label,
   value,
   hint,
-  icon
+  icon,
+  title
 }: {
   label: string;
   value: string;
   hint?: string;
   icon: React.ReactNode;
+  title?: string;
 }) {
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm" title={title}>
       <div className="flex items-start justify-between gap-2">
         <div>
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</p>
@@ -96,6 +101,28 @@ function KpiCard({
         </div>
       </div>
     </div>
+  );
+}
+
+/** Tablo hücresi: büyük yüzde, altında "kaç öğrenci / kaç kayıt" */
+function PctCell({
+  rate,
+  sub,
+  title,
+  danger = false
+}: {
+  rate: number | null | undefined;
+  sub: string;
+  title?: string;
+  danger?: boolean;
+}) {
+  return (
+    <td className="px-3 py-2.5" title={title}>
+      <span className={danger && rate ? 'font-semibold text-rose-700' : 'font-semibold text-slate-900'}>
+        {fmtPct(rate)}
+      </span>
+      <span className="mt-0.5 block text-[11px] text-slate-500">{sub}</span>
+    </td>
   );
 }
 
@@ -122,6 +149,13 @@ export default function CoachStatsPage() {
   const [data, setData] = useState<CoachStatsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  /** Admin: tabloda tıklanan koçun öğrenci kırılımı */
+  const [selected, setSelected] = useState<{ id: string; name: string } | null>(null);
+  const detailRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (selected) detailRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [selected]);
 
   useEffect(() => {
     if (isCoachOnly && ownCoachId && coachId !== ownCoachId) setCoachId(ownCoachId);
@@ -186,6 +220,20 @@ export default function CoachStatsPage() {
     };
   }, [institutionId]);
 
+  const totals = useMemo(() => {
+    const rows = data?.coaches || [];
+    const sum = (f: (c: (typeof rows)[number]) => number) => rows.reduce((a, c) => a + (f(c) || 0), 0);
+    return {
+      students: data?.summary.student_count ?? 0,
+      active: data?.summary.active_student_count ?? data?.summary.student_count ?? 0,
+      reportStudents: sum((c) => c.report_students_filled),
+      absentStudents: sum((c) => c.absent_students ?? 0),
+      cameraOn: sum((c) => c.camera_on ?? 0),
+      cameraTotal: sum((c) => c.camera_total ?? 0),
+      goalAssigned: sum((c) => c.goal_assigned_students ?? 0)
+    };
+  }, [data]);
+
   const chartData = useMemo(
     () =>
       (data?.coaches || [])
@@ -199,6 +247,7 @@ export default function CoachStatsPage() {
           yoklama: c.absence_rate ?? 0,
           deneme: c.deneme_entry_rate ?? 0,
           plan: c.planner_goal_rate ?? 0,
+          kamera: c.camera_rate ?? 0,
           gorusme: c.meeting_completion_rate ?? 0
         })),
     [data]
@@ -213,8 +262,10 @@ export default function CoachStatsPage() {
             Koç İstatistikleri
           </h1>
           <p className="mt-1 max-w-2xl text-sm text-slate-600">
-            Haftalık rapor doldurma, canlı ders devamı, E-Desis deneme katılımı ve koç hedeflerini
-            karşılaştırın. Pasif öğrenciler hesaplamaya dahil edilmez.
+            {isCoachOnly
+              ? 'Öğrencilerinizin rapor doldurma, ders devamı, kamera, hedef ve deneme durumunu öğrenci öğrenci görün.'
+              : 'Koçları karşılaştırın; bir koça tıklayınca öğrencilerinin tek tek durumu açılır.'}{' '}
+            Pasif öğrenciler hesaplamaya dahil edilmez.
           </p>
         </div>
         <button
@@ -354,54 +405,62 @@ export default function CoachStatsPage() {
         <>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             <KpiCard
-              label="Ort. rapor doluluk"
+              label="Öğrenci"
+              value={`${totals.active} aktif`}
+              hint={`${totals.students} toplam · ${data.summary.coach_count} koç`}
+              icon={<Users className="h-5 w-5" />}
+            />
+            <KpiCard
+              label="Rapor doldurma"
               value={fmtPct(data.summary.avg_report_fill_rate)}
-              hint="Aktif öğrenci×gün"
+              hint={`${totals.reportStudents}/${totals.active} öğrenci en az 1 gün doldurdu`}
+              title="Doldurulan öğrenci×gün / aktif öğrenci×gün"
               icon={<ClipboardList className="h-5 w-5" />}
             />
             <KpiCard
-              label="Ort. ders devamı"
+              label="Ders devamı"
               value={fmtPct(data.summary.avg_attendance_rate)}
-              hint="Grup canlı ders"
+              hint={`Devamsızlık ${fmtPct(data.summary.avg_absence_rate)} · ${totals.absentStudents} öğrenci devamsız`}
+              title="Grup canlı ders yoklaması: katıldı (geç dahil) / işaretlenen"
               icon={<Users className="h-5 w-5" />}
             />
             <KpiCard
-              label="Ort. devamsızlık"
-              value={fmtPct(data.summary.avg_absence_rate)}
-              hint="Absent oranı"
-              icon={<Users className="h-5 w-5" />}
+              label="Kamera açık"
+              value={fmtPct(data.summary.avg_camera_rate)}
+              hint={
+                totals.cameraTotal
+                  ? `${totals.cameraOn}/${totals.cameraTotal} katılımda kamera açık`
+                  : 'Henüz kamera işaretlenmedi'
+              }
+              title="Derse katılan ve kamerası işaretlenen yoklamalarda kamera açık oranı"
+              icon={<Camera className="h-5 w-5" />}
             />
             <KpiCard
-              label="Ort. plan hedef"
-              value={fmtPct(data.summary.avg_planner_goal_rate)}
-              hint="Koç soru kotası"
+              label="Plan / hedef girilen"
+              value={fmtPct(data.summary.avg_goal_assigned_rate)}
+              hint={`${totals.goalAssigned}/${totals.active} öğrenciye hedef girildi`}
+              title="Koçun bu dönemde en az 1 haftalık hedef girdiği aktif öğrenci oranı"
               icon={<Target className="h-5 w-5" />}
             />
             <KpiCard
-              label="Deneme katılım"
+              label="Hedef gerçekleşme"
+              value={fmtPct(data.summary.avg_planner_goal_rate)}
+              hint="Girilen soru hedefinde çözülen"
+              icon={<Target className="h-5 w-5" />}
+            />
+            <KpiCard
+              label="Deneme katılımı"
               value={fmtPct(
                 data.summary.deneme_participation_rate ?? data.summary.avg_deneme_entry_rate
               )}
-              hint={`E-Desis · ${data.summary.deneme_participants ?? 0}/${data.summary.active_student_count ?? data.summary.student_count} aktif`}
+              hint={`E-Desis · ${data.summary.deneme_participants ?? 0}/${totals.active} öğrenci katıldı`}
               icon={<BarChart3 className="h-5 w-5" />}
             />
             <KpiCard
-              label="Ort. deneme oda"
-              value={fmtPct(data.summary.avg_deneme_join_rate)}
-              hint="BBB giriş logu"
-              icon={<BarChart3 className="h-5 w-5" />}
-            />
-            <KpiCard
-              label="Ort. görüşme"
+              label="Görüşme"
               value={fmtPct(data.summary.avg_meeting_completion_rate)}
-              hint="Koç görüşmeleri"
+              hint={`Ortalama skor ${fmtPct(data.summary.avg_composite_score)}`}
               icon={<Video className="h-5 w-5" />}
-            />
-            <KpiCard
-              label="Ortalama skor"
-              value={fmtPct(data.summary.avg_composite_score)}
-              hint={`${data.summary.coach_count} koç · ${data.summary.active_student_count ?? data.summary.student_count} aktif`}
-              icon={<Trophy className="h-5 w-5" />}
             />
           </div>
 
@@ -437,6 +496,7 @@ export default function CoachStatsPage() {
                     <Bar dataKey="yoklama" name="Devamsızlık" fill="#e11d48" radius={[4, 4, 0, 0]} />
                     <Bar dataKey="deneme" name="Deneme" fill="#d97706" radius={[4, 4, 0, 0]} />
                     <Bar dataKey="plan" name="Plan hedef" fill="#059669" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="kamera" name="Kamera" fill="#0891b2" radius={[4, 4, 0, 0]} />
                     <Bar dataKey="gorusme" name="Görüşme" fill="#7c3aed" radius={[4, 4, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
@@ -444,92 +504,137 @@ export default function CoachStatsPage() {
             )}
           </div>
 
-          <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-            <div className="border-b border-slate-100 px-4 py-3">
-              <h2 className="text-lg font-bold text-slate-900">Koç detay tablosu</h2>
-              <p className="text-xs text-slate-500">
-                Skor = rapor, devam, deneme ve plan hedef ortalaması · Pasif öğrenciler hariç
-              </p>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="min-w-full text-left text-sm">
-                <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
-                  <tr>
-                    <th className="px-3 py-2.5">#</th>
-                    <th className="px-3 py-2.5">Koç</th>
-                    <th className="px-3 py-2.5">Aktif</th>
-                    <th className="px-3 py-2.5">Rapor %</th>
-                    <th className="px-3 py-2.5">Devam %</th>
-                    <th className="px-3 py-2.5">Devamsızlık %</th>
-                    <th className="px-3 py-2.5">Deneme %</th>
-                    <th className="px-3 py-2.5">Plan hedef %</th>
-                    <th className="px-3 py-2.5">Görüşme %</th>
-                    <th className="px-3 py-2.5">Skor</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.coaches.map((c, i) => (
-                    <tr key={c.coach_id} className="border-t border-slate-100 hover:bg-slate-50/80">
-                      <td className="px-3 py-2.5 text-slate-400">{i + 1}</td>
-                      <td className="px-3 py-2.5 font-medium text-slate-900">
-                        {c.coach_name}
-                        {c.coach_email ? (
-                          <span className="mt-0.5 block text-xs font-normal text-slate-500">
-                            {c.coach_email}
-                          </span>
-                        ) : null}
-                      </td>
-                      <td className="px-3 py-2.5">
-                        {c.active_student_count ?? c.student_count}
-                        <span className="mt-0.5 block text-[11px] text-slate-400">
-                          /{c.student_count} toplam
-                        </span>
-                      </td>
-                      <td className="px-3 py-2.5">
-                        {fmtPct(c.report_fill_rate)}
-                        <span className="mt-0.5 block text-[11px] text-slate-400">
-                          {c.report_filled_slots}/{c.report_expected_slots}
-                        </span>
-                      </td>
-                      <td className="px-3 py-2.5">
-                        {fmtPct(c.attendance_rate)}
-                        <span className="mt-0.5 block text-[11px] text-slate-400">
-                          {c.attendance_present}/{c.attendance_total}
-                        </span>
-                      </td>
-                      <td className="px-3 py-2.5">
-                        {fmtPct(c.absence_rate)}
-                        <span className="mt-0.5 block text-[11px] text-slate-400">
-                          {c.attendance_absent ?? 0}/{c.attendance_total}
-                        </span>
-                      </td>
-                      <td className="px-3 py-2.5">
-                        {fmtPct(c.deneme_entry_rate)}
-                        <span className="mt-0.5 block text-[11px] text-slate-400">
-                          {c.deneme_students}/{c.active_student_count ?? c.student_count}
-                        </span>
-                      </td>
-                      <td className="px-3 py-2.5">
-                        {fmtPct(c.planner_goal_rate)}
-                        <span className="mt-0.5 block text-[11px] text-slate-400">
-                          {c.planner_goal_completed}/{c.planner_goal_target}
-                        </span>
-                      </td>
-                      <td className="px-3 py-2.5">
-                        {fmtPct(c.meeting_completion_rate)}
-                        <span className="mt-0.5 block text-[11px] text-slate-400">
-                          {c.meetings_completed}/{c.meetings_total}
-                        </span>
-                      </td>
-                      <td className="px-3 py-2.5 font-semibold text-teal-800">
-                        {fmtPct(c.composite_score)}
-                      </td>
+          {!isCoachOnly ? (
+            <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+              <div className="border-b border-slate-100 px-4 py-3">
+                <h2 className="text-lg font-bold text-slate-900">Koç detay tablosu</h2>
+                <p className="text-xs text-slate-500">
+                  Her yüzdenin altında kaç öğrenciden hesaplandığı yazar. Öğrencilerin tek tek durumunu
+                  görmek için koça tıklayın.
+                </p>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-left text-sm">
+                  <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                    <tr>
+                      <th className="px-3 py-2.5">#</th>
+                      <th className="px-3 py-2.5">Koç</th>
+                      <th className="px-3 py-2.5">Öğrenci</th>
+                      <th className="px-3 py-2.5" title="Doldurulan öğrenci×gün / aktif öğrenci×gün">Rapor</th>
+                      <th className="px-3 py-2.5" title="Grup canlı ders: katıldı / işaretlenen">Ders devamı</th>
+                      <th className="px-3 py-2.5" title="Devamsız yoklama / işaretlenen">Devamsızlık</th>
+                      <th className="px-3 py-2.5" title="Derse katılanlarda kamera açık oranı">Kamera</th>
+                      <th className="px-3 py-2.5" title="En az 1 hedef girilen aktif öğrenci">Plan / hedef</th>
+                      <th className="px-3 py-2.5" title="Soru hedefinde gerçekleşen">Hedef gerçekleşme</th>
+                      <th className="px-3 py-2.5" title="E-Desis deneme sonucu olan aktif öğrenci">Deneme</th>
+                      <th className="px-3 py-2.5">Görüşme</th>
+                      <th className="px-3 py-2.5">Skor</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {data.coaches.map((c, i) => {
+                      const active = c.active_student_count ?? c.student_count;
+                      const isSel = selected?.id === c.coach_id;
+                      return (
+                        <tr
+                          key={c.coach_id}
+                          onClick={() =>
+                            setSelected(isSel ? null : { id: c.coach_id, name: c.coach_name })
+                          }
+                          className={`cursor-pointer border-t border-slate-100 ${
+                            isSel ? 'bg-teal-50' : 'hover:bg-slate-50/80'
+                          }`}
+                        >
+                          <td className="px-3 py-2.5 text-slate-400">{i + 1}</td>
+                          <td className="px-3 py-2.5 font-medium text-slate-900">
+                            <span className="inline-flex items-center gap-1 text-teal-800 underline-offset-2 hover:underline">
+                              {c.coach_name}
+                              <ChevronRight className={`h-4 w-4 transition ${isSel ? 'rotate-90' : ''}`} />
+                            </span>
+                            {c.coach_email ? (
+                              <span className="mt-0.5 block text-xs font-normal text-slate-500">
+                                {c.coach_email}
+                              </span>
+                            ) : null}
+                          </td>
+                          <td className="px-3 py-2.5">
+                            <span className="font-semibold text-slate-900">{active} aktif</span>
+                            <span className="mt-0.5 block text-[11px] text-slate-500">
+                              {c.student_count} toplam
+                            </span>
+                          </td>
+                          <PctCell
+                            rate={c.report_fill_rate}
+                            sub={`${c.report_students_filled}/${active} öğrenci doldurdu`}
+                            title={`${c.report_filled_slots}/${c.report_expected_slots} öğrenci×gün`}
+                          />
+                          <PctCell
+                            rate={c.attendance_rate}
+                            sub={`${c.attendance_present}/${c.attendance_total} yoklama`}
+                          />
+                          <PctCell
+                            rate={c.absence_rate}
+                            danger
+                            sub={`${c.absent_students ?? 0} öğrenci · ${c.attendance_absent ?? 0} ders`}
+                          />
+                          <PctCell
+                            rate={c.camera_rate}
+                            sub={c.camera_total ? `${c.camera_on}/${c.camera_total} açık` : 'işaretlenmedi'}
+                          />
+                          <PctCell
+                            rate={c.goal_assigned_rate}
+                            sub={`${c.goal_assigned_students ?? 0}/${active} öğrenci`}
+                          />
+                          <PctCell
+                            rate={c.planner_goal_rate}
+                            sub={`${c.planner_goal_completed}/${c.planner_goal_target} soru`}
+                          />
+                          <PctCell
+                            rate={c.deneme_entry_rate}
+                            sub={`${c.deneme_students}/${active} öğrenci`}
+                          />
+                          <PctCell
+                            rate={c.meeting_completion_rate}
+                            sub={`${c.meetings_completed}/${c.meetings_total}`}
+                          />
+                          <td className="px-3 py-2.5 font-semibold text-teal-800">
+                            {fmtPct(c.composite_score)}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </div>
+          ) : null}
+
+          <div ref={detailRef}>
+            {isCoachOnly && ownCoachId ? (
+              <CoachStudentBreakdown
+                coachId={ownCoachId}
+                coachName={data.coaches[0]?.coach_name || 'Öğrencilerim'}
+                from={from}
+                to={to}
+                institutionId={institutionId || null}
+                classId={classId || null}
+              />
+            ) : selected ? (
+              <CoachStudentBreakdown
+                coachId={selected.id}
+                coachName={selected.name}
+                from={from}
+                to={to}
+                institutionId={institutionId || null}
+                classId={classId || null}
+                onClose={() => setSelected(null)}
+              />
+            ) : null}
           </div>
+
+          {data.trial_lessons ? (
+            <TrialLessonFunnel data={data.trial_lessons} from={data.from} to={data.to} />
+          ) : null}
 
           <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
             <p className="font-semibold text-slate-900">Notlar</p>
@@ -541,6 +646,15 @@ export default function CoachStatsPage() {
               <li>
                 <strong>Haftalık karşılaştırma:</strong> Geçen hafta ile bu haftayı aynı filtrelerle
                 (koç, sınıf) yan yana gösterir; ortak deneme günleri haftanın gününe göre hizalanır.
+              </li>
+              <li>
+                <strong>Kamera:</strong> Öğretmenin yoklamada işaretlediği kamera durumundan hesaplanır; yalnız
+                derse katılan öğrenciler sayılır. 21 Eylül 2026 öncesinde kamera bilgisi kaydedilmediği için o
+                tarihlerde "işaretlenmedi" görünür.
+              </li>
+              <li>
+                <strong>Plan / hedef:</strong> Koçun seçili dönemde en az bir haftalık hedef girdiği öğrenci
+                oranı; "hedef gerçekleşme" girilen soru hedefinin ne kadarının çözüldüğüdür.
               </li>
               <li>
                 <strong>Pasif öğrenciler:</strong> Aktivite dönemleri dışında kalan günler tüm
