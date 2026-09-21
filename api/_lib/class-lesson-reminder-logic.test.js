@@ -4,6 +4,7 @@ import {
   isSameLessonSession,
   shouldSkipConsecutiveSameLesson,
   shouldSkipClassLessonReminder,
+  isAutoClassReminderSubject,
   toLessonStartUtcMs,
   normalizeTimeHms
 } from './class-lesson-reminder-logic.js';
@@ -41,5 +42,15 @@ assert.equal(shouldSkipClassLessonReminder('Rehberlik'), true);
 assert.equal(shouldSkipClassLessonReminder('REHBERLİK'), true);
 assert.equal(shouldSkipClassLessonReminder('Matematik'), false);
 assert.equal(shouldSkipClassLessonReminder('Soru Çözüm Kimya'), false);
+
+// Otomatik hatırlatma varsayılan olarak yalnız etüt oturumlarına
+assert.equal(isAutoClassReminderSubject('ETÜT', 'etut'), true);
+assert.equal(isAutoClassReminderSubject('Etüt', 'etut'), true);
+assert.equal(isAutoClassReminderSubject('ETÜT & KİTAP OKUMA', 'etut'), true);
+assert.equal(isAutoClassReminderSubject('MATEMATİK', 'etut'), false);
+assert.equal(isAutoClassReminderSubject('DENEME SINAVI', 'etut'), false);
+// scope=all: eski davranış (deneme/rehberlik hariç tüm grup dersleri)
+assert.equal(isAutoClassReminderSubject('MATEMATİK', 'all'), true);
+assert.equal(isAutoClassReminderSubject('Rehberlik', 'all'), false);
 
 console.log('class-lesson-reminder-logic: ok');

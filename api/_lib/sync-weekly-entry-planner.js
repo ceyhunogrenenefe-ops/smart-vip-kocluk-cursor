@@ -55,8 +55,12 @@ function completedAmountForUnit(unit, entry) {
     )
   );
   const screen = Math.max(0, Number(entry.screen_time_minutes ?? 0));
+  const study =
+    entry.study_minutes != null && Number.isFinite(Number(entry.study_minutes))
+      ? Math.max(0, Number(entry.study_minutes))
+      : screen;
   if (u === 'sayfa') return pages;
-  if (u === 'dakika') return screen;
+  if (u === 'dakika') return study;
   return solved;
 }
 
@@ -127,7 +131,8 @@ export async function syncWeeklyEntryPlannerRow(entry, opts = {}) {
   const target = Number(entry.target_questions ?? 0);
   const pages = Number(entry.pages_read ?? entry.reading_minutes ?? 0);
   const screen = Number(entry.screen_time_minutes ?? 0);
-  const hasAnyProgress = solved > 0 || pages > 0 || screen > 0 || target > 0;
+  const studyMin = Number(entry.study_minutes ?? 0);
+  const hasAnyProgress = solved > 0 || pages > 0 || screen > 0 || studyMin > 0 || target > 0;
 
   const { data: existing, error: exErr } = await supabaseAdmin
     .from('weekly_planner_entries')

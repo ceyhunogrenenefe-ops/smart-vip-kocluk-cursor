@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { BookMarked, CheckCircle2, Clock3, Target } from 'lucide-react';
+import { BookMarked, CheckCircle2, Clock3, Hourglass, Target } from 'lucide-react';
 import type { WeeklyPlannerEntryRow } from '../../lib/weeklyPlannerApi';
 import {
   mapWeeklyEntryApiRow,
@@ -57,6 +57,8 @@ export function WeeklyPlannerStudyModal({
   /** Kitap Okuma hedefi: yalnız kitap alanları; diğer hedefler: soru + ekran süresi */
   const isKitapMode =
     isKitapOkumaContext(subject, plannerEntry.title) || goalUnit === 'sayfa';
+  /** Koç süre hedefi verdiyse öğrenci soru sayısının yanında çalıştığı süreyi de girer */
+  const isDurationGoal = goalUnit === 'dakika' && !isKitapMode;
   const linked = plannerEntry.weekly_entry_id
     ? weeklyEntries.find((e) => e.id === plannerEntry.weekly_entry_id)
     : undefined;
@@ -70,6 +72,8 @@ export function WeeklyPlannerStudyModal({
   const [pagesRead, setPagesRead] = useState<number | ''>('');
   const [screenH, setScreenH] = useState<number | ''>('');
   const [screenM, setScreenM] = useState<number | ''>('');
+  const [studyH, setStudyH] = useState<number | ''>('');
+  const [studyM, setStudyM] = useState<number | ''>('');
   const [notes, setNotes] = useState('');
   const [markBookFinished, setMarkBookFinished] = useState(false);
   const [markTopicFinished, setMarkTopicFinished] = useState(false);
@@ -153,6 +157,14 @@ export function WeeklyPlannerStudyModal({
         setScreenH('');
         setScreenM('');
       }
+      const sm = linked.studyMinutes;
+      if (sm != null && sm > 0) {
+        setStudyH(Math.floor(sm / 60));
+        setStudyM(sm % 60);
+      } else {
+        setStudyH('');
+        setStudyM('');
+      }
       setNotes(linked.coachComment ?? '');
     } else {
       setCorrect(0);
@@ -162,6 +174,8 @@ export function WeeklyPlannerStudyModal({
       setPagesRead('');
       setScreenH('');
       setScreenM('');
+      setStudyH('');
+      setStudyM('');
       setNotes('');
       setMarkBookFinished(false);
     }
@@ -183,6 +197,12 @@ export function WeeklyPlannerStudyModal({
     return h * 60 + m;
   }, [screenH, screenM]);
 
+  const studyTotalMin = useMemo(() => {
+    const h = studyH === '' ? 0 : clampNonNeg(Number(studyH));
+    const m = studyM === '' ? 0 : clampNonNeg(Number(studyM));
+    return h * 60 + m;
+  }, [studyH, studyM]);
+
   const solvedPreview = correct + wrong + blank;
 
   const progressAmount = useMemo(
@@ -190,9 +210,10 @@ export function WeeklyPlannerStudyModal({
       completedQuantityForGoalUnit(goalUnit, {
         solvedQuestions: solvedPreview,
         pagesRead: pagesRead === '' ? 0 : clampNonNeg(Number(pagesRead)),
-        screenMinutes: screenTotalMin
+        screenMinutes: screenTotalMin,
+        studyMinutes: studyTotalMin
       }),
-    [goalUnit, solvedPreview, pagesRead, screenTotalMin]
+    [goalUnit, solvedPreview, pagesRead, screenTotalMin, studyTotalMin]
   );
 
   const topicGoalMet = targetQuestions > 0 && progressAmount >= targetQuestions;
@@ -240,6 +261,13 @@ export function WeeklyPlannerStudyModal({
             ? screenTotalMin
             : null;
 
+      // Süre hedefinde girilen değer (boşsa 0); diğer hedeflerde mevcut kayıttaki süre korunur
+      const study_minutes = isDurationGoal
+        ? studyTotalMin
+        : linked?.studyMinutes != null
+          ? linked.studyMinutes
+          : null;
+
       const bookTitleToSave = isKitapMode
         ? readingLocked
           ? ''
@@ -262,6 +290,7 @@ export function WeeklyPlannerStudyModal({
         solved > 0 ||
         (pages != null && pages > 0) ||
         (screen_time_minutes != null && screen_time_minutes > 0) ||
+        (study_minutes != null && study_minutes > 0) ||
         Boolean(bookTitleToSave);
 
       // Önce doğru/yanlış ve günlük çalışma kaydı — konu/kitap hatası bunları engellemesin
@@ -283,6 +312,7 @@ export function WeeklyPlannerStudyModal({
             reading_minutes: pages,
             pages_read: pages,
             screen_time_minutes,
+            study_minutes,
             book_title: bookTitleToSave || null,
             notes: notes.trim() || null,
           });
@@ -302,6 +332,7 @@ export function WeeklyPlannerStudyModal({
           solved_questions: solved,
           pages_read: pages,
           screen_time_minutes,
+          study_minutes,
           book_title: bookTitleToSave || null,
           notes: notes.trim() || null,
         });
@@ -335,6 +366,7 @@ export function WeeklyPlannerStudyModal({
             readingMinutes: pages ?? undefined,
             pagesRead: pages ?? undefined,
             screenTimeMinutes: screen_time_minutes ?? undefined,
+            studyMinutes: study_minutes ?? undefined,
             bookTitle: bookTitleToSave || undefined,
             createdAt: linked?.createdAt || new Date().toISOString()
           }
@@ -549,6 +581,50 @@ export function WeeklyPlannerStudyModal({
                 </div>
                 <p className="text-xs text-slate-500 mt-2">Çözülen toplam: {solvedPreview}</p>
               </>
+            ) : null}
+            {isDurationGoal ? (
+              <div className="mt-4 rounded-xl border border-teal-200 bg-teal-50/70 p-4 dark:border-teal-800/60 dark:bg-teal-950/30">
+                <p className="text-xs font-semibold flex items-center gap-2 text-teal-900 dark:text-teal-200">
+                  <Hourglass className="w-4 h-4" />
+                  Çalışma süresi
+                </p>
+                <p className="mt-1 text-[11px] text-teal-800/80 dark:text-teal-300/80">
+                  Bu derse ne kadar çalıştın? Süre hedefin ({targetQuestions} dk) bundan ilerler.
+                </p>
+                <div className="mt-2 flex gap-2 items-center">
+                  <label className="flex-1">
+                    <span className="text-[11px] text-slate-500">Saat</span>
+                    <input
+                      type="number"
+                      min={0}
+                      inputMode="numeric"
+                      value={studyH}
+                      onChange={(e) =>
+                        setStudyH(e.target.value === '' ? '' : clampNonNeg(Number(e.target.value)))
+                      }
+                      className="mt-1 w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm"
+                    />
+                  </label>
+                  <label className="flex-1">
+                    <span className="text-[11px] text-slate-500">Dakika</span>
+                    <input
+                      type="number"
+                      min={0}
+                      max={59}
+                      inputMode="numeric"
+                      value={studyM}
+                      onChange={(e) =>
+                        setStudyM(e.target.value === '' ? '' : Math.min(59, clampNonNeg(Number(e.target.value))))
+                      }
+                      className="mt-1 w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm"
+                    />
+                  </label>
+                </div>
+                <p className="mt-2 text-xs text-teal-900 dark:text-teal-200">
+                  Toplam {studyTotalMin} dk
+                  {targetQuestions > 0 ? ` / ${targetQuestions} dk hedef · %${Math.min(100, Math.round((100 * studyTotalMin) / targetQuestions))} tamam` : ''}
+                </p>
+              </div>
             ) : null}
           </div>
 

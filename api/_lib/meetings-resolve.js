@@ -59,9 +59,11 @@ export function getPrimaryAutomationPhone(studentRow) {
   return pr || st || null;
 }
 
-/** Grup dersi hatırlatması — tek alıcı (veli öncelikli) */
+/** Grup dersi / etüt hatırlatması — tek alıcı: öğrencinin kendi numarası, yoksa veli */
 export function getClassLessonReminderPhone(studentRow) {
-  return getPrimaryAutomationPhone(studentRow);
+  const st = normalizePhoneToE164(studentRow?.phone || '');
+  const pr = normalizePhoneToE164(studentRow?.parent_phone || '');
+  return st || pr || null;
 }
 
 /** Günlük rapor hatırlatması: öğrenci + veli (aynı numarada tek mesaj, veli satırı öncelikli) */

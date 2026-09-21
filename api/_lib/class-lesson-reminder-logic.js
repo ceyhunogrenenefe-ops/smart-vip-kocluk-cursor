@@ -33,7 +33,7 @@ export function isInReminderWindow(dateStr, timeStr, nowMs = Date.now()) {
 }
 /** Hatırlatma henüz gitmemiş oturumları sınıflandır (panel özeti). */
 export function classifyUnsentSessionReminder(session, nowMs = Date.now()) {
-  if (shouldSkipClassLessonReminder(session?.subject)) return 'excluded_subject';
+  if (!isAutoClassReminderSubject(session?.subject)) return 'excluded_subject';
   if (session?.reminder_sent) return 'already_sent';
   const until = msUntilLessonStart(session.lesson_date, session.start_time, nowMs);
   if (until <= 0) return 'started_without_reminder';
@@ -82,6 +82,27 @@ export function shouldSkipClassLessonReminder(subject) {
   const s = norm(subject);
   if (!s) return false;
   return s.includes('deneme') || s.includes('rehberlik');
+}
+
+/**
+ * Otomatik (cron) hatırlatmanın kapsamı. Koçların kişisel WhatsApp hattından gittiği için
+ * varsayılan yalnız ETÜT oturumları; tüm grup dersleri için CLASS_LESSON_REMINDER_SCOPE=all.
+ * Öğretmenin elle gönderdiği hatırlatma bu kurala tabi değildir.
+ */
+export function classLessonReminderScope() {
+  const v = String(process.env.CLASS_LESSON_REMINDER_SCOPE || '').trim().toLowerCase();
+  return v === 'all' ? 'all' : 'etut';
+}
+
+export function isEtutSubject(subject) {
+  return norm(subject).includes('etut');
+}
+
+/** Cron bu oturum için otomatik hatırlatma göndermeli mi */
+export function isAutoClassReminderSubject(subject, scope = classLessonReminderScope()) {
+  if (shouldSkipClassLessonReminder(subject)) return false;
+  if (scope === 'all') return true;
+  return isEtutSubject(subject);
 }
 
 function normSubjectCompare(s) {

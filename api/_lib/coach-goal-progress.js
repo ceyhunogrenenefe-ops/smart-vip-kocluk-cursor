@@ -87,6 +87,14 @@ function dedupeGoals(goals, rangeFrom, rangeTo) {
   return [...byKey.values()];
 }
 
+/** Süre hedefi ilerlemesi: study_minutes; alan boşsa (eski kayıt) ekran/okuma süresi */
+function studyMinutesOf(e) {
+  if (e && e.study_minutes != null && Number.isFinite(Number(e.study_minutes))) {
+    return Math.max(0, Number(e.study_minutes));
+  }
+  return Math.max(0, Number(e?.screen_time_minutes || e?.reading_minutes || 0) || 0);
+}
+
 function completedForGoal(g, entries, rangeFrom, rangeTo) {
   const clip = clipRange(g, rangeFrom, rangeTo);
   if (!clip) return 0;
@@ -100,7 +108,7 @@ function completedForGoal(g, entries, rangeFrom, rangeTo) {
     if (kind === 'sayfa') {
       sum += Number(e.pages_read || 0) || 0;
     } else if (kind === 'dakika') {
-      sum += Number(e.screen_time_minutes || e.reading_minutes || 0) || 0;
+      sum += studyMinutesOf(e);
     } else {
       const solved = Number(e.solved_questions) || 0;
       if (solved > 0) sum += solved;

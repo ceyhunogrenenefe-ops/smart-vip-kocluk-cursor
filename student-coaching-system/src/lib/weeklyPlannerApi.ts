@@ -245,6 +245,7 @@ export type WeeklyEntryApiRow = {
   reading_minutes?: number | null;
   pages_read?: number | null;
   screen_time_minutes?: number | null;
+  study_minutes?: number | null;
   book_id?: string | null;
   book_title?: string | null;
   created_at: string;
@@ -266,6 +267,7 @@ export function mapWeeklyEntryApiRow(e: WeeklyEntryApiRow): WeeklyEntry {
     readingMinutes: e.reading_minutes || undefined,
     pagesRead: e.pages_read ?? undefined,
     screenTimeMinutes: e.screen_time_minutes ?? undefined,
+    studyMinutes: e.study_minutes ?? undefined,
     bookId: e.book_id || undefined,
     bookTitle: e.book_title || undefined,
     createdAt: e.created_at,
