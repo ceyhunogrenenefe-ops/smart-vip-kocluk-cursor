@@ -1,6 +1,7 @@
 import { format, parseISO } from 'date-fns';
 import { tr } from 'date-fns/locale/tr';
 import { jsPDF } from 'jspdf';
+import { displayInstitutionName } from './appBrand';
 import type { CoachWeeklyGoalRow, WeeklyPlannerEntryRow } from './weeklyPlannerApi';
 import {
   addCanvasFillLandscapePage,
@@ -73,6 +74,8 @@ export function buildParentWeeklyGoalsMessage(opts: {
   weekEnd: string;
   goals: CoachWeeklyGoalRow[];
   entries: WeeklyPlannerEntryRow[];
+  /** Mesaj imzası: öğrencinin kurumu */
+  institutionName?: string | null;
 }): string {
   const { studentName, weekStart, weekEnd, goals, entries } = opts;
   const coachGoals = goals.filter((g) => g.coach_id);
@@ -114,7 +117,7 @@ export function buildParentWeeklyGoalsMessage(opts: {
       : planLines.length === 0 && goalLines.length
         ? 'Takvim planı henüz oluşturulmadı; hedefler öğrenci tarafından haftalık plana yerleştirilecek.\n\n'
         : '') +
-    `Smart VIP Koçluk`
+    displayInstitutionName(opts.institutionName)
   );
 }
 
@@ -122,6 +125,7 @@ export function buildParentWeeklyPlanPdfCaption(opts: {
   studentName: string;
   weekStart: string;
   weekEnd: string;
+  institutionName?: string | null;
 }): string {
   const { studentName, weekStart, weekEnd } = opts;
   const rangeLabel = `${formatDdMmYyyyDots(weekStart)} – ${formatDdMmYyyyDots(weekEnd)}`;
@@ -129,7 +133,7 @@ export function buildParentWeeklyPlanPdfCaption(opts: {
     `Merhaba,\n\n${studentName} için ${rangeLabel} haftalık çalışma planı ektedir.\n` +
     `• 1. sayfa: haftalık hedefler\n` +
     `• 2. sayfa: çalışma takvimi\n\n` +
-    `Smart VIP Koçluk`
+    displayInstitutionName(opts.institutionName)
   );
 }
 

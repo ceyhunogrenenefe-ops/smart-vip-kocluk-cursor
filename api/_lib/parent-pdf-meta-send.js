@@ -81,8 +81,36 @@ async function loadParentPdfTemplateRow() {
   return buildParentPdfTemplateRow();
 }
 
+const APP_DISPLAY_NAME = 'Online VIP Ders ve Koçluk';
+const LEGACY_BRAND_NAMES = new Set(['smart koçluk sistemi', 'smart koçluk', 'smart vip koçluk', 'öğrenci koçluk sistemi']);
+
+/** Veliye giden metnin imzası: kurum adı (eski "Smart Koçluk" kayıtları marka adına çevrilir) */
+export function parentMessageSignature(institutionName) {
+  const n = String(institutionName || '').trim();
+  if (!n || LEGACY_BRAND_NAMES.has(n.toLocaleLowerCase('tr-TR'))) return APP_DISPLAY_NAME;
+  return n;
+}
+
+/** Öğrencinin kurum adı (student_id → institutions.name) */
+export async function institutionNameForStudentId(studentId) {
+  const sid = String(studentId || '').trim();
+  if (!sid) return '';
+  try {
+    const { data: st } = await supabaseAdmin.from('students').select('institution_id').eq('id', sid).maybeSingle();
+    if (!st?.institution_id) return '';
+    const { data: inst } = await supabaseAdmin
+      .from('institutions')
+      .select('name')
+      .eq('id', st.institution_id)
+      .maybeSingle();
+    return String(inst?.name || '').trim();
+  } catch {
+    return '';
+  }
+}
+
 function buildParentPdfPlainText(vars) {
-  return `Merhaba,\n\n${vars.student_name} için ${vars.baslik} hazır.\n\nPDF indirmek için bağlantı:\n${vars.link}\n\nSmart VIP Koçluk`;
+  return `Merhaba,\n\n${vars.student_name} için ${vars.baslik} hazır.\n\nPDF indirmek için bağlantı:\n${vars.link}\n\n${parentMessageSignature(vars.kurum)}`;
 }
 
 async function tryTemplateSend(toE164, templateRow, templateVars) {
@@ -135,7 +163,8 @@ export async function sendParentPdfToWhatsapp({
   caption = '',
   mimeType = 'application/pdf',
   studentName = '',
-  title = ''
+  title = '',
+  institutionName = ''
 }) {
   const b64 = String(documentBase64 || '').trim();
   if (!b64) {
@@ -176,7 +205,9 @@ export async function sendParentPdfToWhatsapp({
   const templateVars = {
     student_name: student,
     baslik: baslik || 'PDF raporu',
-    link: hosted.signedUrl
+    link: hosted.signedUrl,
+    // Meta şablonu yalnız ilk 3 değişkeni kullanır; düz metin imzası için
+    kurum: parentMessageSignature(institutionName)
   };
 
   const templateRow = await loadParentPdfTemplateRow();

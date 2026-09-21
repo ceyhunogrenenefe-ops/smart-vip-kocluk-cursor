@@ -47,6 +47,7 @@ import { WeeklyPlannerStudyModal } from './WeeklyPlannerStudyModal';
 import { AppModal, AppModalBody, AppModalFooter, AppModalHeader } from '../ui/AppModal';
 import { EtutPlannerEntryModal } from '../etut/EtutPlannerEntryModal';
 import { isEtutSubject } from '../../lib/etutSession';
+import { institutionNameForStudent } from '../../lib/appBrand';
 import { DailyScreenTimeChart } from './DailyScreenTimeChart';
 import { fetchScreenTimeLogs } from '../../lib/screenTimeApi';
 import { mergeScreenTimeByDate } from '../../lib/mergeScreenTimeByDate';
@@ -155,6 +156,7 @@ export function WeeklyPlannerCalendar({
   const {
     students,
     institution,
+    institutions,
     getTopics,
     getTopicsByClass,
     markTopicCompleted,
@@ -177,6 +179,11 @@ export function WeeklyPlannerCalendar({
 
   const plannerStudent = useMemo(() => students.find((s) => s.id === studentId), [students, studentId]);
   const classLevel = plannerStudent?.classLevel;
+  /** Veliye giden PDF/mesajlarda öğrencinin kendi kurumunun adı */
+  const studentInstitutionName = useMemo(
+    () => institutionNameForStudent(plannerStudent, institutions, institution?.name),
+    [plannerStudent, institutions, institution?.name]
+  );
 
   /** Yapıştır hedefi: koç ise yalnızca kendi öğrencileri; ada göre sıralı; sınıfa göre gruplu */
   const pasteCandidates = useMemo(() => {
@@ -599,7 +606,7 @@ export function WeeklyPlannerCalendar({
         dayDates,
         goals,
         entries,
-        institutionName: institution?.name,
+        institutionName: studentInstitutionName,
         logoUrl: institution?.logo ?? null,
         prevWeekStart,
         prevWeekEnd,
@@ -640,6 +647,7 @@ export function WeeklyPlannerCalendar({
       weekEnd: weekEndStr,
       goals,
       entries,
+      institutionName: studentInstitutionName,
     });
     setParentShareBusy(true);
     try {
@@ -684,7 +692,7 @@ export function WeeklyPlannerCalendar({
         dayDates,
         goals,
         entries,
-        institutionName: institution?.name,
+        institutionName: studentInstitutionName,
         logoUrl: institution?.logo ?? null,
         compactForShare: true,
         prevWeekStart,
@@ -695,12 +703,14 @@ export function WeeklyPlannerCalendar({
         studentName: st.name,
         weekStart: weekStartStr,
         weekEnd: weekEndStr,
+        institutionName: studentInstitutionName,
       });
       const result = await sendWhatsAppOutboundDocument({
         coachUserId,
         targetPhone: parentPhone,
         studentId: studentId || undefined,
         studentName: st.name || studentName || '',
+        institutionName: studentInstitutionName,
         pdfTitle: 'Haftalık çalışma planı',
         filename,
         base64: await blobToBase64(blob),
@@ -965,57 +975,105 @@ export function WeeklyPlannerCalendar({
     }
   };
 
-  /** Bu haftanın hedeflerini + plan bloklarını seçili öğrencilere kopyala */
+  /**
+   * Bu haftanın hedeflerini + plan bloklarını seçili öğrencilere kopyala.
+   * Hedef öğrencinin bu haftaki eski hedefleri ve boş plan blokları silinir, yenileri yapışır.
+   * Korunanlar: öğrencinin çalışma kaydı girdiği bloklar ve etüt blokları. Onlarla çakışan
+   * yeni blok atlanır (işlem durmaz).
+   */
   const pastePlanToOtherStudents = async () => {
     if (!canManageGoals || pasteTargetIds.size === 0) return;
+    const targets = [...pasteTargetIds].filter((id) => id && id !== studentId);
+    if (!targets.length) {
+      toast.error('En az bir öğrenci seçin');
+      return;
+    }
+    const ok = window.confirm(
+      `${targets.length} öğrencinin ${weekStartStr} – ${weekEndStr} haftasındaki mevcut hedefleri ve boş plan blokları silinip bu plan yapıştırılacak.\n\nÖğrencinin çalışma kaydı girdiği bloklar ve etüt blokları korunur. Devam edilsin mi?`
+    );
+    if (!ok) return;
     setPasteBusy(true);
+    let okCount = 0;
+    let removedGoals = 0;
+    let skippedBlocks = 0;
+    const failed: string[] = [];
     try {
-      const targets = [...pasteTargetIds].filter((id) => id && id !== studentId);
-      if (!targets.length) {
-        toast.error('En az bir öğrenci seçin');
-        return;
-      }
-      let okCount = 0;
+      const inWeek = (ymd: string | null | undefined) => {
+        const d = String(ymd || '').slice(0, 10);
+        return d >= weekStartStr && d <= weekEndStr;
+      };
+      const weekEntries = entries.filter((e) => inWeek(e.planner_date));
+
       for (const targetId of targets) {
-        const goalIdMap = new Map<string, string>();
-        for (const g of goals) {
-          const created = await createCoachWeeklyGoal({
-            student_id: targetId,
-            subject: g.subject,
-            title: g.title,
-            target_quantity: g.target_quantity,
-            week_start_date: weekStartStr,
-            goal_start_date: g.goal_start_date || weekStartStr,
-            goal_end_date: g.goal_end_date || weekEndStr,
-            quantity_unit: g.quantity_unit,
-          });
-          goalIdMap.set(g.id, created.id);
+        try {
+          // 1) Eski hedefler: bu haftada başlayanlar (önceki haftadan taşan uzun hedeflere dokunulmaz)
+          const oldGoals = await fetchCoachWeeklyGoals(targetId, weekStartStr);
+          for (const g of oldGoals) {
+            const startsThisWeek = g.goal_start_date
+              ? inWeek(g.goal_start_date)
+              : String(g.week_start_date || '').slice(0, 10) === weekStartStr;
+            if (!startsThisWeek) continue;
+            await deleteCoachWeeklyGoal(g.id);
+            removedGoals += 1;
+          }
+          // 2) Eski boş plan blokları (kayıt girilmiş ve etüt blokları kalır)
+          const oldBlocks = await fetchWeeklyPlannerEntries(targetId, weekStartStr, weekEndStr);
+          for (const b of oldBlocks) {
+            const hasProgress = Boolean(b.weekly_entry_id) || Number(b.completed_quantity || 0) > 0;
+            if (hasProgress || isEtutSubject(b.subject)) continue;
+            await deleteWeeklyPlannerEntry(b.id);
+          }
+          // 3) Yeni hedefler
+          const goalIdMap = new Map<string, string>();
+          for (const g of goals) {
+            const created = await createCoachWeeklyGoal({
+              student_id: targetId,
+              subject: g.subject,
+              title: g.title,
+              target_quantity: g.target_quantity,
+              week_start_date: weekStartStr,
+              goal_start_date: g.goal_start_date || weekStartStr,
+              goal_end_date: g.goal_end_date || weekEndStr,
+              quantity_unit: g.quantity_unit,
+            });
+            goalIdMap.set(g.id, created.id);
+          }
+          // 4) Yeni plan blokları — korunan blokla çakışan atlanır
+          for (const en of weekEntries) {
+            if (isEtutSubject(en.subject)) continue;
+            const mappedGoalId = en.coach_goal_id ? goalIdMap.get(en.coach_goal_id) || null : null;
+            try {
+              await createWeeklyPlannerEntry({
+                student_id: targetId,
+                planner_date: en.planner_date,
+                start_time: String(en.start_time).slice(0, 5),
+                end_time: String(en.end_time).slice(0, 5),
+                title: en.title,
+                subject: en.subject,
+                planned_quantity: Number(en.planned_quantity) || 0,
+                coach_goal_id: mappedGoalId,
+                status: 'planned',
+                completed_quantity: 0,
+              });
+            } catch {
+              skippedBlocks += 1;
+            }
+          }
+          okCount += 1;
+        } catch (err) {
+          const name = pasteCandidates.find((st) => st.id === targetId)?.name || targetId;
+          failed.push(`${name}: ${err instanceof Error ? err.message : 'hata'}`);
         }
-        const weekEntries = entries.filter(
-          (e) => e.planner_date >= weekStartStr && e.planner_date <= weekEndStr
-        );
-        for (const en of weekEntries) {
-          const mappedGoalId = en.coach_goal_id ? goalIdMap.get(en.coach_goal_id) || null : null;
-          await createWeeklyPlannerEntry({
-            student_id: targetId,
-            planner_date: en.planner_date,
-            start_time: String(en.start_time).slice(0, 5),
-            end_time: String(en.end_time).slice(0, 5),
-            title: en.title,
-            subject: en.subject,
-            planned_quantity: Number(en.planned_quantity) || 0,
-            coach_goal_id: mappedGoalId,
-            status: 'planned',
-            completed_quantity: 0,
-          });
-        }
-        okCount += 1;
       }
-      toast.success(`Plan ${okCount} öğrenciye yapıştırıldı`);
-      setPasteOpen(false);
-      setPasteTargetIds(new Set());
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Yapıştırılamadı');
+      const parts = [`Plan ${okCount} öğrenciye yapıştırıldı`];
+      if (removedGoals) parts.push(`${removedGoals} eski hedef silindi`);
+      if (skippedBlocks) parts.push(`${skippedBlocks} blok, öğrencinin kayıt girdiği saatle çakıştığı için atlandı`);
+      if (okCount) toast.success(parts.join(' · '));
+      if (failed.length) toast.error(`Yapıştırılamadı — ${failed.join(' | ')}`);
+      if (okCount) {
+        setPasteOpen(false);
+        setPasteTargetIds(new Set());
+      }
     } finally {
       setPasteBusy(false);
     }

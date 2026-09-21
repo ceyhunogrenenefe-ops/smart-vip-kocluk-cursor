@@ -23,6 +23,7 @@ import {
 } from '../lib/coachGoalAnalytics';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
+import { institutionNameForStudent } from '../lib/appBrand';
 import {
   BarChart3,
   TrendingUp,
@@ -95,6 +96,8 @@ export default function Analytics() {
     updateAISuggestion,
     deleteAISuggestion,
     scoresDataReady,
+    institution,
+    institutions,
   } = useApp();
   const [selectedStudentId, setSelectedStudentId] = useState<string>('');
   const [editingReportId, setEditingReportId] = useState<string | null>(null);
@@ -673,7 +676,7 @@ export default function Analytics() {
       (coachLines ? `${coachLines}\n` : `• Toplam hedef: ${s.totalTarget}\n• Toplam çözülen: ${s.totalSolved}\n• Gerçekleşme: %${s.realizationRate}\n`) +
       `• Doğru: ${s.totalCorrect} | Yanlış: ${s.totalWrong} | Boş: ${s.totalBlank}\n` +
       `• Doğruluk (başarı): %${s.successRate}\n\n` +
-      `Smart VIP Koçluk`
+      institutionNameForStudent(selectedStudent, institutions, institution?.name)
     );
   }, [
     selectedStudent,
@@ -818,6 +821,7 @@ export default function Analytics() {
         targetPhone: parentPhone,
         studentId: selectedStudentId,
         studentName: selectedStudent?.name || '',
+        institutionName: institutionNameForStudent(selectedStudent, institutions, institution?.name),
         pdfTitle: 'Koç analiz raporu',
         filename,
         base64: await blobToBase64(blob),

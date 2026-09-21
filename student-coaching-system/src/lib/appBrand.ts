@@ -8,6 +8,17 @@ const LEGACY_NAMES = new Set([
   'öğrenci koçluk sistemi'
 ]);
 
+/** Öğrencinin kendi kurumunun görünen adı (veliye giden mesaj imzası için). */
+export function institutionNameForStudent(
+  student: { institutionId?: string | null } | null | undefined,
+  institutions: { id: string; name?: string | null }[] | null | undefined,
+  fallbackName?: string | null
+): string {
+  const iid = String(student?.institutionId || '').trim();
+  const own = iid ? (institutions || []).find((i) => String(i.id) === iid)?.name : null;
+  return displayInstitutionName(own || fallbackName || null);
+}
+
 /** Veritabanı kurum adını mobil marka adına çevirir (eski Smart Koçluk kayıtları dahil). */
 export function displayInstitutionName(dbName: string | null | undefined, preferAppBrand = false): string {
   if (preferAppBrand) return APP_DISPLAY_NAME;

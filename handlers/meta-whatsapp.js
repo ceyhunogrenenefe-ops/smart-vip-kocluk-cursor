@@ -11,7 +11,7 @@ import {
   saveMetaWhatsAppSecretsToDb,
   sendMetaTextMessage
 } from '../api/_lib/meta-whatsapp.js';
-import { sendParentPdfToWhatsapp } from '../api/_lib/parent-pdf-meta-send.js';
+import { sendParentPdfToWhatsapp, institutionNameForStudentId } from '../api/_lib/parent-pdf-meta-send.js';
 import { ensureMetaInboundDelivery, publicInboundStatus } from '../api/_lib/meta-inbound-ensure.js';
 
 function parseBody(req) {
@@ -157,6 +157,9 @@ export default async function handler(req, res) {
 
     try {
       if (documentBase64) {
+        const institutionName =
+          (typeof b.institution_name === 'string' && b.institution_name.trim()) ||
+          (await institutionNameForStudentId(studentId));
         const sent = await sendParentPdfToWhatsapp({
           toE164: e164,
           documentBase64,
@@ -164,7 +167,8 @@ export default async function handler(req, res) {
           caption,
           mimeType,
           studentName,
-          title: pdfTitle || caption
+          title: pdfTitle || caption,
+          institutionName
         });
         if (!sent.ok || !sent.sid) {
           await insertWhatsAppAutomationLog({
