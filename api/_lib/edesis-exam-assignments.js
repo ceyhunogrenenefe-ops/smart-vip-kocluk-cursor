@@ -364,6 +364,17 @@ export async function syncEdesisExamCatalogToDb({ institutionId, cfg } = {}) {
   const chunk = 80;
   for (let i = 0; i < upserts.length; i += chunk) {
     const slice = upserts.slice(i, i + chunk);
+    // Kurum geneli (institution_id NULL) satırlarda Postgres NULL'ları eşit saymaz: upsert
+    // çakışma bulamayıp her senkronda kopya üretiyordu. Global satırlarda önce eski kayıt silinir.
+    if (!inst) {
+      const ids = slice.map((r) => String(r.edesis_exam_id));
+      const { error: delErr } = await supabaseAdmin
+        .from('edesis_exams')
+        .delete()
+        .is('institution_id', null)
+        .in('edesis_exam_id', ids);
+      if (delErr && !isSchemaMissingError(delErr)) throw delErr;
+    }
     let { error } = await supabaseAdmin.from('edesis_exams').upsert(slice, {
       onConflict: 'institution_id,edesis_exam_id',
       ignoreDuplicates: false
