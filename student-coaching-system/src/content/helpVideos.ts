@@ -19,11 +19,11 @@ export const STUDENT_HELP_VIDEOS: HelpVideo[] = [
   },
   {
     id: 'haftalik-rapor',
-    title: 'Haftalık rapor kısmı nasıl doldurulur?',
+    title: 'Haftalık plan nasıl doldurulur?',
     description:
-      'Haftalık rapor alanlarını doğru ve eksiksiz doldurmanız için adım adım anlatan kısa video.',
-    viewUrl: 'https://youtu.be/YYOqCZqpH7w',
-    embedUrl: 'https://www.youtube.com/embed/YYOqCZqpH7w'
+      'Haftalık plan ve rapor alanlarını doğru ve eksiksiz doldurmanız için adım adım anlatan kısa video.',
+    viewUrl: 'https://youtu.be/wrWEff35cK0',
+    embedUrl: 'https://www.youtube.com/embed/wrWEff35cK0'
   },
   {
     id: 'canli-ders-katilim',
