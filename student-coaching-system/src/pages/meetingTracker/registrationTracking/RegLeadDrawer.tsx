@@ -118,7 +118,7 @@ export default function RegLeadDrawer({
   ];
 
   return (
-    <div className="fixed inset-y-0 right-0 z-50 flex w-full max-w-xl flex-col border-l border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900">
+    <div className="fixed inset-y-0 right-0 z-50 flex h-[100dvh] w-full max-w-xl flex-col border-l border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900">
       <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3 dark:border-slate-700">
         <div>
           <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
@@ -346,7 +346,13 @@ function GeneralForm({
       className="space-y-3 text-sm"
       onSubmit={(e) => {
         e.preventDefault();
-        onSave(form);
+        if (isManager) {
+          onSave(form);
+          return;
+        }
+        // Temsilci / koç: ad-soyad ve sorumlu temsilci yönetici alanı — gönderilmez
+        const { first_name: _f, last_name: _l, assigned_user_id: _a, ...rest } = form;
+        onSave(rest);
       }}
     >
       <div className="grid grid-cols-2 gap-2">
@@ -454,15 +460,16 @@ function GeneralForm({
           onChange={(e) => setForm({ ...form, notes: e.target.value })}
         />
       </label>
-      {isManager && (
+      {/* Küçük ekranlarda form uzasa da Kaydet görünür kalsın */}
+      <div className="sticky bottom-0 -mx-4 -mb-4 border-t border-slate-200 bg-white px-4 py-3 dark:border-slate-700 dark:bg-slate-900">
         <button
           type="submit"
           disabled={saving}
-          className="rounded-lg bg-indigo-600 px-4 py-2 text-white hover:bg-indigo-700 disabled:opacity-50"
+          className="w-full rounded-lg bg-indigo-600 px-4 py-2 font-semibold text-white hover:bg-indigo-700 disabled:opacity-50 sm:w-auto"
         >
           {saving ? 'Kaydediliyor…' : 'Kaydet'}
         </button>
-      )}
+      </div>
     </form>
   );
 }
