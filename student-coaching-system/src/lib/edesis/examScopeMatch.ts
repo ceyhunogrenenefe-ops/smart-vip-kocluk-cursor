@@ -55,6 +55,26 @@ export function examProgramGroup(exam?: ScopeExam | null): ProgramGroup | null {
   return null;
 }
 
+/** Deneme AYT mi? (TYT-AYT karma denemeler AYT sayılmaz) */
+export function examIsAyt(exam?: ScopeExam | null): boolean {
+  const blob = norm(`${exam?.examType || ''} ${exam?.name || ''}`);
+  if (!/\bayt\b/.test(blob)) return false;
+  return !/\btyt\b/.test(blob);
+}
+
+/** Öğrenci AYT denemesi görebilir mi: 12. sınıf ve mezun evet; 9/10/11 hayır. */
+export function studentTakesAyt(scope?: ExamScope | null): boolean {
+  const blob = norm(
+    [scope?.classLevel, scope?.gradeName, scope?.className, ...(scope?.programKeys || [])].join(' ')
+  );
+  if (/\bmezun\b/.test(blob)) return true;
+  if (hasGrade(blob, [12])) return true;
+  // 9 / 10 / 11 açıkça yazıyorsa AYT gösterilmez
+  if (hasGrade(blob, [9, 10, 11])) return false;
+  // Sınıf bilinmiyorsa (ör. "YKS SAYISAL" grubu) gizleme
+  return true;
+}
+
 /**
  * Deneme öğrencinin sınıfına uygun mu?
  * Bilinmeyen durumda TRUE döner — filtre yanlışlıkla deneme gizlemesin.
@@ -63,6 +83,8 @@ export function examMatchesStudentScope(exam?: ScopeExam | null, scope?: ExamSco
   const student = studentProgramGroup(scope);
   if (!student) return true;
   const examGroup = examProgramGroup(exam);
-  if (!examGroup) return true;
-  return examGroup === student;
+  if (examGroup && examGroup !== student) return false;
+  // AYT yalnızca 12. sınıf ve mezunlara
+  if (student === 'lise' && examIsAyt(exam) && !studentTakesAyt(scope)) return false;
+  return true;
 }
