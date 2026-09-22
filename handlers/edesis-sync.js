@@ -1706,6 +1706,101 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, platformStudentId, edesisStudentId });
     }
 
+    /**
+     * Tanı: bir deneme neden öğrencinin "Sınava gir" listesinde yok?
+     * GET ?op=exam-visibility&examId=...&studentId=... (personel)
+     */
+    if (op === 'exam-visibility') {
+      if (!isStaff) return res.status(403).json({ error: 'forbidden' });
+      const examId = String(req.query?.examId || req.body?.examId || '').trim();
+      const studentId = String(req.query?.studentId || req.body?.studentId || '').trim();
+      if (!examId || !studentId) return res.status(400).json({ error: 'examId_and_studentId_required' });
+
+      const cfg = getEdesisConfig();
+      if (!cfg.apiKey) return res.status(400).json({ error: 'EDESIS_API_KEY_missing' });
+
+      const { data: st } = await supabaseAdmin
+        .from('students')
+        .select('id, name, class_level, edesis_ogrenci_id')
+        .eq('id', studentId)
+        .maybeSingle();
+      if (!st) return res.status(404).json({ error: 'student_not_found' });
+      const edesisStudentId = String(st.edesis_ogrenci_id || '').trim();
+      if (!edesisStudentId) {
+        return res.status(200).json({
+          ok: false,
+          reason: 'student_edesis_id_missing',
+          hint: 'Öğrenci kartında Edesis öğrenci ID boş — Öğrenci sınav köprüsünden eşleştirin.',
+          student: { id: st.id, name: st.name }
+        });
+      }
+
+      const catalog = await fetchEdesisExamsCatalog(cfg).catch(() => ({ rows: [] }));
+      const rows = catalog.rows || [];
+      const catalogRow = rows.find((r) => String(pickEdesisCatalogExamId(r)) === examId) || null;
+      const available = await loadAvailableEdesisExamsForStudent({
+        edesisStudentId,
+        platformStudentId: studentId,
+        actor,
+        studentHint: st,
+        cfg
+      }).catch((e) => ({ items: [], openOnline: [], meta: { error: errorMessage(e) } }));
+
+      const inVisible = (available.items || []).some((x) => String(x.examId) === examId);
+      const inOpenOnline = (available.openOnline || []).some((x) => String(x.examId) === examId);
+      const inEdesisAssignment = (available.meta?.assignedExamIds || []).map(String).includes(examId);
+      const inLocalAssignment = (available.meta?.localAssignedExamIds || []).map(String).includes(examId);
+      const roster = await fetchEdesisExamRosterStudentIds(examId, cfg).catch(() => null);
+      const rosterKnown = Array.isArray(roster) && roster.length > 0;
+      const rosterHasStudent = rosterKnown ? examRosterIncludesStudent(roster, edesisStudentId) : null;
+
+      let reason = 'visible';
+      let hint = 'Deneme öğrencinin listesinde görünüyor.';
+      if (!inVisible) {
+        if (!catalogRow) {
+          reason = 'not_in_catalog';
+          hint = 'Deneme Edesis kataloğundan gelmiyor. Edesis’te sınav tanımlı ve yayında mı kontrol edin.';
+        } else if (rosterKnown && rosterHasStudent === false) {
+          reason = 'student_not_in_roster';
+          hint = 'Edesis’te sınav belirli öğrencilere tanımlı ve bu öğrenci listede yok. Edesis’te öğrenciyi sınava ekleyin.';
+        } else if (!inEdesisAssignment && !inLocalAssignment && !inOpenOnline) {
+          reason = 'not_assigned';
+          hint =
+            'Sınav öğrenciye Edesis’te atanmamış ve programına uygun "kurumda açık" listesine de düşmüyor. Edesis’te atayın veya panelden "Öğrenciye ata" ile ekleyin.';
+        } else {
+          reason = 'filtered_out';
+          hint = 'Sınav katalogda var ama sınıf/program eşleşmesi nedeniyle listelenmiyor.';
+        }
+      }
+
+      return res.status(200).json({
+        ok: inVisible,
+        reason,
+        hint,
+        student: { id: st.id, name: st.name, classLevel: st.class_level, edesisStudentId },
+        exam: catalogRow
+          ? {
+              examId,
+              name: catalogRow.name || catalogRow.title || null,
+              examType: catalogRow.examType || null,
+              examDate: catalogRow.examDate || null,
+              isOnline: catalogRow.isOnline ?? null
+            }
+          : { examId, found: false },
+        checks: {
+          inCatalog: Boolean(catalogRow),
+          inStudentList: inVisible,
+          inOpenOnline,
+          inEdesisAssignment,
+          inLocalAssignment,
+          rosterKnown,
+          rosterHasStudent,
+          rosterSize: rosterKnown ? roster.length : 0
+        },
+        meta: available.meta || null
+      });
+    }
+
     if (op === 'exam-karne-pdf') {
       const examId = String(req.query?.examId || req.body?.examId || '').trim();
       const studentId = String(req.query?.studentId || req.body?.studentId || '').trim();

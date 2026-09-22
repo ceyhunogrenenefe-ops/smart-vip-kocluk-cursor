@@ -811,6 +811,25 @@ export async function fetchEdesisExamAssignments(edesisExamId?: string): Promise
   return j;
 }
 
+export type EdesisExamVisibility = {
+  ok: boolean;
+  reason: string;
+  hint: string;
+  student?: { id: string; name?: string; edesisStudentId?: string };
+  exam?: { examId: string; name?: string | null; found?: boolean };
+  checks?: Record<string, unknown>;
+};
+
+/** Tanı: deneme neden öğrencinin listesinde yok? */
+export async function checkEdesisExamVisibility(examId: string, studentId: string): Promise<EdesisExamVisibility> {
+  const res = await apiFetch(
+    `/api/edesis-sync?op=exam-visibility&examId=${encodeURIComponent(examId)}&studentId=${encodeURIComponent(studentId)}`
+  );
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(j.hint || j.error || res.statusText);
+  return j as EdesisExamVisibility;
+}
+
 export async function assignEdesisExam(payload: {
   edesisExamId: string;
   targetType: 'class' | 'student';

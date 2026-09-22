@@ -46,6 +46,7 @@ import {
   type EdesisStudentResultsExam,
   assignEdesisExam,
   unassignEdesisExam,
+  checkEdesisExamVisibility,
   fetchEdesisExamAssignments,
 } from '../lib/edesis/edesisApi';
 import { shareEdesisKarneWithParent } from '../lib/edesis/shareEdesisKarneWhatsApp';
@@ -507,6 +508,26 @@ export default function EdesisPage() {
     void loadStudentAssignments(selectedPlatformId);
   }, [selectedPlatformId, loadStudentAssignments]);
 
+  const [diagBusyId, setDiagBusyId] = useState<string | null>(null);
+
+  /** Tanı: deneme neden öğrencide görünmüyor */
+  const runVisibilityCheck = async (examId: string) => {
+    if (!selectedPlatformId) {
+      toast.error('Önce öğrenci seçin');
+      return;
+    }
+    setDiagBusyId(examId);
+    try {
+      const r = await checkEdesisExamVisibility(examId, selectedPlatformId);
+      if (r.ok) toast.success(r.hint || 'Deneme öğrencinin listesinde görünüyor.');
+      else toast.warning(r.hint || r.reason, { duration: 9000 });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Kontrol edilemedi');
+    } finally {
+      setDiagBusyId(null);
+    }
+  };
+
   const assignToStudent = async (examId: string, examName: string) => {
     if (!selectedPlatformId) {
       toast.error('Önce öğrenci seçin');
@@ -880,6 +901,15 @@ export default function EdesisPage() {
                             {busy ? 'Atanıyor…' : 'Öğrenciye ata'}
                           </button>
                         )}
+                        <button
+                          type="button"
+                          disabled={!selectedPlatformId || diagBusyId === String(ex.examId)}
+                          onClick={() => void runVisibilityCheck(String(ex.examId))}
+                          className="rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-60"
+                          title="Bu deneme öğrencide neden görünmüyor?"
+                        >
+                          {diagBusyId === String(ex.examId) ? 'Kontrol…' : 'Neden görünmüyor?'}
+                        </button>
                       </ExamRow>
                     );
                   })}
