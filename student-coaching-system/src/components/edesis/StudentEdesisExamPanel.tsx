@@ -31,6 +31,7 @@ import {
   type EdesisStudentResultsExam
 } from '../../lib/edesis/edesisApi';
 import { firstPublicBookletViewerUrl } from '../../lib/edesis/googleDrivePdf';
+import { examMatchesStudentScope, type ExamScope } from '../../lib/edesis/examScopeMatch';
 
 function formatExamDurationLabel(seconds?: number | null) {
   const s = Number(seconds) || 0;
@@ -83,6 +84,7 @@ function isExamDateThisWeek(examDate: string | null | undefined, now = new Date(
 }
 
 type TakeDateFilter = 'all' | 'thisWeek';
+type TakeScopeFilter = 'all' | 'myClass';
 
 async function waitForIngestJob(examId: string, jobId: string) {
   for (let i = 0; i < 12; i += 1) {
@@ -130,6 +132,8 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
   const [loading, setLoading] = useState(true);
   const [exams, setExams] = useState<EdesisStudentResultsExam[]>([]);
   const [available, setAvailable] = useState<EdesisAvailableExam[]>([]);
+  const [studentScope, setStudentScope] = useState<ExamScope | null>(null);
+  const [takeScopeFilter, setTakeScopeFilter] = useState<TakeScopeFilter>('all');
   const [expired, setExpired] = useState<EdesisAvailableExam[]>([]);
   const [edesisStudentId, setEdesisStudentId] = useState('');
   const [hint, setHint] = useState<string | null>(null);
@@ -188,6 +192,7 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
       setAvailable(nextAvailable);
       setExpired(Array.isArray(catalog.expired) ? catalog.expired : []);
       if (catalog.edesisStudentId) setEdesisStudentId(catalog.edesisStudentId);
+      setStudentScope(catalog.studentScope || null);
       if (Array.isArray(catalog.taken)) {
         nextExams = catalog.taken;
         setExams(nextExams);
@@ -565,7 +570,20 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
     () => takeableAll.filter((exam) => isExamDateThisWeek(exam.examDate)),
     [takeableAll]
   );
-  const takeable = takeDateFilter === 'thisWeek' ? takeableThisWeek : takeableAll;
+  /** Sınıf filtresi: sınıfına uymayan (ör. LGS denemesi YKS öğrencisinde) denemeler gizlenir */
+  const takeableMyClass = useMemo(
+    () => takeableAll.filter((exam) => examMatchesStudentScope(exam, studentScope)),
+    [takeableAll, studentScope]
+  );
+  const scopeFilterUseful = takeableMyClass.length !== takeableAll.length;
+  const takeableByDate = takeDateFilter === 'thisWeek' ? takeableThisWeek : takeableAll;
+  const takeable = useMemo(
+    () =>
+      takeScopeFilter === 'myClass'
+        ? takeableByDate.filter((exam) => examMatchesStudentScope(exam, studentScope))
+        : takeableByDate,
+    [takeableByDate, takeScopeFilter, studentScope]
+  );
   const tabOn = 'bg-slate-900 text-white shadow-sm';
   const tabOff = 'border border-slate-200/80 bg-white text-slate-700 hover:bg-slate-50';
   const filterOn = 'bg-emerald-700 text-white shadow-sm';
@@ -683,6 +701,19 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
                 <span className="ml-1 tabular-nums opacity-90">({takeableThisWeek.length})</span>
               ) : null}
             </button>
+            {scopeFilterUseful ? (
+              <button
+                type="button"
+                onClick={() => setTakeScopeFilter(takeScopeFilter === 'myClass' ? 'all' : 'myClass')}
+                className={`rounded-md px-2.5 py-1.5 text-xs font-semibold ${
+                  takeScopeFilter === 'myClass' ? filterOn : filterOff
+                }`}
+                title="Yalnızca sınıfına/programına uygun denemeleri göster"
+              >
+                Sınıfıma uygun
+                <span className="ml-1 tabular-nums opacity-90">({takeableMyClass.length})</span>
+              </button>
+            ) : null}
           </div>
         ) : null}
         <button
