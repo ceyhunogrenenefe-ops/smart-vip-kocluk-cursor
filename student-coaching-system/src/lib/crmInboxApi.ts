@@ -576,10 +576,13 @@ export function crmTodayBoard(filters: { agent?: string; channel?: string; ad?: 
   return inboxGet<{ data: CrmTodayBoard }>('today_board', filters);
 }
 
-/** FAZ 7 — personel WhatsApp bildirimi (resmî Meta şablonu) */
+/** FAZ 7 — personel WhatsApp bildirimi (süper admin QR hattı) */
 export type CrmStaffAlerts = {
   enabled: boolean;
   admin_user_id: string | null;
+  channel?: string;
+  gateway_connected?: boolean;
+  gateway_status?: string | null;
   template_status: string | null;
   template_checked_at: string | null;
   template_error: string | null;

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { BellRing, Loader2, RefreshCw, Send } from 'lucide-react';
+import { BellRing, Loader2, Send } from 'lucide-react';
 import { toast } from 'sonner';
 import { crmAdminStaffAlerts, type CrmStaffAlerts } from '../../lib/crmInboxApi';
 
@@ -17,14 +17,10 @@ const STATUS_STYLE: Record<string, string> = {
   pending: 'bg-slate-100 text-slate-600'
 };
 
-function templateBadge(status: string | null) {
-  const s = String(status || '').toUpperCase();
-  if (s === 'APPROVED') return { text: 'Meta onayladı', cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' };
-  if (s === 'PENDING' || s === 'IN_APPEAL') return { text: 'Meta onayı bekleniyor', cls: 'bg-amber-50 text-amber-800 border-amber-200' };
-  if (s === 'REJECTED') return { text: 'Meta reddetti', cls: 'bg-rose-50 text-rose-700 border-rose-200' };
-  if (s === 'ERROR') return { text: 'Gönderilemedi', cls: 'bg-rose-50 text-rose-700 border-rose-200' };
-  if (!s) return { text: 'Henüz gönderilmedi', cls: 'bg-slate-50 text-slate-600 border-slate-200' };
-  return { text: s, cls: 'bg-slate-50 text-slate-600 border-slate-200' };
+function gatewayBadge(connected: boolean | undefined, status: string | null | undefined) {
+  if (connected) return { text: 'Bağlı', cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' };
+  if (status === 'missing_session') return { text: 'Süper admin hesabı yok', cls: 'bg-rose-50 text-rose-700 border-rose-200' };
+  return { text: 'Bağlı değil — QR ile bağlayın', cls: 'bg-rose-50 text-rose-700 border-rose-200' };
 }
 
 /** FAZ 7 — yönetici: personele WhatsApp bildirimi ayarları */
@@ -59,8 +55,8 @@ export default function CrmStaffAlertsPanel() {
     );
   }
 
-  const badge = templateBadge(data.template_status);
-  const approved = String(data.template_status || '').toUpperCase() === 'APPROVED';
+  const badge = gatewayBadge(data.gateway_connected, data.gateway_status);
+  const connected = Boolean(data.gateway_connected);
 
   return (
     <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm xl:col-span-2">
@@ -70,8 +66,8 @@ export default function CrmStaffAlertsPanel() {
             <BellRing className="h-5 w-5 text-emerald-600" /> Personele WhatsApp bildirimi
           </h3>
           <p className="mt-1 max-w-3xl text-xs text-slate-500">
-            Resmî Meta WhatsApp şablonu <code className="rounded bg-slate-100 px-1">crm_staff_alert</code> ile, kurumun
-            işletme numarasından yalnız temsilcilere gider; müşteriye / veliye gitmez. Kurallar: 15 dk bekleyen müşteri →
+            Süper admin hesabının QR ile bağlı WhatsApp hattından (ücretsiz) yalnız temsilcilere gider; müşteriye /
+            veliye gitmez. Ücretli Meta şablonu kullanılmaz; hat bağlı değilse mesaj gitmez. Kurallar: 15 dk bekleyen müşteri →
             temsilci; 30+ dk → temsilci + seçili yönetici; yeni atanan lead → temsilci; 09:30 gecikmiş görev özeti. Sessiz
             saat 22:00–09:00, kişi başı saatte en fazla 6 mesaj, yalnız son 2 saatte başlayan beklemeler.
           </p>
@@ -96,23 +92,11 @@ export default function CrmStaffAlertsPanel() {
 
       <div className="mt-4 grid gap-3 md:grid-cols-3">
         <div className="rounded-xl border border-slate-200 p-3">
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Meta şablonu</p>
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Gönderen hat (süper admin QR)</p>
           <span className={`mt-1 inline-block rounded-lg border px-2 py-0.5 text-xs font-medium ${badge.cls}`}>{badge.text}</span>
-          {data.template_error ? <p className="mt-1 text-[11px] text-rose-600">{data.template_error}</p> : null}
-          {data.template_checked_at ? (
-            <p className="mt-1 text-[11px] text-slate-400">
-              Son kontrol: {new Date(data.template_checked_at).toLocaleString('tr-TR')}
-            </p>
-          ) : null}
-          <button
-            type="button"
-            disabled={busy != null}
-            onClick={() => void run('template', { action: 'template' }, 'Şablon durumu güncellendi')}
-            className="mt-2 inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2 py-1 text-xs hover:bg-slate-50 disabled:opacity-60"
-          >
-            {busy === 'template' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-            {data.template_status ? 'Durumu yenile' : "Meta'ya onaya gönder"}
-          </button>
+          <p className="mt-1 text-[11px] text-slate-400">
+            Hat düşerse süper admin hesabından WhatsApp ayarlarına girip QR ile yeniden bağlayın.
+          </p>
         </div>
         <div className="rounded-xl border border-slate-200 p-3">
           <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Kırmızı uyarı yöneticisi</p>
@@ -136,8 +120,8 @@ export default function CrmStaffAlertsPanel() {
           <p className="mt-1 font-serif text-2xl font-semibold text-slate-900 tabular-nums">{data.sent_this_month}</p>
           <button
             type="button"
-            disabled={busy != null || !approved}
-            title={approved ? 'Kendi numaranıza test mesajı gönderir' : 'Şablon Meta onayından sonra'}
+            disabled={busy != null || !connected}
+            title={connected ? 'Kendi numaranıza test mesajı gönderir' : 'Süper admin WhatsApp hattı bağlı değil'}
             onClick={() => void run('test', { action: 'test' }, 'Test mesajı gönderildi')}
             className="mt-2 inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-2 py-1 text-xs font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
           >

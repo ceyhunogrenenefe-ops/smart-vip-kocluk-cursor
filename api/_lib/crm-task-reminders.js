@@ -4,7 +4,7 @@
 import { supabaseAdmin } from './supabase-admin.js';
 import { GRADE_PROGRAM_LABELS } from './registration-tracking-utils.js';
 import { normalizePhoneToE164 } from './phone-whatsapp.js';
-import { sendMetaTextMessage, metaWhatsAppConfigured } from './meta-whatsapp.js';
+import { sendCrmGatewayText } from './crm-gateway-send.js';
 import { insertWhatsAppAutomationLog } from './message-log.js';
 import { reclassifyLeadGradesFromSnippets } from './registration-channel-ingest.js';
 
@@ -159,20 +159,22 @@ async function loadAgentContact(userId) {
 
 async function sendAgentWhatsApp(agent, text, taskId) {
   const e164 = normalizePhoneToE164(agent?.phone);
-  if (!e164 || !metaWhatsAppConfigured()) {
+  if (!e164) {
     await insertWhatsAppAutomationLog({
       studentId: null,
       relatedId: taskId,
       kind: CRM_TASK_REMINDER_KIND,
       message: text,
       status: 'skipped',
-      error: e164 ? 'meta_not_configured' : 'agent_phone_missing',
+      error: 'agent_phone_missing',
       phone: e164
     });
     return { ok: false, skipped: true };
   }
   try {
-    const sent = await sendMetaTextMessage({ toE164: e164, text });
+    // Süper admin QR hattı (ücretsiz); Meta metin mesajı 24 saat dışında zaten gitmiyordu
+    const sent = await sendCrmGatewayText({ phone: e164, message: text });
+    if (!sent.ok) throw new Error(sent.error || 'gateway_send_failed');
     await insertWhatsAppAutomationLog({
       studentId: null,
       relatedId: taskId,
@@ -180,7 +182,7 @@ async function sendAgentWhatsApp(agent, text, taskId) {
       message: text,
       status: 'sent',
       phone: e164,
-      meta_message_id: sent?.messageId || sent?.id || null
+      meta_message_id: sent.sid || null
     });
     return { ok: true };
   } catch (e) {

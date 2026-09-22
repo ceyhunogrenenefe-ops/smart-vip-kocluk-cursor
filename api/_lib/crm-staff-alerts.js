@@ -1,15 +1,17 @@
 /**
- * FAZ 7 — Personele (temsilci / yönetici) resmî Meta WhatsApp Cloud API şablonu ile bildirim.
- * - Yalnız onaylı UTILITY şablonu `crm_staff_alert`; QR / kişisel hat / resmî olmayan otomasyon YOK.
+ * FAZ 7 — Personele (temsilci / yönetici) WhatsApp bildirimi.
+ * - Süper admin QR (gateway) hattından düz metin gider; ücretli Meta şablonu kullanılmaz, Meta yedeği yok.
  * - Yalnız CRM temsilci atamalı personele gider; müşteri / veliye asla gitmez.
  * - Kurum ana şalteri (crm_settings.staff_wa_enabled) varsayılan KAPALI.
  * - Sessiz saat 22:00–09:00, kişi başı saatte en fazla 6 mesaj, aynı olay için tek mesaj (dedupe_key UNIQUE).
  */
 import { supabaseAdmin } from './supabase-admin.js';
-import { loadMetaWhatsAppSecretsFromDb, metaWhatsAppConfigured, sendMetaTemplateMessage } from './meta-whatsapp.js';
+import { loadMetaWhatsAppSecretsFromDb } from './meta-whatsapp.js';
 import { createOrReuseMetaMessageTemplate } from './meta-template-create.js';
 import { fetchMetaTemplatesFromPhoneWaba, isMetaTemplateSendableStatus } from './meta-templates-sync.js';
 import { normalizePhoneToE164 } from './phone-whatsapp.js';
+import { sendCrmGatewayText } from './crm-gateway-send.js';
+import { waitAutoSendGap } from './whatsapp-gateway-send.js';
 import { buildSalesBoard, istanbulDayStart } from './crm-sales-board.js';
 import { alertRecipients, getOnDutyUserIds } from './crm-shifts.js';
 
@@ -68,6 +70,15 @@ export function cleanParam(text, max = 120) {
     .trim()
     .slice(0, max);
   return s || '-';
+}
+
+/** Gateway düz metni (şablon gövdesiyle aynı içerik + CRM bağlantısı) */
+export function buildStaffAlertText({ firstName, summary, detail }) {
+  return (
+    STAFF_ALERT_BODY.replace('{{1}}', cleanParam(firstName, 40))
+      .replace('{{2}}', cleanParam(summary, 80))
+      .replace('{{3}}', cleanParam(detail, 160)) + '\n' + CRM_URL
+  );
 }
 
 async function saveTemplateState(institutionId, patch) {
@@ -163,16 +174,17 @@ export async function sendStaffAlert({ institutionId, userId, eventType, dedupeK
   }
 
   try {
-    const sent = await sendMetaTemplateMessage({
-      toE164: to.phone,
-      templateName: STAFF_ALERT_TEMPLATE,
-      languageCode: 'tr',
-      bodyParameterTexts: [cleanParam(to.firstName, 40), cleanParam(summary, 80), cleanParam(detail, 160)]
+    const sent = await sendCrmGatewayText({
+      phone: to.phone,
+      message: buildStaffAlertText({ firstName: to.firstName, summary, detail })
     });
+    if (!sent.ok) throw new Error(sent.error || 'gateway_send_failed');
     await supabaseAdmin
       .from('crm_staff_alert_log')
-      .update({ status: 'sent', meta_message_id: sent?.messageId || null })
+      .update({ status: 'sent', meta_message_id: sent.sid || null })
       .eq('id', logRow.id);
+    // Otomatik gönderimlerde alıcılar arası kısa bekleme (numara güvenliği)
+    await waitAutoSendGap();
     return { status: 'sent' };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
@@ -194,23 +206,9 @@ function contactLabel(w) {
 export async function runStaffAlertsJob({ now = Date.now() } = {}) {
   const out = { institutions: 0, sent: 0, skipped: 0, failed: 0, template: null, events: [] };
 
-  // Şablon hiç gönderilmediyse (yönetici onayıyla) bir kez Meta onayına gönder — bildirimler kapalı olsa da.
-  const { data: neverSubmitted } = await supabaseAdmin
-    .from('crm_settings')
-    .select('institution_id')
-    .is('staff_wa_template_status', null)
-    .not('staff_wa_admin_user_id', 'is', null)
-    .limit(5);
-  for (const row of neverSubmitted || []) {
-    const r = await ensureStaffAlertTemplate(String(row.institution_id), { force: true });
-    out.template = r.status;
-  }
-
   const { data: settingsRows } = await supabaseAdmin.from('crm_settings').select('*').eq('staff_wa_enabled', true);
   if (!settingsRows?.length) return { ...out, note: 'staff_wa_disabled' };
-
-  await loadMetaWhatsAppSecretsFromDb();
-  if (!metaWhatsAppConfigured()) return { ...out, note: 'meta_not_configured' };
+  out.channel = 'gateway_super_admin';
 
   const tally = (r, event) => {
     if (r.status === 'sent') out.sent += 1;
@@ -222,9 +220,6 @@ export async function runStaffAlertsJob({ now = Date.now() } = {}) {
   for (const st of settingsRows) {
     const inst = String(st.institution_id);
     out.institutions += 1;
-    const tpl = await ensureStaffAlertTemplate(inst);
-    out.template = tpl.status;
-    if (!tpl.approved) continue;
     if (isQuietHour(now)) continue;
     const adminId = st.staff_wa_admin_user_id ? String(st.staff_wa_admin_user_id) : null;
     // Vardiya: o an görevde olan temsilciler (null → vardiya tanımlı değil)

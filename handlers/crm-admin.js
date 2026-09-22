@@ -173,7 +173,8 @@ export default async function handler(req, res) {
     if (op === 'staff_alerts') {
       const inst = String(body.institution_id || req.query?.institution_id || actor.institution_id || '').trim() || PLATFORM_PRIMARY_INSTITUTION_ID;
       const { getCrmSettings, updateCrmSettings } = await import('../api/_lib/crm-assignment.js');
-      const { ensureStaffAlertTemplate, sendStaffAlert } = await import('../api/_lib/crm-staff-alerts.js');
+      const { sendStaffAlert } = await import('../api/_lib/crm-staff-alerts.js');
+      const { crmGatewayStatus } = await import('../api/_lib/crm-gateway-send.js');
       const action = String(body.action || '').trim();
       if (req.method === 'POST') {
         if (action === 'settings') {
@@ -189,9 +190,6 @@ export default async function handler(req, res) {
             .update({ wa_alerts_enabled: Boolean(body.wa_alerts_enabled) })
             .eq('user_id', uid);
           if (error) throw error;
-        } else if (action === 'template') {
-          // Kullanıcı onayıyla: şablonu Meta'ya onaya gönder / durumunu yenile
-          await ensureStaffAlertTemplate(inst, { force: true });
         } else if (action === 'test') {
           const r = await sendStaffAlert({
             institutionId: inst,
@@ -235,8 +233,12 @@ export default async function handler(req, res) {
         .eq('institution_id', inst)
         .eq('status', 'sent')
         .gte('created_at', monthStart.toISOString());
+      const gateway = await crmGatewayStatus().catch(() => ({ connected: false, status: 'error' }));
       return res.status(200).json({
         data: {
+          channel: 'gateway_super_admin',
+          gateway_connected: Boolean(gateway.connected),
+          gateway_status: gateway.status || null,
           enabled: settings.staff_wa_enabled === true,
           admin_user_id: settings.staff_wa_admin_user_id || null,
           template_status: settings.staff_wa_template_status || null,
