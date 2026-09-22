@@ -2385,6 +2385,13 @@ export default async function handler(req, res) {
         taken,
         takenCount: taken.length,
         scope: meta.assignmentMode || 'assigned',
+        // Öğrenci panelindeki "Sınıfıma uygun" filtresi için sınıf/program bilgisi
+        studentScope: {
+          classLevel: loaded.scope?.classLevel ?? null,
+          gradeName: loaded.scope?.gradeName || null,
+          className: loaded.scope?.className || null,
+          programKeys: [...(loaded.scope?.programKeys || [])]
+        },
         assignmentMeta: { ...meta, localAssignment: localAssignmentMeta },
         takeableCount: gatedItems.filter((x) => x.canTake && !x.hasStudentResult).length,
         hint: (() => {

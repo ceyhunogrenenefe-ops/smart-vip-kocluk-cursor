@@ -599,6 +599,12 @@ export async function fetchEdesisAvailableExams(params: {
   taken?: EdesisStudentResultsExam[];
   takenCount?: number;
   scope?: string;
+  studentScope?: {
+    classLevel?: string | number | null;
+    gradeName?: string | null;
+    className?: string | null;
+    programKeys?: string[];
+  } | null;
   hint?: string | null;
   assignmentMeta?: Record<string, unknown>;
 }> {
