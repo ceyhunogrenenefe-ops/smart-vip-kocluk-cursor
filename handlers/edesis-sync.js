@@ -372,11 +372,12 @@ async function loadAvailableEdesisExamsForStudent({
       institutionId: actor?.institution_id || null
     })
   );
-  // Açık online yedeği: Edesis'te belirli öğrencilere atanmış (kadrosu dolu) ve bu öğrenci
-  // kadroda olmayan denemeler gösterilmez — öğrencinin adına tanımlanmamış sınav görünmesin.
-  // Kadrosu okunamayan / boş denemeler eskisi gibi kalır (liste boş kalmasın diye eklenen yedek).
+  // Kadro filtresi VARSAYILAN KAPALI: Edesis'te tanımlanan kurum denemesi öğrencide doğrudan
+  // görünsün (eski davranış). Açıldığında, kadrosu dolu ve öğrencinin olmadığı denemeler gizlenir.
+  // Açmak için: EDESIS_OPEN_ONLINE_ROSTER_FILTER=1
+  const rosterFilterEnabled = String(process.env.EDESIS_OPEN_ONLINE_ROSTER_FILTER || '').trim() === '1';
   let openOnlineRosterHidden = 0;
-  if (!items.length && openOnline.length) {
+  if (rosterFilterEnabled && !items.length && openOnline.length) {
     const kept = [];
     for (let i = 0; i < openOnline.length; i += 6) {
       const batch = openOnline.slice(i, i + 6);
@@ -455,6 +456,7 @@ async function loadAvailableEdesisExamsForStudent({
       expiredExamIds: expired.map((x) => x.examId).slice(0, 40),
       openOnlineCount: openOnline.length,
       openOnlineRosterHidden,
+      rosterFilterEnabled,
       totalMs: Date.now() - t0
     }
   };
