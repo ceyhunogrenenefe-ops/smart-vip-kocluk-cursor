@@ -120,6 +120,7 @@ export const routeLoaders = {
   'cron/crm-instagram-sync': () => import('../handlers/cron-crm-instagram-sync.js'),
   'ozel-ders-talepleri': () => import('../handlers/ozel-ders-talepleri.js'),
   'site-leads': () => import('../handlers/site-leads.js'),
+  'account-deletion': () => import('../handlers/account-deletion.js'),
   'teacher-profile': () => import('../handlers/teacher-profile.js'),
   'teacher-profiles-admin': () => import('../handlers/teacher-profiles-admin.js'),
   'teacher-profile-media': () => import('../handlers/teacher-profile-media.js'),
