@@ -6,6 +6,7 @@ import { useAuth } from '../context/AuthContext';
 import { useMobileAppShell } from '../hooks/useMobileAppShell';
 import { isNativeApp } from '../lib/nativeApp';
 import MobileStoreEntryCard from '../components/commerce/MobileStoreEntryCard';
+import AccountDeletionCard from '../components/profile/AccountDeletionCard';
 
 type ProfilePayload = {
   user: { id: string; name: string; email: string; phone?: string | null; role: string };
@@ -192,6 +193,7 @@ export default function MyProfilePage() {
           </p>
         ) : null}
       </div>
+      {!loading ? <AccountDeletionCard /> : null}
     </div>
   );
 }

@@ -80,6 +80,7 @@ import VeliImzaPage from './pages/VeliImzaPage';
 import PublicTeacherReviewPage from './pages/PublicTeacherReviewPage';
 import VeliKayitLegalDocPage from './pages/VeliKayitLegalDocPage';
 import PlayStoreLegalPage from './pages/PlayStoreLegalPage';
+import AccountDeletionPage from './pages/AccountDeletionPage';
 import VerifyDocumentPage from './pages/VerifyDocumentPage';
 import StudentSoruSorPage from './pages/questionHelp/StudentSoruSorPage';
 import StudentHelpPage from './pages/StudentHelpPage';
@@ -173,6 +174,7 @@ function App() {
               <Route path="/fiyat" element={<Marketing />} />
               <Route path="/gizlilik" element={<PlayStoreLegalPage />} />
               <Route path="/kullanim-kosullari" element={<PlayStoreLegalPage />} />
+              <Route path="/hesap-silme" element={<AccountDeletionPage />} />
 
               {/* Auth Sayfaları */}
               <Route path="/login" element={<Login />} />

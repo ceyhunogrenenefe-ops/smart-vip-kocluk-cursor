@@ -49,8 +49,13 @@ export function MobileAppPrivacyBody() {
 
       <h2 className="pt-2 text-base font-semibold text-slate-900">4. Saklama ve güvenlik</h2>
       <p>
-        Veriler TLS (HTTPS) ile iletilir. Erişim rol tabanlıdır. Hesabınız kurum/koç tarafından yönetiliyorsa silme
-        talebinizi önce kurumunuza, gerekirse destek@smartkocluk.com adresine iletebilirsiniz.
+        Veriler TLS (HTTPS) ile iletilir. Erişim rol tabanlıdır. Hesabınızın ve verilerinizin silinmesini uygulamada{' '}
+        <strong>Profilim → Hesabımı sil</strong> bölümünden veya{' '}
+        <a href="/hesap-silme" className="text-blue-700 underline">
+          hesap silme talep sayfasından
+        </a>{' '}
+        isteyebilirsiniz; talep en geç 30 gün içinde tamamlanır. Ayrıca destek@smartkocluk.com adresine de
+        yazabilirsiniz.
       </p>
 
       <h2 className="pt-2 text-base font-semibold text-slate-900">5. KVKK haklarınız</h2>
