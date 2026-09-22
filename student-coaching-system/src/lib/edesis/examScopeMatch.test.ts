@@ -24,9 +24,10 @@ describe('deneme programı', () => {
 });
 
 describe('eşleşme', () => {
-  it('YKS öğrencisinde TYT/AYT kalır, LGS elenir', () => {
+  it('11. sınıf öğrencisinde TYT kalır; LGS ve AYT elenir', () => {
     expect(examMatchesStudentScope({ name: 'ÖZDEBİR İLK PROVA TYT', examType: 'TYT' }, yks)).toBe(true);
-    expect(examMatchesStudentScope({ name: 'ÜÇDÖRTBEŞ AYT', examType: 'AYT' }, yks)).toBe(true);
+    // AYT yalnızca 12. sınıf ve mezunlarda
+    expect(examMatchesStudentScope({ name: 'ÜÇDÖRTBEŞ AYT', examType: 'AYT' }, yks)).toBe(false);
     expect(examMatchesStudentScope({ name: 'ADAY LGS-2', examType: 'LGS' }, yks)).toBe(false);
     expect(examMatchesStudentScope({ name: '7. Sınıf Deneme' }, yks)).toBe(false);
   });
@@ -39,5 +40,30 @@ describe('eşleşme', () => {
   it('bilinmeyen durumlarda gizlemez', () => {
     expect(examMatchesStudentScope({ name: 'Genel Deneme' }, yks)).toBe(true);
     expect(examMatchesStudentScope({ name: 'ÖZDEBİR TYT' }, {})).toBe(true);
+  });
+});
+
+describe('AYT yalnızca 12. sınıf ve mezun', () => {
+  const onbir = { classLevel: '11', gradeName: '11. Sınıf', programKeys: ['tyt'] };
+  const oniki = { classLevel: '12', gradeName: '12. Sınıf', programKeys: ['tyt', 'ayt'] };
+  const mezun = { classLevel: 'Mezun', gradeName: 'Mezun', programKeys: ['tyt', 'ayt'] };
+  const yksGrubu = { classLevel: 'YKS SAYISAL', gradeName: null, programKeys: ['tyt', 'ayt'] };
+
+  it('11. sınıfta AYT gizlenir, TYT kalır', () => {
+    expect(examMatchesStudentScope({ name: 'ÜÇDÖRTBEŞ AYT BÜYÜK PROVA', examType: 'AYT' }, onbir)).toBe(false);
+    expect(examMatchesStudentScope({ name: 'ÖZDEBİR İLK PROVA TYT', examType: 'TYT' }, onbir)).toBe(true);
+  });
+
+  it('12 ve mezunda AYT görünür', () => {
+    expect(examMatchesStudentScope({ name: 'özdebir ayt1', examType: 'AYT' }, oniki)).toBe(true);
+    expect(examMatchesStudentScope({ name: 'özdebir ayt1', examType: 'AYT' }, mezun)).toBe(true);
+  });
+
+  it('sınıfı belirsiz YKS grubunda gizlenmez', () => {
+    expect(examMatchesStudentScope({ name: 'özdebir ayt1', examType: 'AYT' }, yksGrubu)).toBe(true);
+  });
+
+  it('TYT-AYT karma deneme AYT sayılmaz', () => {
+    expect(examMatchesStudentScope({ name: 'TYT-AYT Genel Deneme', examType: 'TYT-AYT' }, onbir)).toBe(true);
   });
 });
