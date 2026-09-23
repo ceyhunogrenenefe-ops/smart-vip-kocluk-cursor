@@ -82,6 +82,7 @@ export const routeLoaders = {
   'class-schedule-plans': () => import('../handlers/class-schedule-plans.js'),
   'academic-center-links': () => import('../handlers/academic-center-links.js'),
   'exam-calendar': () => import('../handlers/exam-calendar.js'),
+  'institution-features': () => import('../handlers/institution-features.js'),
   'academic-center-bbb-join': () => import('../handlers/academic-center-bbb-join.js'),
   'parent-sign-contracts': () => import('../handlers/parent-sign-contracts.js'),
   'parent-sign-class-presets': () => import('../handlers/parent-sign-class-presets.js'),
