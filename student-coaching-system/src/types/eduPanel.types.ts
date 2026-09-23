@@ -65,6 +65,10 @@ export type EduHomeworkSubmission = {
   teacher_note?: string | null;
   grade?: string | null;
   status: SubmissionStatus;
+  /** Ödev modülü: öğrencinin bildirdiği soru / süre */
+  solved_question_count?: number | null;
+  spent_minutes?: number | null;
+  self_reported_at?: string | null;
 };
 
 export type EduHomeworkSubmitPayload = {
@@ -72,6 +76,9 @@ export type EduHomeworkSubmitPayload = {
   videos?: File[];
   /** @deprecated Tek video — videos kullanın */
   video?: File | null;
+  /** Ödev modülü: öğrencinin bildirdiği çözülen soru ve harcanan süre */
+  solved_question_count?: number | null;
+  spent_minutes?: number | null;
 };
 
 export type HomeworkAssigneeMode = 'class' | 'students';
@@ -93,6 +100,16 @@ export type EduHomework = {
   attachment_pdf_path?: string | null;
   attachment_pdf_name?: string | null;
   attachment_pdf_url?: string | null;
+  /** Ödev modülü (platform dışı kurumlar) */
+  institution_id?: string | null;
+  subject_name?: string | null;
+  topic_key?: string | null;
+  topic_label?: string | null;
+  target_question_count?: number | null;
+  target_minutes?: number | null;
+  resource_url?: string | null;
+  share_token?: string | null;
+  share_expires_at?: string | null;
   submissions?: EduHomeworkSubmission[];
   /** Kart istatistikleri (sunucu veya istemci) */
   stats?: {

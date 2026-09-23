@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
+import { useHomeworkModule } from '../features/homework/useHomeworkModule';
 import { useAuth } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
 import { apiFetch } from '../lib/session';
@@ -357,6 +358,8 @@ export default function ClassLiveLessons() {
   }, []);
 
   const canMarkAttendance = canManageSlots && !isStudentView && Boolean(selectedClassId);
+  // Ödev modülü yalnız platform dışı kurumlarda açık
+  const { enabled: homeworkModuleEnabled } = useHomeworkModule();
 
   useEffect(() => {
     if (!isStudentView || !resolvedStudentId) return;
@@ -2608,6 +2611,16 @@ export default function ClassLiveLessons() {
                                     >
                                       Yoklama
                                     </button>
+                                  ) : null}
+                                  {/* Ders bitince tek tık: ödev formu açık gelir */}
+                                  {homeworkModuleEnabled && s.status === 'completed' ? (
+                                    <Link
+                                      to="/edu-panel?create_homework=1"
+                                      title="Bu dersin ardından ödev ver"
+                                      className="inline-flex items-center gap-1 rounded-lg border border-amber-300 bg-amber-50 px-2 py-1 text-[10px] font-semibold text-amber-900 hover:bg-amber-100"
+                                    >
+                                      Ödev Ver
+                                    </Link>
                                   ) : null}
                                   {canManageSlots && s.status !== 'cancelled' ? (
                                     <button

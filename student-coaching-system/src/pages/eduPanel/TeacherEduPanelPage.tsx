@@ -3,6 +3,9 @@ import { useSearchParams } from 'react-router-dom';
 import { EDU_HOMEWORK_ANIMATIONS_LABEL } from '../../components/layout/sidebar/navModel';
 import { BookOpen, Clapperboard, GraduationCap, Layers, Loader2, Plus } from 'lucide-react';
 import { toast } from 'sonner';
+import HomeworkTargets from '../../features/homework/HomeworkTargets';
+import HomeworkShareBar from '../../features/homework/HomeworkShareBar';
+import { useHomeworkModule } from '../../features/homework/useHomeworkModule';
 import EduAnimationPreviewModal from '../../components/eduPanel/EduAnimationPreviewModal';
 import EduAnimationPoolPickerModal from '../../components/eduPanel/EduAnimationPoolPickerModal';
 import EduAnimationPoolTab from '../../components/eduPanel/EduAnimationPoolTab';
@@ -393,7 +396,15 @@ export default function TeacherEduPanelPage() {
         assignee_mode: draft.assignee_mode || 'class',
         assignee_student_ids:
           draft.assignee_mode === 'students' ? draft.assignee_student_ids || [] : [],
-        pdf_file: draft.pdf_file || null
+        pdf_file: draft.pdf_file || null,
+        // Ödev modülü açıksa hedefler de gider; kapalıysa alanlar boş kalır
+        topic_label: draft.topic_label?.trim() || undefined,
+        topic_key: draft.topic_key?.trim() || undefined,
+        target_question_count: draft.target_question_count
+          ? Number(draft.target_question_count) || undefined
+          : undefined,
+        target_minutes: draft.target_minutes ? Number(draft.target_minutes) || undefined : undefined,
+        resource_url: draft.resource_url?.trim() || undefined
       });
       let notifyCount = notified;
       if (hw.status !== 'published') {
