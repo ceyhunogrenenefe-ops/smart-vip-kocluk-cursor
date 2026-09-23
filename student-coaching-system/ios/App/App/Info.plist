@@ -51,5 +51,7 @@
 	<string>Odev ve soru fotografi cekebilmek icin kamera erisimi gerekir.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Odev ve soru gorsellerini yukleyebilmek icin fotograflara erisim gerekir.</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 </dict>
 </plist>
