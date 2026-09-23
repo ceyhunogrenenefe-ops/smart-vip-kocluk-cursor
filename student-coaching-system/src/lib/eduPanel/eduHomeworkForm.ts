@@ -16,6 +16,12 @@ export type EduHomeworkDraft = {
   pool_animation_title?: string;
   /** Öğretmen PDF eki (yayınlama anında yüklenir) */
   pdf_file?: File | null;
+  /** Ödev modülü (platform dışı kurumlar): konu ve hedefler */
+  topic_key?: string;
+  topic_label?: string;
+  target_question_count?: string;
+  target_minutes?: string;
+  resource_url?: string;
 };
 
 export const EMPTY_HOMEWORK_DRAFT: EduHomeworkDraft = {
@@ -29,7 +35,12 @@ export const EMPTY_HOMEWORK_DRAFT: EduHomeworkDraft = {
   pool_animations: [],
   pool_animation_id: undefined,
   pool_animation_title: undefined,
-  pdf_file: null
+  pdf_file: null,
+  topic_key: '',
+  topic_label: '',
+  target_question_count: '',
+  target_minutes: '',
+  resource_url: ''
 };
 
 export function formatEduHomeworkLabel(hw: {

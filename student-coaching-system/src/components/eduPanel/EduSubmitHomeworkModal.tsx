@@ -15,7 +15,12 @@ type Props = {
   /** Daha önce teslim edilmişse yeniden düzenleme / tekrar teslim */
   isResubmit?: boolean;
   onClose: () => void;
-  onSubmit: (payload: { photos: File[]; videos: File[] }) => Promise<void>;
+  onSubmit: (payload: {
+    photos: File[];
+    videos: File[];
+    solved_question_count?: number | null;
+    spent_minutes?: number | null;
+  }) => Promise<void>;
 };
 
 function readVideoDuration(file: File): Promise<number> {
@@ -53,6 +58,9 @@ export default function EduSubmitHomeworkModal({
 }: Props) {
   const [photos, setPhotos] = useState<File[]>([]);
   const [videos, setVideos] = useState<File[]>([]);
+  // Ödev modülü: öğrencinin bildirdiği çözülen soru ve harcanan süre
+  const [solvedCount, setSolvedCount] = useState('');
+  const [spentMinutes, setSpentMinutes] = useState('');
   const [photoPreviews, setPhotoPreviews] = useState<string[]>([]);
   const [videoPreviews, setVideoPreviews] = useState<string[]>([]);
   const [mediaError, setMediaError] = useState<string | null>(null);
@@ -159,10 +167,61 @@ export default function EduSubmitHomeworkModal({
         </div>
 
         <div className="space-y-3 px-4 py-4">
+          {homework?.target_question_count || homework?.target_minutes ? (
+            <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-3">
+              <p className="text-xs font-semibold text-amber-900">Ne kadarını yaptın?</p>
+              <p className="mt-0.5 text-[11px] text-amber-800">
+                Hedef:
+                {homework?.target_question_count ? ` ${homework.target_question_count} soru` : ''}
+                {homework?.target_question_count && homework?.target_minutes ? ' ·' : ''}
+                {homework?.target_minutes ? ` ${homework.target_minutes} dakika` : ''}
+              </p>
+              <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                {homework?.target_question_count ? (
+                  <label className="block text-[11px] font-medium text-slate-600">
+                    Çözdüğün soru
+                    <input
+                      type="number"
+                      min={0}
+                      max={1000}
+                      inputMode="numeric"
+                      value={solvedCount}
+                      disabled={busy}
+                      onChange={(e) => setSolvedCount(e.target.value)}
+                      className="mt-1 w-full rounded-lg border border-amber-200 bg-white px-3 py-2 text-sm"
+                    />
+                  </label>
+                ) : null}
+                {homework?.target_minutes ? (
+                  <label className="block text-[11px] font-medium text-slate-600">
+                    Harcadığın süre (dk)
+                    <input
+                      type="number"
+                      min={0}
+                      max={600}
+                      inputMode="numeric"
+                      value={spentMinutes}
+                      disabled={busy}
+                      onChange={(e) => setSpentMinutes(e.target.value)}
+                      className="mt-1 w-full rounded-lg border border-amber-200 bg-white px-3 py-2 text-sm"
+                    />
+                  </label>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+
           <button
             type="button"
             disabled={busy}
-            onClick={() => void onSubmit({ photos, videos })}
+            onClick={() =>
+              void onSubmit({
+                photos,
+                videos,
+                solved_question_count: solvedCount ? Number(solvedCount) || null : null,
+                spent_minutes: spentMinutes ? Number(spentMinutes) || null : null
+              })
+            }
             className="flex w-full items-center justify-center gap-2 rounded-xl bg-amber-600 py-2.5 text-sm font-semibold text-white hover:bg-amber-700 disabled:opacity-50"
           >
             {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}

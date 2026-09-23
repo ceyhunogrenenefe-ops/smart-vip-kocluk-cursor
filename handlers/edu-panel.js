@@ -15,6 +15,50 @@ import {
   createEduSignedUploadUrl
 } from '../api/_lib/edu-panel-storage.js';
 import { classIdsForStudent } from '../api/_lib/student-teacher-scope.js';
+import { assertHomeworkModule, isHomeworkModuleEnabled } from '../api/_lib/homework-module.js';
+import {
+  markHomeworkPlanCompleted,
+  removeHomeworkPlanEntries,
+  syncHomeworkToWeeklyPlan
+} from '../api/_lib/homework-weekly-plan.js';
+
+/**
+ * Ödevi haftalık plana yansıtır. Yalnız ödev modülü açık kurumlarda çalışır;
+ * kapalıysa hiçbir şey yapmaz, böylece mevcut ödev akışı aynen sürer.
+ */
+async function syncHomeworkPlanIfEnabled({ hw, lessonRow, actor, tags }) {
+  try {
+    const institutionId = hw?.institution_id || lessonRow?.institution_id || '';
+    if (!(await isHomeworkModuleEnabled(institutionId))) return null;
+    let classStudents = [];
+    if (String(hw?.assignee_mode || 'class') !== 'students' && lessonRow) {
+      const picked = await studentsForLessonRow(lessonRow, { actor, tags });
+      classStudents = picked?.students || [];
+    }
+    return await syncHomeworkToWeeklyPlan({ hw, lessonRow, classStudents });
+  } catch (e) {
+    console.warn('[edu-panel] ödev planı:', errorMessage(e));
+    return null;
+  }
+}
+
+/** Hedef alanları: boş / geçersiz ise null, aksi halde makul aralığa kırpılır. */
+function normalizeHomeworkTarget(value, max) {
+  if (value === undefined || value === null || value === '') return null;
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return Math.min(Math.round(n), max);
+}
+
+function normalizeHomeworkText(value, max) {
+  const s = String(value ?? '').trim();
+  return s ? s.slice(0, max) : null;
+}
+
+/** Paylaşım bağlantısı anahtarı — tahmin edilemeyecek kadar uzun. */
+function newHomeworkShareToken() {
+  return randomUUID().replace(/-/g, '') + Math.random().toString(36).slice(2, 8);
+}
 import { getIstanbulDateString } from '../api/_lib/istanbul-time.js';
 
 function parseBody(req) {
@@ -2446,6 +2490,15 @@ export default async function handler(req, res) {
           due_date: body.due_date ? String(body.due_date).slice(0, 10) : null,
           status: body.status === 'published' ? 'published' : 'draft'
         };
+        // Ödev modülü alanları (kurum, ders, konu, hedefler, kaynak)
+        insertHw.institution_id = row.institution_id ? String(row.institution_id) : null;
+        insertHw.subject_name = normalizeHomeworkText(body.subject_name || row.subject_name, 120);
+        insertHw.topic_key = normalizeHomeworkText(body.topic_key, 200);
+        insertHw.topic_label = normalizeHomeworkText(body.topic_label, 300);
+        insertHw.target_question_count = normalizeHomeworkTarget(body.target_question_count, 1000);
+        insertHw.target_minutes = normalizeHomeworkTarget(body.target_minutes, 600);
+        insertHw.resource_url = normalizeHomeworkText(body.resource_url, 1000);
+        insertHw.created_by = String(actor.sub || '') || null;
         if (poolAnimationIds[0]) insertHw.pool_animation_id = poolAnimationIds[0];
         insertHw.pool_animation_ids = poolAnimationIds;
         insertHw.assignee_mode = assigneeMode;
@@ -2459,7 +2512,15 @@ export default async function handler(req, res) {
             'assignee_student_ids',
             'pool_animation_id',
             'attachment_pdf_path',
-            'attachment_pdf_name'
+            'attachment_pdf_name',
+            'institution_id',
+            'subject_name',
+            'topic_key',
+            'topic_label',
+            'target_question_count',
+            'target_minutes',
+            'resource_url',
+            'created_by'
           ];
           let retried = false;
           for (const col of dropOptional) {
@@ -2514,6 +2575,7 @@ export default async function handler(req, res) {
 
         const enriched = await enrichHomeworkAttachmentUrls(hwResult.data);
         let notify = { notified: 0, skipped: 0 };
+        let plan = null;
         if (String(enriched?.status || '') === 'published') {
           const lessonForNotify = await loadRow(enriched.lesson_row_id);
           if (lessonForNotify) {
@@ -2523,9 +2585,15 @@ export default async function handler(req, res) {
               senderUserId: actor.sub,
               senderName: actor.name || actor.email || 'Öğretmen'
             });
+            plan = await syncHomeworkPlanIfEnabled({
+              hw: enriched,
+              lessonRow: lessonForNotify,
+              actor,
+              tags
+            });
           }
         }
-        return res.status(201).json({ data: enriched, notify });
+        return res.status(201).json({ data: enriched, notify, plan });
       }
       if (req.method === 'PATCH') {
         const hwId = rowId || String(req.query?.homework_id || '').trim();
@@ -2542,6 +2610,16 @@ export default async function handler(req, res) {
         for (const k of ['title', 'book_name', 'question_range', 'description', 'due_date', 'status']) {
           if (body[k] !== undefined) patch[k] = body[k];
         }
+        if (body.subject_name !== undefined) patch.subject_name = normalizeHomeworkText(body.subject_name, 120);
+        if (body.topic_key !== undefined) patch.topic_key = normalizeHomeworkText(body.topic_key, 200);
+        if (body.topic_label !== undefined) patch.topic_label = normalizeHomeworkText(body.topic_label, 300);
+        if (body.target_question_count !== undefined) {
+          patch.target_question_count = normalizeHomeworkTarget(body.target_question_count, 1000);
+        }
+        if (body.target_minutes !== undefined) {
+          patch.target_minutes = normalizeHomeworkTarget(body.target_minutes, 600);
+        }
+        if (body.resource_url !== undefined) patch.resource_url = normalizeHomeworkText(body.resource_url, 1000);
         if (body.assignee_mode !== undefined) {
           patch.assignee_mode = body.assignee_mode === 'students' ? 'students' : 'class';
         }
@@ -2609,7 +2687,9 @@ export default async function handler(req, res) {
             senderName: actor.name || actor.email || 'Öğretmen'
           });
         }
-        return res.status(200).json({ data: enriched, notify });
+        // Yayımdan çıkarılan ödevin plan satırları da temizlenir
+        const plan = await syncHomeworkPlanIfEnabled({ hw: enriched, lessonRow: hwRow, actor, tags });
+        return res.status(200).json({ data: enriched, notify, plan });
       }
       if (req.method === 'DELETE') {
         const hwId = rowId;
@@ -2621,6 +2701,7 @@ export default async function handler(req, res) {
           return res.status(403).json({ error: 'forbidden' });
         }
         await removeHomeworkPdfAttachment(hw);
+        await removeHomeworkPlanEntries(hwId);
         await supabaseAdmin.from('edu_homework').delete().eq('id', hwId);
         return res.status(200).json({ ok: true });
       }
@@ -2927,13 +3008,47 @@ export default async function handler(req, res) {
         submitted_at: new Date().toISOString(),
         status: 'submitted'
       };
+      // Ödev modülü: "tamamladım" damgası, çözülen soru ve harcanan süre
+      const solvedCount = normalizeHomeworkTarget(body.solved_question_count, 1000);
+      const spentMinutes = normalizeHomeworkTarget(body.spent_minutes, 600);
+      upsertRow.solved_question_count = solvedCount;
+      upsertRow.spent_minutes = spentMinutes;
+      upsertRow.self_reported_at = new Date().toISOString();
 
-      const { data, error } = await supabaseAdmin
+      let submitResult = await supabaseAdmin
         .from('edu_homework_submissions')
         .upsert(upsertRow, { onConflict: 'homework_id,student_user_id' })
         .select()
         .single();
-      if (error) throw error;
+      if (submitResult.error) {
+        // Sütunlar henüz yoksa eski davranışla kaydet
+        let retried = false;
+        for (const col of ['solved_question_count', 'spent_minutes', 'self_reported_at']) {
+          if (isOptionalEduColumnMissing(submitResult.error, col) && upsertRow[col] !== undefined) {
+            delete upsertRow[col];
+            retried = true;
+          }
+        }
+        if (retried) {
+          submitResult = await supabaseAdmin
+            .from('edu_homework_submissions')
+            .upsert(upsertRow, { onConflict: 'homework_id,student_user_id' })
+            .select()
+            .single();
+        }
+      }
+      if (submitResult.error) throw submitResult.error;
+      const data = submitResult.data;
+
+      // Haftalık plandaki ödev satırı da tamamlandıya döner
+      if (student?.id) {
+        await markHomeworkPlanCompleted({
+          homeworkId,
+          studentId: student.id,
+          solvedQuestionCount: solvedCount
+        });
+      }
+
       const enriched = await enrichSubmissionWithMediaUrls(data);
       return res.status(201).json({ data: enriched });
     }
@@ -3105,6 +3220,114 @@ export default async function handler(req, res) {
         .maybeSingle();
       const enriched = data ? await enrichSubmissionWithMediaUrls(data) : null;
       return res.status(200).json({ data: enriched });
+    }
+
+    // Paylaşım bağlantısı: öğretmen ödeve tahmin edilemez bir anahtar basar.
+    if (resource === 'homework-share' && req.method === 'POST') {
+      if (!canTeach(tags)) return res.status(403).json({ error: 'forbidden' });
+      const body = parseBody(req);
+      const hwId = String(body.homework_id || req.query?.homework_id || '').trim();
+      if (!hwId) return res.status(400).json({ error: 'homework_id_required' });
+      const { data: hw } = await supabaseAdmin.from('edu_homework').select('*').eq('id', hwId).maybeSingle();
+      if (!hw) return res.status(404).json({ error: 'not_found' });
+      const shareRow = await loadRow(hw.lesson_row_id);
+      if (
+        String(shareRow?.teacher_user_id) !== String(actor.sub) &&
+        !tags.includes('admin') &&
+        !tags.includes('super_admin')
+      ) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+      const institutionId = hw.institution_id || shareRow?.institution_id || '';
+      if (!(await assertHomeworkModule(res, institutionId))) return undefined;
+
+      const token = body.rotate || !hw.share_token ? newHomeworkShareToken() : String(hw.share_token);
+      const base = hw.due_date ? new Date(`${String(hw.due_date).slice(0, 10)}T00:00:00Z`) : new Date();
+      const expires = new Date(base.getTime() + (hw.due_date ? 7 : 30) * 24 * 60 * 60 * 1000);
+      const { data: updated, error } = await supabaseAdmin
+        .from('edu_homework')
+        .update({ share_token: token, share_expires_at: expires.toISOString() })
+        .eq('id', hwId)
+        .select('id, share_token, share_expires_at')
+        .single();
+      if (error) throw error;
+      return res.status(200).json({
+        data: {
+          homework_id: updated.id,
+          share_token: updated.share_token,
+          share_expires_at: updated.share_expires_at,
+          path: `/odev/${updated.share_token}`
+        }
+      });
+    }
+
+    // Ödev modalını besler: ders satırının sınıfı, dersi ve öğrencileri.
+    // Ders / konu listesi istemcideki konu havuzundan çözülür (havuz orada tutuluyor).
+    if (resource === 'homework-form-context' && req.method === 'GET') {
+      if (!canTeach(tags)) return res.status(403).json({ error: 'forbidden' });
+      const lessonRowId = String(req.query?.lesson_row_id || '').trim();
+      if (!lessonRowId) return res.status(400).json({ error: 'lesson_row_id_required' });
+      const row = await loadRow(lessonRowId);
+      if (!row) return res.status(404).json({ error: 'not_found' });
+      if (
+        String(row.teacher_user_id) !== String(actor.sub) &&
+        !tags.includes('admin') &&
+        !tags.includes('super_admin')
+      ) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+      const institutionId = row.institution_id ? String(row.institution_id) : '';
+      if (!(await assertHomeworkModule(res, institutionId))) return undefined;
+
+      const { students } = await studentsForLessonRow(row, { actor, tags });
+      const studentIds = [...new Set((students || []).map((st) => String(st.id)).filter(Boolean))];
+      const levelByStudent = new Map();
+      if (studentIds.length) {
+        const { data: rows } = await supabaseAdmin
+          .from('students')
+          .select('id, class_level')
+          .in('id', studentIds);
+        for (const st of rows || []) levelByStudent.set(String(st.id), st.class_level || null);
+      }
+
+      let classRow = null;
+      if (row.class_id) {
+        const { data } = await supabaseAdmin
+          .from('classes')
+          .select('id, name, class_level')
+          .eq('id', row.class_id)
+          .maybeSingle();
+        classRow = data || null;
+      }
+      // Sınıfın düzeyi yoksa öğrencilerin en sık görülen düzeyini kullan
+      let classLevel = classRow?.class_level || null;
+      if (!classLevel && levelByStudent.size) {
+        const tally = new Map();
+        for (const lv of levelByStudent.values()) {
+          if (!lv) continue;
+          tally.set(lv, (tally.get(lv) || 0) + 1);
+        }
+        classLevel = [...tally.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || null;
+      }
+
+      return res.status(200).json({
+        data: {
+          lesson_row_id: lessonRowId,
+          institution_id: institutionId || null,
+          subject_name: row.subject_name || null,
+          lesson_date: row.lesson_date || null,
+          lesson_title: row.title || null,
+          class: classRow ? { id: classRow.id, name: classRow.name, class_level: classRow.class_level } : null,
+          class_level: classLevel,
+          students: (students || []).map((st) => ({
+            id: st.id,
+            name: st.name || 'Öğrenci',
+            user_id: studentUserIdFromStudent(st) || null,
+            class_id: st.class_id || null,
+            class_level: levelByStudent.get(String(st.id)) || null
+          }))
+        }
+      });
     }
 
     if (resource === 'teacher-students' && req.method === 'GET') {

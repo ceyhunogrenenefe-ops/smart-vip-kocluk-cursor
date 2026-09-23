@@ -37,6 +37,9 @@ import {
   formatEduHomeworkLabel,
   type EduHomeworkDraft
 } from '../../lib/eduPanel/eduHomeworkForm';
+import HomeworkTargets from '../../features/homework/HomeworkTargets';
+import HomeworkShareBar from '../../features/homework/HomeworkShareBar';
+import { useHomeworkModule } from '../../features/homework/useHomeworkModule';
 import EduHomeworkAssigneePicker from './EduHomeworkAssigneePicker';
 import EduHomeworkStatusBar from './EduHomeworkStatusBar';
 import EduHomeworkPdfLink from './EduHomeworkPdfLink';
@@ -89,6 +92,8 @@ export default function TeacherEduTopicCard({
   const dateRange = formatEduDateRange(row.available_from, row.available_until, row.lesson_date);
   const [editOpen, setEditOpen] = useState(false);
   const [reviewHw, setReviewHw] = useState<EduHomework | null>(null);
+  // Ödev modülü yalnız platform dışı kurumlarda açıktır
+  const { enabled: homeworkModuleEnabled } = useHomeworkModule();
   const [animUploadMode, setAnimUploadMode] = useState<'file' | 'code' | 'link'>('file');
   const [animHtmlCode, setAnimHtmlCode] = useState('');
   const [animLinkUrl, setAnimLinkUrl] = useState('');
@@ -457,6 +462,16 @@ export default function TeacherEduTopicCard({
                             Teslimleri incele
                           </button>
                         ) : null}
+                        {homeworkModuleEnabled && h.status === 'published' ? (
+                          <div className="mt-2">
+                            <HomeworkShareBar
+                              homeworkId={h.id}
+                              homeworkTitle={h.title}
+                              dueDate={h.due_date}
+                              existingToken={h.share_token}
+                            />
+                          </div>
+                        ) : null}
                       </div>
                     ))
                   )}
@@ -528,6 +543,16 @@ export default function TeacherEduTopicCard({
                       }
                     />
                   </label>
+                  {homeworkModuleEnabled ? (
+                    <HomeworkTargets
+                      value={{
+                        target_question_count: hwDraft.target_question_count,
+                        target_minutes: hwDraft.target_minutes,
+                        resource_url: hwDraft.resource_url
+                      }}
+                      onChange={(patch) => onHwDraftChange({ ...hwDraft, ...patch })}
+                    />
+                  ) : null}
                   <div className="space-y-1.5">
                     <p className="text-xs font-medium text-amber-900">PDF eki (isteğe bağlı)</p>
                     {hwDraft.pdf_file ? (

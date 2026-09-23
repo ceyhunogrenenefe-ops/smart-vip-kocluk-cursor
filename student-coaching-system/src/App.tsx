@@ -90,6 +90,7 @@ import NotificationsPage from './pages/NotificationsPage';
 import EventsPage from './pages/EventsPage';
 import MeetingTrackerPage from './pages/MeetingTrackerPage';
 import CrmLayout from './pages/crm/CrmLayout';
+import HomeworkSharePage from './pages/HomeworkSharePage';
 import CrmInboxPage from './pages/crm/CrmInboxPage';
 import CrmAgentsPage from './pages/crm/CrmAgentsPage';
 import CrmWidgetsPage from './pages/crm/CrmWidgetsPage';
@@ -181,6 +182,8 @@ function App() {
               <Route path="/register" element={<Register />} />
               <Route path="/forgot-password" element={<ForgotPassword />} />
               <Route path="/reset-password" element={<ResetPassword />} />
+              {/* Ödev paylaşım bağlantısı — oturum gerektirmez, kişisel veri içermez */}
+              <Route path="/odev/:token" element={<HomeworkSharePage />} />
               <Route path="/d/:code" element={<BbbGuestJoinPage />} />
               <Route path="/misafir-katil/:slug" element={<BbbGuestJoinPage />} />
               <Route path="/misafir-katil" element={<BbbGuestJoinPage />} />

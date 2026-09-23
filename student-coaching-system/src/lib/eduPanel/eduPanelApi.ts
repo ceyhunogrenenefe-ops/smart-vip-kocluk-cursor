@@ -415,6 +415,13 @@ export async function createEduHomework(
     assignee_mode?: 'class' | 'students';
     assignee_student_ids?: string[];
     pdf_file?: File | null;
+    /** Ödev modülü (platform dışı kurumlar): ders, konu, hedefler, kaynak */
+    subject_name?: string;
+    topic_key?: string;
+    topic_label?: string;
+    target_question_count?: number | null;
+    target_minutes?: number | null;
+    resource_url?: string;
   }
 ): Promise<{ homework: EduHomework; notified: number }> {
   const { pdf_file, ...rest } = payload;
@@ -634,7 +641,14 @@ function friendlyStorageUploadError(status: number, body: string): string {
 
 export async function submitEduHomework(
   homeworkId: string,
-  payload?: { photos?: File[]; videos?: File[]; video?: File | null }
+  payload?: {
+    photos?: File[];
+    videos?: File[];
+    video?: File | null;
+    /** Ödev modülü: öğrencinin bildirdiği çözülen soru ve harcanan süre */
+    solved_question_count?: number | null;
+    spent_minutes?: number | null;
+  }
 ): Promise<EduHomeworkSubmission> {
   const photos = (payload?.photos || []).filter((f) => f && isEduImageFile(f)).slice(0, 5);
   const videosFromList = (payload?.videos || []).filter((f) => f && isEduVideoFile(f));
@@ -663,6 +677,8 @@ export async function submitEduHomework(
   }
 
   const body: Record<string, unknown> = { homework_id: homeworkId };
+  if (payload?.solved_question_count != null) body.solved_question_count = payload.solved_question_count;
+  if (payload?.spent_minutes != null) body.spent_minutes = payload.spent_minutes;
   if (photoPaths.length) body.photo_paths = photoPaths;
   if (videoPaths.length) {
     body.video_paths = videoPaths;

@@ -83,6 +83,7 @@ export const routeLoaders = {
   'academic-center-links': () => import('../handlers/academic-center-links.js'),
   'exam-calendar': () => import('../handlers/exam-calendar.js'),
   'institution-features': () => import('../handlers/institution-features.js'),
+  'homework-share': () => import('../handlers/homework-share.js'),
   'academic-center-bbb-join': () => import('../handlers/academic-center-bbb-join.js'),
   'parent-sign-contracts': () => import('../handlers/parent-sign-contracts.js'),
   'parent-sign-class-presets': () => import('../handlers/parent-sign-class-presets.js'),
