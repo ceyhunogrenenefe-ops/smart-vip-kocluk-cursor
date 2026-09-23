@@ -3,6 +3,7 @@ import { ChevronRight, ShoppingBag, ShoppingCart } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { userRoleTags } from '../../config/rolePermissions';
 import { useMobileAppShell } from '../../hooks/useMobileAppShell';
+import { isIosApp } from '../../lib/nativeApp';
 
 /**
  * Mobil (native uygulama + dar ekran) öğrenci için Kitap Mağazası girişi.
@@ -14,7 +15,8 @@ export default function MobileStoreEntryCard({ className = '' }: { className?: s
   const mobileAppShell = useMobileAppShell();
   const tags = userRoleTags(effectiveUser);
   const canShop = tags.some((t) => ['student', 'teacher', 'coach', 'admin', 'super_admin'].includes(t));
-  if (!mobileAppShell || !canShop) return null;
+  // iOS uygulamasında mağaza girişi gösterilmez (App Store kuralı)
+  if (!mobileAppShell || !canShop || isIosApp()) return null;
 
   return (
     <div

@@ -3,6 +3,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { userRoleTags } from '../../config/rolePermissions';
+import { isIosApp } from '../../lib/nativeApp';
 import { useApp } from '../../context/AppContext';
 import { cn } from '../../lib/utils';
 import { Menu, User, ChevronDown, LogOut, Undo2, ShoppingBag } from 'lucide-react';
@@ -186,6 +187,7 @@ export default function TopBar({ onMenuClick, drawerOpen = false, hideMenuButton
 
         {/* Mobilde yan menü gizli: Kitap Mağazası'na her sayfadan erişim */}
         {mobileAppShell &&
+        !isIosApp() &&
         user &&
         userRoleTags(effectiveUser).some((t) => ['student', 'teacher', 'coach', 'admin', 'super_admin'].includes(t)) ? (
           <Link

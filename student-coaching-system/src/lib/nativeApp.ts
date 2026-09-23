@@ -9,6 +9,14 @@ export function nativePlatform(): 'ios' | 'android' | 'web' {
   return Capacitor.getPlatform() as 'ios' | 'android' | 'web';
 }
 
+/**
+ * iOS uygulaması mı? App Store kuralları gereği iOS kabuğunda uygulama dışı
+ * satın alma / mağaza girişleri gösterilmez (Android ve web etkilenmez).
+ */
+export function isIosApp(): boolean {
+  return isNativeApp() && nativePlatform() === 'ios';
+}
+
 /** Mobil build — API aynı origin değil; production backend gerekir */
 export function isMobileApiBuild(): boolean {
   return Boolean(String(import.meta.env.VITE_API_BASE_URL || '').trim());
