@@ -17,7 +17,7 @@ workflows:
         BUNDLE_ID: com.dersonlinevipkocluk.student
         XCODE_WORKSPACE: student-coaching-system/ios/App/App.xcworkspace
         XCODE_SCHEME: App
-      node: 20
+      node: 22
       xcode: latest
       cocoapods: default
     scripts:
