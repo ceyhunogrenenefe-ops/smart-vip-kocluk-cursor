@@ -121,6 +121,7 @@ export const routeLoaders = {
   'ozel-ders-talepleri': () => import('../handlers/ozel-ders-talepleri.js'),
   'site-leads': () => import('../handlers/site-leads.js'),
   'account-deletion': () => import('../handlers/account-deletion.js'),
+  'gateway-session-status': () => import('../handlers/gateway-session-status.js'),
   'teacher-profile': () => import('../handlers/teacher-profile.js'),
   'teacher-profiles-admin': () => import('../handlers/teacher-profiles-admin.js'),
   'teacher-profile-media': () => import('../handlers/teacher-profile-media.js'),
