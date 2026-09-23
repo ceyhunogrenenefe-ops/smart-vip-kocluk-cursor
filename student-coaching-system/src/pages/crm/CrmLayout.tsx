@@ -5,6 +5,8 @@ import CrmAlarmHost from './CrmAlarmHost';
 import CrmLiveOpsHost from './CrmLiveOpsHost';
 import CrmNotificationBell from './CrmNotificationBell';
 import { ensureCrmManifest } from '../../lib/crmPush';
+import { setCrmInstitutionScope } from '../../lib/crmInboxApi';
+import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
 import { userRoleTags } from '../../config/rolePermissions';
 
@@ -15,7 +17,12 @@ export default function CrmLayout() {
     ensureCrmManifest();
   }, []);
   const { effectiveUser, logout } = useAuth();
+  const { institution } = useApp();
   const navigate = useNavigate();
+  // CRM istekleri açık olan kurumla sınırlansın (platformda eski davranış sürer)
+  useEffect(() => {
+    setCrmInstitutionScope(institution?.id);
+  }, [institution?.id]);
   const tags = userRoleTags(effectiveUser);
   const isAdmin = tags.includes('super_admin') || tags.includes('admin');
   const canSeePipeline = isAdmin || tags.includes('crm_agent');
@@ -32,7 +39,7 @@ export default function CrmLayout() {
           <div className="flex flex-wrap items-center gap-4 sm:gap-6">
             <div>
               <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-emerald-700">
-                Online VIP Dershane
+                {institution?.name || 'CRM'}
               </p>
               <h1 className="font-serif text-xl font-semibold tracking-tight text-slate-900">CRM</h1>
             </div>

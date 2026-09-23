@@ -7,6 +7,7 @@ import {
   crmVerifyMetaConnection,
   type CrmMetaConnection
 } from '../../lib/crmInboxApi';
+import { useApp } from '../../context/AppContext';
 
 const input =
   'w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:border-emerald-600 focus:outline-none';
@@ -16,6 +17,7 @@ const input =
  * Platform kurumunda gösterilmez — orada genel ayarlar geçerlidir.
  */
 export default function CrmInstitutionMetaCard() {
+  const { institution } = useApp();
   const [data, setData] = useState<CrmMetaConnection | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [form, setForm] = useState({
@@ -46,8 +48,10 @@ export default function CrmInstitutionMetaCard() {
   };
 
   useEffect(() => {
+    setData(null);
     void load();
-  }, []);
+    // Kurum değişince (süper admin panel değiştirince) yeniden oku
+  }, [institution?.id]);
 
   if (!data || data.is_platform) return null;
 
@@ -94,8 +98,13 @@ export default function CrmInstitutionMetaCard() {
   };
 
   return (
-    <section className="rounded-2xl border-2 border-emerald-200 bg-gradient-to-r from-emerald-50 via-white to-teal-50 p-4 shadow-sm sm:p-5">
-      <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Kurumunuzun hesabı</p>
+    <section
+      id="kurum-meta-baglantisi"
+      className="rounded-2xl border-2 border-emerald-200 bg-gradient-to-r from-emerald-50 via-white to-teal-50 p-4 shadow-sm sm:p-5"
+    >
+      <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">
+        {institution?.name || 'Kurumunuzun hesabı'}
+      </p>
       <h3 className="mt-1 flex items-center gap-2 text-lg font-semibold text-slate-900">
         <Plug className="h-5 w-5 text-emerald-700" />
         WhatsApp ve Instagram bağlantısı
