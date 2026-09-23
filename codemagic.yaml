@@ -1,8 +1,8 @@
 # iOS paketini Mac olmadan üretir: Codemagic macOS makinesinde derleyip TestFlight'a yükler.
 # Gerekli ortam değişkenleri (Codemagic > Environment variables):
-#   grup "mobil_env": VITE_API_BASE_URL, VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY, CERTIFICATE_PRIVATE_KEY
-#                    APP_STORE_CONNECT_PRIVATE_KEY, CERTIFICATE_PRIVATE_KEY
-#   grup "mobil_env": VITE_API_BASE_URL, VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY
+#   grup "mobil_env": VITE_API_BASE_URL, VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY,
+#                     CERTIFICATE_PRIVATE_KEY (iOS dağıtım sertifikasının özel anahtarı)
+#   Apple bağlantısı: Settings > Integrations > App Store Connect ("OnlineVIP ASC")
 workflows:
   ios-testflight:
     name: iOS — TestFlight
