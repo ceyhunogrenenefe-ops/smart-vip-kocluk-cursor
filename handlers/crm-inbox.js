@@ -214,6 +214,39 @@ export default async function handler(req, res) {
     }
 
     if (op === 'inbound_status') {
+      const { isPlatformInstitutionId, describeMetaConnection } = await import(
+        '../api/_lib/crm-meta-connection.js'
+      );
+      // Platform dışı kurum: yalnız KENDİ bağlantısını görür, platformun hattı sızmaz
+      if (!isPlatformInstitutionId(institutionId)) {
+        const conn = await describeMetaConnection(institutionId);
+        return res.status(200).json({
+          data: {
+            ok: Boolean(conn.whatsapp.connected),
+            bound_to_production: Boolean(conn.whatsapp.connected),
+            institution_scoped: true,
+            company_line: conn.whatsapp.display_phone || '',
+            company_digits: String(conn.whatsapp.display_phone || '').replace(/\D/g, ''),
+            display_phone: conn.whatsapp.display_phone,
+            verified_name: null,
+            hint: conn.whatsapp.connected
+              ? null
+              : 'Kurumun WhatsApp hattı bağlı değil — CRM → Widgetler ekranından bağlayın.',
+            social: {
+              ok: Boolean(conn.instagram.connected),
+              token_present: Boolean(conn.instagram.token_masked),
+              page_name: conn.instagram.username || null,
+              hint: conn.instagram.connected
+                ? null
+                : 'Kurumun Instagram hesabı bağlı değil — CRM → Widgetler ekranından bağlayın.'
+            },
+            website_form: { ok: true, endpoint: '/api/site-leads' },
+            real_inbound: null,
+            real_inbound_seen: false,
+            last_webhook_at: null
+          }
+        });
+      }
       const [diag, inbound, social] = await Promise.all([
         diagnoseCrmInbox().catch(() => null),
         ensureMetaInboundDelivery({ apply: false }).catch(() => null),
@@ -235,6 +268,15 @@ export default async function handler(req, res) {
     if (op === 'meta_diagnostics') {
       if (!isAdmin) {
         return res.status(403).json({ error: 'forbidden', hint: 'Meta tanılama yalnızca yönetici.' });
+      }
+      {
+        const { isPlatformInstitutionId } = await import('../api/_lib/crm-meta-connection.js');
+        if (!isPlatformInstitutionId(institutionId)) {
+          return res.status(400).json({
+            error: 'platform_only',
+            hint: 'Meta tanılama platform hesabına aittir; kurum bağlantısını Widgetler ekranından doğrulayın.'
+          });
+        }
       }
       const [diag, social, recentLogs, fbChannel] = await Promise.all([
         diagnoseCrmInbox().catch((e) => ({ error: e instanceof Error ? e.message : String(e) })),

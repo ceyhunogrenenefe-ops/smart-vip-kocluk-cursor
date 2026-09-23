@@ -1,4 +1,30 @@
 import { apiFetch } from './session';
+import {
+  PLATFORM_PRIMARY_INSTITUTION_ID,
+  readActiveInstitutionIdForRole,
+  readActiveInstitutionIdFromStorage
+} from './activeInstitutionScope';
+
+/**
+ * Açık olan kurum. Platform kurumunda boş bırakılır (süper admin tüm CRM'i görsün),
+ * diğer kurumlarda her CRM isteğine eklenir; böylece bir kurumun paneline geçildiğinde
+ * başka kurumun konuşmaları / Meta hesabı görünmez.
+ */
+let explicitCrmInstitutionId: string | null | undefined;
+
+export function setCrmInstitutionScope(institutionId?: string | null) {
+  explicitCrmInstitutionId = String(institutionId || '').trim() || null;
+}
+
+/** Bileşen henüz kurumu bildirmediyse depodaki açık kurumu kullan. */
+export function crmInstitutionScope(): string | null {
+  const raw =
+    explicitCrmInstitutionId !== undefined
+      ? explicitCrmInstitutionId
+      : readActiveInstitutionIdForRole('super_admin') || readActiveInstitutionIdFromStorage();
+  const v = String(raw || '').trim();
+  return v && v !== PLATFORM_PRIMARY_INSTITUTION_ID ? v : null;
+}
 
 export type CrmChannel = 'whatsapp' | 'instagram' | 'facebook';
 export type CrmStatus = 'open' | 'pending' | 'closed';
@@ -47,6 +73,8 @@ async function inboxGet<T>(op: string, params: Record<string, string | undefined
   for (const [k, v] of Object.entries(params)) {
     if (v) sp.set(k, v);
   }
+  const scopeId = crmInstitutionScope();
+  if (scopeId && !sp.get('institution_id')) sp.set('institution_id', scopeId);
   const res = await apiFetch(`/api/crm-inbox?${sp}`);
   const json = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(json?.message || json?.error || `crm_${op}_failed`);
@@ -54,10 +82,12 @@ async function inboxGet<T>(op: string, params: Record<string, string | undefined
 }
 
 async function inboxPost<T>(op: string, body: Record<string, unknown> = {}) {
+  const scopeId = crmInstitutionScope();
+  const scoped = scopeId && !body.institution_id ? { institution_id: scopeId, ...body } : body;
   const res = await apiFetch(`/api/crm-inbox?op=${encodeURIComponent(op)}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ op, ...body })
+    body: JSON.stringify({ op, ...scoped })
   });
   const json = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(json?.message || json?.error || `crm_${op}_failed`);
@@ -69,6 +99,8 @@ async function adminGet<T>(op: string, params: Record<string, string | undefined
   for (const [k, v] of Object.entries(params)) {
     if (v) sp.set(k, v);
   }
+  const scopeId = crmInstitutionScope();
+  if (scopeId && !sp.get('institution_id')) sp.set('institution_id', scopeId);
   const res = await apiFetch(`/api/crm-admin?${sp}`);
   const json = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(json?.message || json?.error || `crm_admin_${op}_failed`);
@@ -76,10 +108,13 @@ async function adminGet<T>(op: string, params: Record<string, string | undefined
 }
 
 async function adminPost<T>(op: string, body: Record<string, unknown> = {}) {
+  const adminScopeId = crmInstitutionScope();
+  const scopedBody =
+    adminScopeId && !body.institution_id ? { institution_id: adminScopeId, ...body } : body;
   const res = await apiFetch(`/api/crm-admin?op=${encodeURIComponent(op)}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ op, ...body })
+    body: JSON.stringify({ op, ...scopedBody })
   });
   const json = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(json?.message || json?.error || `crm_admin_${op}_failed`);
@@ -326,10 +361,16 @@ export function fillCannedVars(body: string, vars: Record<string, string | null 
 
 const INBOUND_CACHE_KEY = 'crm_inbound_status_v1';
 
+/** Önbellek kurum başına: kurum değişince önceki kurumun durumu görünmesin */
+function inboundCacheKey() {
+  const scopeId = crmInstitutionScope();
+  return scopeId ? `${INBOUND_CACHE_KEY}:${scopeId}` : INBOUND_CACHE_KEY;
+}
+
 /** Son bilinen bağlantı durumu: Meta’dan cevap gelene kadar “kopmuş” görünmesin */
 export function readCachedInboundStatus(): CrmInboundStatus | null {
   try {
-    const raw = localStorage.getItem(INBOUND_CACHE_KEY);
+    const raw = localStorage.getItem(inboundCacheKey());
     return raw ? (JSON.parse(raw) as CrmInboundStatus) : null;
   } catch {
     return null;
@@ -339,7 +380,7 @@ export function readCachedInboundStatus(): CrmInboundStatus | null {
 function writeCachedInboundStatus(value: CrmInboundStatus | null | undefined) {
   if (!value) return;
   try {
-    localStorage.setItem(INBOUND_CACHE_KEY, JSON.stringify(value));
+    localStorage.setItem(inboundCacheKey(), JSON.stringify(value));
   } catch {
     /* depolama kapalı olabilir */
   }

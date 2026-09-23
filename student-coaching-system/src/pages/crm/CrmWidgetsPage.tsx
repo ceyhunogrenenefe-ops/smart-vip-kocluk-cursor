@@ -3,6 +3,8 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { CheckCircle2, Loader2, Puzzle, Search } from 'lucide-react';
 import { toast } from 'sonner';
 import CrmInstitutionMetaCard from '../../components/crm/CrmInstitutionMetaCard';
+import { useApp } from '../../context/AppContext';
+import { PLATFORM_PRIMARY_INSTITUTION_ID } from '../../lib/activeInstitutionScope';
 import {
   readCachedInboundStatus,
   crmEnsureInbound,
@@ -36,6 +38,9 @@ function widgetInstalled(id: string, inbound: CrmInboundStatus | null): boolean 
 
 export default function CrmWidgetsPage() {
   const navigate = useNavigate();
+  const { institution } = useApp();
+  /** Platform kurumu genel Meta hesabını yönetir; diğer kurumlar yalnız kendi bağlantısını görür */
+  const isPlatform = !institution?.id || institution.id === PLATFORM_PRIMARY_INSTITUTION_ID;
   const [searchParams, setSearchParams] = useSearchParams();
   const [inbound, setInbound] = useState<CrmInboundStatus | null>(() => readCachedInboundStatus());
   const [login, setLogin] = useState<CrmFacebookLoginStart | null>(null);
@@ -207,6 +212,13 @@ export default function CrmWidgetsPage() {
   };
 
   const runAction = async (action: CrmWidgetAction) => {
+    const metaAction =
+      action === 'whatsapp_cloud' || action === 'facebook_login' || action === 'facebook_lead_ads';
+    if (metaAction && !isPlatform) {
+      document.getElementById('kurum-meta-baglantisi')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      toast.message('Kurumunuzun kendi WhatsApp / Instagram hesabını yukarıdaki karttan bağlayın.');
+      return;
+    }
     if (action === 'whatsapp_cloud') return refreshWhatsApp();
     if (action === 'facebook_login' || action === 'facebook_lead_ads') return connectSocial();
     if (action === 'whatsapp_gateway') {
@@ -280,6 +292,7 @@ export default function CrmWidgetsPage() {
       {/* Platform dışı kurumlar kendi Meta hesabını bağlar */}
       <CrmInstitutionMetaCard />
 
+      {isPlatform ? (
       <section
         id="instagram-facebook-bagla"
         className="rounded-2xl border-2 border-pink-200 bg-gradient-to-r from-purple-50 via-white to-blue-50 p-4 shadow-sm sm:p-5"
@@ -578,7 +591,9 @@ export default function CrmWidgetsPage() {
           </>
         )}
       </section>
+      ) : null}
 
+      {isPlatform ? (
       <section
         id="meta-tanilama"
         className="rounded-2xl border-2 border-slate-200 bg-white p-4 shadow-sm sm:p-5"
@@ -782,6 +797,7 @@ export default function CrmWidgetsPage() {
           <p className="mt-3 text-sm text-slate-500">Tanılamayı yenile ile Meta durumunu yükleyin.</p>
         )}
       </section>
+      ) : null}
 
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
@@ -873,6 +889,7 @@ export default function CrmWidgetsPage() {
         <p className="text-center text-sm text-slate-500">Bu filtrede widget yok.</p>
       ) : null}
 
+      {isPlatform ? (
       <section className="rounded-2xl border border-slate-200 bg-white p-5 text-sm text-slate-700 shadow-sm">
         <h3 className="font-semibold text-slate-900">Meta Dashboard (yalnızca ilk sefer)</h3>
         <p className="mt-1 text-xs text-slate-500">
@@ -904,6 +921,7 @@ export default function CrmWidgetsPage() {
           <p className="mt-3 text-xs text-emerald-700">Sayfa bağlı: {pageName || 'ok'}</p>
         ) : null}
       </section>
+      ) : null}
     </div>
   );
 }
