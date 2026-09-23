@@ -263,6 +263,44 @@ export default function CoachWhatsAppSettings() {
     hook.user ??
     null;
   const isAdminActor = actor?.role === 'super_admin' || actor?.role === 'admin';
+  /** Taklit modunda: görüntülenen hesabın kendi WhatsApp oturumu (sunucu üzerinden okunur) */
+  const viewedUserId = isImpersonating ? String(actor?.id || '') : '';
+  const [viewedGateway, setViewedGateway] = useState<{
+    connected: boolean;
+    status: string;
+    name?: string | null;
+    error?: string | null;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!viewedUserId) {
+      setViewedGateway(null);
+      return;
+    }
+    let iptal = false;
+    void (async () => {
+      try {
+        const res = await apiFetch(`/api/gateway-session-status?userId=${encodeURIComponent(viewedUserId)}`);
+        const j = await res.json().catch(() => ({}));
+        if (iptal) return;
+        if (!res.ok) {
+          setViewedGateway({ connected: false, status: 'error', error: j?.message || j?.error || 'okunamadı' });
+          return;
+        }
+        setViewedGateway({
+          connected: Boolean(j.connected),
+          status: String(j.status || 'unknown'),
+          name: j?.user?.name || null,
+          error: j?.error || null
+        });
+      } catch (e) {
+        if (!iptal) setViewedGateway({ connected: false, status: 'error', error: e instanceof Error ? e.message : 'hata' });
+      }
+    })();
+    return () => {
+      iptal = true;
+    };
+  }, [viewedUserId]);
   const { students } = useApp();
   const gatewayEnvRaw = String(import.meta.env.VITE_WHATSAPP_GATEWAY_URL || '').trim();
   const gatewayEnvInvalid = Boolean(gatewayEnvRaw && !isValidGatewayEnvUrl(gatewayEnvRaw));
@@ -1993,8 +2031,27 @@ export default function CoachWhatsAppSettings() {
             <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
               <p className="font-medium">Başka kullanıcı adına görünüyorsunuz</p>
               <p className="mt-2">
-                WhatsApp QR yalnızca <strong>giriş yaptığınız hesaba</strong> bağlanır. Taklit modunda gateway
-                istekleri reddedilebilir — QR için taklidi kapatın veya kendi hesabınızla giriş yapın.
+                Aşağıdaki QR ve bağlantı durumu <strong>sizin hesabınıza</strong> aittir; WhatsApp oturumu
+                hesap başına bağlanır.
+              </p>
+              <p className="mt-2">
+                {viewedGateway === null ? (
+                  'Görüntülenen hesabın WhatsApp durumu okunuyor…'
+                ) : viewedGateway.status === 'error' ? (
+                  <>Görüntülenen hesabın durumu okunamadı{viewedGateway.error ? ` (${viewedGateway.error})` : ''}.</>
+                ) : (
+                  <>
+                    Görüntülenen hesap <strong>{viewedGateway.name || actor?.name || 'kullanıcı'}</strong>:{' '}
+                    {viewedGateway.connected ? (
+                      <strong className="text-emerald-700">WhatsApp bağlı</strong>
+                    ) : (
+                      <>
+                        <strong className="text-rose-700">WhatsApp bağlı değil</strong> (durum: {viewedGateway.status}).
+                        Bu hesabın kendi girişinden QR okutması gerekir.
+                      </>
+                    )}
+                  </>
+                )}
               </p>
             </div>
           )}
