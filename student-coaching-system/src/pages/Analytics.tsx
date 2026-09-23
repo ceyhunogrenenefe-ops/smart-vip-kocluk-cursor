@@ -124,6 +124,12 @@ export default function Analytics() {
   const isStudentUi = tags.includes('student');
   const canManageSharedAiReports =
     tags.includes('coach') || tags.includes('admin') || tags.includes('super_admin');
+  /** Veli paylaşımı ve PDF: koç dışındaki personel de kullanabilsin (tek yöneticili kurumlar) */
+  const isStaffUi =
+    tags.includes('coach') ||
+    tags.includes('teacher') ||
+    tags.includes('admin') ||
+    tags.includes('super_admin');
 
   /** Öğrenci hesabı: JWT studentId / e-posta ile seçim; students.length===1 şartı çok kurumda bozuluyordu */
   useEffect(() => {
@@ -1016,7 +1022,7 @@ export default function Analytics() {
               Bu yıl
             </button>
           </div>
-          {(effectiveUser?.role === 'coach' || isStudentUi) && (
+          {(isStaffUi || isStudentUi) && (
             <button
               onClick={generateAnalyticsPdf}
               disabled={isGeneratingPdf}
@@ -1029,7 +1035,7 @@ export default function Analytics() {
         </div>
       </div>
 
-      {effectiveUser?.role === 'coach' && selectedStudent && (
+      {isStaffUi && selectedStudent && (
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 space-y-3">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
             <p className="text-sm text-gray-600">
