@@ -2282,6 +2282,7 @@ export default function ClassLiveLessons() {
                     className: selectedClass.name || 'Sınıf',
                     slots: pngExportSlots,
                     logoUrl: institution?.logo?.trim() || null,
+                    institutionName: institution?.name ?? null,
                     filename: `${String(selectedClass.name || 'ders-programi')
                       .replace(/[\\/:*?"<>|]+/g, ' ')
                       .trim()} - ders programi.png`

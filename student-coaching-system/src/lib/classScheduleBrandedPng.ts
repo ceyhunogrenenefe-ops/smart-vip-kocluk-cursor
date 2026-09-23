@@ -152,6 +152,8 @@ export async function downloadBrandedClassSchedulePng(opts: {
   className: string;
   slots: BrandedScheduleSlot[];
   logoUrl?: string | null;
+  /** Kurum logosu yoksa başlıkta kurumun kendi adı yazılır (platform logosu düşmesin) */
+  institutionName?: string | null;
   filename?: string;
 }): Promise<void> {
   const className = String(opts.className || 'Sınıf').trim() || 'Sınıf';
@@ -189,6 +191,10 @@ export async function downloadBrandedClassSchedulePng(opts: {
     })
     .join('');
 
+  const ownLogo = String(opts.logoUrl || '').trim();
+  const institutionName = String(opts.institutionName || '').trim();
+  // Kurumun logosu yoksa ve adı biliniyorsa platform logosu yerine kurum adı yazılır
+  const useNameHeader = !ownLogo && Boolean(institutionName);
   const logoSrc = resolveLogoUrl(opts.logoUrl);
   const stage = document.createElement('div');
   stage.setAttribute('data-branded-schedule-png', '1');
@@ -201,6 +207,7 @@ export async function downloadBrandedClassSchedulePng(opts: {
       .png-sheet .ph{text-align:center;margin-bottom:18px;padding-bottom:14px;border-bottom:3px solid ${BRAND_RED}}
       .png-sheet .ph img{height:88px;width:auto;max-width:320px;margin:0 auto 12px;display:block;background:transparent;object-fit:contain}
       .png-sheet .ph .tt{font-family:"Fraunces","Noto Sans",Georgia,serif;font-size:30px;font-weight:600;color:${BRAND_NAVY};letter-spacing:-0.01em;line-height:1.2}
+      .png-sheet .ph .brandname{font-family:"Fraunces","Noto Sans",Georgia,serif;font-size:26px;font-weight:600;color:${BRAND_NAVY};margin-bottom:8px}
       .png-sheet .ph .sb{color:${BRAND_RED};font-weight:600;text-transform:uppercase;letter-spacing:.05em;font-size:14px;margin-top:5px}
       .png-sheet table{width:100%;border-collapse:collapse}
       .png-sheet th,.png-sheet td{border:1px solid ${BORDER};padding:9px 11px;font-size:14px;text-align:left;vertical-align:top}
@@ -215,7 +222,11 @@ export async function downloadBrandedClassSchedulePng(opts: {
     </style>
     <div class="png-sheet">
       <div class="ph">
-        <img src="${esc(logoSrc)}" alt="Online VIP Dershane" crossorigin="anonymous" />
+        ${
+          useNameHeader
+            ? `<div class="brandname">${esc(institutionName)}</div>`
+            : `<img src="${esc(logoSrc)}" alt="${esc(institutionName || 'Kurum logosu')}" crossorigin="anonymous" />`
+        }
         <div class="tt">${esc(className)}</div>
         <div class="sb">Haftalık Ders Programı</div>
       </div>
@@ -233,7 +244,7 @@ export async function downloadBrandedClassSchedulePng(opts: {
 
   document.body.appendChild(stage);
   try {
-    const img = stage.querySelector('img') as HTMLImageElement | null;
+    const img = useNameHeader ? null : (stage.querySelector('img') as HTMLImageElement | null);
     if (img) {
       await waitImg(img);
       if (!img.naturalWidth) {

@@ -20,6 +20,7 @@ import { userRoleTags } from '../../config/rolePermissions';
 import { cn } from '../../lib/utils';
 import {
   getFlatMenuForRoles,
+  filterNavForInstitution,
   structureNavFromFlat,
   STUDENT_PANEL_SUBMENU_ITEMS,
   STUDENT_LESSON_NAV_ITEMS,
@@ -53,7 +54,10 @@ export default function Sidebar({
   const { institution } = useApp();
 
   const tags = userRoleTags(effectiveUser);
-  const flat = useMemo(() => getFlatMenuForRoles(tags), [tags]);
+  const flat = useMemo(
+    () => filterNavForInstitution(getFlatMenuForRoles(tags), institution?.id),
+    [tags, institution?.id]
+  );
   const nav = useMemo(() => structureNavFromFlat(flat), [flat]);
   const restNav = nav.rest;
   const isStudentOnlyNav =

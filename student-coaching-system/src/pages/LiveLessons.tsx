@@ -638,7 +638,7 @@ export default function LiveLessons({ hideCalendar = false }: { hideCalendar?: b
           teacherNameById: staffMap,
           branding: {
             institutionName: institution?.name || 'Kurum',
-            logoUrl: institution?.logo?.trim() || null
+            logoUrl: institution?.logo?.trim() || null,
           }
         };
         if (mode === 'copy') {
@@ -1144,7 +1144,7 @@ export default function LiveLessons({ hideCalendar = false }: { hideCalendar?: b
                       'Veli ve öğrenciyle paylaşabilirsiniz. Bağlantılar için uygulamadaki «Katıl» düğmesini kullanın.',
                     branding: {
                       institutionName: institution?.name || 'Kurum',
-                      logoUrl: institution?.logo?.trim() || null
+                      logoUrl: institution?.logo?.trim() || null,
                     }
                   });
                 } catch (e) {
