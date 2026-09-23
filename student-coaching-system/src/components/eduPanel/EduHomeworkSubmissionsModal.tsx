@@ -3,6 +3,8 @@ import { Check, ImageIcon, Loader2, Pencil, Trash2, Video, X } from 'lucide-reac
 import { toast } from 'sonner';
 import type { EduHomework, EduHomeworkSubmission } from '../../types/eduPanel.types';
 import { formatEduHomeworkLabel } from '../../lib/eduPanel/eduHomeworkForm';
+import HomeworkStatsPanel from '../../features/homework/HomeworkStatsPanel';
+import { useHomeworkModule } from '../../features/homework/useHomeworkModule';
 import {
   fetchEduHomeworkStats,
   fetchEduHomeworkSubmissions,
@@ -27,6 +29,8 @@ export default function EduHomeworkSubmissionsModal({
   const [loading, setLoading] = useState(false);
   const [subs, setSubs] = useState<EduHomeworkSubmission[]>([]);
   const [stats, setStats] = useState<EduHomeworkStatsPayload | null>(null);
+  // Ödev modülü açıksa süre / soru hedefi ölçütleri de gösterilir
+  const { enabled: homeworkModuleEnabled } = useHomeworkModule();
   const [busyId, setBusyId] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [noteMode, setNoteMode] = useState(false);
@@ -154,7 +158,11 @@ export default function EduHomeworkSubmissionsModal({
           </button>
         </div>
 
-        {stats ? (
+        {stats && homeworkModuleEnabled ? (
+          <div className="border-b border-slate-100 bg-slate-50/80 px-4 py-3">
+            <HomeworkStatsPanel stats={stats} />
+          </div>
+        ) : stats ? (
           <div className="grid grid-cols-2 gap-2 border-b border-slate-100 bg-slate-50/80 px-4 py-3 text-[11px] sm:grid-cols-4">
             <div>
               <p className="text-slate-500">Teslim oranı</p>

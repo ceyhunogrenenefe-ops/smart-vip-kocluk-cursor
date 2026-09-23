@@ -3467,6 +3467,21 @@ export default async function handler(req, res) {
           status
         };
       });
+      // Ödev modülü ölçütleri: ortalama süre, ortalama çözülen soru, hedefe ulaşma
+      const spentValues = submissions
+        .map((x) => Number(x.spent_minutes))
+        .filter((n) => Number.isFinite(n) && n > 0);
+      const solvedValues = submissions
+        .map((x) => Number(x.solved_question_count))
+        .filter((n) => Number.isFinite(n) && n >= 0);
+      const avg = (arr) =>
+        arr.length ? Math.round((arr.reduce((a, b) => a + b, 0) / arr.length) * 10) / 10 : null;
+      const targetQuestions = Number(hw.target_question_count);
+      const metTarget =
+        Number.isFinite(targetQuestions) && targetQuestions > 0
+          ? solvedValues.filter((n) => n >= targetQuestions).length
+          : null;
+
       return res.status(200).json({
         data: {
           ...stats,
@@ -3475,7 +3490,15 @@ export default async function handler(req, res) {
           missingNames: missing,
           photoCount,
           videoCount,
-          roster: rosterStatus
+          roster: rosterStatus,
+          targetQuestionCount: Number.isFinite(targetQuestions) && targetQuestions > 0 ? targetQuestions : null,
+          targetMinutes: Number.isFinite(Number(hw.target_minutes)) && Number(hw.target_minutes) > 0
+            ? Number(hw.target_minutes)
+            : null,
+          averageSpentMinutes: avg(spentValues),
+          averageSolvedQuestions: avg(solvedValues),
+          reachedTargetCount: metTarget,
+          selfReportedCount: solvedValues.length || spentValues.length
         }
       });
     }

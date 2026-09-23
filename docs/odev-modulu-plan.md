@@ -221,3 +221,28 @@ MVP'de olmayanlar bilinçli olarak dışarıda: AI öneri motoru, gerçek zamanl
 - **WhatsApp yalnız resmî API / kurumun kendi geçidi ile.** Kurum bazlı Meta bağlantısı geçen hafta kuruldu, ödev bildirimi de aynı hattan gider.
 - **AI kendiliğinden mesaj atmaz.** Öneri motoru yalnız öğretmene öneri gösterir.
 - **Platform kurumu kod düzeyinde hariç.** `institution_features` satırı yanlışlıkla açılsa bile platformda modül açılmaz.
+
+---
+
+## 7. Uygulama notu (24 Eylül 2026)
+
+MVP uygulandı. Plandan iki sapma oldu, ikisi de işi küçülttü:
+
+**1. Konu havuzu sunucuda değil, istemcide.** `topics` tablosu boş; havuz `src/data/*TopicPool.ts` dosyalarında ve `useApp().getTopicsByClass()` ile okunuyor. Bu yüzden `homework-form-context` uç noktası yalnız sınıf / ders / öğrenci döndürüyor; ders ve konu listesi istemcide çözülüyor.
+
+**2. Ayrı modal yazılmadı.** Öğretmen panelindeki mevcut "Ödev ver" formu zaten ders ve konuyu konu havuzundan alıyordu. Sıfırdan modal yerine bu forma hedef alanları eklendi — öğretmenin alışkanlığı bozulmadı, risk azaldı.
+
+Kurulan parçalar:
+
+| Parça | Yer |
+|---|---|
+| Modül anahtarı | `institution_features` tablosu, `api/_lib/homework-module.js`, `/api/institution-features`, `useHomeworkModule` |
+| Modal bağlamı | `/api/edu-panel?resource=homework-form-context` |
+| Hedef alanları | `features/homework/HomeworkTargets.tsx`, `TeacherEduTopicCard` içinde |
+| Haftalık plan köprüsü | `api/_lib/homework-weekly-plan.js` — yayımda yazar, taslakta/silmede temizler, teslimde tamamlar |
+| Paylaşım | `?resource=homework-share`, `/api/homework-share`, `/odev/:token`, `HomeworkShareBar` |
+| Öğrenci bildirimi | `EduSubmitHomeworkModal` içinde çözülen soru + harcanan süre |
+| Takip ölçütleri | `homework-stats` yeni alanlar + `HomeworkStatsPanel` |
+| Ders sonrası tek tık | `ClassLiveLessons` içinde tamamlanan oturumda "Ödev Ver" |
+
+İkinci faza kalanlar plandaki gibi: AI öneri motoru, Supabase Realtime, veli bildirimi.

@@ -736,6 +736,13 @@ export type EduHomeworkStatsPayload = {
   photoCount: number;
   videoCount: number;
   roster: { id: string; name: string; user_id?: string | null; status: 'submitted' | 'pending' | 'late' }[];
+  /** Ödev modülü ölçütleri */
+  targetQuestionCount?: number | null;
+  targetMinutes?: number | null;
+  averageSpentMinutes?: number | null;
+  averageSolvedQuestions?: number | null;
+  reachedTargetCount?: number | null;
+  selfReportedCount?: number;
 };
 
 export async function fetchEduHomeworkStats(homeworkId: string): Promise<EduHomeworkStatsPayload> {
