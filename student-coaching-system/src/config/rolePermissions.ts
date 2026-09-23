@@ -97,7 +97,8 @@ export const ROUTE_ALLOWED_ROLES = {
   '/musaitlik-takvimim': ['teacher', 'coach'],
   '/edu-panel': ['super_admin', 'admin', 'coach', 'teacher'],
   '/edu-derslerim': ['student'],
-  '/ai-agents-admin': ['super_admin', 'admin', 'teacher', 'coach'],
+  // AI Ders Ajanları geliştirme aşamasında: şimdilik yalnız süper admin
+  '/ai-agents-admin': ['super_admin'],
   '/ai-agents': ['super_admin', 'admin', 'teacher', 'coach', 'student'],
   '/ai-agents/:id': ['super_admin', 'admin', 'teacher', 'coach', 'student'],
   '/exams': ['super_admin', 'admin', 'teacher', 'coach', 'student'],
