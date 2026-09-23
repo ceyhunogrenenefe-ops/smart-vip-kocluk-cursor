@@ -20,7 +20,10 @@ import { useAuth } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
 import { userRoleTags } from '../config/rolePermissions';
 import { apiFetch } from '../lib/session';
-import { resolveInstitutionIdForActor } from '../lib/activeInstitutionScope';
+import {
+  PLATFORM_PRIMARY_INSTITUTION_ID,
+  resolveInstitutionIdForActor
+} from '../lib/activeInstitutionScope';
 import { mergeClassSlotsIntoPlanner, type PlannerState as FullPlannerState } from '../lib/classSlotsToPlanner';
 import { PLANNER_CURRICULUM_PRESETS, PLANNER_POOL_SUBJECTS } from '../lib/plannerTopicPool';
 import {
@@ -245,6 +248,9 @@ export default function SchedulePlannerPage({ mode = 'default' }: { mode?: 'defa
       institutions
     ]
   );
+
+  /** Hazır Excel / yedek programlar Online VIP'e ait: başka kurumların taslağına yazılmaz */
+  const isPlatformInstitution = !institutionId || institutionId === PLATFORM_PRIMARY_INSTITUTION_ID;
 
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [loadError, setLoadError] = useState('');
@@ -645,6 +651,19 @@ export default function SchedulePlannerPage({ mode = 'default' }: { mode?: 'defa
           if (planTouchedRef.current || gen !== planLoadGenRef.current) return;
 
           const lessonCount = countPlannerLessonCells(j.data.planner_json);
+          if (lessonCount === 0 && !isPlatformInstitution) {
+            // Kurumun kendi taslağı boş — platformun hazır programı buraya yazılmaz
+            await pushPlannerContext({
+              serverPlanActive: false,
+              autoSyncClasses: true,
+              nameOverride: String(j.data.name || NEW_TERM_PLAN_NAME)
+            });
+            if (planTouchedRef.current || gen !== planLoadGenRef.current) return;
+            setSelectedPlanId(existing.id);
+            setPlanName(String(j.data.name || NEW_TERM_PLAN_NAME));
+            rememberSharedPlan(existing.id);
+            return;
+          }
           if (lessonCount === 0) {
             // Boş kayıtlı taslak Excel'i engelliyordu
             const seeded = await applyExcelSeed(existing.id);
@@ -669,6 +688,16 @@ export default function SchedulePlannerPage({ mode = 'default' }: { mode?: 'defa
           return;
         }
 
+        if (!isPlatformInstitution) {
+          // Kurum kendi programını sıfırdan kurar
+          await pushPlannerContext({
+            serverPlanActive: false,
+            autoSyncClasses: true,
+            nameOverride: NEW_TERM_PLAN_NAME
+          });
+          setPlanName(NEW_TERM_PLAN_NAME);
+          return;
+        }
         const seeded = await applyExcelSeed();
         if (!seeded) return;
         toast.success(
@@ -684,6 +713,7 @@ export default function SchedulePlannerPage({ mode = 'default' }: { mode?: 'defa
     isNewTerm,
     iframeReady,
     institutionId,
+    isPlatformInstitution,
     plans,
     plansReady,
     isAdmin,
@@ -1491,6 +1521,8 @@ export default function SchedulePlannerPage({ mode = 'default' }: { mode?: 'defa
           </button>
           {isNewTerm ? (
             <>
+              {isPlatformInstitution ? (
+              <>
               <Link
                 to="/schedule-planner"
                 className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50"
@@ -1546,6 +1578,8 @@ export default function SchedulePlannerPage({ mode = 'default' }: { mode?: 'defa
                 {busy === 'clear-live' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
                 Canlı 5A–8F programı boşalt
               </button>
+              </>
+              ) : null}
               <button
                 type="button"
                 onClick={() => void handleStartBlankNewTerm()}
@@ -1567,12 +1601,6 @@ export default function SchedulePlannerPage({ mode = 'default' }: { mode?: 'defa
                 {busy === 'yaz-yedek' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
                 Yedek JSON yaz (yapıyı koru)
               </button>
-              <Link
-                to={NEW_TERM_PLANNER_PATH}
-                className="inline-flex items-center gap-1 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-sm font-medium text-indigo-800 hover:bg-indigo-100"
-              >
-                Yeni dönem programı
-              </Link>
             </>
           )}
           {isNewTerm ? null : (

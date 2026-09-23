@@ -1,8 +1,10 @@
 /**
- * Deneme sınav takvimi (9 / 10 / 11 / YKS).
- * - Öğrenci: yalnız kendi sınıfının takvimi (sunucuda filtrelenir).
- * - Öğretmen / koç / yönetici: tüm sınıflar, salt görüntüleme.
- * - Süper admin: ekle / düzenle / sil.
+ * Deneme sınav takvimi (9 / 10 / 11 / YKS) — kurum bazlı.
+ * - Her kurum yalnız kendi takvimini görür; Online VIP'in takvimi diğer kurumlara sızmaz.
+ * - Öğrenci: kendi kurumunun, kendi sınıfının takvimi.
+ * - Öğretmen / koç: salt görüntüleme.
+ * - Kurum yöneticisi: kendi kurumunun takvimini ekler / düzenler / siler.
+ * - Süper admin: institution_id ile seçtiği kurumun takvimini yönetir.
  */
 import { requireAuthenticatedActor } from '../api/_lib/auth.js';
 import { enrichStudentActor } from '../api/_lib/enrich-student-actor.js';
@@ -11,11 +13,13 @@ import { resolveStudentRowForUser } from '../api/_lib/resolve-student-id.js';
 import {
   EXAM_CALENDAR_LEVELS,
   ensureExamCalendarSeeded,
+  examCalendarInstitutionId,
   examCalendarLevelForClassLevel
 } from '../api/_lib/exam-calendar.js';
 
 const STAFF_ROLES = ['super_admin', 'admin', 'coach', 'teacher'];
-const COLUMNS = 'id, level, publisher, exam_no, difficulty, exam_date, content, source, sort_order, updated_at';
+const COLUMNS =
+  'id, level, publisher, exam_no, difficulty, exam_date, content, source, sort_order, updated_at, institution_id';
 
 function parseBody(req) {
   const b = req.body;
@@ -57,6 +61,20 @@ async function studentLevel(actor) {
   return { classLevel, level: examCalendarLevelForClassLevel(classLevel) };
 }
 
+/** İsteğin ait olduğu kurum: süper admin / yönetici açıkça seçebilir, diğerleri kendi kurumu. */
+async function resolveInstitution(actor, tags, queryInstitutionId) {
+  const asked = String(queryInstitutionId || '').trim();
+  if (asked && (tags.has('super_admin') || tags.has('admin'))) return asked;
+  const own = String(actor.institution_id || '').trim();
+  if (own) return own;
+  const { data } = await supabaseAdmin
+    .from('users')
+    .select('institution_id')
+    .eq('id', actor.sub)
+    .maybeSingle();
+  return examCalendarInstitutionId(data?.institution_id);
+}
+
 function cleanRow(body) {
   const level = String(body.level || '').trim().toLowerCase();
   const date = String(body.exam_date || '').trim().slice(0, 10);
@@ -72,7 +90,8 @@ function cleanRow(body) {
       exam_no: String(body.exam_no ?? '').trim().slice(0, 20) || null,
       difficulty: String(body.difficulty || '').trim().toUpperCase().slice(0, 40) || null,
       content: String(body.content || '').trim().slice(0, 1000) || null,
-      source: String(body.source || 'ONLİNE VİP DERSHANE').trim().slice(0, 120)
+      // Kaynak kuruma göre değişir; boş bırakılırsa yazılmaz
+    source: String(body.source || '').trim().slice(0, 120) || null
     }
   };
 }
@@ -92,16 +111,35 @@ export default async function handler(req, res) {
     const isStudentOnly = tags.has('student') && !isStaff;
     if (!isStaff && !isStudentOnly) return res.status(403).json({ error: 'forbidden' });
 
-    await ensureExamCalendarSeeded();
+    const askedInstitutionId =
+      req.query?.institution_id || (req.method === 'GET' ? '' : parseBody(req).institution_id);
+    const institutionId = examCalendarInstitutionId(
+      await resolveInstitution(actor, tags, askedInstitutionId)
+    );
+    // Takvimi kurum yöneticisi de düzenleyebilir (kendi kurumu için)
+    const canEdit = isSuper || tags.has('admin');
+
+    await ensureExamCalendarSeeded(institutionId);
 
     if (req.method === 'GET') {
-      let q = supabaseAdmin.from('exam_calendar').select(COLUMNS).order('exam_date', { ascending: true }).order('sort_order');
+      let q = supabaseAdmin
+        .from('exam_calendar')
+        .select(COLUMNS)
+        .eq('institution_id', institutionId)
+        .order('exam_date', { ascending: true })
+        .order('sort_order');
       let myLevel = null;
       let classLevel = null;
       if (isStudentOnly) {
         ({ level: myLevel, classLevel } = await studentLevel(actor));
         if (!myLevel) {
-          return res.status(200).json({ data: [], scope: 'student', level: null, class_level: classLevel || null });
+          return res.status(200).json({
+            data: [],
+            scope: 'student',
+            level: null,
+            class_level: classLevel || null,
+            institution_id: institutionId
+          });
         }
         q = q.eq('level', myLevel);
       } else {
@@ -115,11 +153,16 @@ export default async function handler(req, res) {
         scope: isStudentOnly ? 'student' : 'staff',
         level: myLevel,
         class_level: classLevel,
-        can_edit: isSuper
+        institution_id: institutionId,
+        can_edit: canEdit
       });
     }
 
-    if (!isSuper) return res.status(403).json({ error: 'forbidden', message: 'Takvimi yalnız süper admin düzenleyebilir.' });
+    if (!canEdit) {
+      return res
+        .status(403)
+        .json({ error: 'forbidden', message: 'Takvimi yalnız kurum yöneticisi düzenleyebilir.' });
+    }
     const body = parseBody(req);
 
     if (req.method === 'POST' || req.method === 'PATCH') {
@@ -133,6 +176,7 @@ export default async function handler(req, res) {
           .from('exam_calendar')
           .update({ ...row, ...stamp })
           .eq('id', id)
+          .eq('institution_id', institutionId)
           .select(COLUMNS)
           .maybeSingle();
         if (error) throw new Error(error.message);
@@ -142,7 +186,7 @@ export default async function handler(req, res) {
       const id = `ex_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
       const { data, error } = await supabaseAdmin
         .from('exam_calendar')
-        .insert({ id, ...row, sort_order: 100, ...stamp })
+        .insert({ id, ...row, institution_id: institutionId, sort_order: 100, ...stamp })
         .select(COLUMNS)
         .single();
       if (error) throw new Error(error.message);
@@ -152,7 +196,11 @@ export default async function handler(req, res) {
     if (req.method === 'DELETE') {
       const id = String(req.query?.id || body.id || '').trim();
       if (!id) return res.status(400).json({ error: 'id_required' });
-      const { error } = await supabaseAdmin.from('exam_calendar').delete().eq('id', id);
+      const { error } = await supabaseAdmin
+        .from('exam_calendar')
+        .delete()
+        .eq('id', id)
+        .eq('institution_id', institutionId);
       if (error) throw new Error(error.message);
       return res.status(200).json({ ok: true });
     }

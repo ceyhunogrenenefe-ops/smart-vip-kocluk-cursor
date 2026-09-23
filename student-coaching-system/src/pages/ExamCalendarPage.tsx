@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { CalendarDays, Loader2, Pencil, Plus, Search, Trash2, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiFetch } from '../lib/session';
+import { useApp } from '../context/AppContext';
 
 type ExamRow = {
   id: string;
@@ -66,6 +67,9 @@ const EMPTY_EDIT = { id: '', level: '9', publisher: '', exam_no: '', difficulty:
 
 /** Deneme sınav takvimi — öğrenci yalnız kendi sınıfı; personel tüm sınıflar; süper admin düzenler. */
 export default function ExamCalendarPage() {
+  // Takvim kurum bazlı: açık olan kurumun takvimi gösterilir
+  const { institution } = useApp();
+  const institutionId = String(institution?.id || '').trim();
   const [payload, setPayload] = useState<Payload | null>(null);
   const [loading, setLoading] = useState(true);
   const [level, setLevel] = useState('9');
@@ -78,13 +82,14 @@ export default function ExamCalendarPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      setPayload(await api<Payload>('/api/exam-calendar'));
+      const qs = institutionId ? `?institution_id=${encodeURIComponent(institutionId)}` : '';
+      setPayload(await api<Payload>(`/api/exam-calendar${qs}`));
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Takvim yüklenemedi');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [institutionId]);
 
   useEffect(() => {
     void load();
@@ -122,7 +127,11 @@ export default function ExamCalendarPage() {
       await api('/api/exam-calendar', {
         method: edit.id ? 'PATCH' : 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(edit)
+        body: JSON.stringify({
+          ...edit,
+          institution_id: institutionId || undefined,
+          source: institution?.name || undefined
+        })
       });
       toast.success(edit.id ? 'Sınav güncellendi' : 'Sınav eklendi');
       setEdit(null);
@@ -137,7 +146,8 @@ export default function ExamCalendarPage() {
   const remove = async (r: ExamRow) => {
     if (!window.confirm(`${r.publisher} (${fmtDate(r.exam_date)}) silinsin mi?`)) return;
     try {
-      await api(`/api/exam-calendar?id=${encodeURIComponent(r.id)}`, { method: 'DELETE' });
+      const instQs = institutionId ? `&institution_id=${encodeURIComponent(institutionId)}` : '';
+      await api(`/api/exam-calendar?id=${encodeURIComponent(r.id)}${instQs}`, { method: 'DELETE' });
       toast.success('Silindi');
       void load();
     } catch (e) {
