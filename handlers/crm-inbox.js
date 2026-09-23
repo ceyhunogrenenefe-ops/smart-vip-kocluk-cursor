@@ -442,6 +442,44 @@ export default async function handler(req, res) {
       return res.status(200).json({ data: describeFacebookLoginWidget(undefined, { state }) });
     }
 
+    /** Kurumun kendi Meta bağlantısı (platform dışı kurumlar kendi hesabını bağlar) */
+    if (op === 'meta_connection') {
+      const { describeMetaConnection } = await import('../api/_lib/crm-meta-connection.js');
+      const data = await describeMetaConnection(institutionId);
+      return res.status(200).json({ data });
+    }
+
+    if (op === 'save_meta_connection' && req.method === 'POST') {
+      if (!isAdmin) {
+        return res.status(403).json({ error: 'forbidden', hint: 'Meta bağlantısını yalnızca yönetici kaydeder.' });
+      }
+      const { saveInstitutionMetaConnection, isPlatformInstitutionId } = await import(
+        '../api/_lib/crm-meta-connection.js'
+      );
+      if (isPlatformInstitutionId(institutionId)) {
+        return res.status(400).json({
+          error: 'platform_uses_global_settings',
+          hint: 'Platform kurumu genel Meta ayarlarını kullanır; bu ekran diğer kurumlar içindir.'
+        });
+      }
+      try {
+        const data = await saveInstitutionMetaConnection(institutionId, body, actor.sub);
+        return res.status(200).json({ ok: true, data });
+      } catch (e) {
+        return res.status(400).json({ error: 'save_failed', message: e instanceof Error ? e.message : String(e) });
+      }
+    }
+
+    if (op === 'verify_meta_connection' && req.method === 'POST') {
+      if (!isAdmin) return res.status(403).json({ error: 'forbidden' });
+      const { verifyInstitutionMetaConnection, describeMetaConnection } = await import(
+        '../api/_lib/crm-meta-connection.js'
+      );
+      const result = await verifyInstitutionMetaConnection(institutionId);
+      const data = await describeMetaConnection(institutionId);
+      return res.status(200).json({ ok: result.ok, result, data });
+    }
+
     if (op === 'save_meta_app_secret' && req.method === 'POST') {
       if (!isAdmin) {
         return res.status(403).json({ error: 'forbidden', hint: 'App secret yalnızca yönetici kaydeder.' });
@@ -833,7 +871,11 @@ export default async function handler(req, res) {
                 mode: 'whatsapp_template'
               };
             } catch (tplErr) {
-              const r = await sendCrmWhatsAppText({ phone: conv.contact_identifier, text: outboundBody });
+              const r = await sendCrmWhatsAppText({
+                phone: conv.contact_identifier,
+                text: outboundBody,
+                institutionId: conv.institution_id || institutionId
+              });
               sendResult = {
                 ok: true,
                 messageId: r.messageId,
@@ -855,7 +897,11 @@ export default async function handler(req, res) {
             };
           }
         } else if (conv.channel === 'whatsapp') {
-          const r = await sendCrmWhatsAppText({ phone: conv.contact_identifier, text });
+          const r = await sendCrmWhatsAppText({
+            phone: conv.contact_identifier,
+            text,
+            institutionId: conv.institution_id || institutionId
+          });
           sendResult = { ok: true, messageId: r.messageId, error: null };
         } else {
           const r = await sendCrmInstagramDm({ igScopedId: conv.contact_identifier, text });

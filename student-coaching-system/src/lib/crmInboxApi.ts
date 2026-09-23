@@ -623,3 +623,50 @@ export function crmAdminShifts(body?: Record<string, unknown>) {
     ? adminPost<{ data: { shifts: CrmShift[]; on_duty: string[] | null } }>('shifts', body)
     : adminGet<{ data: { shifts: CrmShift[]; on_duty: string[] | null } }>('shifts');
 }
+
+/** Kurum bazlı Meta bağlantısı (WhatsApp Cloud API + Instagram) */
+export type CrmMetaConnection = {
+  source: 'platform' | 'institution' | 'none';
+  is_platform: boolean;
+  whatsapp: {
+    connected: boolean;
+    phone_number_id: string | null;
+    waba_id: string | null;
+    display_phone: string | null;
+    token_masked: string;
+  };
+  instagram: {
+    connected: boolean;
+    ig_user_id: string | null;
+    page_id: string | null;
+    username: string | null;
+    token_masked: string;
+  };
+  last_verified_at: string | null;
+  last_verify_error: string | null;
+  updated_at: string | null;
+};
+
+export function crmGetMetaConnection() {
+  return inboxGet<{ data: CrmMetaConnection }>('meta_connection');
+}
+
+export function crmSaveMetaConnection(payload: {
+  wa_token?: string;
+  wa_phone_number_id?: string;
+  wa_waba_id?: string;
+  ig_page_token?: string;
+  ig_page_id?: string;
+  ig_user_id?: string;
+  ig_username?: string;
+}) {
+  return inboxPost<{ ok: boolean; data: CrmMetaConnection }>('save_meta_connection', payload);
+}
+
+export function crmVerifyMetaConnection() {
+  return inboxPost<{
+    ok: boolean;
+    result: { ok: boolean; error?: string; display_phone_number?: string | null; verified_name?: string | null };
+    data: CrmMetaConnection;
+  }>('verify_meta_connection');
+}

@@ -115,6 +115,25 @@ function token() {
   return process.env.META_WHATSAPP_TOKEN?.trim();
 }
 
+/**
+ * Kuruma ait WhatsApp Cloud API bilgisi (platform kurumunda boş döner → genel ayar kullanılır).
+ * Böylece her kurumun mesajı kendi hattından gider.
+ */
+async function resolveInstitutionWhatsApp(institutionId) {
+  const id = String(institutionId || '').trim();
+  if (!id) return {};
+  try {
+    const { resolveMetaConnection, isPlatformInstitutionId } = await import('./crm-meta-connection.js');
+    if (isPlatformInstitutionId(id)) return {};
+    const conn = await resolveMetaConnection(id);
+    if (conn.source !== 'institution') return {};
+    return conn.whatsapp || {};
+  } catch (e) {
+    console.warn('[meta-whatsapp] kurum bağlantısı okunamadı:', e instanceof Error ? e.message : e);
+    return {};
+  }
+}
+
 function phoneNumberId() {
   return process.env.META_PHONE_NUMBER_ID?.trim();
 }
@@ -416,9 +435,14 @@ export async function sendMetaTemplateMessage({
 /**
  * Serbest metin (genelde yönetici testi veya 24 saat penceresi içi).
  */
-export async function sendMetaTextMessage({ toE164, text }) {
-  const pid = phoneNumberId();
-  const tok = token();
+/**
+ * @param {{ toE164: string, text: string, institutionId?: string|null }} opts
+ * institutionId verilirse o kurumun kendi Meta hesabı kullanılır (platform dışı kurumlar).
+ */
+export async function sendMetaTextMessage({ toE164, text, institutionId = null }) {
+  const own = await resolveInstitutionWhatsApp(institutionId);
+  const pid = own.phoneNumberId || phoneNumberId();
+  const tok = own.token || token();
   if (!pid || !tok) {
     const err = new Error('missing_meta_whatsapp_env');
     err.code = 'ENV';

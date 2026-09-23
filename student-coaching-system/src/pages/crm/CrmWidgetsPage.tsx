@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { CheckCircle2, Loader2, Puzzle, Search } from 'lucide-react';
 import { toast } from 'sonner';
+import CrmInstitutionMetaCard from '../../components/crm/CrmInstitutionMetaCard';
 import {
   readCachedInboundStatus,
   crmEnsureInbound,
@@ -275,6 +276,9 @@ export default function CrmWidgetsPage() {
           Gelen kutusuna dön
         </Link>
       </div>
+
+      {/* Platform dışı kurumlar kendi Meta hesabını bağlar */}
+      <CrmInstitutionMetaCard />
 
       <section
         id="instagram-facebook-bagla"
