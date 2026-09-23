@@ -30,6 +30,7 @@ import {
   normalizeAcademicLinksStore
 } from './academic-center-links-store.js';
 import { isDirectExternalMeetingLink } from './detect-meeting-platform.js';
+import { isPlatformInstitution } from './academic-center-links-store.js';
 import {
   LGS8_ETUT_ZOOM_URL,
   LISE_YKS_ZOOM_URL,
@@ -507,17 +508,11 @@ function academicStudyMeetingKeyPrefix(institutionId, room) {
 async function buildAcademicStudyGuestJoinUrl({ institutionId, room, guestName }) {
   if (!VALID_STUDY_ROOMS.has(room)) throw new Error('Geçersiz etüt sınıfı.');
 
-  // 4–6 / 5–6 etüt — DB’de 8. sınıf Zoom veya BBB kalsa bile verilen Zoom
-  if (room === 'class47' || room === 'class56') {
-    return PRIMARY_4567_ZOOM_URL;
-  }
-  // 7–8 / LGS etüt
-  if (room === 'class78') {
-    return LGS8_ETUT_ZOOM_URL;
-  }
-  // 9-10-11 / YKS etüt
-  if (room === 'class911' || room === 'yks') {
-    return LISE_YKS_ZOOM_URL;
+  // Sabit Zoom odaları yalnız platform kurumunda geçerli
+  if (isPlatformInstitution(institutionId)) {
+    if (room === 'class47' || room === 'class56') return PRIMARY_4567_ZOOM_URL;
+    if (room === 'class78') return LGS8_ETUT_ZOOM_URL;
+    if (room === 'class911' || room === 'yks') return LISE_YKS_ZOOM_URL;
   }
 
   const stored = await loadAcademicStudyRoomUrl(institutionId, room);
@@ -590,7 +585,7 @@ export async function createAcademicStudyGuestJoinShareLink({ institutionId, roo
     ACADEMIC_STUDY_ROOM_LABELS[r] || DEFAULT_ACADEMIC_LINKS.studyClasses[r] || 'Etüt Sınıfı';
 
   // 4–6 / 5–6 davet — her zaman verilen Zoom (eski 8. sınıf / BBB linki panoya düşmesin)
-  if (r === 'class47' || r === 'class56') {
+  if (isPlatformInstitution(institutionId) && (r === 'class47' || r === 'class56')) {
     return externalInviteSharePayload({
       url: PRIMARY_4567_ZOOM_URL,
       title,
@@ -600,7 +595,7 @@ export async function createAcademicStudyGuestJoinShareLink({ institutionId, roo
     });
   }
   // 7–8 / LGS ve 9-10-11 / YKS etüt davet
-  if (r === 'class78' || r === 'class911' || r === 'yks') {
+  if (isPlatformInstitution(institutionId) && (r === 'class78' || r === 'class911' || r === 'yks')) {
     return externalInviteSharePayload({
       url: r === 'class78' ? LGS8_ETUT_ZOOM_URL : LISE_YKS_ZOOM_URL,
       title,

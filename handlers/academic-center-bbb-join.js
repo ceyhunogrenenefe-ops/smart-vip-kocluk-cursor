@@ -17,6 +17,7 @@ import {
 } from '../api/_lib/bbb.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { LGS8_ETUT_ZOOM_URL, LISE_YKS_ZOOM_URL } from '../api/_lib/primary-4567-zoom.js';
+import { isPlatformInstitution } from '../api/_lib/academic-center-links-store.js';
 import { getIstanbulDateString } from '../api/_lib/istanbul-time.js';
 import { isMissingTableError } from '../api/_lib/supabase-schema.js';
 import { errorMessage } from '../api/_lib/error-msg.js';
@@ -109,13 +110,17 @@ export default async function handler(req, res) {
     });
   }
 
-  // 7–8 / LGS etüt ve deneme — sabit Zoom (eski kayıtta bbb:auto kalsa bile)
-  if (room === 'class78') {
-    return res.status(200).json({ url: LGS8_ETUT_ZOOM_URL, provider: 'external' });
-  }
-  // 9-10-11 / YKS etüt ve lise deneme — sabit Zoom
-  if ((kind === 'study' && (room === 'class911' || room === 'yks')) || (kind !== 'study' && room === 'lise')) {
-    return res.status(200).json({ url: LISE_YKS_ZOOM_URL, provider: 'external' });
+  const actorInstitutionId = String(
+    req.query?.institution_id || req.body?.institution_id || actor.institution_id || ''
+  ).trim();
+  // Sabit Zoom odaları yalnız platform kurumunda; diğer kurumlar kendi bağlantısını kullanır
+  if (isPlatformInstitution(actorInstitutionId)) {
+    if (room === 'class78') {
+      return res.status(200).json({ url: LGS8_ETUT_ZOOM_URL, provider: 'external' });
+    }
+    if ((kind === 'study' && (room === 'class911' || room === 'yks')) || (kind !== 'study' && room === 'lise')) {
+      return res.status(200).json({ url: LISE_YKS_ZOOM_URL, provider: 'external' });
+    }
   }
 
   if (!isBbbConfigured()) {

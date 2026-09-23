@@ -1,4 +1,11 @@
 import { LGS8_ETUT_ZOOM_URL, PRIMARY_4567_ZOOM_URL } from './primary-4567-zoom.js';
+import { PLATFORM_PRIMARY_INSTITUTION_ID } from './quota-enforce.js';
+
+/** Sabit Zoom odaları platforma özeldir; diğer kurumlar kendi bağlantılarını tanımlar. */
+export function isPlatformInstitution(institutionId) {
+  const id = String(institutionId || '').trim();
+  return !id || id === PLATFORM_PRIMARY_INSTITUTION_ID;
+}
 
 const DEFAULT_STUDY = {
   class47: PRIMARY_4567_ZOOM_URL,
@@ -97,20 +104,19 @@ export function linksForInstitution(store, institutionId) {
     const patch = normalized.byInstitution[iid];
     if (patch) merged = coerceAcademicLinks(deepMerge(base, coerceAcademicLinks(patch)));
   }
-  // Lise Deneme Sınavı giriş — kurum geneli Zoom oturumu
-  merged.exams.lise = LISE_DENEME_ZOOM_ENTRY;
-  if (merged.exams.exam) merged.exams.exam = LISE_DENEME_ZOOM_ENTRY;
-  // 4–6 ve 5–6 etüt / ödev / kitap / deneme — ortak Zoom
-  merged.exams.class47 = PRIMARY_4567_ZOOM_URL;
-  merged.exams.class56 = PRIMARY_4567_ZOOM_URL;
-  merged.studyClasses.class47 = PRIMARY_4567_ZOOM_URL;
-  merged.studyClasses.class56 = PRIMARY_4567_ZOOM_URL;
-  // 7–8 / LGS etüt ve deneme — aynı sabit Zoom
-  merged.studyClasses.class78 = LGS8_ETUT_ZOOM_URL;
-  merged.exams.class78 = LGS8_ETUT_ZOOM_URL;
-  // 9-10-11 ve YKS etüt — lise deneme ile aynı sabit Zoom
-  merged.studyClasses.class911 = LISE_DENEME_ZOOM_ENTRY;
-  merged.studyClasses.yks = LISE_DENEME_ZOOM_ENTRY;
+  // Sabit Zoom odaları yalnız platform kurumunda; diğer kurumlar kendi ayarını kullanır
+  if (isPlatformInstitution(iid)) {
+    merged.exams.lise = LISE_DENEME_ZOOM_ENTRY;
+    if (merged.exams.exam) merged.exams.exam = LISE_DENEME_ZOOM_ENTRY;
+    merged.exams.class47 = PRIMARY_4567_ZOOM_URL;
+    merged.exams.class56 = PRIMARY_4567_ZOOM_URL;
+    merged.studyClasses.class47 = PRIMARY_4567_ZOOM_URL;
+    merged.studyClasses.class56 = PRIMARY_4567_ZOOM_URL;
+    merged.studyClasses.class78 = LGS8_ETUT_ZOOM_URL;
+    merged.exams.class78 = LGS8_ETUT_ZOOM_URL;
+    merged.studyClasses.class911 = LISE_DENEME_ZOOM_ENTRY;
+    merged.studyClasses.yks = LISE_DENEME_ZOOM_ENTRY;
+  }
   return merged;
 }
 

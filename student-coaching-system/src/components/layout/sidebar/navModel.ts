@@ -319,6 +319,30 @@ function mergeSideMenus(groups: FlatNavItem[][]): FlatNavItem[] {
   return [...map.values()];
 }
 
+/**
+ * Yalnız platform (Online VIP) kurumunda görünen sayfalar. Yeni kurumlarda
+ * (ör. TÜRKÇE UZMANI) menüde çıkmaz; ilgili içerik platforma özeldir.
+ */
+const PLATFORM_ONLY_PATHS = new Set<string>([
+  '/kitap-pazaryeri',
+  '/ozel-ders-talepleri',
+  '/ogretmen-profil-onaylari',
+  '/reports',
+  '/private-lesson-assignments'
+]);
+
+const PLATFORM_PRIMARY_INSTITUTION_ID = '73323d75-eea1-4552-8bba-d50555423589';
+
+/** Kurum platform kurumu değilse platforma özel sayfaları ayıkla. */
+export function filterNavForInstitution(
+  items: FlatNavItem[],
+  institutionId?: string | null
+): FlatNavItem[] {
+  const id = String(institutionId || '').trim();
+  if (!id || id === PLATFORM_PRIMARY_INSTITUTION_ID) return items;
+  return items.filter((i) => !PLATFORM_ONLY_PATHS.has(i.path));
+}
+
 /** Rol birleşimine göre düz menü (mevcut davranışla uyumlu). */
 export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
   if (tags.includes('super_admin')) {
