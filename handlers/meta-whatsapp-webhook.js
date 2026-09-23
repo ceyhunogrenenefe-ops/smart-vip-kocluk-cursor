@@ -205,6 +205,21 @@ async function applyDeliveryStatus(wamid, status, errors) {
   }
 }
 
+/**
+ * Gelen mesajı doğru kuruma yaz: numara kimliği (WhatsApp) veya Instagram hesabı
+ * crm_meta_connections'ta hangi kuruma bağlıysa o kurum. Eşleşme yoksa null döner
+ * ve eski davranış (platform / varsayılan kurum) geçerli kalır.
+ */
+async function institutionForIncoming({ phoneNumberId, igUserId } = {}) {
+  try {
+    const { findInstitutionByMetaIds } = await import('../api/_lib/crm-meta-connection.js');
+    return await findInstitutionByMetaIds({ phoneNumberId, igUserId });
+  } catch (e) {
+    console.warn('[meta-webhook] kurum eşleşmesi:', e instanceof Error ? e.message : e);
+    return null;
+  }
+}
+
 export default async function handler(req, res) {
   if (req.method === 'GET') {
     const { mode, token, challenge } = hubQuery(req);
@@ -394,7 +409,13 @@ export default async function handler(req, res) {
           const r = await ingestInstagramMessagingEvents(messaging);
           igIngested += Number(r?.processed || 0);
           try {
-            crmIgSync = await syncInstagramMessagingToCrm(messaging);
+            const igInstitutionId = await institutionForIncoming({
+              igUserId: messaging?.[0]?.recipient?.id || null
+            });
+            crmIgSync = await syncInstagramMessagingToCrm(
+              messaging,
+              igInstitutionId ? { institutionId: igInstitutionId } : {}
+            );
             console.info('[meta-webhook] crm ig synced', crmIgSync?.processed || 0);
           } catch (e) {
             console.warn('[meta-webhook] crm ig sync:', e instanceof Error ? e.message : e);
@@ -540,7 +561,13 @@ export default async function handler(req, res) {
           const r = await ingestInstagramMessagingEvents(batch, { channel: socialChannel });
           igIngested += Number(r?.processed || 0);
           try {
-            const ig = await syncInstagramMessagingToCrm(batch, { channel: socialChannel });
+            const batchInstitutionId = await institutionForIncoming({
+              igUserId: batch?.[0]?.recipient?.id || null
+            });
+            const ig = await syncInstagramMessagingToCrm(batch, {
+              channel: socialChannel,
+              ...(batchInstitutionId ? { institutionId: batchInstitutionId } : {})
+            });
             crmIgSync = {
               processed: Number(crmIgSync?.processed || 0) + Number(ig?.processed || 0),
               channel: socialChannel
@@ -597,7 +624,13 @@ const changes = Array.isArray(entry?.changes) ? entry.changes : [];
           waIngested += Number(r?.processed || 0);
           // Şirket hattı (META_PHONE_NUMBER_ID / 0850) gelenleri CRM inbox'a yaz
           try {
-            crmWaSync = await syncWhatsAppValueToCrm(value);
+            const waInstitutionId = await institutionForIncoming({
+              phoneNumberId: value?.metadata?.phone_number_id
+            });
+            crmWaSync = await syncWhatsAppValueToCrm(
+              value,
+              waInstitutionId ? { institutionId: waInstitutionId } : {}
+            );
             if (crmWaSync?.processed) {
               console.info('[meta-webhook] crm wa synced', crmWaSync.processed);
             } else if (crmWaSync?.skipped || crmWaSync?.issues?.length) {

@@ -687,10 +687,19 @@ export async function syncFacebookCommentsToCrm(changes, { institutionId } = {})
   return { processed, skipped };
 }
 
-export async function sendCrmWhatsAppText({ phone, text }) {
+export async function sendCrmWhatsAppText({ phone, text, institutionId = null }) {
+  // Kurumun kendi Meta hesabı varsa onunla gönderilir; yoksa platform ayarı
+  let ownConnection = null;
+  try {
+    const { resolveMetaConnection } = await import('./crm-meta-connection.js');
+    const conn = await resolveMetaConnection(institutionId);
+    ownConnection = conn.source === 'institution' ? conn : null;
+  } catch {
+    ownConnection = null;
+  }
   // Panel / commerce_settings üzerinden token + phone_number_id (0850 hattı) yükle
   await loadMetaWhatsAppSecretsFromDb();
-  if (!metaWhatsAppConfigured()) {
+  if (!ownConnection && !metaWhatsAppConfigured()) {
     const err = new Error(
       'whatsapp_not_configured — META_WHATSAPP_TOKEN + META_PHONE_NUMBER_ID (0850 hattı) veya panel commerce_settings.meta.whatsapp gerekli'
     );
@@ -703,7 +712,7 @@ export async function sendCrmWhatsAppText({ phone, text }) {
     err.code = 'PHONE';
     throw err;
   }
-  const result = await sendMetaTextMessage({ toE164: e164, text });
+  const result = await sendMetaTextMessage({ toE164: e164, text, institutionId });
   return {
     messageId: result?.messages?.[0]?.id || result?.messageId || result?.id || null,
     raw: result
