@@ -15,11 +15,10 @@ workflows:
         - mobil_env
       vars:
         BUNDLE_ID: com.dersonlinevipkocluk.student
-        XCODE_WORKSPACE: student-coaching-system/ios/App/App.xcworkspace
+        XCODE_PROJECT: student-coaching-system/ios/App/App.xcodeproj
         XCODE_SCHEME: App
       node: 22
       xcode: latest
-      cocoapods: default
     scripts:
       - name: Web derlemesi (Capacitor kabuğunun içeriği)
         script: |
@@ -35,10 +34,10 @@ workflows:
         script: |
           cd student-coaching-system
           npx cap sync ios
-      - name: CocoaPods
+      - name: Swift Package bağımlılıkları (Capacitor 8 SPM kullanır, Podfile yok)
         script: |
           cd student-coaching-system/ios/App
-          pod install
+          xcodebuild -resolvePackageDependencies -project App.xcodeproj -scheme App
       - name: İmzalama profilleri (App Store Connect API anahtarı ile otomatik)
         script: |
           app-store-connect fetch-signing-files "$BUNDLE_ID" --type IOS_APP_STORE --create
@@ -54,7 +53,7 @@ workflows:
       - name: IPA üret
         script: |
           xcode-project build-ipa \
-            --workspace "$CM_BUILD_DIR/$XCODE_WORKSPACE" \
+            --project "$CM_BUILD_DIR/$XCODE_PROJECT" \
             --scheme "$XCODE_SCHEME"
     artifacts:
       - build/ios/ipa/*.ipa
