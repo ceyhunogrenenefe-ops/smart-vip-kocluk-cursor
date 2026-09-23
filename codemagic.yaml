@@ -1,0 +1,74 @@
+# iOS paketini Mac olmadan üretir: Codemagic macOS makinesinde derleyip TestFlight'a yükler.
+# Gerekli ortam değişkenleri (Codemagic > Environment variables):
+#   grup "appstore": APP_STORE_CONNECT_ISSUER_ID, APP_STORE_CONNECT_KEY_IDENTIFIER,
+#                    APP_STORE_CONNECT_PRIVATE_KEY, CERTIFICATE_PRIVATE_KEY
+#   grup "mobil_env": VITE_API_BASE_URL, VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY
+workflows:
+  ios-testflight:
+    name: iOS — TestFlight
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    integrations:
+      app_store_connect: OnlineVIP ASC
+    environment:
+      groups:
+        - mobil_env
+      vars:
+        BUNDLE_ID: com.dersonlinevipkocluk.student
+        XCODE_WORKSPACE: student-coaching-system/ios/App/App.xcworkspace
+        XCODE_SCHEME: App
+      node: 20
+      xcode: latest
+      cocoapods: default
+    scripts:
+      - name: Web derlemesi (Capacitor kabuğunun içeriği)
+        script: |
+          cd student-coaching-system
+          cat > .env.mobile <<EOF
+          VITE_API_BASE_URL=$VITE_API_BASE_URL
+          VITE_SUPABASE_URL=$VITE_SUPABASE_URL
+          VITE_SUPABASE_ANON_KEY=$VITE_SUPABASE_ANON_KEY
+          EOF
+          npm ci
+          npm run build:mobile
+      - name: Capacitor iOS senkronu
+        script: |
+          cd student-coaching-system
+          npx cap sync ios
+      - name: CocoaPods
+        script: |
+          cd student-coaching-system/ios/App
+          pod install
+      - name: İmzalama profilleri (App Store Connect API anahtarı ile otomatik)
+        script: |
+          app-store-connect fetch-signing-files "$BUNDLE_ID" --type IOS_APP_STORE --create
+          keychain initialize
+          keychain add-certificates
+          xcode-project use-profiles
+      - name: Derleme numarasını artır
+        script: |
+          LATEST=$(app-store-connect get-latest-testflight-build-number "$APP_STORE_APP_ID" 2>/dev/null || echo 0)
+          NEXT=$(($LATEST + 1))
+          cd student-coaching-system/ios/App
+          agvtool new-version -all $NEXT
+      - name: IPA üret
+        script: |
+          xcode-project build-ipa \
+            --workspace "$CM_BUILD_DIR/$XCODE_WORKSPACE" \
+            --scheme "$XCODE_SCHEME"
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true
+        # TestFlight'ta iç test grubuna otomatik dağıt (grup adını Codemagic'te güncelleyin)
+        beta_groups:
+          - Ic Test
+      email:
+        recipients:
+          - ceyhunogrenenefe@gmail.com
+        notify:
+          success: true
+          failure: true
