@@ -458,6 +458,8 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
     { path: '/ai-coach', icon: Brain, label: 'AI KOÇ' },
     { path: '/whatsapp', icon: MessageCircle, label: 'Mesaj gönder' },
     { path: '/message-templates', icon: MessageSquareText, label: 'Mesaj şablonları' },
+    // Kurum yöneticisi kendi WhatsApp hattını QR ile bağlayabilsin
+    { path: '/coach-whatsapp-settings', icon: MessageCircle, label: 'WhatsApp merkezi' },
     { path: '/topics', icon: BookOpen, label: 'Konu Havuzu' },
     { path: '/topic-tracking', icon: CheckSquare, label: 'Konu Takibi' },
     { path: '/written-exam', icon: FileCheck, label: 'Yazılı Takip' },
