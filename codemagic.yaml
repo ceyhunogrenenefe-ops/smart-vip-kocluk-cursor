@@ -40,18 +40,30 @@ workflows:
           xcodebuild -resolvePackageDependencies -project App.xcodeproj -scheme App
       - name: İmzalama profilleri (App Store Connect API anahtarı ile otomatik)
         script: |
+          set -e
+          if [ -z "$CERTIFICATE_PRIVATE_KEY" ]; then
+            echo "HATA: CERTIFICATE_PRIVATE_KEY tanımlı değil."
+            echo "Codemagic > Applications > bu uygulama > Environment variables:"
+            echo "  ad: CERTIFICATE_PRIVATE_KEY · grup: mobil_env · Secure işaretli"
+            echo "  değer: ios_cert_key.pem dosyasının tamamı (BEGIN/END satırları dahil)"
+            exit 1
+          fi
           keychain initialize
           # Dağıtım sertifikası yoksa CERTIFICATE_PRIVATE_KEY ile bir kez oluşturulur.
           # Aynı anahtar her derlemede kullanıldığı için Apple'ın sertifika limiti dolmaz.
           app-store-connect certificates create \
             --type IOS_DISTRIBUTION \
             --certificate-key=@env:CERTIFICATE_PRIVATE_KEY \
-            --save || echo "Sertifika zaten var, mevcut olan kullanılacak"
+            --save || echo "Sertifika oluşturulamadı (muhtemelen zaten var), mevcut olan denenecek"
           app-store-connect fetch-signing-files "$BUNDLE_ID" \
             --type IOS_APP_STORE \
             --certificate-key=@env:CERTIFICATE_PRIVATE_KEY \
             --create
           keychain add-certificates
+          # Keychain'de imzalama kimliği var mı — yoksa arşiv adımı anlaşılmaz hata veriyor
+          if ! security find-identity -v -p codesigning "$CM_BUILD_DIR/keychain.db" 2>/dev/null | grep -q "valid identities found"; then
+            security find-identity -v -p codesigning || true
+          fi
           # Profil/sertifika doğrudan bu projeye işlenir (kök taramada bulunamıyordu)
           xcode-project use-profiles \
             --project "$CM_BUILD_DIR/$XCODE_PROJECT" \
