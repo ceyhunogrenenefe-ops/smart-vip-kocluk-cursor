@@ -99,7 +99,10 @@ import {
   GROUP_LESSON_UNIT_MINUTES
 } from '../api/_lib/class-lesson-payment-units.js';
 import { isSolutionLessonSubject } from '../api/_lib/solution-appointments-core.js';
-import { findBlockingTeacherRow } from '../api/_lib/teacher-time-conflict.js';
+import {
+  findBlockingTeacherRow,
+  slotFreedByCancelledSession
+} from '../api/_lib/teacher-time-conflict.js';
 import { listScheduledSessionBatchPeers } from '../api/_lib/class-session-batch-peers.js';
 import { ensureClassTeacherLink, getTeacherPanelClassIds } from '../api/_lib/teacher-class-scope.js';
 import { errorMessage } from '../api/_lib/error-msg.js';
@@ -345,7 +348,25 @@ async function teacherTimeConflictOnDate({
     rows: slots || []
   });
   if (slotHit) {
-    return { ok: false, reason: `Bu öğretmenin aynı gün/saatte haftalık şablon dersi var (${lessonDate}).` };
+    /**
+     * Şablon o gün ders olduğunu söylüyor ama bu TARİHTEKİ oturum iptal edilmişse
+     * gerçekte ders yok; yerine yenisi eklenebilmeli. İptal edilmiş oturum aynı
+     * sınıf ve çakışan saatteyse şablon engeli düşer.
+     */
+    const { data: cancelledRows, error: cErr } = await supabaseAdmin
+      .from('class_sessions')
+      .select('id,class_id,start_time,end_time,status')
+      .eq('teacher_id', teacherId)
+      .eq('lesson_date', lessonDate)
+      .eq('status', 'cancelled');
+    if (cErr) throw cErr;
+    const freedByCancellation = slotFreedByCancelledSession({
+      slot: slotHit,
+      cancelledRows: cancelledRows || []
+    });
+    if (!freedByCancellation) {
+      return { ok: false, reason: `Bu öğretmenin aynı gün/saatte haftalık şablon dersi var (${lessonDate}).` };
+    }
   }
   return { ok: true };
 }
