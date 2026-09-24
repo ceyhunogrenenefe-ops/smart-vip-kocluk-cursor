@@ -137,7 +137,7 @@ export default function CrmLayout() {
                   Pipeline
                 </NavLink>
               )}
-              {isAdmin && (
+              {(isAdmin || canSeePipeline) && (
                 <>
                   <NavLink
                     to="/crm/agents"

@@ -39,7 +39,12 @@ export type CrmConversation = {
   assigned_user_id?: string | null;
   status: CrmStatus;
   lead_id?: string | null;
-  metadata?: { tags?: string[] } | null;
+  metadata?: {
+    tags?: string[];
+    /** Gelen mesaj öğretmen başvurusu gibi göründü (şablon otomatik gönderilmez) */
+    teacher_application?: boolean;
+    teacher_application_confidence?: string;
+  } | null;
   ad_source_data?: Record<string, unknown> | null;
   last_message_at?: string | null;
   last_message_preview?: string | null;
@@ -710,4 +715,16 @@ export function crmVerifyMetaConnection() {
     result: { ok: boolean; error?: string; display_phone_number?: string | null; verified_name?: string | null };
     data: CrmMetaConnection;
   }>('verify_meta_connection');
+}
+
+/** Öğretmen başvurusuna gönderilecek Meta onaylı şablon (kurum ayarı). */
+export function crmGetTeacherTemplate() {
+  return inboxGet<{ data: { template_name: string | null; language: string } }>('teacher_template');
+}
+
+export function crmSaveTeacherTemplate(templateName: string, language = 'tr') {
+  return inboxPost<{ ok: boolean; data: { template_name: string | null; language: string } }>(
+    'save_teacher_template',
+    { template_name: templateName, language }
+  );
 }

@@ -8,6 +8,8 @@ import {
   crmAdminPromoteAgent,
   crmListPresence
 } from '../../lib/crmInboxApi';
+import { useAuth } from '../../context/AuthContext';
+import { userRoleTags } from '../../config/rolePermissions';
 import CrmAssignmentPanel from './CrmAssignmentPanel';
 import CrmFollowUpRulesPanel from './CrmFollowUpRulesPanel';
 import CrmCannedRepliesPanel from './CrmCannedRepliesPanel';
@@ -25,6 +27,10 @@ type AgentRow = {
 type CoachRow = { id: string; name: string; email: string; role: string };
 
 export default function CrmAgentsPage() {
+  const { effectiveUser } = useAuth();
+  const roleTags = userRoleTags(effectiveUser);
+  /** Temsilci listeyi görür; ekleme, vardiya ve kural düzenleme yöneticide kalır */
+  const canManage = roleTags.includes('super_admin') || roleTags.includes('admin');
   const [loading, setLoading] = useState(true);
   const [agents, setAgents] = useState<AgentRow[]>([]);
   const [coaches, setCoaches] = useState<CoachRow[]>([]);
@@ -123,21 +129,28 @@ export default function CrmAgentsPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="font-serif text-2xl font-semibold text-slate-900">CRM Temsilci Yönetimi</h2>
+        <h2 className="font-serif text-2xl font-semibold text-slate-900">
+          {canManage ? 'CRM Temsilci Yönetimi' : 'CRM Temsilcileri'}
+        </h2>
         <p className="mt-1 text-sm text-slate-600">
-          Yalnızca CRM erişimli kullanıcı oluşturun veya mevcut koçları temsilci yapın. Temsilciler faturalama ve
-          sistem ayarlarını göremez.
+          {canManage
+            ? 'Yalnızca CRM erişimli kullanıcı oluşturun veya mevcut koçları temsilci yapın. Temsilciler faturalama ve sistem ayarlarını göremez.'
+            : 'Ekipteki temsilciler ve vardiyalar. Değişiklik yalnızca yöneticide yapılır.'}
         </p>
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-2">
-        <CrmAssignmentPanel agents={agents} />
-        <CrmFollowUpRulesPanel />
-        <CrmShiftsPanel agents={agents} />
-        <CrmStaffAlertsPanel />
-        <CrmCannedRepliesPanel />
-      </div>
+      {/* Yönetim panelleri yalnız yöneticide; temsilci listeyi görür */}
+      {canManage ? (
+        <div className="grid gap-6 xl:grid-cols-2">
+          <CrmAssignmentPanel agents={agents} />
+          <CrmFollowUpRulesPanel />
+          <CrmShiftsPanel agents={agents} />
+          <CrmStaffAlertsPanel />
+          <CrmCannedRepliesPanel />
+        </div>
+      ) : null}
 
+      {canManage ? (
       <div className="grid gap-6 lg:grid-cols-2">
         <form
           onSubmit={onCreate}
@@ -208,6 +221,7 @@ export default function CrmAgentsPage() {
           </button>
         </div>
       </div>
+      ) : null}
 
       <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="border-b border-slate-100 px-4 py-3 font-semibold text-slate-900">

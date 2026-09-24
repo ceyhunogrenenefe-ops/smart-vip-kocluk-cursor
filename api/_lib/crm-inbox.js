@@ -430,6 +430,29 @@ export async function upsertCrmMessage({
     if (await autoMarkConversationInternal(conversation)) conversation = { ...conversation, is_internal: true };
   }
 
+  // Öğretmen başvurusu: konuşma işaretlenir, mesaj GÖNDERİLMEZ — karar temsilcide
+  if (direction === 'inbound' && !conversation.is_internal && body) {
+    try {
+      const { detectTeacherApplication, withTeacherApplicationTag } = await import(
+        './crm-teacher-application.js'
+      );
+      const hit = detectTeacherApplication(body);
+      if (hit.match && !conversation.metadata?.teacher_application) {
+        const metadata = withTeacherApplicationTag(conversation.metadata);
+        metadata.teacher_application_confidence = hit.confidence;
+        const { data } = await supabaseAdmin
+          .from('crm_conversations')
+          .update({ metadata, updated_at: now })
+          .eq('id', conversation.id)
+          .select('*')
+          .maybeSingle();
+        if (data) conversation = data;
+      }
+    } catch (e) {
+      console.warn('[crm-inbox] öğretmen başvurusu tespiti:', e instanceof Error ? e.message : e);
+    }
+  }
+
   if (direction === 'inbound' && !conversation.is_internal && !conversation.assigned_user_id) {
     try {
       const { assignConversationIfUnassigned } = await import('./crm-assignment.js');
