@@ -165,3 +165,51 @@ describe('matchIncomingToBookletLessons', () => {
     assert.equal(m[1].hit, null);
   });
 });
+
+describe('matchIncomingToBookletLessons — sıra ve uzunluk karışımı', () => {
+  /**
+   * Regresyon: eski sıra eşleşmesi imleci geri saramıyordu. Ders uzunlukları
+   * farklı sırada geldiğinde atlanan cevaplar bir daha denenmiyor, ders boş
+   * kalıyor ve gönderim 400 (answer_length_mismatch) veriyordu.
+   */
+  it('uzunlukları farklı sırada gelen cevapları doğru derse bağlar', () => {
+    const lessons = [
+      { lessonId: 31, dersGrupId: 1, lessonName: 'Türkçe', questionCount: 20 },
+      { lessonId: 32, dersGrupId: 2, lessonName: 'Sosyal', questionCount: 10 },
+      { lessonId: 33, dersGrupId: 3, lessonName: 'Matematik', questionCount: 20 }
+    ];
+    const incoming = [
+      { lessonId: 1, dersGrupId: 1, cevaplar: 'S'.repeat(10) },
+      { lessonId: 2, dersGrupId: 2, cevaplar: 'T'.repeat(20) },
+      { lessonId: 3, dersGrupId: 3, cevaplar: 'M'.repeat(20) }
+    ];
+    const m = matchIncomingToBookletLessons(lessons, incoming);
+    assert.deepEqual(
+      m.map((x) => [x.lesson.lessonName, x.hit?.cevaplar?.length ?? null]),
+      [
+        ['Türkçe', 20],
+        ['Sosyal', 10],
+        ['Matematik', 20]
+      ],
+      'hiçbir ders boş kalmamalı'
+    );
+  });
+
+  it('ders adı tutuyorsa uzunluk farklı olsa da eşleştirir (hata doğru derste raporlansın)', () => {
+    const lessons = [{ lessonId: 40, dersGrupId: 4, lessonName: 'Fen', questionCount: 20 }];
+    const m = matchIncomingToBookletLessons(lessons, [
+      { lessonId: 9, dersGrupId: 9, lessonName: 'Fen', cevaplar: 'F'.repeat(18) }
+    ]);
+    assert.equal(m[0].hit?.cevaplar?.length, 18);
+  });
+
+  it('aynı uzunluktaki cevabı iki derse birden vermez', () => {
+    const lessons = [
+      { lessonId: 1, dersGrupId: 1, lessonName: 'A dersi', questionCount: 5 },
+      { lessonId: 2, dersGrupId: 2, lessonName: 'B dersi', questionCount: 5 }
+    ];
+    const m = matchIncomingToBookletLessons(lessons, [{ lessonId: 7, dersGrupId: 7, cevaplar: 'ABCDE' }]);
+    assert.equal(m[0].hit?.cevaplar, 'ABCDE');
+    assert.equal(m[1].hit, null);
+  });
+});

@@ -503,6 +503,14 @@ export async function fetchEdesisExamStructure(
   availableBookletCodes?: string[];
   answerKeyBookletCodes?: string[];
   denemeOnlyBookletCodes?: string[];
+  /**
+   * Sunucunun gönderimde her kitapçık için beklediği ders düzeni.
+   * Optik bu düzenle doldurulmazsa gönderim "answer_length_mismatch" verir.
+   */
+  bookletLessonLayouts?: Record<
+    string,
+    { lessonName: string | null; lessonId: number | null; dersGrupId: number | null; questionCount: number }[]
+  >;
   bookletPdfs?: EdesisBookletPdf[];
   examFamily?: string;
   bookletMode?: string;
@@ -674,7 +682,12 @@ export async function submitEdesisStudentExam(params: {
   examId: string;
   kitapcikTuru: string;
   kitapcikTuruSay?: string;
-  dersCevaplari: { lessonId: number | null; dersGrupId: number | null; cevaplar: string }[];
+  dersCevaplari: {
+    lessonId: number | null;
+    dersGrupId: number | null;
+    lessonName?: string | null;
+    cevaplar: string;
+  }[];
   replace?: boolean;
   studentId?: string;
 }): Promise<{

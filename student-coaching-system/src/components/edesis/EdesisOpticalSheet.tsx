@@ -240,7 +240,15 @@ type Props = {
   pdfError?: string | null;
   /** Akademik Merkez sınav stüdyosu — viewport’u doldur, PDF’i geniş tut */
   studio?: boolean;
-  onSubmit: (dersCevaplari: { lessonId: number | null; dersGrupId: number | null; cevaplar: string }[]) => void;
+  onSubmit: (
+    dersCevaplari: {
+      lessonId: number | null;
+      dersGrupId: number | null;
+      /** B/C/D kitapçığında ders kimlikleri değişebilir; ad eşleştirmeyi güvene alır */
+      lessonName?: string | null;
+      cevaplar: string;
+    }[]
+  ) => void;
 };
 
 const PDF_ZOOM_CHIPS: { id: EdesisPdfZoom; label: string }[] = [
@@ -381,6 +389,7 @@ export default function EdesisOpticalSheet({
       filled.map(({ lesson, cevaplar }) => ({
         lessonId: lesson.lessonId,
         dersGrupId: lesson.dersGrupId,
+        lessonName: lesson.lessonName ?? null,
         cevaplar
       }))
     );

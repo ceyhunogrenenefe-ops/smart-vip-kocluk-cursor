@@ -3017,23 +3017,16 @@ export function matchIncomingToBookletLessons(bookletLessons, incoming) {
   const passes = [
     (l) => (d) => Number(d.lessonId) === Number(l.lessonId) && Number(d.dersGrupId) === Number(l.dersGrupId),
     (l) => (d) => Number(d.lessonId) === Number(l.lessonId) && len(d) === l.questionCount,
-    (l) => (d) => Boolean(l.lessonName) && norm(d.lessonName) === norm(l.lessonName) && len(d) === l.questionCount
+    (l) => (d) => Boolean(l.lessonName) && norm(d.lessonName) === norm(l.lessonName) && len(d) === l.questionCount,
+    // Uzunluğu uyan ilk kullanılmamış cevap (B kitapçığında ders sırası A'dan farklı olabilir)
+    (l) => (d) => len(d) === l.questionCount,
+    // Son çare: yalnız ders adı. Uzunluk tutmuyorsa handler hangi derste sorun
+    // olduğunu söyleyebilsin diye eşleştirilir; sessizce boş bırakılmaz.
+    (l) => (d) => Boolean(l.lessonName) && norm(d.lessonName) === norm(l.lessonName)
   ];
   for (const pass of passes) {
     for (const r of result) {
       if (!r.hit) r.hit = take(pass(r.lesson));
-    }
-  }
-  // Sıra eşleşmesi: kalan dersler, kalan cevaplarla aynı sırada ve aynı uzunlukta
-  const leftover = list.filter((d) => !used.has(d.__i));
-  let li = 0;
-  for (const r of result) {
-    if (r.hit) continue;
-    while (li < leftover.length && len(leftover[li]) !== r.lesson.questionCount) li += 1;
-    if (li < leftover.length) {
-      r.hit = leftover[li];
-      used.add(leftover[li].__i);
-      li += 1;
     }
   }
   return result;
