@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { nextDeliveryStatus, summarizeCampaignMessages } from './crm-delivery-status.js';
+import { computeCrmDailyReport, formatCrmDailyReportText } from './crm-daily-report.js';
 
 test('nextDeliveryStatus yalnız ileri taşır, failed son sözdür', () => {
   assert.equal(nextDeliveryStatus('accepted', 'sent'), 'sent');
@@ -97,4 +98,46 @@ test('computeCrmDailyReport + metin', async () => {
   assert.match(text, /Ayşe: 1 kişi · 2 mesaj/);
   assert.match(text, /3 kişiye gönderildi · Ulaştı 1 \(okundu 0\) · Beklemede 1 · Hatalı 1/);
   assert.match(text, /gunluk-rapor\?tarih=2026-09-16/);
+});
+
+test('Instagram / Facebook yorumları gelen mesaj sayısına girmez', () => {
+  const day = '2026-09-24';
+  const at = `${day}T10:00:00+03:00`;
+  const p = computeCrmDailyReport({
+    date: day,
+    leads: [],
+    users: [],
+    inboundMessages: [
+      { channel: 'instagram', message_type: 'text', occurred_at: at },
+      { channel: 'instagram', message_type: 'comment', occurred_at: at },
+      { channel: 'instagram', message_type: 'comment', occurred_at: at },
+      { channel: 'facebook', message_type: 'comment', occurred_at: at },
+      { channel: 'whatsapp', message_type: 'text', occurred_at: at }
+    ]
+  });
+  assert.equal(p.inbound_messages.total, 2, 'yalnız gerçek mesajlar sayılır');
+  assert.equal(p.inbound_messages.instagram, 1);
+  assert.equal(p.inbound_messages.whatsapp, 1);
+  assert.equal(p.comments.total, 3);
+  assert.equal(p.comments.instagram, 2);
+  assert.equal(p.comments.facebook, 1);
+});
+
+test('yorum varsa rapor metninde ayrı satır çıkar', () => {
+  const day = '2026-09-24';
+  const p = computeCrmDailyReport({
+    date: day,
+    leads: [],
+    users: [],
+    inboundMessages: [{ channel: 'instagram', message_type: 'comment', occurred_at: `${day}T10:00:00+03:00` }]
+  });
+  const text = formatCrmDailyReportText(p);
+  assert.match(text, /Yorum: 1/);
+  assert.match(text, /mesaj sayısına dahil değil/);
+});
+
+test('yorum yoksa metinde yorum satırı olmaz', () => {
+  const day = '2026-09-24';
+  const p = computeCrmDailyReport({ date: day, leads: [], users: [], inboundMessages: [] });
+  assert.doesNotMatch(formatCrmDailyReportText(p), /Yorum:/);
 });

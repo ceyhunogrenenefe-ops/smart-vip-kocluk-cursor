@@ -27,6 +27,10 @@ import {
 } from '../api/_lib/meta-template-create.js';
 import { diagnoseCrmInbox, ensureCrmInboxSchema, probeFacebookChannelSupport, FACEBOOK_CHANNEL_REPAIR_SQL } from '../api/_lib/crm-inbox-schema.js';
 import { listRecentMetaWebhookLogs } from '../api/_lib/meta-webhook-logs.js';
+import {
+  markConversationMessagesDeleted,
+  markSingleMessageDeleted
+} from '../api/_lib/crm-message-purge.js';
 import { analyzeInstagramDmDelivery } from '../api/_lib/meta-webhook-ingress-diag.js';
 import { PAGE_WEBHOOK_FIELDS, INSTAGRAM_APP_WEBHOOK_FIELDS } from '../api/_lib/meta-social-inbound.js';
 import { ensureMetaInboundDelivery, publicInboundStatus } from '../api/_lib/meta-inbound-ensure.js';
@@ -1252,9 +1256,13 @@ export default async function handler(req, res) {
       if (institutionId && conv.institution_id && String(conv.institution_id) !== String(institutionId)) {
         return res.status(403).json({ error: 'forbidden' });
       }
+      // Rapor kayıtları ayrı tabloda; sohbet silinmeden önce işaretlenir
+      const purged = await markConversationMessagesDeleted(conversationId);
       const { error: delErr } = await supabaseAdmin.from('crm_conversations').delete().eq('id', conversationId);
       if (delErr) throw delErr;
-      return res.status(200).json({ ok: true, data: { deleted_id: conversationId } });
+      return res
+        .status(200)
+        .json({ ok: true, data: { deleted_id: conversationId, report_rows_removed: purged.marked } });
     }
 
     if (op === 'delete_message' && req.method === 'POST') {
@@ -1262,7 +1270,7 @@ export default async function handler(req, res) {
       if (!messageId) return res.status(400).json({ error: 'message_id_required' });
       const { data: msg, error: mErr } = await supabaseAdmin
         .from('crm_messages')
-        .select('id, conversation_id, body, created_at')
+        .select('id, conversation_id, body, created_at, message_id')
         .eq('id', messageId)
         .maybeSingle();
       if (mErr) throw mErr;
@@ -1275,6 +1283,8 @@ export default async function handler(req, res) {
       if (!(await assertConversationAccess(conv, actor, roleSet, assignment))) {
         return res.status(403).json({ error: 'forbidden' });
       }
+      // Silinen mesaj günlük rapora da girmesin
+      await markSingleMessageDeleted(msg);
       const { error: delErr } = await supabaseAdmin.from('crm_messages').delete().eq('id', messageId);
       if (delErr) throw delErr;
 

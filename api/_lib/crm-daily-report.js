@@ -69,10 +69,20 @@ export function computeCrmDailyReport({
     sources.total += 1;
   }
 
+  /**
+   * Gelen mesaj = adayın yazdığı DM. Instagram / Facebook YORUMLARI ayrı sayılır:
+   * yorum bir görüşme başlatmaz, toplamı şişirip raporu yanıltıyordu.
+   */
   const inbound = { whatsapp: 0, instagram: 0, facebook: 0, total: 0 };
+  const comments = { instagram: 0, facebook: 0, total: 0 };
   for (const m of inboundMessages) {
     if (!inRange(m.occurred_at, startMs, endMs)) continue;
     const ch = String(m.channel || '').toLowerCase();
+    if (String(m.message_type || '').toLowerCase() === 'comment') {
+      if (ch in comments) comments[ch] += 1;
+      comments.total += 1;
+      continue;
+    }
     if (ch in inbound) inbound[ch] += 1;
     inbound.total += 1;
   }
@@ -191,6 +201,7 @@ export function computeCrmDailyReport({
     institution_name: institutionName,
     sources,
     inbound_messages: inbound,
+    comments,
     waiting_reply: Number(waitingConversations) || 0,
     conversations: { contacted: contactedAll.size, outbound_messages: outboundCount, notes },
     representatives,
@@ -233,6 +244,9 @@ export function formatCrmDailyReportText(p) {
     `📥 *Gelen başvuru: ${s.total}*`,
     `WhatsApp ${s.whatsapp} · Instagram ${s.instagram} · Web sitesi ${s.website} · Facebook ${s.facebook}${s.other ? ` · Diğer ${s.other}` : ''}`,
     `💬 Gelen mesaj: ${p.inbound_messages.total} (WA ${p.inbound_messages.whatsapp} · IG ${p.inbound_messages.instagram} · FB ${p.inbound_messages.facebook})`,
+    ...(p.comments?.total
+      ? [`💭 Yorum: ${p.comments.total} (IG ${p.comments.instagram} · FB ${p.comments.facebook}) — mesaj sayısına dahil değil`]
+      : []),
     `⏳ Yanıt bekleyen görüşme: ${p.waiting_reply}`,
     '',
     `🗣️ *Görüşmeler*`,
@@ -308,10 +322,12 @@ export async function buildCrmDailyReport(institutionId, date) {
     safeSelect(
       supabaseAdmin
         .from('registration_channel_messages')
-        .select('id, lead_id, channel, direction, occurred_at, payload, campaign_id')
+        .select('id, lead_id, channel, direction, occurred_at, payload, campaign_id, message_type')
         .eq('institution_id', institutionId)
         .gte('occurred_at', start)
         .lte('occurred_at', end)
+        // CRM'den silinen mesajlar rapora girmez
+        .is('deleted_at', null)
         .limit(10000)
     ),
     safeSelect(
