@@ -33,6 +33,7 @@ import {
 } from '../api/_lib/crm-message-purge.js';
 import { analyzeInstagramDmDelivery } from '../api/_lib/meta-webhook-ingress-diag.js';
 import { PAGE_WEBHOOK_FIELDS, INSTAGRAM_APP_WEBHOOK_FIELDS } from '../api/_lib/meta-social-inbound.js';
+import { PLATFORM_PRIMARY_INSTITUTION_ID as PLATFORM_FALLBACK_INSTITUTION_ID } from '../api/_lib/quota-enforce.js';
 import { ensureMetaInboundDelivery, publicInboundStatus } from '../api/_lib/meta-inbound-ensure.js';
 import {
   bindMetaSocialFromPageToken,
@@ -489,6 +490,44 @@ export default async function handler(req, res) {
     }
 
     /** Kurumun kendi Meta bağlantısı (platform dışı kurumlar kendi hesabını bağlar) */
+    /** Öğretmen başvurusu yanıtı için seçilen Meta onaylı şablon (kurum başına). */
+    if (op === 'teacher_template' && req.method !== 'POST') {
+      const { data } = await supabaseAdmin
+        .from('crm_settings')
+        .select('teacher_application_template, teacher_application_template_lang')
+        .eq('institution_id', institutionId || PLATFORM_FALLBACK_INSTITUTION_ID)
+        .maybeSingle();
+      return res.status(200).json({
+        data: {
+          template_name: data?.teacher_application_template || null,
+          language: data?.teacher_application_template_lang || 'tr'
+        }
+      });
+    }
+
+    if (op === 'save_teacher_template' && req.method === 'POST') {
+      if (!isAdmin) {
+        return res.status(403).json({ error: 'forbidden', hint: 'Şablonu yalnızca yönetici seçer.' });
+      }
+      const templateName = String(body.template_name || '').trim();
+      const language = String(body.language || 'tr').trim() || 'tr';
+      const instId = institutionId || PLATFORM_FALLBACK_INSTITUTION_ID;
+      const { error } = await supabaseAdmin.from('crm_settings').upsert(
+        {
+          institution_id: instId,
+          teacher_application_template: templateName || null,
+          teacher_application_template_lang: templateName ? language : null,
+          updated_by: actor.sub,
+          updated_at: new Date().toISOString()
+        },
+        { onConflict: 'institution_id' }
+      );
+      if (error) throw error;
+      return res
+        .status(200)
+        .json({ ok: true, data: { template_name: templateName || null, language } });
+    }
+
     if (op === 'meta_connection') {
       const { describeMetaConnection } = await import('../api/_lib/crm-meta-connection.js');
       const data = await describeMetaConnection(institutionId);

@@ -17,6 +17,7 @@ import {
 import { toast } from 'sonner';
 import { useAuth } from '../../context/AuthContext';
 import { userRoleTags } from '../../config/rolePermissions';
+import CrmTeacherApplicationBar from '../../components/crm/CrmTeacherApplicationBar';
 import {
   crmAddNote,
   crmAssignConversation,
@@ -1293,6 +1294,16 @@ export default function CrmInboxPage() {
                 </button>
               </div>
             </div>
+
+            {selected.metadata?.teacher_application ? (
+              <div className="mb-3">
+                <CrmTeacherApplicationBar
+                  conversationId={selected.id}
+                  isAdmin={isAdmin}
+                  onSent={() => void loadMessages(selected.id)}
+                />
+              </div>
+            ) : null}
 
             <div>
               <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">

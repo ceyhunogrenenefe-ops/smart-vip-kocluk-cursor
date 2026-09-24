@@ -59,12 +59,15 @@ export default async function handler(req, res) {
   }
 
   const roleSet = await actorRoleSet(actor);
-  if (!actorIsAdminLike(actor, roleSet)) {
-    return res.status(403).json({ error: 'admin_only' });
-  }
-
   const body = req.method === 'GET' ? {} : parseBody(req);
   const op = String(req.query?.op || body.op || '').trim();
+
+  /** Temsilci ekip listesini görebilir; diğer her işlem yöneticiye ait. */
+  const AGENT_READABLE_OPS = new Set(['list_agents', 'list']);
+  const agentMayRead = AGENT_READABLE_OPS.has(op) && req.method === 'GET' && roleSet.has('crm_agent');
+  if (!actorIsAdminLike(actor, roleSet) && !agentMayRead) {
+    return res.status(403).json({ error: 'admin_only' });
+  }
 
   try {
     if (op === 'create_crm_user' && req.method === 'POST') {
