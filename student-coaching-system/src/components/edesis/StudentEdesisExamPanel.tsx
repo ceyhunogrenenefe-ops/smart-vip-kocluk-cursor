@@ -390,10 +390,26 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
           : (r.items || []).filter(
               (row) => String(row.kitapcikTuru || '').trim().toUpperCase() === code
             );
-        return {
-          kitapcikTuru: code,
-          lessons: own.length ? own : sharedLessons
-        };
+        if (own.length) return { kitapcikTuru: code, lessons: own };
+        /**
+         * Kitapçığın kendi satırı yoksa sunucunun gönderimde beklediği düzeni kullan.
+         * Eskiden her zaman A düzeni (sharedLessons) gösteriliyordu; B/C/D'de ders
+         * sayısı veya soru dağılımı farklıysa gönderim 400 ile reddediliyordu.
+         */
+        const serverLayout = (r.bookletLessonLayouts || {})[code] || [];
+        if (serverLayout.length) {
+          return {
+            kitapcikTuru: code,
+            lessons: serverLayout.map((l) => ({
+              kitapcikTuru: code,
+              lessonId: l.lessonId,
+              lessonName: l.lessonName || '',
+              dersGrupId: l.dersGrupId,
+              questionCount: l.questionCount
+            }))
+          };
+        }
+        return { kitapcikTuru: code, lessons: sharedLessons };
       });
       const nameType = `${exam.name || ''} ${exam.examType || ''} ${r.examTitle || ''} ${r.examType || ''}`;
       const family =
@@ -433,7 +449,12 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
   };
 
   const submitAnswers = async (
-    dersCevaplari: { lessonId: number | null; dersGrupId: number | null; cevaplar: string }[]
+    dersCevaplari: {
+      lessonId: number | null;
+      dersGrupId: number | null;
+      lessonName?: string | null;
+      cevaplar: string;
+    }[]
   ) => {
     if (!activeExam || !kitapcik) return;
     if (!activeLessons.length) {
@@ -492,7 +513,8 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
         }
       }
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Cevaplar gönderilemedi');
+      // Gönderim hatası kısa toast'ta kaybolmasın: mesaj uzun süre ekranda kalsın
+      toast.error(e instanceof Error ? e.message : 'Cevaplar gönderilemedi', { duration: 15000 });
     } finally {
       setSubmitBusy(false);
     }

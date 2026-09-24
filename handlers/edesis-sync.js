@@ -2146,6 +2146,26 @@ export default async function handler(req, res) {
         remainingSeconds: structure.remainingSeconds || 0,
         examTitle: structure.examTitle || '',
         examType: structure.examType || '',
+        /**
+         * Tanı: gönderim sırasında her kitapçık için beklenen ders düzeni.
+         * Optikteki düzenle karşılaştırılır; uyuşmazlık "answer_length_mismatch" üretir.
+         */
+        bookletLessonLayouts: (structure.availableBookletCodes || listEdesisBookletCodes(structure)).reduce(
+          (acc, code) => {
+            try {
+              acc[code] = pickEdesisBookletLessons(structure, code).map((l) => ({
+                lessonName: l.lessonName || null,
+                lessonId: l.lessonId,
+                dersGrupId: l.dersGrupId,
+                questionCount: l.questionCount
+              }));
+            } catch {
+              acc[code] = [];
+            }
+            return acc;
+          },
+          {}
+        ),
         deployMarker: EDESIS_PDF_DURATION_MARKER
       });
     }
@@ -2672,10 +2692,10 @@ export default async function handler(req, res) {
       if (!allowed.ok) {
         return res.status(400).json({
           error: 'invalid_kitapcik',
-          message: `Kitapçık türü için cevap anahtarı bulunamadı. KitapcikTuru=${kitapcikNorm}`,
+          message: `${kitapcikNorm} kitapçığı bu denemede tanımlı değil.`,
           hint: allowed.available.length
-            ? `Bu sınavda kayıtlı kitapçıklar: ${allowed.available.join(', ')}`
-            : 'Edesis’te bu deneme için cevap anahtarı yok',
+            ? `Bu denemede yalnız ${allowed.available.join(', ')} kitapçığı var. Elinizdeki kitapçığı kontrol edip yeniden seçin.`
+            : 'Edesis’te bu deneme için cevap anahtarı yok — koçunuza bildirin.',
           availableBookletCodes: allowed.available,
           answerKeyBookletCodes: structure.answerKeyBookletCodes || []
         });
@@ -2711,13 +2731,35 @@ export default async function handler(req, res) {
       for (const { lesson, hit } of matchedLessons) {
         const cevaplar = String(hit?.cevaplar ?? '');
         if (cevaplar.length !== lesson.questionCount) {
+          // Tanı: kitapçığın beklediği ders düzeni ile optikten gelen düzen
+          const expectedLayout = bookletLessons.map((l) => ({
+            lessonName: l.lessonName || null,
+            lessonId: l.lessonId,
+            dersGrupId: l.dersGrupId,
+            questionCount: l.questionCount
+          }));
+          const incomingLayout = incoming.map((d) => ({
+            lessonName: d?.lessonName || null,
+            lessonId: d?.lessonId ?? null,
+            dersGrupId: d?.dersGrupId ?? null,
+            length: String(d?.cevaplar ?? '').length
+          }));
           return res.status(400).json({
             error: 'answer_length_mismatch',
-            hint: `${lesson.lessonName || 'Ders'} için ${lesson.questionCount} cevap bekleniyor, ${cevaplar.length} geldi`,
+            message: hit
+              ? `${lesson.lessonName || 'Ders'}: ${lesson.questionCount} cevap bekleniyor, ${cevaplar.length} geldi.`
+              : `${lesson.lessonName || 'Ders'} dersi ${kitapcikNorm} kitapçığında eşleşmedi.`,
+            hint: hit
+              ? `${lesson.lessonName || 'Ders'} için ${lesson.questionCount} cevap bekleniyor, ${cevaplar.length} geldi. Optik formu kapatıp yeniden açın; sorun sürerse bu denemenin ${kitapcikNorm} kitapçığı Edesis'te A'dan farklı tanımlanmış demektir.`
+              : `${kitapcikNorm} kitapçığında "${lesson.lessonName || 'ders'}" için optikten cevap gelmedi. Bu denemede ${kitapcikNorm} kitapçığının ders düzeni A'dan farklı.`,
+            kitapcikTuru: kitapcikNorm,
             lessonId: lesson.lessonId,
             dersGrupId: lesson.dersGrupId,
             expected: lesson.questionCount,
-            actual: cevaplar.length
+            actual: cevaplar.length,
+            matched: Boolean(hit),
+            expectedLayout,
+            incomingLayout
           });
         }
         dersCevaplari.push({
