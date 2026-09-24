@@ -3,6 +3,7 @@ import { CalendarDays, Clock, ListChecks, Loader2, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { useApp } from '../../context/AppContext';
 import { createQuickHomework } from './homeworkApi';
+import { levelCandidates } from './classLevel';
 
 const field =
   'mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-amber-500 focus:outline-none';
@@ -41,13 +42,25 @@ export default function HomeworkQuickModal({
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
 
-  /** Sınıfın dersleri ve her dersin konuları */
+  /**
+   * Sınıfın dersleri ve her dersin konuları.
+   * getTopicsByClass { regular, tytSubjects, aytSubjects } döndürür; üçü birleştirilir.
+   * 8. sınıf konuları havuzda LGS anahtarında durduğu için iki yazım da denenir.
+   */
   const subjectTopics = useMemo(() => {
-    try {
-      return getTopicsByClass(classLevel ?? null) || {};
-    } catch {
-      return {};
+    const collect = (level: string | number): Record<string, string[]> => {
+      try {
+        const r = getTopicsByClass(level);
+        return { ...(r?.regular || {}), ...(r?.tytSubjects || {}), ...(r?.aytSubjects || {}) };
+      } catch {
+        return {};
+      }
+    };
+    for (const level of levelCandidates(classLevel)) {
+      const map = collect(level);
+      if (Object.keys(map).some((k) => (map[k] || []).length > 0)) return map;
     }
+    return {};
   }, [getTopicsByClass, classLevel]);
 
   const subjects = useMemo(
