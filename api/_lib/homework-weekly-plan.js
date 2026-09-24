@@ -215,8 +215,14 @@ export async function syncHomeworkToCoachGoals({ hw, lessonRow = null, classStud
   const title = goalTitle(hw);
   const givenAt = String(hw?.created_at || '').slice(0, 10) || new Date().toISOString().slice(0, 10);
   const dueDate = String(hw?.due_date || '').slice(0, 10) || null;
+  /**
+   * Soru hedefi verilmeyen (eski form) ödevler "1 ödev" olarak görünür;
+   * "1 soru" yazması yanıltıcı olurdu.
+   */
   const target = Number(hw?.target_question_count);
-  const targetQuantity = Number.isFinite(target) && target > 0 ? target : 1;
+  const hasQuestionTarget = Number.isFinite(target) && target > 0;
+  const targetQuantity = hasQuestionTarget ? target : 1;
+  const quantityUnit = hasQuestionTarget ? 'soru' : 'ödev';
   const now = new Date().toISOString();
 
   let created = 0;
@@ -236,7 +242,7 @@ export async function syncHomeworkToCoachGoals({ hw, lessonRow = null, classStud
         subject,
         title,
         target_quantity: targetQuantity,
-        quantity_unit: 'soru',
+        quantity_unit: quantityUnit,
         week_start_date: weekStartDate(givenAt),
         goal_start_date: givenAt,
         goal_end_date: dueDate,
