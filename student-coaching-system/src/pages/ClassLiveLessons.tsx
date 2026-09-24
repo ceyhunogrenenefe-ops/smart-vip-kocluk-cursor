@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useHomeworkModule } from '../features/homework/useHomeworkModule';
+import HomeworkQuickModal from '../features/homework/HomeworkQuickModal';
+import HomeworkCheckModal from '../features/homework/HomeworkCheckModal';
 import { useAuth } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
 import { apiFetch } from '../lib/session';
@@ -360,6 +362,8 @@ export default function ClassLiveLessons() {
   const canMarkAttendance = canManageSlots && !isStudentView && Boolean(selectedClassId);
   // Ödev modülü yalnız platform dışı kurumlarda açık
   const { enabled: homeworkModuleEnabled } = useHomeworkModule();
+  const [homeworkModalClassId, setHomeworkModalClassId] = useState('');
+  const [homeworkCheckClassId, setHomeworkCheckClassId] = useState('');
 
   useEffect(() => {
     if (!isStudentView || !resolvedStudentId) return;
@@ -894,9 +898,11 @@ export default function ClassLiveLessons() {
   useEffect(() => {
     if (isStudentView) return;
     if (consumePostLessonHomeworkPrompt()) {
+      // Ödev modülü açıksa yönlendirme yerine sade ödev penceresi açılır
+      if (homeworkModuleEnabled && selectedClassId) setHomeworkModalClassId(selectedClassId);
       setPostLessonHwOpen(true);
     }
-  }, [isStudentView]);
+  }, [isStudentView, homeworkModuleEnabled, selectedClassId]);
 
   const copySessionGuestLink = useCallback(
     async (s: SessionRow) => {
@@ -2057,6 +2063,26 @@ export default function ClassLiveLessons() {
         />
       ) : null}
 
+      {selectedClass && canManageSlots && homeworkModuleEnabled ? (
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-amber-200 bg-amber-50/60 p-3">
+          <span className="text-sm font-medium text-amber-900">Ödev — {selectedClass.name}</span>
+          <button
+            type="button"
+            onClick={() => setHomeworkModalClassId(selectedClass.id)}
+            className="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-700"
+          >
+            Ödev ver
+          </button>
+          <button
+            type="button"
+            onClick={() => setHomeworkCheckClassId(selectedClass.id)}
+            className="rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-semibold text-amber-900 hover:bg-amber-100"
+          >
+            Kontrol
+          </button>
+        </div>
+      ) : null}
+
       {selectedClass && canManageSlots && (
         <div
           className={`bg-white rounded-xl border border-slate-200 p-4 space-y-3${showMobileCalendar && !isStudentView ? ' order-3' : ''}`}
@@ -2612,15 +2638,26 @@ export default function ClassLiveLessons() {
                                       Yoklama
                                     </button>
                                   ) : null}
-                                  {/* Ders bitince tek tık: ödev formu açık gelir */}
+                                  {/* Ders bitince tek tık: sade ödev penceresi */}
                                   {homeworkModuleEnabled && s.status === 'completed' ? (
-                                    <Link
-                                      to="/edu-panel?create_homework=1"
-                                      title="Bu dersin ardından ödev ver"
-                                      className="inline-flex items-center gap-1 rounded-lg border border-amber-300 bg-amber-50 px-2 py-1 text-[10px] font-semibold text-amber-900 hover:bg-amber-100"
-                                    >
-                                      Ödev Ver
-                                    </Link>
+                                    <>
+                                      <button
+                                        type="button"
+                                        title="Bu dersin ardından ödev ver"
+                                        onClick={() => setHomeworkModalClassId(s.class_id || selectedClassId)}
+                                        className="inline-flex items-center gap-1 rounded-lg border border-amber-300 bg-amber-50 px-2 py-1 text-[10px] font-semibold text-amber-900 hover:bg-amber-100"
+                                      >
+                                        Ödev Ver
+                                      </button>
+                                      <button
+                                        type="button"
+                                        title="Kim yaptı, kim yapmadı"
+                                        onClick={() => setHomeworkCheckClassId(s.class_id || selectedClassId)}
+                                        className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-2 py-1 text-[10px] font-semibold text-slate-700 hover:bg-slate-50"
+                                      >
+                                        Kontrol
+                                      </button>
+                                    </>
                                   ) : null}
                                   {canManageSlots && s.status !== 'cancelled' ? (
                                     <button
@@ -3291,10 +3328,30 @@ export default function ClassLiveLessons() {
           }}
         />
       ) : null}
-      <EduPostLessonHomeworkModal open={postLessonHwOpen} onClose={() => setPostLessonHwOpen(false)} />
+      <EduPostLessonHomeworkModal
+        open={postLessonHwOpen && !homeworkModuleEnabled}
+        onClose={() => setPostLessonHwOpen(false)}
+      />
         </>
       )}
       {recordingAlertModal}
+      {homeworkModuleEnabled ? (
+        <>
+          <HomeworkQuickModal
+            open={Boolean(homeworkModalClassId)}
+            classId={homeworkModalClassId}
+            className={classes.find((c) => c.id === homeworkModalClassId)?.name || null}
+            classLevel={classes.find((c) => c.id === homeworkModalClassId)?.class_level || null}
+            onClose={() => setHomeworkModalClassId('')}
+          />
+          <HomeworkCheckModal
+            open={Boolean(homeworkCheckClassId)}
+            classId={homeworkCheckClassId}
+            className={classes.find((c) => c.id === homeworkCheckClassId)?.name || null}
+            onClose={() => setHomeworkCheckClassId('')}
+          />
+        </>
+      ) : null}
     </div>
   );
 }

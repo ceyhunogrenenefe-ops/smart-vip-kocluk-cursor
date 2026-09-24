@@ -3222,6 +3222,224 @@ export default async function handler(req, res) {
       return res.status(200).json({ data: enriched });
     }
 
+    /**
+     * Sade ödev verme: sınıf + ders + konu + hedefler. Ders satırı arka planda
+     * kurulur, ödev yayımlanır ve öğrencilerin haftalık planına düşer.
+     */
+    if (resource === 'quick-homework' && req.method === 'POST') {
+      if (!canTeach(tags)) return res.status(403).json({ error: 'forbidden' });
+      const body = parseBody(req);
+      const classId = String(body.class_id || '').trim();
+      const subject = normalizeHomeworkText(body.subject, 120);
+      const topic = normalizeHomeworkText(body.topic, 300);
+      if (!classId) return res.status(400).json({ error: 'class_id_required' });
+      if (!subject) return res.status(400).json({ error: 'subject_required' });
+
+      const { data: cls } = await supabaseAdmin
+        .from('classes')
+        .select('id, name, institution_id')
+        .eq('id', classId)
+        .maybeSingle();
+      if (!cls) return res.status(404).json({ error: 'class_not_found' });
+      const institutionId = cls.institution_id ? String(cls.institution_id) : '';
+      if (!(await assertHomeworkModule(res, institutionId))) return undefined;
+      if (!(await teacherCanAccessClass(actor, classId, tags))) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+
+      const today = getIstanbulDateString();
+      const dueDate = String(body.due_date || '').slice(0, 10) || today;
+      const lessonDate = dueDate < today ? dueDate : today;
+      const title = topic ? `${subject} — ${topic}` : subject;
+
+      // Aynı gün, aynı sınıf ve ders için satır varsa yeniden kullanılır
+      const { data: existingRows } = await supabaseAdmin
+        .from('edu_lesson_rows')
+        .select('*')
+        .eq('class_id', classId)
+        .eq('teacher_user_id', String(actor.sub))
+        .eq('subject_name', subject)
+        .eq('lesson_date', lessonDate)
+        .limit(1);
+      let lessonRow = (existingRows || [])[0] || null;
+
+      if (!lessonRow) {
+        const insertRow = {
+          teacher_user_id: String(actor.sub),
+          class_id: classId,
+          title: topic || subject,
+          subject_name: subject,
+          lesson_date: lessonDate,
+          status: 'active'
+        };
+        if (institutionId) insertRow.institution_id = institutionId;
+        const { data: created, error: rowErr } = await supabaseAdmin
+          .from('edu_lesson_rows')
+          .insert(insertRow)
+          .select()
+          .single();
+        if (rowErr) throw rowErr;
+        lessonRow = created;
+      }
+
+      const insertHw = {
+        lesson_row_id: lessonRow.id,
+        title,
+        description: normalizeHomeworkText(body.description, 1000),
+        due_date: dueDate,
+        status: 'published',
+        assignee_mode: 'class',
+        assignee_student_ids: [],
+        institution_id: institutionId || null,
+        subject_name: subject,
+        topic_label: topic,
+        topic_key: normalizeHomeworkText(body.topic_key, 200) || topic,
+        target_question_count: normalizeHomeworkTarget(body.target_question_count, 1000),
+        target_minutes: normalizeHomeworkTarget(body.target_minutes, 600),
+        resource_url: normalizeHomeworkText(body.resource_url, 1000),
+        created_by: String(actor.sub || '') || null
+      };
+      const { data: hw, error: hwErr } = await supabaseAdmin
+        .from('edu_homework')
+        .insert(insertHw)
+        .select()
+        .single();
+      if (hwErr) throw hwErr;
+
+      const plan = await syncHomeworkPlanIfEnabled({ hw, lessonRow, actor, tags });
+      let notify = { notified: 0, skipped: 0 };
+      try {
+        notify = await notifyStudentsHomeworkPublished({
+          hw: normalizeHomeworkRow(hw),
+          lessonRow,
+          senderUserId: actor.sub,
+          senderName: actor.name || actor.email || 'Öğretmen'
+        });
+      } catch (e) {
+        console.warn('[edu-panel] hizli odev bildirimi:', errorMessage(e));
+      }
+
+      return res.status(201).json({
+        data: { ...hw, class_name: cls.name || null },
+        plan,
+        notify
+      });
+    }
+
+    /** Kontrol ekranı: sınıfın ödevleri ve kimin yapıp yapmadığı. */
+    if (resource === 'class-homework-overview' && req.method === 'GET') {
+      if (!canTeach(tags)) return res.status(403).json({ error: 'forbidden' });
+      const classId = String(req.query?.class_id || '').trim();
+      if (!classId) return res.status(400).json({ error: 'class_id_required' });
+      const { data: cls } = await supabaseAdmin
+        .from('classes')
+        .select('id, name, institution_id')
+        .eq('id', classId)
+        .maybeSingle();
+      if (!cls) return res.status(404).json({ error: 'class_not_found' });
+      if (!(await assertHomeworkModule(res, cls.institution_id ? String(cls.institution_id) : ''))) {
+        return undefined;
+      }
+      if (!(await teacherCanAccessClass(actor, classId, tags))) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+
+      const { data: rows } = await supabaseAdmin
+        .from('edu_lesson_rows')
+        .select('id')
+        .eq('class_id', classId);
+      const rowIds = (rows || []).map((r) => r.id);
+      if (!rowIds.length) {
+        return res
+          .status(200)
+          .json({ data: { class_name: cls.name || null, students: [], homework: [] } });
+      }
+
+      const { data: hwRows } = await supabaseAdmin
+        .from('edu_homework')
+        .select('*')
+        .in('lesson_row_id', rowIds)
+        .eq('status', 'published')
+        .order('due_date', { ascending: false })
+        .limit(50);
+      const homework = hwRows || [];
+
+      const { data: links } = await supabaseAdmin
+        .from('class_students')
+        .select('student_id')
+        .eq('class_id', classId);
+      const studentIds = [...new Set((links || []).map((l) => String(l.student_id)).filter(Boolean))];
+      const { data: studentRows } = studentIds.length
+        ? await supabaseAdmin
+            .from('students')
+            .select('id, name, user_id, platform_user_id')
+            .in('id', studentIds)
+            .order('name')
+        : { data: [] };
+      const students = (studentRows || []).map((st) => ({
+        id: String(st.id),
+        name: st.name || 'Öğrenci',
+        user_id: studentUserIdFromStudent(st) || null
+      }));
+
+      const hwIds = homework.map((h) => h.id);
+      const { data: subs } = hwIds.length
+        ? await supabaseAdmin
+            .from('edu_homework_submissions')
+            .select(
+              'homework_id, student_id, student_user_id, submitted_at, solved_question_count, spent_minutes'
+            )
+            .in('homework_id', hwIds)
+        : { data: [] };
+
+      const byHomework = new Map();
+      for (const sub of subs || []) {
+        const list = byHomework.get(String(sub.homework_id)) || [];
+        list.push(sub);
+        byHomework.set(String(sub.homework_id), list);
+      }
+
+      const payload = homework.map((h) => {
+        const list = byHomework.get(String(h.id)) || [];
+        const doneStudentIds = new Set(list.map((x) => String(x.student_id || '')).filter(Boolean));
+        const doneUserIds = new Set(list.map((x) => String(x.student_user_id || '')).filter(Boolean));
+        const byStudent = new Map();
+        for (const sub of list) {
+          if (sub.student_id) byStudent.set(String(sub.student_id), sub);
+        }
+        const rosterStatus = students.map((st) => {
+          const done = doneStudentIds.has(st.id) || (st.user_id && doneUserIds.has(st.user_id));
+          const sub = byStudent.get(st.id) || null;
+          return {
+            id: st.id,
+            name: st.name,
+            done: Boolean(done),
+            submitted_at: sub?.submitted_at || null,
+            solved_question_count: sub?.solved_question_count ?? null,
+            spent_minutes: sub?.spent_minutes ?? null
+          };
+        });
+        const doneCount = rosterStatus.filter((r) => r.done).length;
+        return {
+          id: h.id,
+          title: h.title,
+          subject_name: h.subject_name,
+          topic_label: h.topic_label,
+          due_date: h.due_date,
+          target_question_count: h.target_question_count,
+          target_minutes: h.target_minutes,
+          created_at: h.created_at,
+          done_count: doneCount,
+          total_count: rosterStatus.length,
+          roster: rosterStatus
+        };
+      });
+
+      return res.status(200).json({
+        data: { class_name: cls.name || null, students, homework: payload }
+      });
+    }
+
     // Paylaşım bağlantısı: öğretmen ödeve tahmin edilemez bir anahtar basar.
     if (resource === 'homework-share' && req.method === 'POST') {
       if (!canTeach(tags)) return res.status(403).json({ error: 'forbidden' });

@@ -100,3 +100,62 @@ export function homeworkShareUrl(token: string): string {
   const origin = typeof window !== 'undefined' ? window.location.origin : '';
   return `${origin}/odev/${token}`;
 }
+
+/** Sade ödev verme: sınıf + ders + konu + hedefler. */
+export type QuickHomeworkPayload = {
+  class_id: string;
+  subject: string;
+  topic?: string;
+  topic_key?: string;
+  target_question_count?: number | null;
+  target_minutes?: number | null;
+  due_date?: string;
+  description?: string;
+  resource_url?: string;
+};
+
+export function createQuickHomework(payload: QuickHomeworkPayload) {
+  return request<{
+    data: { id: string; title: string; class_name: string | null };
+    plan: { created: number; updated: number; skipped: string | null } | null;
+    notify: { notified: number; skipped: number };
+  }>('/api/edu-panel?resource=quick-homework', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+}
+
+/** Kontrol ekranı: sınıfın ödevleri ve kimin yaptığı. */
+export type ClassHomeworkRosterRow = {
+  id: string;
+  name: string;
+  done: boolean;
+  submitted_at: string | null;
+  solved_question_count: number | null;
+  spent_minutes: number | null;
+};
+
+export type ClassHomeworkRow = {
+  id: string;
+  title: string;
+  subject_name: string | null;
+  topic_label: string | null;
+  due_date: string | null;
+  target_question_count: number | null;
+  target_minutes: number | null;
+  created_at: string | null;
+  done_count: number;
+  total_count: number;
+  roster: ClassHomeworkRosterRow[];
+};
+
+export function getClassHomeworkOverview(classId: string) {
+  return request<{
+    data: {
+      class_name: string | null;
+      students: Array<{ id: string; name: string; user_id: string | null }>;
+      homework: ClassHomeworkRow[];
+    };
+  }>(`/api/edu-panel?resource=class-homework-overview&class_id=${encodeURIComponent(classId)}`);
+}
