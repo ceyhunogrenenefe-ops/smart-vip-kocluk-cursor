@@ -336,6 +336,16 @@ export function WeeklyPlannerCalendar({
 
   const cellKey = (date: string, slot: PlannerTimeSlot) => `${date}|${slot.start}|${slot.end}`;
 
+  /** Görünen haftanın dışında kalan seçili hücre sayısı (seçim haftalar arası korunur). */
+  const selectedCellsOutsideWeek = useMemo(() => {
+    let n = 0;
+    for (const key of selectedCells) {
+      const date = key.split('|')[0] || '';
+      if (date < weekStartStr || date > weekEndStr) n += 1;
+    }
+    return n;
+  }, [selectedCells, weekStartStr, weekEndStr]);
+
   const toggleCellSelection = (date: string, slot: PlannerTimeSlot) => {
     const key = cellKey(date, slot);
     setSelectedCells((prev) => {
@@ -495,12 +505,22 @@ export function WeeklyPlannerCalendar({
     setNewGoalTitle('');
   }, [studentId]);
 
+  /** Öğrenci değişince seçim tamamen sıfırlanır (hücreler başka öğrenciye ait). */
   useEffect(() => {
     exitCellSelectMode();
     setPasteOpen(false);
     setPasteTargetIds(new Set());
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- reset when student/week changes
-  }, [studentId, weekStartStr]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reset when student changes
+  }, [studentId]);
+
+  /**
+   * Hafta değişince hücre seçimi KORUNUR: koç hedefi birden fazla haftaya yayılabilsin.
+   * Yalnız yapıştırma paneli kapanır (o panel görünen haftaya aittir).
+   */
+  useEffect(() => {
+    setPasteOpen(false);
+    setPasteTargetIds(new Set());
+  }, [weekStartStr]);
 
   useEffect(() => {
     const tick = () => {
@@ -941,6 +961,8 @@ export function WeeklyPlannerCalendar({
           toast.error('Seçili hücreler bu hedefin tarih aralığında değil');
           return;
         }
+        // Hedefin aralığı dışında kalan hücreler atlanır; koç sessizce kaybetmesin
+        const skippedCells = selectedCells.size - cells.length;
 
         const n = cells.length;
         const base = Math.floor(remaining / n);
@@ -964,7 +986,11 @@ export function WeeklyPlannerCalendar({
           });
         }
         await reload();
-        toast.success(`${cells.length} hücreye dağıtıldı`);
+        toast.success(
+          skippedCells > 0
+            ? `${cells.length} hücreye dağıtıldı · ${skippedCells} hücre hedefin tarih aralığı dışında kaldı`
+            : `${cells.length} hücreye dağıtıldı`
+        );
         clearCellSelection();
         setCellSelectMode(false);
       });
@@ -2330,8 +2356,14 @@ export function WeeklyPlannerCalendar({
             </p>
             {cellSelectMode ? (
               <div className="mb-3 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-[11px] text-indigo-950 dark:border-indigo-800 dark:bg-indigo-950/40 dark:text-indigo-100">
-                <strong>Hücre seçim modu:</strong> Takvimden hücrelere tıklayın ({selectedCells.size} seçili).
+                <strong>Hücre seçim modu:</strong> Takvimden hücrelere tıklayın ({selectedCells.size} seçili
+                {selectedCellsOutsideWeek > 0 ? `, ${selectedCellsOutsideWeek} tanesi başka haftada` : ''}).
                 Sonra hedef kartındaki <em>Seçili hücrelere dağıt</em> ile koç hedefini yerleştirin.
+                {selectedCellsOutsideWeek > 0 ? (
+                  <span className="mt-1 block">
+                    Hafta değiştirince seçimler durur; birkaç haftaya yayıp tek seferde dağıtabilirsiniz.
+                  </span>
+                ) : null}
                 <button
                   type="button"
                   onClick={exitCellSelectMode}
