@@ -18,13 +18,15 @@ import { classIdsForStudent } from '../api/_lib/student-teacher-scope.js';
 import { assertHomeworkModule, isHomeworkModuleEnabled } from '../api/_lib/homework-module.js';
 import {
   markHomeworkPlanCompleted,
+  removeHomeworkCoachGoals,
   removeHomeworkPlanEntries,
-  syncHomeworkToWeeklyPlan
+  syncHomeworkToCoachGoals
 } from '../api/_lib/homework-weekly-plan.js';
 
 /**
- * Ödevi haftalık plana yansıtır. Yalnız ödev modülü açık kurumlarda çalışır;
- * kapalıysa hiçbir şey yapmaz, böylece mevcut ödev akışı aynen sürer.
+ * Ödevi haftalık planın SOL paneline hedef kartı olarak koyar. Öğrenci kartı
+ * kendi programına sürükler; sistem hücreye yerleştirmez.
+ * Yalnız ödev modülü açık kurumlarda çalışır.
  */
 async function syncHomeworkPlanIfEnabled({ hw, lessonRow, actor, tags }) {
   try {
@@ -35,9 +37,9 @@ async function syncHomeworkPlanIfEnabled({ hw, lessonRow, actor, tags }) {
       const picked = await studentsForLessonRow(lessonRow, { actor, tags });
       classStudents = picked?.students || [];
     }
-    return await syncHomeworkToWeeklyPlan({ hw, lessonRow, classStudents });
+    return await syncHomeworkToCoachGoals({ hw, lessonRow, classStudents });
   } catch (e) {
-    console.warn('[edu-panel] ödev planı:', errorMessage(e));
+    console.warn('[edu-panel] ödev hedefi:', errorMessage(e));
     return null;
   }
 }
@@ -2702,6 +2704,7 @@ export default async function handler(req, res) {
         }
         await removeHomeworkPdfAttachment(hw);
         await removeHomeworkPlanEntries(hwId);
+        await removeHomeworkCoachGoals(hwId);
         await supabaseAdmin.from('edu_homework').delete().eq('id', hwId);
         return res.status(200).json({ ok: true });
       }
