@@ -47,3 +47,23 @@ export function findBlockingTeacherRow({ start, end, subject, ownClassId, rows, 
   }
   return null;
 }
+
+/**
+ * Haftalık şablon o gün ders olduğunu söylüyor ama bu TARİHTEKİ oturum iptal
+ * edilmişse gerçekte ders yoktur; yerine yenisi eklenebilmelidir.
+ *
+ * @param {object} args
+ * @param {{class_id?: string, start_time?: string, end_time?: string}} args.slot
+ * @param {Array<{class_id?: string, start_time?: string, end_time?: string}>} args.cancelledRows
+ * @returns {boolean} true = şablon engeli düşer
+ */
+export function slotFreedByCancelledSession({ slot, cancelledRows }) {
+  if (!slot) return false;
+  const slotClassId = String(slot.class_id || '').trim();
+  if (!slotClassId) return false;
+  return (cancelledRows || []).some(
+    (row) =>
+      String(row?.class_id || '').trim() === slotClassId &&
+      timeRangesOverlapHms(slot.start_time, slot.end_time, row?.start_time, row?.end_time)
+  );
+}

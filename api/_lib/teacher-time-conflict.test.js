@@ -1,72 +1,80 @@
-import { describe, it } from 'node:test';
+import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  subjectsMatchCombined,
+  findBlockingTeacherRow,
+  slotFreedByCancelledSession,
   teacherRowBlocksNewLesson,
-  findBlockingTeacherRow
+  timeRangesOverlapHms
 } from './teacher-time-conflict.js';
 
-describe('teacherRowBlocksNewLesson', () => {
-  const fen19 = { start: '19:00:00', end: '19:40:00', subject: 'FEN BİLİMLERİ', ownClassId: 'class-8c' };
+test('aynı sınıfta çakışan saat engellenir', () => {
+  const row = { id: 's1', class_id: 'c1', subject: 'TYT GEOMETRİ', start_time: '18:40:00', end_time: '19:20:00' };
+  assert.equal(
+    teacherRowBlocksNewLesson(
+      { start: '18:40:00', end: '19:20:00', subject: 'TYT GEOMETRİ', ownClassId: 'c1' },
+      row
+    ),
+    true
+  );
+});
 
-  it('allows 8C Fen when 8A already has Fen at the same time (combined class)', () => {
-    const blocks = teacherRowBlocksNewLesson(fen19, {
-      class_id: 'class-8a',
-      subject: 'FEN BİLİMLERİ',
-      start_time: '19:00:00',
-      end_time: '19:40:00'
-    });
-    assert.equal(blocks, false);
-  });
+test('farklı sınıfta aynı ders birleşik grup sayılır, engellenmez', () => {
+  const row = { id: 's1', class_id: 'c2', subject: 'FEN', start_time: '18:40:00', end_time: '19:20:00' };
+  assert.equal(
+    teacherRowBlocksNewLesson({ start: '18:40:00', end: '19:20:00', subject: 'Fen', ownClassId: 'c1' }, row),
+    false
+  );
+});
 
-  it('blocks Fen vs Matematik at the same time for the same teacher', () => {
-    const blocks = teacherRowBlocksNewLesson(fen19, {
-      class_id: 'class-8a',
-      subject: 'MATEMATİK',
-      start_time: '19:00:00',
-      end_time: '19:40:00'
-    });
-    assert.equal(blocks, true);
-  });
+test('saatler örtüşmüyorsa engellenmez', () => {
+  const row = { id: 's1', class_id: 'c1', subject: 'X', start_time: '19:30:00', end_time: '20:10:00' };
+  assert.equal(
+    teacherRowBlocksNewLesson({ start: '18:40:00', end: '19:20:00', subject: 'X', ownClassId: 'c1' }, row),
+    false
+  );
+});
 
-  it('blocks a duplicate in the same class', () => {
-    const blocks = teacherRowBlocksNewLesson(fen19, {
-      class_id: 'class-8c',
-      subject: 'FEN BİLİMLERİ',
-      start_time: '19:00:00',
-      end_time: '19:40:00'
-    });
-    assert.equal(blocks, true);
-  });
+test('hariç tutulan satır engellemez', () => {
+  const rows = [{ id: 's1', class_id: 'c1', subject: 'X', start_time: '18:40:00', end_time: '19:20:00' }];
+  assert.equal(
+    findBlockingTeacherRow({
+      start: '18:40:00',
+      end: '19:20:00',
+      subject: 'X',
+      ownClassId: 'c1',
+      rows,
+      excludeIds: ['s1']
+    }),
+    null
+  );
+});
 
-  it('does not treat a later slot as overlap', () => {
-    const blocks = teacherRowBlocksNewLesson(fen19, {
-      class_id: 'class-8a',
-      subject: 'MATEMATİK',
-      start_time: '19:50:00',
-      end_time: '20:30:00'
-    });
-    assert.equal(blocks, false);
-  });
+test('saat aralığı örtüşmesi sınırlarda kapalı', () => {
+  assert.equal(timeRangesOverlapHms('18:40:00', '19:20:00', '19:20:00', '20:00:00'), false);
+  assert.equal(timeRangesOverlapHms('18:40:00', '19:20:00', '19:00:00', '20:00:00'), true);
+});
 
-  it('matches Turkish subject casing', () => {
-    assert.equal(subjectsMatchCombined('Fen Bilimleri', 'FEN BİLİMLERİ'), true);
-  });
+test('iptal edilmiş oturum aynı sınıf ve saatteyse şablon engeli düşer', () => {
+  const slot = { class_id: 'c1', start_time: '18:40:00', end_time: '19:20:00' };
+  const cancelled = [{ class_id: 'c1', start_time: '18:40:00', end_time: '19:20:00' }];
+  assert.equal(slotFreedByCancelledSession({ slot, cancelledRows: cancelled }), true);
+});
 
-  it('findBlockingTeacherRow skips excluded ids', () => {
-    const hit = findBlockingTeacherRow({
-      ...fen19,
-      rows: [
-        {
-          id: 'keep',
-          class_id: 'class-8c',
-          subject: 'FEN BİLİMLERİ',
-          start_time: '19:00:00',
-          end_time: '19:40:00'
-        }
-      ],
-      excludeIds: ['keep']
-    });
-    assert.equal(hit, null);
-  });
+test('iptal başka sınıfın ise şablon engeli sürer', () => {
+  const slot = { class_id: 'c1', start_time: '18:40:00', end_time: '19:20:00' };
+  const cancelled = [{ class_id: 'c2', start_time: '18:40:00', end_time: '19:20:00' }];
+  assert.equal(slotFreedByCancelledSession({ slot, cancelledRows: cancelled }), false);
+});
+
+test('iptal edilen saat örtüşmüyorsa şablon engeli sürer', () => {
+  const slot = { class_id: 'c1', start_time: '18:40:00', end_time: '19:20:00' };
+  const cancelled = [{ class_id: 'c1', start_time: '19:30:00', end_time: '20:10:00' }];
+  assert.equal(slotFreedByCancelledSession({ slot, cancelledRows: cancelled }), false);
+});
+
+test('iptal kaydı yoksa şablon engeli sürer', () => {
+  assert.equal(
+    slotFreedByCancelledSession({ slot: { class_id: 'c1', start_time: '18:40:00', end_time: '19:20:00' }, cancelledRows: [] }),
+    false
+  );
 });
