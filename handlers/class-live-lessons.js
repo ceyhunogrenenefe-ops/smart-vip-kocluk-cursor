@@ -209,23 +209,16 @@ function canAssignAnyClassTeacher(role, roleTags = []) {
   return tags.includes('coach') || tags.includes('admin') || tags.includes('super_admin');
 }
 
-/** Sınıf listesinde kurum geneli: salt yönetici (öğretmen/koç etiketi varsa asla tam kurum) */
+/**
+ * Sınıf listesinde kurum geneli: yönetici her zaman kendi kurumunun tüm sınıflarını görür.
+ * Küçük kurumlarda yönetici aynı zamanda koçluk / öğretmenlik yapıyor; ek rol aldığında
+ * sınıfların kaybolmaması için yönetici etiketi koç / öğretmen etiketine üstün gelir.
+ */
 function seesAllInstitutionClasses(role, roleTags = []) {
   const r = normalizeRole(role);
   const tags = Array.isArray(roleTags) ? roleTags : [];
-  if (
-    tags.includes('teacher') ||
-    tags.includes('coach') ||
-    isTeacherRole(role) ||
-    r === 'coach'
-  ) {
-    return false;
-  }
   return (
-    r === 'admin' ||
-    r === 'super_admin' ||
-    tags.includes('admin') ||
-    tags.includes('super_admin')
+    r === 'admin' || r === 'super_admin' || tags.includes('admin') || tags.includes('super_admin')
   );
 }
 
@@ -490,16 +483,17 @@ async function getManagedClassIds(actor) {
   const role = normalizeRole(actor.role);
   const roleTags = await normalizedUserRolesFromDb(actor.sub);
 
-  const hasTeacher = roleTags.includes('teacher') || isTeacherRole(actor.role);
-  const hasCoach = roleTags.includes('coach') || role === 'coach';
   const hasAdmin =
     role === 'admin' ||
     role === 'super_admin' ||
     roleTags.includes('admin') ||
     roleTags.includes('super_admin');
 
-  /** Salt yönetici: sınırsız. admin+öğretmen veya admin+koç atamaya göre sınırlanır. */
-  if (hasAdmin && !hasTeacher && !hasCoach) {
+  /**
+   * Yönetici: sınırsız (kendi kurumunun tümü). Ek olarak koç / öğretmen rolü taşısa da
+   * kısıtlanmaz — yönetici kendi kurumunun sınıflarını her zaman görür.
+   */
+  if (hasAdmin) {
     return null;
   }
 
