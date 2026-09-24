@@ -3045,10 +3045,33 @@ export function pickEdesisBookletLessons(structure, kitapcikTuru) {
     // Structure'da yok -> deneme cevap anahtarındaki o kitapçığın kendi ders / grup kimlikleri
     const fromKey = (structure?.answerKeyLessons || []).filter((r) => kitapcikCodesMatch(r.kitapcikTuru, want));
     if (fromKey.length) {
-      // Kitapçıklar dersleri aynı sırada verir (sorular karışır): ders sayısı tutuyorsa soru sayısını
-      // Edesis'in doğruladığı structure (A) satırından al — optik de o düzenle doldurulur.
+      /**
+       * Kitapçık dersleri A ile aynı olsa da SIRALARI farklı olabilir. Soru sayısını
+       * indeksle almak dersleri kaydırıyordu (TYT'de Tarih'e Matematik'in 40 sorusu
+       * geliyor, Edesis "LessonId=3 Beklenen=5 Gelen=40" ile reddediyordu).
+       * Bu yüzden önce ders adıyla eşleştirilir; ad yoksa eski indeks yolu korunur.
+       */
       const base = canonicalEdesisStructureLessons(structure);
+      const nameKey = (v) => String(v || '').trim().toLocaleLowerCase('tr');
+      const baseByName = new Map();
+      for (const b of base) {
+        const k = nameKey(b.lessonName);
+        if (k && !baseByName.has(k)) baseByName.set(k, b);
+      }
+      const everyNamedHasMatch =
+        fromKey.every((l) => nameKey(l.lessonName) && baseByName.has(nameKey(l.lessonName)));
+      if (everyNamedHasMatch) {
+        return fromKey.map((l) => {
+          const hit = baseByName.get(nameKey(l.lessonName));
+          return { ...l, questionCount: hit?.questionCount || l.questionCount };
+        });
+      }
       if (base.length === fromKey.length) {
+        // Adlar eşleşmedi: indeks yolu varsayımdır, kayma riski için iz bırakılır
+        console.warn(
+          `[edesis] ${want} kitapçığı soru sayıları ders adıyla eşleşmedi, indeksle alındı`,
+          { base: base.map((l) => l.lessonName || null), key: fromKey.map((l) => l.lessonName || null) }
+        );
         return fromKey.map((l, i) => ({ ...l, questionCount: base[i].questionCount || l.questionCount }));
       }
       return fromKey;

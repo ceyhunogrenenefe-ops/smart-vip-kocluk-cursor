@@ -213,3 +213,52 @@ describe('matchIncomingToBookletLessons — sıra ve uzunluk karışımı', () =
     assert.equal(m[1].hit, null);
   });
 });
+
+describe('TYT B kitapçığı — soru sayıları derslere kaymamalı', () => {
+  /**
+   * Gerçek olay (ÖZDEBİR İLK PROVA TYT): B seçilince optikte TYT-TARİH 40 soru
+   * görünüyordu, Edesis "LessonId=3, Beklenen=5, Gelen=40" diyerek reddediyordu.
+   * Sebep: soru sayıları A satırından İNDEKSLE alınıyordu; cevap anahtarında
+   * dersler farklı sıradaydı, sayılar kaydı.
+   */
+  const base = [
+    { kitapcikTuru: 'A', lessonId: 1, dersGrupId: 1, lessonName: 'TYT-TÜRKÇE', questionCount: 40 },
+    { kitapcikTuru: 'A', lessonId: 3, dersGrupId: 7, lessonName: 'TYT-TARİH', questionCount: 5 },
+    { kitapcikTuru: 'A', lessonId: 4, dersGrupId: 7, lessonName: 'TYT-COĞRAFYA', questionCount: 5 },
+    { kitapcikTuru: 'A', lessonId: 5, dersGrupId: 2, lessonName: 'TYT-MATEMATİK', questionCount: 40 },
+    { kitapcikTuru: 'A', lessonId: 6, dersGrupId: 3, lessonName: 'TYT-FİZİK', questionCount: 7 },
+    { kitapcikTuru: 'A', lessonId: 7, dersGrupId: 3, lessonName: 'TYT-KİMYA', questionCount: 7 },
+    { kitapcikTuru: 'A', lessonId: 8, dersGrupId: 3, lessonName: 'TYT-BİYOLOJİ', questionCount: 6 }
+  ];
+  // Cevap anahtarı aynı dersleri BAŞKA sırada veriyor
+  const answerKeyLessons = [
+    { kitapcikTuru: 'B', lessonId: 101, dersGrupId: 11, lessonName: 'TYT-TÜRKÇE', questionCount: 40 },
+    { kitapcikTuru: 'B', lessonId: 102, dersGrupId: 12, lessonName: 'TYT-MATEMATİK', questionCount: 40 },
+    { kitapcikTuru: 'B', lessonId: 103, dersGrupId: 13, lessonName: 'TYT-TARİH', questionCount: 5 },
+    { kitapcikTuru: 'B', lessonId: 104, dersGrupId: 13, lessonName: 'TYT-COĞRAFYA', questionCount: 5 },
+    { kitapcikTuru: 'B', lessonId: 105, dersGrupId: 14, lessonName: 'TYT-FİZİK', questionCount: 7 },
+    { kitapcikTuru: 'B', lessonId: 106, dersGrupId: 14, lessonName: 'TYT-KİMYA', questionCount: 7 },
+    { kitapcikTuru: 'B', lessonId: 107, dersGrupId: 14, lessonName: 'TYT-BİYOLOJİ', questionCount: 6 }
+  ];
+
+  it('her dersin soru sayısı kendi dersinden gelir', () => {
+    const b = pickEdesisBookletLessons({ rows: base, answerKeyLessons }, 'B');
+    assert.deepEqual(
+      b.map((l) => [l.lessonName, l.questionCount]),
+      [
+        ['TYT-TÜRKÇE', 40],
+        ['TYT-MATEMATİK', 40],
+        ['TYT-TARİH', 5],
+        ['TYT-COĞRAFYA', 5],
+        ['TYT-FİZİK', 7],
+        ['TYT-KİMYA', 7],
+        ['TYT-BİYOLOJİ', 6]
+      ]
+    );
+  });
+
+  it('B kitapçığının kendi ders kimlikleri korunur', () => {
+    const b = pickEdesisBookletLessons({ rows: base, answerKeyLessons }, 'B');
+    assert.deepEqual(b.map((l) => l.lessonId), [101, 102, 103, 104, 105, 106, 107]);
+  });
+});
