@@ -25,6 +25,7 @@ import EduPostLessonHomeworkModal, {
   markPostLessonHomeworkPrompt
 } from '../components/eduPanel/EduPostLessonHomeworkModal';
 import ClassLiveClassManager from '../components/liveLessons/ClassLiveClassManager';
+import DeletedClassesPanel from '../components/liveLessons/DeletedClassesPanel';
 import ClassLivePresenceModal from '../components/liveLessons/ClassLivePresenceModal';
 import {
   CLASS_LIVE_PRESENCE_ENABLED,
@@ -175,6 +176,8 @@ export default function ClassLiveLessons() {
   const role = String(effectiveUser?.role || '');
   const actorUserId = String(effectiveUser?.id || '');
   const canManageClasses = userHasAnyRole(effectiveUser, ['admin', 'super_admin', 'coach']);
+  /** Grup sınıfı silme yalnız yönetici yetkisinde — koç silemez (11 B vakası) */
+  const canDeleteClasses = userHasAnyRole(effectiveUser, ['admin', 'super_admin']);
   const canOpenSchedulePlanner = role === 'admin' || role === 'super_admin';
   const canManageSlots = canManageClasses || role === 'teacher' || userHasAnyRole(effectiveUser, ['teacher']);
   const isTeacherView = userHasAnyRole(effectiveUser, ['teacher']);
@@ -1273,7 +1276,12 @@ export default function ClassLiveLessons() {
   };
 
   const handleDeleteClass = async (classId: string, className: string): Promise<boolean> => {
-    if (!window.confirm(`«${className}» sınıfını silmek istediğinize emin misiniz?`)) return false;
+    const onay = [
+      `«${className}» sınıfı öğrencileri, programı, dersleri ve yoklamalarıyla birlikte arşive kaldırılacak.`,
+      'Kalıcı silme değildir: "Silinen sınıflar" bölümünden aynen geri alabilirsiniz.',
+      'Devam edilsin mi?'
+    ].join('\n\n');
+    if (!window.confirm(onay)) return false;
     const res = await apiFetch(`/api/class-live-lessons?class_id=${encodeURIComponent(classId)}`, {
       method: 'DELETE'
     });
@@ -2046,11 +2054,16 @@ export default function ClassLiveLessons() {
         isStudentView={isStudentView}
         onCreateClass={handleCreateClass}
         onUpdateClass={handleUpdateClass}
-        onDeleteClass={handleDeleteClass}
+        onDeleteClass={canDeleteClasses ? handleDeleteClass : undefined}
         livePresenceByClassId={livePresenceData?.classes}
         livePresenceLoading={livePresenceLoading}
         onPresenceStatClick={handlePresenceStatClick}
       />
+      {canDeleteClasses ? (
+        <div className="mt-3">
+          <DeletedClassesPanel onRestored={() => void loadAll()} />
+        </div>
+      ) : null}
       </div>
 
       {CLASS_LIVE_PRESENCE_ENABLED ? (

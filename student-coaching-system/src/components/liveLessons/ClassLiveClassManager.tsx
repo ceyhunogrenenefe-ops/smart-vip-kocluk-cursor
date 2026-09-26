@@ -174,7 +174,8 @@ type Props = {
       student_subjects?: Record<string, string[]>;
     }
   ) => Promise<boolean>;
-  onDeleteClass: (classId: string, className: string) => Promise<boolean>;
+  /** Verilmezse sil düğmesi çizilmez — silme yalnız yönetici yetkisinde */
+  onDeleteClass?: (classId: string, className: string) => Promise<boolean>;
   livePresenceByClassId?: Record<string, ClassLivePresenceSnapshot | undefined>;
   livePresenceLoading?: boolean;
   onPresenceStatClick?: (classId: string, kind: ClassLivePresenceModalKind) => void;
@@ -378,6 +379,7 @@ export default function ClassLiveClassManager({
 
   const handleDelete = async (c: ClassLiveClassRow, e: React.MouseEvent) => {
     e.stopPropagation();
+    if (!onDeleteClass) return;
     setDeletingId(c.id);
     try {
       await onDeleteClass(c.id, c.name);
@@ -564,19 +566,21 @@ export default function ClassLiveClassManager({
                         >
                           <Pencil className="h-3.5 w-3.5" />
                         </button>
-                        <button
-                          type="button"
-                          title="Sil"
-                          disabled={deletingId === c.id}
-                          onClick={(e) => void handleDelete(c, e)}
-                          className="rounded-lg border border-red-200 bg-red-50 p-1.5 text-red-600 hover:bg-red-100 disabled:opacity-50"
-                        >
-                          {deletingId === c.id ? (
-                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                          ) : (
-                            <Trash2 className="h-3.5 w-3.5" />
-                          )}
-                        </button>
+                        {onDeleteClass ? (
+                          <button
+                            type="button"
+                            title="Sil"
+                            disabled={deletingId === c.id}
+                            onClick={(e) => void handleDelete(c, e)}
+                            className="rounded-lg border border-red-200 bg-red-50 p-1.5 text-red-600 hover:bg-red-100 disabled:opacity-50"
+                          >
+                            {deletingId === c.id ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <Trash2 className="h-3.5 w-3.5" />
+                            )}
+                          </button>
+                        ) : null}
                       </div>
                     ) : null}
                   </div>
