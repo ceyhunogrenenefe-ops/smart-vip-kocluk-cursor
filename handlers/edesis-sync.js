@@ -28,6 +28,8 @@ import {
   inferEdesisExamProgramKeys,
   buildStudentAvailableEdesisExamItems,
   examCompatibleWithStudentGrade,
+  examCompatibleWithStudentProgramSoft,
+  sortCatalogExamsByRecencyDesc,
   pickEdesisCatalogExamId,
   pickEdesisResultExamId,
   collectOpenOnlineProgramExams,
@@ -1751,7 +1753,8 @@ export default async function handler(req, res) {
       if (!isStaff) return res.status(403).json({ error: 'forbidden' });
       const examId = String(req.query?.examId || req.body?.examId || '').trim();
       const studentId = String(req.query?.studentId || req.body?.studentId || '').trim();
-      if (!examId || !studentId) return res.status(400).json({ error: 'examId_and_studentId_required' });
+      // examId verilmezse öğrenci geneli tanı: Edesis ne döndürüyor, ne eleniyor
+      if (!studentId) return res.status(400).json({ error: 'studentId_required' });
 
       const cfg = getEdesisConfig();
       if (!cfg.apiKey) return res.status(400).json({ error: 'EDESIS_API_KEY_missing' });
@@ -1772,9 +1775,17 @@ export default async function handler(req, res) {
         });
       }
 
+      const scopeForDiag = await resolveStudentEdesisScope({
+        edesisStudentId,
+        platformStudentId: studentId,
+        studentHint: st,
+        cfg
+      }).catch(() => ({ programKeys: new Set(), gradeName: '', className: '', classroomId: '' }));
       const catalog = await fetchEdesisExamsCatalog(cfg).catch(() => ({ rows: [] }));
       const rows = catalog.rows || [];
-      const catalogRow = rows.find((r) => String(pickEdesisCatalogExamId(r)) === examId) || null;
+      const catalogRow = examId
+        ? rows.find((r) => String(pickEdesisCatalogExamId(r)) === examId) || null
+        : null;
       const available = await loadAvailableEdesisExamsForStudent({
         edesisStudentId,
         platformStudentId: studentId,
@@ -1782,6 +1793,55 @@ export default async function handler(req, res) {
         studentHint: st,
         cfg
       }).catch((e) => ({ items: [], openOnline: [], meta: { error: errorMessage(e) } }));
+
+      /**
+       * examId yoksa: öğrencinin gördüğü liste + kataloğun son denemeleri.
+       * "5-6. sınıfta deneme çıkmıyor" gibi durumlarda hangi aşamada elendiğini
+       * tek bakışta gösterir (katalogda var mı, atanmış mı, filtre mi eledi).
+       */
+      if (!examId) {
+        const visibleIds = new Set((available.items || []).map((x) => String(x.examId)));
+        const recent = sortCatalogExamsByRecencyDesc(rows).slice(0, 25).map((r) => {
+          const id = String(pickEdesisCatalogExamId(r) || '');
+          return {
+            examId: id,
+            name: r.name || r.title || r.examName || null,
+            examType: r.examType || null,
+            examDate: r.examDate || r.date || null,
+            isOnline: r.isOnline ?? null,
+            visibleToStudent: visibleIds.has(id),
+            gradeOk: examCompatibleWithStudentGrade(r, scopeForDiag.gradeName || ''),
+            programOk: examCompatibleWithStudentProgramSoft(r, scopeForDiag.programKeys)
+          };
+        });
+        return res.status(200).json({
+          ok: true,
+          mode: 'student',
+          student: {
+            id: st.id,
+            name: st.name,
+            classLevel: st.class_level,
+            edesisStudentId,
+            gradeName: scopeForDiag.gradeName || null,
+            className: scopeForDiag.className || null,
+            classroomId: scopeForDiag.classroomId || null,
+            programKeys: [...(scopeForDiag.programKeys || [])]
+          },
+          counts: {
+            catalogRows: rows.length,
+            visible: (available.items || []).length,
+            openOnline: (available.openOnline || []).length,
+            edesisAssigned: (available.meta?.assignedExamIds || []).length
+          },
+          visibleExams: (available.items || []).slice(0, 15).map((x) => ({
+            examId: x.examId,
+            name: x.name || x.title || null,
+            examDate: x.examDate || null
+          })),
+          recentCatalog: recent,
+          meta: available.meta || null
+        });
+      }
 
       const inVisible = (available.items || []).some((x) => String(x.examId) === examId);
       const inOpenOnline = (available.openOnline || []).some((x) => String(x.examId) === examId);

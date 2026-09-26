@@ -47,6 +47,8 @@ import {
   assignEdesisExam,
   unassignEdesisExam,
   checkEdesisExamVisibility,
+  fetchEdesisStudentVisibility,
+  type EdesisStudentVisibility,
   fetchEdesisExamAssignments,
 } from '../lib/edesis/edesisApi';
 import { shareEdesisKarneWithParent } from '../lib/edesis/shareEdesisKarneWhatsApp';
@@ -510,6 +512,30 @@ export default function EdesisPage() {
 
   const [diagBusyId, setDiagBusyId] = useState<string | null>(null);
 
+  /** Öğrenci geneli görünürlük raporu: katalogda ne var, öğrenci neyi görüyor */
+  const [visReport, setVisReport] = useState<EdesisStudentVisibility | null>(null);
+  const [visBusy, setVisBusy] = useState(false);
+
+  useEffect(() => {
+    setVisReport(null);
+  }, [selectedPlatformId]);
+
+  const runStudentVisibility = async () => {
+    if (!selectedPlatformId) {
+      toast.error('Önce öğrenci seçin');
+      return;
+    }
+    setVisBusy(true);
+    try {
+      const r = await fetchEdesisStudentVisibility(selectedPlatformId);
+      setVisReport(r);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Rapor alınamadı');
+    } finally {
+      setVisBusy(false);
+    }
+  };
+
   /** Tanı: deneme neden öğrencide görünmüyor */
   const runVisibilityCheck = async (examId: string) => {
     if (!selectedPlatformId) {
@@ -735,14 +761,26 @@ export default function EdesisPage() {
                       {profile?.programKeys?.length ? ` · ${profile.programKeys.join(', ')}` : ''}
                     </p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => void loadDossier(selectedPlatformId, selectedEdesisId || undefined)}
-                    className="inline-flex items-center gap-2 rounded-full border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
-                  >
-                    <RefreshCw className="h-3.5 w-3.5" />
-                    Dosyayı yenile
-                  </button>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void loadDossier(selectedPlatformId, selectedEdesisId || undefined)}
+                      className="inline-flex items-center gap-2 rounded-full border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                    >
+                      <RefreshCw className="h-3.5 w-3.5" />
+                      Dosyayı yenile
+                    </button>
+                    <button
+                      type="button"
+                      disabled={visBusy || !selectedPlatformId}
+                      onClick={() => void runStudentVisibility()}
+                      title="Edesis kataloğunun son denemeleri bu öğrenciye neden görünüyor/görünmüyor"
+                      className="inline-flex items-center gap-2 rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-medium text-indigo-800 disabled:opacity-50"
+                    >
+                      <ClipboardList className="h-3.5 w-3.5" />
+                      {visBusy ? 'Kontrol ediliyor…' : 'Görünürlük raporu'}
+                    </button>
+                  </div>
                 </div>
                 <div className="mt-4 grid gap-3 sm:grid-cols-3">
                   {[
@@ -762,6 +800,68 @@ export default function EdesisPage() {
                     </div>
                   ))}
                 </div>
+                {visReport && (
+                  <div className="mt-4 rounded-2xl border border-indigo-100 bg-indigo-50/50 p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <h3 className="text-sm font-semibold text-slate-900">Görünürlük raporu</h3>
+                      <button
+                        type="button"
+                        onClick={() => setVisReport(null)}
+                        className="text-xs font-medium text-slate-500 hover:text-slate-800"
+                      >
+                        Kapat
+                      </button>
+                    </div>
+                    <p className="mt-1 font-mono text-[11px] text-slate-500">
+                      sınıf {visReport.student.gradeName || visReport.student.classLevel || '—'} ·
+                      şube {visReport.student.className || '—'} · program{' '}
+                      {visReport.student.programKeys.join(', ') || '—'} · katalog{' '}
+                      {visReport.counts.catalogRows} · görünen {visReport.counts.visible} · kurumda açık{' '}
+                      {visReport.counts.openOnline} · Edesis atama {visReport.counts.edesisAssigned}
+                    </p>
+                    <div className="mt-3 max-h-80 overflow-auto rounded-xl border border-white bg-white">
+                      <table className="w-full text-left text-xs">
+                        <thead className="bg-slate-50 text-slate-500">
+                          <tr>
+                            <th className="px-3 py-2 font-medium">Deneme</th>
+                            <th className="px-3 py-2 font-medium">Tarih</th>
+                            <th className="px-3 py-2 font-medium">Sınıf</th>
+                            <th className="px-3 py-2 font-medium">Program</th>
+                            <th className="px-3 py-2 font-medium">Görünür</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {visReport.recentCatalog.map((ex) => (
+                            <tr key={ex.examId} className="border-t border-slate-100">
+                              <td className="px-3 py-2 text-slate-800">{ex.name || ex.examId}</td>
+                              <td className="px-3 py-2 tabular-nums text-slate-500">{ex.examDate || '—'}</td>
+                              <td className={`px-3 py-2 ${ex.gradeOk ? 'text-emerald-700' : 'text-rose-700'}`}>
+                                {ex.gradeOk ? 'uygun' : 'elendi'}
+                              </td>
+                              <td className={`px-3 py-2 ${ex.programOk ? 'text-emerald-700' : 'text-rose-700'}`}>
+                                {ex.programOk ? 'uygun' : 'elendi'}
+                              </td>
+                              <td
+                                className={`px-3 py-2 font-semibold ${
+                                  ex.visibleToStudent ? 'text-emerald-700' : 'text-rose-700'
+                                }`}
+                              >
+                                {ex.visibleToStudent ? 'evet' : 'hayır'}
+                              </td>
+                            </tr>
+                          ))}
+                          {!visReport.recentCatalog.length && (
+                            <tr>
+                              <td className="px-3 py-3 text-slate-500" colSpan={5}>
+                                Edesis kataloğu boş döndü.
+                              </td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="flex flex-wrap gap-2">
