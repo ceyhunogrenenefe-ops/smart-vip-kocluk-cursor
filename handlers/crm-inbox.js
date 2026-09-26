@@ -490,6 +490,85 @@ export default async function handler(req, res) {
     }
 
     /** Kurumun kendi Meta bağlantısı (platform dışı kurumlar kendi hesabını bağlar) */
+    /** Öğretmen başvuru şablonunun hazır metni (link yerleştirilmiş) */
+    if (op === 'teacher_flow_template') {
+      const { getAutoGreetingSettings } = await import('../api/_lib/crm-auto-greeting.js');
+      const { buildTeacherApplicationMessage, DEFAULT_TEACHER_MESSAGE, TEACHER_APPLICATION_STATUSES } =
+        await import('../api/_lib/crm-teacher-application.js');
+      const instId = institutionId || PLATFORM_FALLBACK_INSTITUTION_ID;
+      const settings = await getAutoGreetingSettings(instId);
+      const text = buildTeacherApplicationMessage({
+        template: settings?.teacher_message || DEFAULT_TEACHER_MESSAGE,
+        applicationUrl: settings?.teacher_application_url
+      });
+      return res.status(200).json({
+        data: {
+          text,
+          has_url: Boolean(String(settings?.teacher_application_url || '').trim()),
+          statuses: TEACHER_APPLICATION_STATUSES
+        }
+      });
+    }
+
+    /** Temsilci öğretmen başvuru şablonunu elle gönderir (düzenlenmiş de olabilir) */
+    if (op === 'send_teacher_template' && req.method === 'POST') {
+      const conversationId = String(body.conversation_id || '').trim();
+      if (!conversationId) return res.status(400).json({ error: 'conversation_id_required' });
+      const { data: conv } = await supabaseAdmin
+        .from('crm_conversations')
+        .select('*')
+        .eq('id', conversationId)
+        .maybeSingle();
+      if (!conv) return res.status(404).json({ error: 'conversation_not_found' });
+      if (!(await assertConversationAccess(conv, actor, roleSet, assignment))) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+
+      const { getAutoGreetingSettings, markTeacherTemplateSentManually } = await import(
+        '../api/_lib/crm-auto-greeting.js'
+      );
+      const { buildTeacherApplicationMessage, DEFAULT_TEACHER_MESSAGE } = await import(
+        '../api/_lib/crm-teacher-application.js'
+      );
+      const instId = conv.institution_id || institutionId || PLATFORM_FALLBACK_INSTITUTION_ID;
+      const settings = await getAutoGreetingSettings(instId);
+      const custom = String(body.text || '').trim();
+      const text =
+        custom ||
+        buildTeacherApplicationMessage({
+          template: settings?.teacher_message || DEFAULT_TEACHER_MESSAGE,
+          applicationUrl: settings?.teacher_application_url
+        });
+      if (!text) return res.status(400).json({ error: 'empty_text' });
+
+      const channel = String(conv.channel || '').toLowerCase();
+      try {
+        if (channel === 'whatsapp') {
+          await sendCrmWhatsAppText({ phone: conv.contact_identifier, text, institutionId: instId });
+        } else {
+          await sendCrmInstagramDm({ igScopedId: conv.contact_identifier, text });
+        }
+      } catch (e) {
+        return res.status(502).json({
+          error: 'send_failed',
+          message: e instanceof Error ? e.message : String(e)
+        });
+      }
+
+      await upsertCrmMessage({
+        channel: conv.channel,
+        contactIdentifier: conv.contact_identifier,
+        body: text,
+        direction: 'outbound',
+        senderType: 'agent',
+        senderId: actor.sub,
+        institutionId: instId,
+        leadId: conv.lead_id || null
+      });
+      await markTeacherTemplateSentManually({ conversation: conv, institutionId: instId });
+      return res.status(200).json({ ok: true, data: { text } });
+    }
+
     /** Otomatik Karşılama — kurum ayarları */
     if (op === 'auto_greeting_settings' && req.method !== 'POST') {
       const { getAutoGreetingSettings } = await import('../api/_lib/crm-auto-greeting.js');

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { BotMessageSquare, Clock, Loader2, ScrollText, Save } from 'lucide-react';
+import { BotMessageSquare, Clock, GraduationCap, Loader2, ScrollText, Save } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   crmAutoGreetingLogs,
@@ -14,6 +14,12 @@ const input =
 
 const EVENT_LABELS: Record<string, string> = {
   greeting_sent: 'Otomatik karşılama gönderildi',
+  teacher_intent_detected: 'Öğretmen başvuru niyeti tespit edildi',
+  teacher_message_sent: 'Öğretmen başvuru mesajı gönderildi',
+  teacher_tag_added: 'Öğretmen Başvurusu etiketi eklendi',
+  teacher_repeat_blocked: 'Tekrar gönderim engellendi',
+  teacher_template_manual: 'Temsilci şablonu elle gönderdi',
+  teacher_intent_unclear: 'Niyet belirsiz — otomasyon çalıştırılmadı',
   grade_detected: 'Sınıf tespit edildi',
   task_created: 'Satış görevi oluşturuldu',
   flow_completed: 'Akış tamamlandı',
@@ -70,6 +76,12 @@ export default function CrmAutoGreetingPanel() {
         const base: CrmAutoGreetingSettings = r.data || {
           institution_id: r.institution_id,
           is_active: false,
+          teacher_flow_active: false,
+          teacher_channel_whatsapp: true,
+          teacher_channel_instagram: true,
+          teacher_channel_facebook: true,
+          teacher_message: null,
+          teacher_application_url: null,
           channel_whatsapp: true,
           channel_instagram: true,
           channel_facebook: true,
@@ -149,12 +161,27 @@ export default function CrmAutoGreetingPanel() {
         </p>
       </div>
 
-      <div className="rounded-xl border border-slate-200 bg-white p-3">
+      <div className="space-y-2 rounded-xl border border-slate-200 bg-white p-3">
+        <p className="text-sm font-semibold text-slate-900">Otomasyonlar</p>
         <Toggle
           checked={form.is_active}
           onChange={(v) => patch({ is_active: v })}
-          label="Otomatik Karşılama Sistemi Aktif"
-          hint={form.is_active ? 'Açık — koşullar sağlandığında müşteriye mesaj gider.' : 'Kapalı — hiçbir otomatik mesaj gönderilmez.'}
+          label="Öğrenci / Veli Otomatik Karşılama"
+          hint={
+            form.is_active
+              ? 'Açık — yeni adaya sınıf ve arama saati sorulur.'
+              : 'Kapalı — öğrenci/veli akışında mesaj gönderilmez.'
+          }
+        />
+        <Toggle
+          checked={form.teacher_flow_active}
+          onChange={(v) => patch({ teacher_flow_active: v })}
+          label="Öğretmen Başvuru Otomasyonu"
+          hint={
+            form.teacher_flow_active
+              ? 'Açık — net öğretmen başvurusuna başvuru linki gönderilir.'
+              : 'Kapalı — öğretmen başvurusu yalnız etiketlenir, mesaj gitmez.'
+          }
         />
       </div>
 
@@ -239,8 +266,59 @@ export default function CrmAutoGreetingPanel() {
         </div>
       </div>
 
+      <div className="space-y-3 rounded-xl border border-violet-200 bg-violet-50/50 p-3">
+        <p className="flex items-center gap-1.5 text-sm font-semibold text-slate-900">
+          <GraduationCap className="h-4 w-4 text-violet-700" />
+          Öğretmen Başvuru Otomasyonu
+        </p>
+        <p className="text-[11px] text-slate-600">
+          Öğrenci/veli akışından bağımsızdır. Açık olduğunda net bir öğretmen başvurusuna başvuru
+          linki bir kez gönderilir; öğretmene sınıf sorusu asla sorulmaz.
+        </p>
+        <div className="grid gap-2 sm:grid-cols-3">
+          <Toggle
+            checked={form.teacher_channel_whatsapp}
+            onChange={(v) => patch({ teacher_channel_whatsapp: v })}
+            label="WhatsApp"
+          />
+          <Toggle
+            checked={form.teacher_channel_instagram}
+            onChange={(v) => patch({ teacher_channel_instagram: v })}
+            label="Instagram"
+          />
+          <Toggle
+            checked={form.teacher_channel_facebook}
+            onChange={(v) => patch({ teacher_channel_facebook: v })}
+            label="Facebook"
+          />
+        </div>
+        <label className="block text-xs font-medium text-slate-600">
+          Öğretmen Başvuru Linki
+          <input
+            type="url"
+            value={form.teacher_application_url ?? ''}
+            onChange={(e) => patch({ teacher_application_url: e.target.value })}
+            placeholder="https://…/ogretmen-basvuru"
+            className={input}
+          />
+          <span className="mt-1 block text-[11px] text-slate-500">
+            Link boşken otomasyon mesaj göndermez.
+          </span>
+        </label>
+        <label className="block text-xs font-medium text-slate-600">
+          Öğretmen mesajı — {'[ÖĞRETMEN_BASVURU_LINKI]'} yukarıdaki adresle değişir
+          <textarea
+            rows={7}
+            value={form.teacher_message ?? ''}
+            onChange={(e) => patch({ teacher_message: e.target.value })}
+            placeholder="Boş bırakılırsa varsayılan metin kullanılır"
+            className={input}
+          />
+        </label>
+      </div>
+
       <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-3">
-        <p className="text-sm font-semibold text-slate-900">Mesajlar</p>
+        <p className="text-sm font-semibold text-slate-900">Öğrenci / veli mesajları</p>
         <label className="block text-xs font-medium text-slate-600">
           Karşılama mesajı (sınıf seçenekleri altına eklenir)
           <textarea

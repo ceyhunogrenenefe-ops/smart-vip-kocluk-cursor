@@ -86,7 +86,13 @@ export async function saveAutoGreetingSettings(institutionId, patch = {}, actorI
     'greeting_text',
     'call_time_text',
     'closing_text',
-    'call_slots'
+    'call_slots',
+    'teacher_flow_active',
+    'teacher_channel_whatsapp',
+    'teacher_channel_instagram',
+    'teacher_channel_facebook',
+    'teacher_message',
+    'teacher_application_url'
   ];
   const row = { institution_id: id, updated_by: actorId || null, updated_at: new Date().toISOString() };
   for (const key of allowed) {
@@ -315,6 +321,126 @@ async function addTags(conversation, tags) {
   }
 }
 
+/** Öğretmen otomasyonu bu kanalda açık mı? */
+function isTeacherChannelEnabled(settings, channel) {
+  const ch = String(channel || '').toLowerCase();
+  if (ch === 'whatsapp') return settings?.teacher_channel_whatsapp !== false;
+  if (ch === 'instagram') return settings?.teacher_channel_instagram !== false;
+  if (ch === 'facebook') return settings?.teacher_channel_facebook !== false;
+  return false;
+}
+
+/**
+ * Öğretmen Başvuru Otomasyonu.
+ * Öğrenci/veli akışından bağımsız açılır. Açık ve niyet NET ise başvuru linkini
+ * bir kez gönderir; aynı sohbette tekrar göndermez.
+ *
+ * @returns {Promise<{handled: boolean, reason?: string}>} handled=true ise
+ *          öğrenci/veli akışı çalıştırılmaz.
+ */
+async function runTeacherFlow({ conversation, body, settings, institutionId, session }) {
+  const { detectTeacherApplication, buildTeacherApplicationMessage, teacherFlowReady, TEACHER_APPLICATION_TAGS } =
+    await import('./crm-teacher-application.js');
+
+  const base = {
+    institutionId,
+    conversationId: conversation.id,
+    leadId: conversation.lead_id || null
+  };
+
+  // Bu sohbet zaten öğretmen akışındaysa: link tekrar gönderilmez
+  if (session?.flow_kind === 'teacher') {
+    await logEvent({ ...base, event: 'teacher_repeat_blocked' });
+    return { handled: true, reason: 'already_sent' };
+  }
+
+  const hit = detectTeacherApplication(body);
+  if (!hit.match) return { handled: false, reason: 'not_teacher' };
+
+  // Niyet net değilse hiçbir otomasyon çalışmasın (yanlış cevap gitmesin)
+  if (hit.confidence !== 'high') {
+    await logEvent({ ...base, event: 'teacher_intent_unclear', detail: hit });
+    return { handled: true, reason: 'intent_unclear' };
+  }
+
+  if (settings?.teacher_flow_active !== true) {
+    await logEvent({ ...base, event: 'teacher_intent_detected', detail: { ...hit, sent: false } });
+    return { handled: true, reason: 'teacher_flow_disabled' };
+  }
+  if (!isTeacherChannelEnabled(settings, conversation.channel)) {
+    return { handled: true, reason: 'teacher_channel_disabled' };
+  }
+  if (!teacherFlowReady(settings)) {
+    await logEvent({ ...base, event: 'error', detail: { step: 'teacher', error: 'application_url_missing' } });
+    return { handled: true, reason: 'application_url_missing' };
+  }
+
+  await logEvent({ ...base, event: 'teacher_intent_detected', detail: hit });
+
+  const text = buildTeacherApplicationMessage({
+    template: settings.teacher_message,
+    applicationUrl: settings.teacher_application_url
+  });
+  const sent = await sendByChannel({ conversation, text, institutionId });
+  if (!sent.ok) {
+    await logEvent({ ...base, event: 'error', detail: { step: 'teacher_send', error: sent.error } });
+    return { handled: true, reason: sent.error };
+  }
+  await recordOutgoing({ conversation, text, institutionId });
+
+  await upsertSession({
+    conversation_id: conversation.id,
+    institution_id: institutionId || null,
+    lead_id: conversation.lead_id || null,
+    channel: String(conversation.channel || ''),
+    flow_kind: 'teacher',
+    step: 'completed',
+    teacher_status: 'link_sent',
+    teacher_link_sent_at: new Date().toISOString(),
+    completed_at: new Date().toISOString()
+  });
+
+  const channelTag = { whatsapp: 'WhatsApp', instagram: 'Instagram', facebook: 'Facebook' }[
+    String(conversation.channel || '').toLowerCase()
+  ];
+  await addTags(conversation, [...TEACHER_APPLICATION_TAGS, channelTag]);
+  await logEvent({ ...base, event: 'teacher_message_sent' });
+  await logEvent({ ...base, event: 'teacher_tag_added' });
+  return { handled: true, reason: 'teacher_link_sent' };
+}
+
+/**
+ * Temsilci öğretmen başvuru şablonunu elle gönderdi.
+ * Otomatik akış kapalı olsa da çalışır; oturum işaretlenir.
+ */
+export async function markTeacherTemplateSentManually({ conversation, institutionId }) {
+  try {
+    await upsertSession({
+      conversation_id: conversation.id,
+      institution_id: institutionId || conversation.institution_id || null,
+      lead_id: conversation.lead_id || null,
+      channel: String(conversation.channel || ''),
+      flow_kind: 'teacher',
+      step: 'completed',
+      teacher_status: 'link_sent',
+      teacher_link_sent_at: new Date().toISOString(),
+      completed_at: new Date().toISOString()
+    });
+    const { TEACHER_APPLICATION_TAGS } = await import('./crm-teacher-application.js');
+    await addTags(conversation, TEACHER_APPLICATION_TAGS);
+    await logEvent({
+      institutionId: institutionId || conversation.institution_id,
+      conversationId: conversation.id,
+      leadId: conversation.lead_id || null,
+      event: 'teacher_template_manual'
+    });
+    return { ok: true };
+  } catch (e) {
+    console.warn('[auto-greeting] manuel öğretmen şablonu:', errorMessage(e));
+    return { ok: false, error: errorMessage(e) };
+  }
+}
+
 /**
  * Gelen mesaj için otomatik akışı yürütür.
  * Hiçbir koşul sağlanmazsa sessizce çıkar — mevcut davranış değişmez.
@@ -331,11 +457,28 @@ export async function runAutoGreetingFlow({ conversation, body }) {
 
     const institutionId = conversation.institution_id ? String(conversation.institution_id) : '';
     const settings = await getAutoGreetingSettings(institutionId);
-    if (!settings || settings.is_active !== true) return { ran: false, reason: 'module_disabled' };
-    if (!isChannelEnabled(settings, conversation.channel)) return { ran: false, reason: 'channel_disabled' };
+    if (!settings) return { ran: false, reason: 'module_disabled' };
+    if (settings.is_active !== true && settings.teacher_flow_active !== true) {
+      return { ran: false, reason: 'module_disabled' };
+    }
+    if (settings.is_active === true && !isChannelEnabled(settings, conversation.channel)) {
+      // Öğrenci akışı bu kanalda kapalı olsa da öğretmen akışı çalışabilir
+      if (settings.teacher_flow_active !== true) return { ran: false, reason: 'channel_disabled' };
+    }
 
     const nowHhmm = istanbulHhmm();
     const session = await getSession(conversation.id);
+
+    if (session?.human_takeover_at) return { ran: false, reason: 'human_takeover' };
+
+    /**
+     * ÖNCELİK: mesaj açıkça öğretmen / iş başvurusuysa öğrenci-veli satış akışı
+     * ÇALIŞTIRILMAZ. Öğretmene "öğrencimiz kaçıncı sınıf?" sorusu gitmez.
+     */
+    const teacher = await runTeacherFlow({ conversation, body, settings, institutionId, session });
+    if (teacher.handled) return { ran: teacher.reason === 'teacher_link_sent', reason: teacher.reason };
+
+    if (settings.is_active !== true) return { ran: false, reason: 'student_flow_disabled' };
 
     // Çalışma penceresi yalnız AKIŞI BAŞLATIRKEN bakılır; başlamış akış
     // mesai içinde de tamamlanabilsin (müşteri yarım bırakmasın).

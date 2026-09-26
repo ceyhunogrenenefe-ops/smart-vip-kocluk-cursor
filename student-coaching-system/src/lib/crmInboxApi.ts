@@ -733,6 +733,13 @@ export function crmSaveTeacherTemplate(templateName: string, language = 'tr') {
 export type CrmAutoGreetingSettings = {
   institution_id: string;
   is_active: boolean;
+  /** Öğretmen Başvuru Otomasyonu — öğrenci akışından bağımsız */
+  teacher_flow_active: boolean;
+  teacher_channel_whatsapp: boolean;
+  teacher_channel_instagram: boolean;
+  teacher_channel_facebook: boolean;
+  teacher_message: string | null;
+  teacher_application_url: string | null;
   channel_whatsapp: boolean;
   channel_instagram: boolean;
   channel_facebook: boolean;
@@ -791,4 +798,18 @@ export function crmAutoFlowState(conversationId: string) {
 
 export function crmResumeAutoFlow(conversationId: string) {
   return inboxPost<{ ok: boolean }>('resume_auto_flow', { conversation_id: conversationId });
+}
+
+/** Öğretmen Başvuru Otomasyonu — hazır şablon ve manuel gönderim */
+export function crmTeacherFlowTemplate() {
+  return inboxGet<{
+    data: { text: string; has_url: boolean; statuses: { key: string; label: string }[] };
+  }>('teacher_flow_template');
+}
+
+export function crmSendTeacherTemplate(conversationId: string, text?: string) {
+  return inboxPost<{ ok: boolean; data: { text: string } }>('send_teacher_template', {
+    conversation_id: conversationId,
+    ...(text ? { text } : {})
+  });
 }
