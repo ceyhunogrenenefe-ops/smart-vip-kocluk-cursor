@@ -205,6 +205,24 @@ function isAdminRole(role) {
   return r === 'admin' || r === 'super_admin' || r === 'coach';
 }
 
+/**
+ * Grup sınıfını / haftalık ders bloğunu silme yetkisi: YALNIZ admin ve süper admin.
+ *
+ * isAdminRole koçu da yönetici sayıyor; bir koç sınıfı silince altındaki tüm
+ * dersler, yoklamalar ve ödevler cascade ile gidiyordu (11 B vakası). Silme
+ * artık ayrı ve dar bir kapıdan geçer; okuma/düzenleme yetkileri değişmedi.
+ */
+export function canDeleteClass(role, roleTags = []) {
+  const r = normalizeRole(role);
+  const tags = Array.isArray(roleTags) ? roleTags : [];
+  return (
+    r === 'admin' ||
+    r === 'super_admin' ||
+    tags.includes('admin') ||
+    tags.includes('super_admin')
+  );
+}
+
 /** Koç/admin (JWT role veya roles[]): ders eklerken öğretmen seçebilir */
 function canAssignAnyClassTeacher(role, roleTags = []) {
   if (isAdminRole(role)) return true;
@@ -1041,6 +1059,31 @@ export default async function handler(req, res) {
     if (getOp === 'guest-join-link') {
       return handleClassGuestJoinLink(req, res, actor, role);
     }
+    /** Silinen (arsivlenen) grup siniflari — geri alinabilir olanlar */
+    if (getOp === 'deleted-classes') {
+      if (!canDeleteClass(role, roleTags)) return res.status(403).json({ error: 'forbidden' });
+      let q = supabaseAdmin
+        .from('deleted_classes_archive')
+        .select('id, class_id, class_name, institution_id, deleted_by, deleted_at, restored_at, row_counts')
+        .is('restored_at', null)
+        .order('deleted_at', { ascending: false })
+        .limit(100);
+      // Süper admin tüm kurumları, yönetici kendi kurumunu görür
+      if (normalizeRole(role) !== 'super_admin' && !roleTags.includes('super_admin') && institutionId) {
+        q = q.eq('institution_id', institutionId);
+      }
+      const { data, error } = await q;
+      if (error) return res.status(500).json({ error: error.message });
+      const byUser = new Map();
+      const ids = [...new Set((data || []).map((r) => r.deleted_by).filter(Boolean))];
+      if (ids.length) {
+        const { data: users } = await supabaseAdmin.from('users').select('id, name').in('id', ids);
+        for (const u of users || []) byUser.set(String(u.id), u.name);
+      }
+      return res.status(200).json({
+        data: (data || []).map((r) => ({ ...r, deleted_by_name: byUser.get(String(r.deleted_by)) || null }))
+      });
+    }
     if (!skipSessionSync) {
       await syncClassSessionsScheduledToCompleted();
     }
@@ -1608,6 +1651,45 @@ export default async function handler(req, res) {
   if (req.method === 'POST') {
     const op = String(req.query.op || '').trim();
     const body = parseBody(req);
+
+    /** Arsivlenen sinifi cocuklariyla geri yukle */
+    if (op === 'restore-class') {
+      if (!canDeleteClass(role, roleTags)) {
+        return res.status(403).json({
+          error: 'forbidden',
+          hint: 'Silinen sınıfı yalnızca yönetici veya süper yönetici geri alabilir.'
+        });
+      }
+      const archiveId = String(body.archive_id || body.archiveId || req.query.archive_id || '').trim();
+      if (!archiveId) return res.status(400).json({ error: 'archive_id_required' });
+
+      const { data: arch } = await supabaseAdmin
+        .from('deleted_classes_archive')
+        .select('id, institution_id, class_name, restored_at')
+        .eq('id', archiveId)
+        .maybeSingle();
+      if (!arch) return res.status(404).json({ error: 'archive_not_found' });
+      if (arch.restored_at) return res.status(409).json({ error: 'already_restored' });
+      const isSuper = normalizeRole(role) === 'super_admin' || roleTags.includes('super_admin');
+      if (!isSuper && institutionId && String(arch.institution_id || '') !== String(institutionId)) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+
+      const { data: classId, error } = await supabaseAdmin.rpc('restore_archived_class', {
+        p_archive_id: archiveId,
+        p_actor: actor.sub || null
+      });
+      if (error) {
+        if (/class_already_exists/i.test(error.message || '')) {
+          return res.status(409).json({ error: 'class_already_exists' });
+        }
+        if (/archive_not_found/i.test(error.message || '')) {
+          return res.status(404).json({ error: 'archive_not_found' });
+        }
+        return res.status(500).json({ error: error.message });
+      }
+      return res.status(200).json({ ok: true, class_id: classId, class_name: arch.class_name });
+    }
 
     if (op === 'bulk-patch-student-subjects') {
       if (!isAdminRole(role)) return res.status(403).json({ error: 'forbidden' });
@@ -3582,10 +3664,28 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, cancelled: true });
     }
     if (classId) {
-      if (!isAdminRole(role)) return res.status(403).json({ error: 'forbidden' });
-      const { error } = await supabaseAdmin.from('classes').delete().eq('id', classId);
-      if (error) return res.status(500).json({ error: error.message });
-      return res.status(200).json({ ok: true });
+      if (!canDeleteClass(role, roleTags)) {
+        return res.status(403).json({
+          error: 'forbidden',
+          hint: 'Grup sınıfını yalnızca yönetici veya süper yönetici silebilir.'
+        });
+      }
+      /**
+       * Kalıcı DELETE yerine arşivleme: sınıf öğrencileri, öğretmenleri, haftalık
+       * programı, tüm dersleri, yoklamaları, ödevleri ve konu takibiyle birlikte
+       * saklanır ve tek çağrıyla aynen geri alınabilir.
+       */
+      const { data: archiveId, error } = await supabaseAdmin.rpc('archive_class', {
+        p_class_id: classId,
+        p_actor: actor.sub || null
+      });
+      if (error) {
+        if (/class_not_found/i.test(error.message || '')) {
+          return res.status(404).json({ error: 'class_not_found' });
+        }
+        return res.status(500).json({ error: error.message });
+      }
+      return res.status(200).json({ ok: true, archived: true, archive_id: archiveId });
     }
     if (slotId) {
       const { data: slot } = await supabaseAdmin
@@ -3597,8 +3697,12 @@ export default async function handler(req, res) {
         return res.status(200).json({ ok: true, already_deleted: true });
       }
       const details = await getClassDetails(slot.class_id);
-      if (!isAdminRole(role) && slot.teacher_id !== actor.sub && !details.teacher_ids.includes(actor.sub)) {
-        return res.status(403).json({ error: 'forbidden' });
+      // Haftalık blok silmek dersi programdan tümüyle kaldırır: yönetici işi
+      if (!canDeleteClass(role, roleTags)) {
+        return res.status(403).json({
+          error: 'forbidden',
+          hint: 'Haftalık ders bloğunu yalnızca yönetici veya süper yönetici silebilir.'
+        });
       }
       const { error } = await supabaseAdmin.from('class_weekly_slots').delete().eq('id', slotId);
       if (error) return res.status(500).json({ error: error.message });

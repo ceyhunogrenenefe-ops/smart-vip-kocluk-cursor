@@ -1,0 +1,27 @@
+-- Grup sınıfı silme: kalıcı DELETE yerine arşivleme (uygulandı).
+--
+-- 11 B sınıfı yanlışlıkla silindiğinde altındaki her şey ON DELETE CASCADE ile
+-- gitti: öğrenci listesi, öğretmenler, haftalık program, 800+ ders, yoklamalar,
+-- ödevler. Geri alma yolu yoktu.
+--
+-- Neden classes tablosuna deleted_at eklemedik: classes 63 ayrı yerden okunuyor.
+-- Hepsine filtre eklemek hem devasa bir değişiklik hem de bir tanesi atlanınca
+-- silinen sınıf listelerde görünmeye devam eder. Arşivde satır gerçekten tablodan
+-- çıkar (hiçbir okuma değişmez) ama çocuklarıyla birlikte JSON olarak saklanır ve
+-- tek çağrıyla, orijinal kimlikleriyle geri yazılır.
+--
+-- archive_class(class_id, actor)          -> arşiv id döner, sınıfı siler
+-- restore_archived_class(archive_id, act) -> class_id döner, her şeyi geri yazar
+--
+-- Arşivlenen tablolar: classes, class_students, class_teachers,
+-- class_weekly_slots, class_sessions, class_session_attendance, appointments,
+-- class_lesson_topic_checkpoints, edu_lesson_rows, edu_lesson_row_classes,
+-- edesis_exam_assignments (bu sonuncusu silinmez, class_id'si NULL'a çekilir;
+-- geri yüklemede upsert ile bağlanır).
+--
+-- 11 A üzerinde kuru test (BEGIN/ROLLBACK): 843 ders, 1074 yoklama, 8 öğrenci,
+-- 8 öğretmen, 16 blok, 14 ödev, 9 konu takibi — hepsi birebir geri geldi.
+--
+-- Güncel tanımlar Supabase migration geçmişindedir:
+--   classes_soft_delete_archive
+--   classes_archive_fix_empty_children
