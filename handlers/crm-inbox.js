@@ -490,6 +490,83 @@ export default async function handler(req, res) {
     }
 
     /** Kurumun kendi Meta bağlantısı (platform dışı kurumlar kendi hesabını bağlar) */
+    /** Otomatik Karşılama — kurum ayarları */
+    if (op === 'auto_greeting_settings' && req.method !== 'POST') {
+      const { getAutoGreetingSettings } = await import('../api/_lib/crm-auto-greeting.js');
+      const { GRADE_OPTIONS, DEFAULT_CALL_SLOTS } = await import('../api/_lib/crm-auto-greeting-core.js');
+      const instId = institutionId || PLATFORM_FALLBACK_INSTITUTION_ID;
+      const data = await getAutoGreetingSettings(instId);
+      return res.status(200).json({
+        data,
+        defaults: { grade_options: GRADE_OPTIONS, call_slots: DEFAULT_CALL_SLOTS },
+        institution_id: instId
+      });
+    }
+
+    if (op === 'save_auto_greeting_settings' && req.method === 'POST') {
+      if (!isAdmin) {
+        return res.status(403).json({ error: 'forbidden', hint: 'Bu ayarı yalnızca yönetici değiştirir.' });
+      }
+      const { saveAutoGreetingSettings } = await import('../api/_lib/crm-auto-greeting.js');
+      const instId = institutionId || PLATFORM_FALLBACK_INSTITUTION_ID;
+      try {
+        const data = await saveAutoGreetingSettings(instId, body, actor.sub);
+        return res.status(200).json({ ok: true, data });
+      } catch (e) {
+        return res.status(400).json({ error: 'save_failed', message: e instanceof Error ? e.message : String(e) });
+      }
+    }
+
+    /** Otomatik Karşılama — işlem kayıtları (yalnız yönetici) */
+    if (op === 'auto_greeting_logs') {
+      if (!isAdmin) return res.status(403).json({ error: 'forbidden' });
+      const limit = Math.min(200, Math.max(1, Number(req.query?.limit || 50) || 50));
+      const instId = institutionId || PLATFORM_FALLBACK_INSTITUTION_ID;
+      const { data, error } = await supabaseAdmin
+        .from('crm_auto_greeting_logs')
+        .select('id, conversation_id, lead_id, event, detail, created_at')
+        .eq('institution_id', instId)
+        .order('created_at', { ascending: false })
+        .limit(limit);
+      if (error) {
+        if (/does not exist|schema cache/i.test(error.message || '')) {
+          return res.status(200).json({ data: [] });
+        }
+        throw error;
+      }
+      return res.status(200).json({ data: data || [] });
+    }
+
+    /** Konuşmada otomatik akışı yeniden başlat */
+    if (op === 'resume_auto_flow' && req.method === 'POST') {
+      const conversationId = String(body.conversation_id || '').trim();
+      if (!conversationId) return res.status(400).json({ error: 'conversation_id_required' });
+      const { data: conv } = await supabaseAdmin
+        .from('crm_conversations')
+        .select('*')
+        .eq('id', conversationId)
+        .maybeSingle();
+      if (!(await assertConversationAccess(conv, actor, roleSet, assignment))) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+      const { resumeAutoFlow } = await import('../api/_lib/crm-auto-greeting.js');
+      const r = await resumeAutoFlow(conversationId);
+      return res.status(r.ok ? 200 : 400).json(r);
+    }
+
+    /** Konuşmanın otomatik akış durumu (bot / temsilci) */
+    if (op === 'auto_flow_state') {
+      const conversationId = String(req.query?.conversation_id || body.conversation_id || '').trim();
+      if (!conversationId) return res.status(400).json({ error: 'conversation_id_required' });
+      const { data, error } = await supabaseAdmin
+        .from('crm_auto_greeting_sessions')
+        .select('step, grade_program, call_slot, call_date, human_takeover_at, completed_at')
+        .eq('conversation_id', conversationId)
+        .maybeSingle();
+      if (error && !/does not exist|schema cache/i.test(error.message || '')) throw error;
+      return res.status(200).json({ data: data || null });
+    }
+
     /** Öğretmen başvurusu yanıtı için seçilen Meta onaylı şablon (kurum başına). */
     if (op === 'teacher_template' && req.method !== 'POST') {
       const { data } = await supabaseAdmin

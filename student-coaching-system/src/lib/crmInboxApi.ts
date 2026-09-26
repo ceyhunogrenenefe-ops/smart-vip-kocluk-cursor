@@ -728,3 +728,67 @@ export function crmSaveTeacherTemplate(templateName: string, language = 'tr') {
     { template_name: templateName, language }
   );
 }
+
+/** Otomatik Karşılama modülü — kurum ayarları */
+export type CrmAutoGreetingSettings = {
+  institution_id: string;
+  is_active: boolean;
+  channel_whatsapp: boolean;
+  channel_instagram: boolean;
+  channel_facebook: boolean;
+  run_mode: 'always' | 'after_hours' | 'custom_window';
+  business_start: string;
+  business_end: string;
+  custom_start: string | null;
+  custom_end: string | null;
+  greeting_text: string | null;
+  call_time_text: string | null;
+  closing_text: string | null;
+  call_slots: string[];
+  updated_at?: string;
+};
+
+export type CrmAutoGreetingLog = {
+  id: string;
+  conversation_id: string | null;
+  lead_id: string | null;
+  event: string;
+  detail: Record<string, unknown> | null;
+  created_at: string;
+};
+
+export function crmGetAutoGreetingSettings() {
+  return inboxGet<{
+    data: CrmAutoGreetingSettings | null;
+    defaults: { grade_options: { key: string; label: string }[]; call_slots: string[] };
+    institution_id: string;
+  }>('auto_greeting_settings');
+}
+
+export function crmSaveAutoGreetingSettings(patch: Partial<CrmAutoGreetingSettings>) {
+  return inboxPost<{ ok: boolean; data: CrmAutoGreetingSettings }>(
+    'save_auto_greeting_settings',
+    patch as Record<string, unknown>
+  );
+}
+
+export function crmAutoGreetingLogs(limit = 50) {
+  return inboxGet<{ data: CrmAutoGreetingLog[] }>('auto_greeting_logs', { limit: String(limit) });
+}
+
+export type CrmAutoFlowState = {
+  step: string;
+  grade_program: string | null;
+  call_slot: string | null;
+  call_date: string | null;
+  human_takeover_at: string | null;
+  completed_at: string | null;
+} | null;
+
+export function crmAutoFlowState(conversationId: string) {
+  return inboxGet<{ data: CrmAutoFlowState }>('auto_flow_state', { conversation_id: conversationId });
+}
+
+export function crmResumeAutoFlow(conversationId: string) {
+  return inboxPost<{ ok: boolean }>('resume_auto_flow', { conversation_id: conversationId });
+}
