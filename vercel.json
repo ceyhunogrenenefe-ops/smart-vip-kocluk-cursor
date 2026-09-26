@@ -139,7 +139,7 @@
     },
     {
       "path": "/api/cron/edesis-sync",
-      "schedule": "0 6,18 * * *"
+      "schedule": "0 */4 * * *"
     },
     {
       "path": "/api/cron/taksit-reminders",

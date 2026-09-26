@@ -4681,11 +4681,17 @@ export async function fetchEdesisExamList(cfgOverride = {}) {
   })();
 
   // 1) Toplu sınav sonuçları (rehber adım 4)
+  /**
+   * Hafif mod eskiden tek sayfa (200 kayıt) çekiyordu; Edesis listeyi eskiden
+   * yeniye verdiği için yeni tanımlanan denemeler hiç gelmiyordu (5-6. sınıf
+   * ÖSD denemeleri 5 gün boyunca kataloğa girmedi). Sayfa sınırı ayarlanabilir.
+   */
+  const lightMaxPages = Math.max(1, Number(cfg.lightMaxPages || cfgOverride.lightMaxPages) || 6);
   const bulk = await fetchAllPaged(
     localCfg,
     V1_PATHS.examResults,
     { ...lightDateRange, ...(skipEnrich ? {} : EXAM_DETAIL_QUERY) },
-    skipEnrich ? { pageSize: 200, maxPages: 1 } : {}
+    skipEnrich ? { pageSize: 200, maxPages: lightMaxPages } : {}
   );
   if (bulk.error && bulk.response) {
     const r = bulk.response;

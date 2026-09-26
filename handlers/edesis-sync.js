@@ -828,10 +828,19 @@ async function runSyncInner(actor) {
   const institutionId = actor?.institution_id || null;
   const students = await loadStudentsForMatching();
 
-  // Manuel UI: light sync (enrich yok) — Vercel Hobby ~60s 504 önleme. Cron: tam.
-  const skipEnrich = String(actor?.role || '') !== 'cron';
+  /**
+   * Eskiden cron TAM senkron (enrich dahil) yapıyordu ve 120 sn sınırını aşıp
+   * "operation was aborted due to timeout" ile düşüyordu; 15 Eylül'den sonra
+   * hiç başarılı cron çalışmadı. Artık cron da hafif modda çalışır, ama daha
+   * çok sayfa okur: liste eksiksiz gelir, süre sınırına takılmaz.
+   */
+  const isCron = String(actor?.role || '') === 'cron';
+  const skipEnrich = true;
   const tFetch = Date.now();
-  const fetchResult = await fetchEdesisExamList({ skipEnrich });
+  const fetchResult = await fetchEdesisExamList({
+    skipEnrich,
+    lightMaxPages: isCron ? 12 : 6
+  });
   const fetchMs = Date.now() - tFetch;
   const {
     rows,
@@ -951,6 +960,8 @@ export default async function handler(req, res) {
     const auth = authorizeVercelOrCronSecret(req);
     if (!auth.ok) return res.status(401).json({ error: 'Unauthorized cron' });
     try {
+      // Anahtar yalnız panelde tanımlıysa (commerce_settings.meta.edesis) cron da okusun
+      await loadEdesisRuntimeSecretsFromDb(supabaseAdmin).catch(() => null);
       const result = await runSync({ institution_id: null, role: 'cron' });
       return res.status(200).json(result);
     } catch (e) {
