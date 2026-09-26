@@ -15,6 +15,14 @@ export type CoachStatRow = {
   attendance_rate: number | null;
   attendance_present: number;
   attendance_total: number;
+  /** Ders devamı — etüt ve deneme hariç */
+  lesson_attendance_rate?: number | null;
+  lesson_attendance_present?: number;
+  lesson_attendance_total?: number;
+  /** Etüt devamı — ders oranından ayrı ölçülür */
+  etut_attendance_rate?: number | null;
+  etut_attendance_present?: number;
+  etut_attendance_total?: number;
   absence_rate?: number | null;
   attendance_absent?: number;
   deneme_entry_rate: number | null;

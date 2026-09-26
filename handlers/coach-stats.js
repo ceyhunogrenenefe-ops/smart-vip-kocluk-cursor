@@ -29,6 +29,7 @@ import { isUuid } from '../api/_lib/uuid.js';
 import { isMissingTableError, isSchemaColumnError } from '../api/_lib/supabase-schema.js';
 import { aggregatePlannerGoalProgress } from '../api/_lib/coach-goal-progress.js';
 import { summarizeTrialFunnel, TRIAL_SCHEDULED, TRIAL_COMPLETED } from '../api/_lib/crm-trial-funnel.js';
+import { classifyAttendanceKind } from '../api/_lib/attendance-kind.js';
 import {
   loadPeriodsForStudents,
   countActiveStudentDays,
@@ -124,6 +125,10 @@ function studentAcc(map, sid) {
       attPresent: 0,
       attAbsent: 0,
       attTotal: 0,
+      lessonPresent: 0,
+      lessonTotal: 0,
+      etutPresent: 0,
+      etutTotal: 0,
       camOn: 0,
       camTotal: 0,
       examDates: new Set(),
@@ -444,6 +449,11 @@ export default async function handler(req, res) {
     const attPresent = new Map();
     const attAbsent = new Map();
     const attTotal = new Map();
+    /** Etüt yoklaması ders devamını bozmasın: iki oran ayrı tutulur */
+    const lessonPresent = new Map();
+    const lessonTotal = new Map();
+    const etutPresent = new Map();
+    const etutTotal = new Map();
     const camOn = new Map();
     const camTotal = new Map();
     try {
@@ -452,7 +462,7 @@ export default async function handler(req, res) {
       for (let offset = 0; offset < 50000; offset += 1000) {
         let sessionsQ = supabaseAdmin
           .from('class_sessions')
-          .select('id,lesson_date,institution_id,status,class_id')
+          .select('id,lesson_date,institution_id,status,class_id,subject')
           .gte('lesson_date', from)
           .lte('lesson_date', to)
           .order('id', { ascending: true })
@@ -465,12 +475,15 @@ export default async function handler(req, res) {
         if (!page || page.length < 1000) break;
       }
       const sessionMeta = new Map();
+      /** oturum -> 'etut' | 'deneme' | 'lesson' */
+      const sessionKind = new Map();
       const sessionIds = [];
       for (const s of sessions || []) {
         if (String(s.status || '') === 'cancelled') continue;
         const sid = String(s.id);
         sessionIds.push(sid);
         sessionMeta.set(sid, padYmd(s.lesson_date));
+        sessionKind.set(sid, classifyAttendanceKind(s.subject));
       }
 
       if (sessionIds.length && studentIds.length) {
@@ -504,11 +517,26 @@ export default async function handler(req, res) {
           const st = String(row.status || '').toLowerCase();
           if (!['present', 'absent', 'late'].includes(st)) continue;
           const acc = studentAcc(perStudent, sid);
+          const kind = sessionKind.get(String(row.session_id)) || 'lesson';
           attTotal.set(cid, (attTotal.get(cid) || 0) + 1);
           acc.attTotal += 1;
+          if (kind === 'etut') {
+            etutTotal.set(cid, (etutTotal.get(cid) || 0) + 1);
+            acc.etutTotal += 1;
+          } else if (kind === 'lesson') {
+            lessonTotal.set(cid, (lessonTotal.get(cid) || 0) + 1);
+            acc.lessonTotal += 1;
+          }
           if (st === 'present' || st === 'late') {
             attPresent.set(cid, (attPresent.get(cid) || 0) + 1);
             acc.attPresent += 1;
+            if (kind === 'etut') {
+              etutPresent.set(cid, (etutPresent.get(cid) || 0) + 1);
+              acc.etutPresent += 1;
+            } else if (kind === 'lesson') {
+              lessonPresent.set(cid, (lessonPresent.get(cid) || 0) + 1);
+              acc.lessonPresent += 1;
+            }
             // Kamera yalnız derse katılanlarda anlamlı; işaretlenmemişse sayılmaz
             const cam = String(row.camera_status || '').toLowerCase();
             if (cam === 'on' || cam === 'off') {
@@ -697,6 +725,12 @@ export default async function handler(req, res) {
       const reportFillRate = pct(filledSlots, expectedFillSlots);
       const attendanceRate = pct(attP, attT);
       const absenceRate = pct(attA, attT);
+      const lessonP = lessonPresent.get(cid) || 0;
+      const lessonT = lessonTotal.get(cid) || 0;
+      const etutP = etutPresent.get(cid) || 0;
+      const etutT = etutTotal.get(cid) || 0;
+      const lessonAttendanceRate = pct(lessonP, lessonT);
+      const etutAttendanceRate = pct(etutP, etutT);
       const denome = activeStudentCount || studentCount;
       const denemeEntryRate = pct(examStudents, denome);
       const denemeJoinRate = pct(joinStudents, denome);
@@ -719,7 +753,7 @@ export default async function handler(req, res) {
 
       const rates = [
         reportFillRate,
-        attendanceRate,
+        lessonAttendanceRate ?? attendanceRate,
         denemeJoinRate ?? denemeEntryRate,
         plannerGoalRate
       ].filter((x) => x != null);
@@ -743,6 +777,14 @@ export default async function handler(req, res) {
         attendance_rate: attendanceRate,
         attendance_present: attP,
         attendance_total: attT,
+        /** Ders devamı — etüt ve deneme hariç */
+        lesson_attendance_rate: lessonAttendanceRate,
+        lesson_attendance_present: lessonP,
+        lesson_attendance_total: lessonT,
+        /** Etüt devamı — ayrı ölçülür, ders oranını bozmaz */
+        etut_attendance_rate: etutAttendanceRate,
+        etut_attendance_present: etutP,
+        etut_attendance_total: etutT,
         absence_rate: absenceRate,
         attendance_absent: attA,
         deneme_entry_rate: denemeEntryRate,

@@ -256,7 +256,8 @@ export default function CoachStatsPage() {
           name: c.coach_name.length > 14 ? `${c.coach_name.slice(0, 12)}…` : c.coach_name,
           fullName: c.coach_name,
           rapor: c.report_fill_rate ?? 0,
-          devam: c.attendance_rate ?? 0,
+          devam: c.lesson_attendance_rate ?? c.attendance_rate ?? 0,
+          etut: c.etut_attendance_rate ?? 0,
           yoklama: c.absence_rate ?? 0,
           deneme: c.deneme_entry_rate ?? 0,
           plan: c.planner_goal_rate ?? 0,
@@ -532,7 +533,8 @@ export default function CoachStatsPage() {
                     />
                     <Legend />
                     <Bar dataKey="rapor" name="Rapor" fill="#0d9488" radius={[4, 4, 0, 0]} />
-                    <Bar dataKey="devam" name="Devam" fill="#2563eb" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="devam" name="Ders devamı" fill="#2563eb" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="etut" name="Etüt devamı" fill="#7c3aed" radius={[4, 4, 0, 0]} />
                     <Bar dataKey="yoklama" name="Devamsızlık" fill="#e11d48" radius={[4, 4, 0, 0]} />
                     <Bar dataKey="deneme" name="Deneme" fill="#d97706" radius={[4, 4, 0, 0]} />
                     <Bar dataKey="plan" name="Plan hedef" fill="#059669" radius={[4, 4, 0, 0]} />
@@ -561,8 +563,9 @@ export default function CoachStatsPage() {
                       <th className="px-3 py-2.5">Koç</th>
                       <th className="px-3 py-2.5">Öğrenci</th>
                       <th className="px-3 py-2.5" title="Doldurulan öğrenci×gün / aktif öğrenci×gün">Rapor</th>
-                      <th className="px-3 py-2.5" title="Grup canlı ders: katıldı / işaretlenen">Ders devamı</th>
-                      <th className="px-3 py-2.5" title="Devamsız yoklama / işaretlenen">Devamsızlık</th>
+                      <th className="px-3 py-2.5" title="Grup canlı ders: katıldı / işaretlenen (etüt ve deneme hariç)">Ders devamı</th>
+                      <th className="px-3 py-2.5" title="Etüt oturumları: katıldı / işaretlenen">Etüt devamı</th>
+                      <th className="px-3 py-2.5" title="Devamsız yoklama / işaretlenen (tüm oturumlar)">Devamsızlık</th>
                       <th className="px-3 py-2.5" title="Derse katılanlarda kamera açık oranı">Kamera</th>
                       <th className="px-3 py-2.5" title="En az 1 hedef girilen aktif öğrenci">Plan / hedef</th>
                       <th className="px-3 py-2.5" title="Soru hedefinde gerçekleşen">Hedef gerçekleşme</th>
@@ -609,8 +612,20 @@ export default function CoachStatsPage() {
                             title={`${c.report_filled_slots}/${c.report_expected_slots} öğrenci×gün`}
                           />
                           <PctCell
-                            rate={c.attendance_rate}
-                            sub={`${c.attendance_present}/${c.attendance_total} yoklama`}
+                            rate={c.lesson_attendance_rate ?? c.attendance_rate}
+                            sub={
+                              c.lesson_attendance_total
+                                ? `${c.lesson_attendance_present}/${c.lesson_attendance_total} yoklama`
+                                : 'ders yoklaması yok'
+                            }
+                          />
+                          <PctCell
+                            rate={c.etut_attendance_rate}
+                            sub={
+                              c.etut_attendance_total
+                                ? `${c.etut_attendance_present}/${c.etut_attendance_total} yoklama`
+                                : 'etüt yoklaması yok'
+                            }
                           />
                           <PctCell
                             rate={c.absence_rate}
