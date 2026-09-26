@@ -12,7 +12,7 @@ import {
   inIsoRange,
   isTrialLessonLead,
   resolveOpsDateRange,
-  summarizeLeadSources
+  summarizeLeadSourceFunnel
 } from './crm-ops-metrics.js';
 
 function boundsFromRange(fromYmd, toYmd) {
@@ -74,6 +74,9 @@ export async function handleOpsDashboard(institutionId, filters = {}) {
       throw error;
     }
   }
+
+  /** Dönem içinde oluşan yeni lead'ler — kanal kırılımının "gelen" ayağı */
+  const newLeadsInRange = all.filter((l) => inIsoRange(l.created_at, fromMs, toMs));
 
   // İletişim = temsilcinin mesaj / not / bilgi girişi (gelen mesaj sayılmaz)
   const contacts = all.filter(
@@ -205,7 +208,11 @@ export async function handleOpsDashboard(institutionId, filters = {}) {
     agents,
     coaches,
     series: [...seriesMap.values()].sort((a, b) => a.day.localeCompare(b.day)),
-    sources: summarizeLeadSources(contacts.length ? contacts : all.filter((l) => inIsoRange(l.created_at, fromMs, toMs))),
+    /**
+     * Kanal kutusu artık iki sayı gösterir: dönem içinde GELEN yeni lead ve
+     * bunlardan DÖNÜLEN. Eskiden yalnız temas edilenlerin kaynağı sayılıyordu.
+     */
+    sources: summarizeLeadSourceFunnel(newLeadsInRange),
     segments: CRM_OPS_SEGMENTS
   };
 }

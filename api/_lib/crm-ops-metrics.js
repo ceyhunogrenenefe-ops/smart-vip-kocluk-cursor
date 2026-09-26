@@ -233,3 +233,36 @@ export function filterBulkAudience(leads, filters = {}) {
   }
   return { items, facets: { grades: gradeCounts, columns: columnCounts } };
 }
+
+/**
+ * Kanal bazında "gelen" ve "dönülen" kırılımı.
+ *
+ * gelen   = dönem içinde oluşan yeni lead
+ * dönülen = bu lead'lerden temsilcinin temas ettiği (mesaj / not / bilgi girişi)
+ *
+ * Eskiden dashboard yalnız TEMAS EDİLEN lead'lerin kaynağını gösteriyordu ama
+ * başlıkta "lead kaynağı" yazıyordu; Instagram'dan 10 başvuru gelip hiç
+ * dönülmediğinde ekranda "Instagram 0" çıkıyor, başvuru hiç gelmemiş sanılıyordu.
+ */
+export function summarizeLeadSourceFunnel(newLeads) {
+  const incoming = Object.fromEntries(CRM_SOURCE_BUCKETS.map((b) => [b.id, 0]));
+  const responded = Object.fromEntries(CRM_SOURCE_BUCKETS.map((b) => [b.id, 0]));
+  for (const l of newLeads || []) {
+    const id = classifyLeadSource(l);
+    incoming[id] = (incoming[id] || 0) + 1;
+    if (l?.last_contact_at || l?.first_contact_at) responded[id] = (responded[id] || 0) + 1;
+  }
+  const total = (newLeads || []).length;
+  return CRM_SOURCE_BUCKETS.map((b) => {
+    const came = incoming[b.id] || 0;
+    const answered = responded[b.id] || 0;
+    return {
+      ...b,
+      count: came,
+      responded: answered,
+      pending: Math.max(0, came - answered),
+      pct: total ? Math.round((came / total) * 1000) / 10 : 0,
+      responded_pct: came ? Math.round((answered / came) * 1000) / 10 : 0
+    };
+  });
+}

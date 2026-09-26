@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  summarizeLeadSourceFunnel,
   computeFirstResponseAvgMs,
   formatFirstResponse,
   isOfferPendingLead,
@@ -90,4 +91,39 @@ test('filterBulkAudience: sınıf + pipeline sütunu ve sayaçlar', async () => 
   // Eski segment parametresi hâlâ çalışır
   const legacy = filterBulkAudience(leads, { segment: 'trial_no_show' });
   assert.deepEqual(legacy.items.map((l) => l.id), ['a']);
+});
+
+test('kanal kırılımı geleni ve dönüleni ayrı sayar', () => {
+  const leads = [
+    { last_inbound_channel: 'instagram', last_contact_at: null, first_contact_at: null },
+    { last_inbound_channel: 'instagram', last_contact_at: null, first_contact_at: null },
+    { last_inbound_channel: 'instagram', last_contact_at: '2026-09-25T10:00:00Z' },
+    { last_inbound_channel: 'whatsapp', first_contact_at: '2026-09-25T11:00:00Z' }
+  ];
+  const rows = summarizeLeadSourceFunnel(leads);
+  const ig = rows.find((r) => r.id === 'instagram');
+  const wa = rows.find((r) => r.id === 'whatsapp');
+  assert.equal(ig.count, 3, 'Instagram 3 başvuru');
+  assert.equal(ig.responded, 1, 'biri dönülmüş');
+  assert.equal(ig.pending, 2, 'ikisi bekliyor');
+  assert.equal(wa.count, 1);
+  assert.equal(wa.responded, 1);
+  assert.equal(wa.pending, 0);
+});
+
+test('hiç dönülmeyen kanal sıfır dönülen gösterir, gelen kaybolmaz', () => {
+  const rows = summarizeLeadSourceFunnel([
+    { last_inbound_channel: 'instagram' },
+    { last_inbound_channel: 'instagram' }
+  ]);
+  const ig = rows.find((r) => r.id === 'instagram');
+  assert.equal(ig.count, 2);
+  assert.equal(ig.responded, 0);
+  assert.equal(ig.responded_pct, 0);
+});
+
+test('boş liste tüm kanalları sıfırla döndürür', () => {
+  const rows = summarizeLeadSourceFunnel([]);
+  assert.ok(rows.length > 0);
+  assert.ok(rows.every((r) => r.count === 0 && r.responded === 0));
 });

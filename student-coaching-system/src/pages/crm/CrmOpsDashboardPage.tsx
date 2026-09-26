@@ -52,7 +52,18 @@ const SOURCE_VISUAL: Record<
 function SourceMixPanel({
   sources
 }: {
-  sources: Array<{ id: string; label: string; hint?: string; count: number; pct: number }>;
+  sources: Array<{
+    id: string;
+    label: string;
+    hint?: string;
+    /** Dönem içinde gelen yeni başvuru */
+    count: number;
+    pct: number;
+    /** Bunlardan temsilcinin döndüğü sayı */
+    responded?: number;
+    pending?: number;
+    responded_pct?: number;
+  }>;
 }) {
   const featured = sources.filter((s) => ['website', 'instagram', 'whatsapp'].includes(s.id));
   const pie = sources.filter((s) => s.count > 0);
@@ -62,18 +73,21 @@ function SourceMixPanel({
     <div className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm">
       <div className="mb-4 flex flex-wrap items-end justify-between gap-2">
         <div>
-          <h3 className="text-sm font-semibold text-slate-800">Desteklenen gelen kanallar</h3>
+          <h3 className="text-sm font-semibold text-slate-800">Gelen kanallar — gelen / dönülen</h3>
           <p className="mt-0.5 text-xs text-slate-500">
-            Web sitesi formu, Instagram DM ve WhatsApp gelen kutusu — seçili dönemdeki lead kaynağı.
+            Seçili dönemde kaç yeni başvuru geldi ve kaçına dönüldü. Dönülmeyenler kırmızı.
           </p>
         </div>
-        <p className="text-xs font-medium tabular-nums text-slate-500">{total} iletişim</p>
+        <p className="text-xs font-medium tabular-nums text-slate-500">{total} yeni başvuru</p>
       </div>
       <div className="grid gap-3 lg:grid-cols-5">
         <div className="grid gap-3 sm:grid-cols-3 lg:col-span-3">
           {featured.map((s) => {
             const vis = SOURCE_VISUAL[s.id] || SOURCE_VISUAL.other;
             const Icon = vis.icon;
+            const responded = s.responded ?? 0;
+            const pending = s.pending ?? Math.max(0, s.count - responded);
+            const respondedPct = s.responded_pct ?? (s.count ? Math.round((responded / s.count) * 100) : 0);
             return (
               <div key={s.id} className="rounded-xl border border-slate-100 bg-slate-50/80 p-3">
                 <div className="flex items-center justify-between gap-2">
@@ -85,9 +99,16 @@ function SourceMixPanel({
                 </div>
                 <p className="mt-1 text-[11px] text-slate-500">{s.hint}</p>
                 <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white">
-                  <div className={`h-full rounded-full ${vis.bar}`} style={{ width: `${Math.min(100, s.pct)}%` }} />
+                  <div className={`h-full rounded-full ${vis.bar}`} style={{ width: `${Math.min(100, respondedPct)}%` }} />
                 </div>
-                <p className="mt-1 text-[11px] font-medium tabular-nums text-slate-600">%{s.pct}</p>
+                <p className="mt-1 flex items-center justify-between text-[11px] font-medium tabular-nums">
+                  <span className="text-emerald-700">{responded} dönüldü</span>
+                  {pending > 0 ? (
+                    <span className="text-rose-700">{pending} bekliyor</span>
+                  ) : (
+                    <span className="text-slate-400">—</span>
+                  )}
+                </p>
               </div>
             );
           })}
