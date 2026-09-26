@@ -765,6 +765,55 @@ export async function sendCrmWhatsAppText({ phone, text, institutionId = null })
   };
 }
 
+/**
+ * WhatsApp seçmeli mesaj (interactive button / list).
+ * Numaralı liste yerine gerçek seçim bileşeni gönderir.
+ */
+export async function sendCrmWhatsAppInteractive({ phone, interactive, institutionId = null }) {
+  await loadMetaWhatsAppSecretsFromDb();
+  const e164 = normalizePhoneToE164(phone) || (toMetaWaContactId(phone) ? `+${toMetaWaContactId(phone)}` : null);
+  if (!e164) {
+    const err = new Error('invalid_phone');
+    err.code = 'PHONE';
+    throw err;
+  }
+  const { sendMetaInteractiveMessage } = await import('./meta-whatsapp.js');
+  const result = await sendMetaInteractiveMessage({ toE164: e164, interactive, institutionId });
+  return { messageId: result?.messageId || null, raw: result?.raw || null };
+}
+
+/** Instagram / Facebook DM quick reply (≤13 seçenek). */
+export async function sendCrmInstagramQuickReplies({ igScopedId, text, quickReplies }) {
+  await loadMetaWhatsAppSecretsFromDb();
+  const { resolveSocialToken, resolvePageId } = await import('./meta-social-inbound.js');
+  const { token } = resolveSocialToken();
+  const pageId = resolvePageId();
+  if (!token || !pageId) {
+    const err = new Error('instagram_not_configured');
+    err.code = 'ENV';
+    throw err;
+  }
+  const graphVer = String(process.env.META_GRAPH_API_VERSION || 'v21.0').trim() || 'v21.0';
+  const url = `https://graph.facebook.com/${graphVer}/${encodeURIComponent(pageId)}/messages`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      recipient: { id: String(igScopedId) },
+      messaging_type: 'RESPONSE',
+      message: { text: String(text || '').slice(0, 1000), quick_replies: quickReplies }
+    })
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const err = new Error(json?.error?.message || `instagram_send_http_${res.status}`);
+    err.code = 'META';
+    err.meta = json;
+    throw err;
+  }
+  return { messageId: json?.message_id || null, raw: json };
+}
+
 export async function sendCrmWhatsAppTemplate({
   phone,
   templateName,

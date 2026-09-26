@@ -19,16 +19,38 @@ import {
   DEFAULT_CALL_SLOTS,
   DEFAULT_CALL_TIME_TEXT,
   DEFAULT_CLOSING_TEXT,
+  DEFAULT_CONSULTANT_TEXT,
+  DEFAULT_GRADE_TEXT,
   DEFAULT_GREETING_TEXT,
+  GRADE_LEVELS,
   GRADE_OPTIONS,
   PREFER_MESSAGE_OPTION,
+  detectGrade,
+  gradeOptionsForLevel,
   isChannelEnabled,
   isWithinRunWindow,
+  levelOfGrade,
   nextFlowAction,
   numberedOptions
 } from './crm-auto-greeting-core.js';
 
-export { GRADE_OPTIONS, DEFAULT_CALL_SLOTS };
+export { GRADE_OPTIONS, GRADE_LEVELS, DEFAULT_CALL_SLOTS };
+
+/** Yanıt gelmezse kaç dakika sonra danışman mesajı gider. */
+export const DEFAULT_FOLLOWUP_MINUTES = 3;
+
+function followupMinutes(settings) {
+  const n = Number(settings?.followup_minutes);
+  return Number.isFinite(n) && n >= 1 && n <= 180 ? n : DEFAULT_FOLLOWUP_MINUTES;
+}
+
+function followupDueAt(settings, from = new Date()) {
+  return new Date(from.getTime() + followupMinutes(settings) * 60_000).toISOString();
+}
+
+export function consultantText(settings) {
+  return String(settings?.consultant_text || DEFAULT_CONSULTANT_TEXT);
+}
 
 /** Istanbul saatine göre "HH:MM". */
 export function istanbulHhmm(date = new Date()) {
@@ -92,7 +114,13 @@ export async function saveAutoGreetingSettings(institutionId, patch = {}, actorI
     'teacher_channel_instagram',
     'teacher_channel_facebook',
     'teacher_message',
-    'teacher_application_url'
+    'teacher_application_url',
+    'grade_text',
+    'use_interactive',
+    'ask_call_slot',
+    'followup_minutes',
+    'consultant_text',
+    'skip_grade_when_known'
   ];
   const row = { institution_id: id, updated_by: actorId || null, updated_at: new Date().toISOString() };
   for (const key of allowed) {
@@ -193,22 +221,61 @@ export async function resumeAutoFlow(conversationId) {
   return { ok: true };
 }
 
-/** Kanala göre mesaj gönderir. */
-async function sendByChannel({ conversation, text, institutionId }) {
+/**
+ * Kanala göre mesaj gönderir.
+ *
+ * options verilirse önce resmî API'nin seçim bileşeni denenir
+ * (WhatsApp interactive / Instagram quick reply). Kanal veya limit izin
+ * vermezse numaralı metne düşer — mesaj her hâlükârda gider.
+ */
+async function sendByChannel({ conversation, text, institutionId, options = null, listButtonLabel }) {
   const channel = String(conversation?.channel || '').toLowerCase();
   const contact = String(conversation?.contact_identifier || '').trim();
   if (!contact || !text) return { ok: false, error: 'missing_target' };
 
+  const opts = Array.isArray(options) && options.length ? options : null;
+  const fallbackBody = opts ? text + '\n\n' + numberedOptions(opts) : text;
+
   if (channel === 'whatsapp') {
-    const { sendCrmWhatsAppText } = await import('./crm-inbox.js');
-    await sendCrmWhatsAppText({ phone: contact, text, institutionId });
-    return { ok: true };
+    const inbox = await import('./crm-inbox.js');
+    if (opts) {
+      const { buildWhatsAppInteractive } = await import('./crm-interactive-message.js');
+      const interactive = buildWhatsAppInteractive({ text, options: opts, listButtonLabel });
+      if (interactive) {
+        try {
+          await inbox.sendCrmWhatsAppInteractive({ phone: contact, interactive, institutionId });
+          return { ok: true, interactive: true, body: text };
+        } catch (e) {
+          console.warn('[auto-greeting] interactive gonderilemedi, metne dusuldu:', errorMessage(e));
+        }
+      }
+    }
+    await inbox.sendCrmWhatsAppText({ phone: contact, text: fallbackBody, institutionId });
+    return { ok: true, interactive: false, body: fallbackBody };
   }
+
   if (channel === 'instagram' || channel === 'facebook') {
-    const { sendCrmInstagramDm } = await import('./crm-inbox.js');
-    await sendCrmInstagramDm({ igScopedId: contact, text });
-    return { ok: true };
+    const inbox = await import('./crm-inbox.js');
+    if (opts) {
+      const { buildInstagramQuickReplies } = await import('./crm-interactive-message.js');
+      const payload = buildInstagramQuickReplies({ text, options: opts });
+      if (payload) {
+        try {
+          await inbox.sendCrmInstagramQuickReplies({
+            igScopedId: contact,
+            text: payload.text,
+            quickReplies: payload.quick_replies
+          });
+          return { ok: true, interactive: true, body: text };
+        } catch (e) {
+          console.warn('[auto-greeting] quick reply gonderilemedi, metne dusuldu:', errorMessage(e));
+        }
+      }
+    }
+    await inbox.sendCrmInstagramDm({ igScopedId: contact, text: fallbackBody });
+    return { ok: true, interactive: false, body: fallbackBody };
   }
+
   return { ok: false, error: `unsupported_channel:${channel}` };
 }
 
@@ -231,17 +298,75 @@ async function recordOutgoing({ conversation, text, institutionId }) {
 }
 
 function buildGreetingMessage(settings) {
-  const head = String(settings?.greeting_text || DEFAULT_GREETING_TEXT);
-  return `${head}\n\n${numberedOptions(GRADE_OPTIONS)}`;
+  return String(settings?.greeting_text || DEFAULT_GREETING_TEXT);
+}
+
+function buildGradeQuestion(settings) {
+  return String(settings?.grade_text || DEFAULT_GRADE_TEXT);
 }
 
 function buildCallTimeMessage(settings, programLabel) {
   const raw = String(settings?.call_time_text || DEFAULT_CALL_TIME_TEXT);
-  const head = raw.replace(/\{program\}/g, programLabel || '');
+  return raw.replace(/\{program\}/g, programLabel || '');
+}
+
+function callSlotOptions(settings) {
   const slots = Array.isArray(settings?.call_slots) && settings.call_slots.length
     ? settings.call_slots
     : DEFAULT_CALL_SLOTS;
-  return `${head}\n\n${numberedOptions([...slots, PREFER_MESSAGE_OPTION])}`;
+  return [...slots, PREFER_MESSAGE_OPTION].map((label) => ({ key: String(label), label: String(label) }));
+}
+
+/**
+ * Sınıf form / reklam kaydından zaten biliniyorsa bir daha sorulmaz.
+ * Kaynak: registration_leads.grade_program (web formu, Meta lead formu).
+ */
+async function resolveKnownGrade(conversation, settings) {
+  if (settings?.skip_grade_when_known === false) return null;
+  const leadId = conversation?.lead_id ? String(conversation.lead_id) : '';
+  if (!leadId) return null;
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('registration_leads')
+      .select('grade_program')
+      .eq('id', leadId)
+      .maybeSingle();
+    if (error) return null;
+    const raw = String(data?.grade_program || '').trim();
+    if (!raw) return null;
+    const hit = detectGrade(raw);
+    return hit ? { key: hit.key, label: hit.label } : null;
+  } catch (e) {
+    console.warn('[auto-greeting] lead sinifi okunamadi:', errorMessage(e));
+    return null;
+  }
+}
+
+/** Saat aralığı sorulmadığı akışta: "en kısa sürede aransın" görevi. */
+async function createQuickCallTask({ leadId, institutionId, assignedTo, contactName, gradeLabelText }) {
+  if (!leadId) return null;
+  const today = getIstanbulDateString();
+  const title = `${gradeLabelText || 'Aday'} - ${contactName || 'Yeni lead'} - en kisa surede aranacak`;
+  try {
+    const { error } = await supabaseAdmin.from('registration_tasks').insert({
+      lead_id: leadId,
+      institution_id: institutionId || null,
+      assigned_to: assignedTo || null,
+      title: title.slice(0, 300),
+      description: 'Otomatik karsilama: musteri sinifini secti, danisman aramasi bekleniyor.',
+      task_type: 'call_parent',
+      priority: 'high',
+      status: 'pending',
+      due_at: new Date().toISOString(),
+      deduplication_key: `auto-greeting-quick:${leadId}:${today}`,
+      auto_generated: true
+    });
+    if (error && !/duplicate|unique/i.test(error.message || '')) throw error;
+    return title;
+  } catch (e) {
+    console.warn('[auto-greeting] hizli gorev:', errorMessage(e));
+    return null;
+  }
 }
 
 /** Mesai bitmişse arama "yarın" için planlanır. */
@@ -486,10 +611,14 @@ export async function runAutoGreetingFlow({ conversation, body }) {
       return { ran: false, reason: 'outside_window' };
     }
 
+    const knownGrade = session ? null : await resolveKnownGrade(conversation, settings);
+    const askCallSlot = settings.ask_call_slot === true;
     const decision = nextFlowAction({
       session,
       body,
-      slots: Array.isArray(settings.call_slots) ? settings.call_slots : DEFAULT_CALL_SLOTS
+      slots: Array.isArray(settings.call_slots) ? settings.call_slots : DEFAULT_CALL_SLOTS,
+      knownGrade,
+      askCallSlot
     });
     if (decision.action === 'ignore') return { ran: false, reason: decision.reason };
 
@@ -502,28 +631,81 @@ export async function runAutoGreetingFlow({ conversation, body }) {
 
     if (decision.action === 'greet') {
       const text = buildGreetingMessage(settings);
-      const sent = await sendByChannel({ conversation, text, institutionId });
+      const options = GRADE_LEVELS.map((l) => ({ key: l.key, label: l.label }));
+      const sent = await sendByChannel({
+        conversation,
+        text,
+        institutionId,
+        options: settings.use_interactive === false ? null : options,
+        listButtonLabel: 'Kademe seç'
+      });
       if (!sent.ok) {
         await logEvent({ ...base, event: 'error', detail: { step: 'greet', error: sent.error } });
         return { ran: false, reason: sent.error };
       }
-      await recordOutgoing({ conversation, text, institutionId });
-      await upsertSession({ ...base, step: 'grade_asked' });
+      await recordOutgoing({ conversation, text: sent.body || text, institutionId });
+      await upsertSession({
+        ...base,
+        step: 'level_asked',
+        followup_due_at: followupDueAt(settings),
+        followup_sent_at: null
+      });
       await addTags(conversation, ['Yeni Lead', 'Otomatik karşılama']);
-      await logEvent({ ...base, event: 'greeting_sent' });
+      await logEvent({ ...base, event: 'greeting_sent', detail: { interactive: Boolean(sent.interactive) } });
       return { ran: true, action: 'greet' };
+    }
+
+    if (decision.action === 'ask_grade') {
+      const level = decision.level;
+      const text = buildGradeQuestion(settings);
+      const options = gradeOptionsForLevel(level.key).map((o) => ({ key: o.key, label: o.label }));
+      const sent = await sendByChannel({
+        conversation,
+        text,
+        institutionId,
+        options: settings.use_interactive === false ? null : options,
+        listButtonLabel: 'Sınıf seç'
+      });
+      if (!sent.ok) {
+        await logEvent({ ...base, event: 'error', detail: { step: 'ask_grade', error: sent.error } });
+        return { ran: false, reason: sent.error };
+      }
+      await recordOutgoing({ conversation, text: sent.body || text, institutionId });
+      await upsertSession({
+        ...base,
+        step: 'grade_asked',
+        grade_level: level.key,
+        followup_due_at: followupDueAt(settings),
+        followup_sent_at: null
+      });
+      await logEvent({ ...base, event: 'level_selected', detail: level });
+      return { ran: true, action: 'ask_grade' };
     }
 
     if (decision.action === 'ask_slot') {
       const label = decision.grade.label;
       const text = buildCallTimeMessage(settings, label);
-      const sent = await sendByChannel({ conversation, text, institutionId });
+      const sent = await sendByChannel({
+        conversation,
+        text,
+        institutionId,
+        options: settings.use_interactive === false ? null : callSlotOptions(settings),
+        listButtonLabel: 'Saat seç'
+      });
       if (!sent.ok) {
         await logEvent({ ...base, event: 'error', detail: { step: 'ask_slot', error: sent.error } });
         return { ran: false, reason: sent.error };
       }
-      await recordOutgoing({ conversation, text, institutionId });
-      await upsertSession({ ...base, step: 'slot_asked', grade_program: label });
+      await recordOutgoing({ conversation, text: sent.body || text, institutionId });
+      await upsertSession({
+        ...base,
+        step: 'slot_asked',
+        grade_program: label,
+        grade_level: levelOfGrade(decision.grade.key) || null,
+        grade_source: decision.reason || null,
+        followup_due_at: followupDueAt(settings),
+        followup_sent_at: null
+      });
       await updateLead({
         leadId: conversation.lead_id,
         gradeLabelText: label,
@@ -532,6 +714,40 @@ export async function runAutoGreetingFlow({ conversation, body }) {
       await addTags(conversation, ['Yeni Lead', label]);
       await logEvent({ ...base, event: 'grade_detected', detail: decision.grade });
       return { ran: true, action: 'ask_slot' };
+    }
+
+    // Yeni akış: sınıf seçildi → "danışmanımız iletişime geçecek" ve akış biter
+    if (decision.action === 'complete' && decision.grade) {
+      const label = decision.grade.label;
+      const text = consultantText(settings);
+      const sent = await sendByChannel({ conversation, text, institutionId });
+      if (!sent.ok) {
+        await logEvent({ ...base, event: 'error', detail: { step: 'handoff', error: sent.error } });
+        return { ran: false, reason: sent.error };
+      }
+      await recordOutgoing({ conversation, text, institutionId });
+      await upsertSession({
+        ...base,
+        step: 'completed',
+        grade_program: label,
+        grade_level: levelOfGrade(decision.grade.key) || null,
+        grade_source: decision.reason || null,
+        followup_due_at: null,
+        completed_at: new Date().toISOString()
+      });
+      await updateLead({ leadId: conversation.lead_id, gradeLabelText: label, channel: conversation.channel });
+      const taskTitle = await createQuickCallTask({
+        leadId: conversation.lead_id,
+        institutionId,
+        assignedTo: conversation.assigned_user_id || null,
+        contactName: conversation.contact_name || conversation.contact_username,
+        gradeLabelText: label
+      });
+      await addTags(conversation, ['Yeni Lead', label, 'Arama Talebi']);
+      await logEvent({ ...base, event: 'grade_detected', detail: decision.grade });
+      await logEvent({ ...base, event: 'task_created', detail: { taskTitle, quick: true } });
+      await logEvent({ ...base, event: 'flow_completed', detail: { grade: label, askCallSlot: false } });
+      return { ran: true, action: 'complete' };
     }
 
     if (decision.action === 'complete') {
@@ -553,6 +769,7 @@ export async function runAutoGreetingFlow({ conversation, body }) {
         grade_program: label || null,
         call_slot: slot,
         call_date: prefersMessage ? null : callDate,
+        followup_due_at: null,
         completed_at: new Date().toISOString()
       });
 
@@ -588,5 +805,121 @@ export async function runAutoGreetingFlow({ conversation, body }) {
   } catch (e) {
     console.warn('[auto-greeting] akış:', errorMessage(e));
     return { ran: false, reason: 'error', error: errorMessage(e) };
+  }
+}
+
+/**
+ * Yanıt gelmeyen sohbetlere danışman mesajı (varsayılan 3 dk).
+ *
+ * Müşteri seçenekleri görüp hiçbir şey seçmezse konuşma ortada kalmasın diye
+ * aynı kapanış mesajı gönderilir ve satış ekibine görev açılır. Cron her
+ * dakika çağırır; oturum başına yalnız BİR kez gönderilir.
+ *
+ * Atlanan durumlar: temsilci devraldıysa, akış zaten bittiyse, kurum modülü
+ * kapattıysa. Hiçbiri hata üretmez — sessizce geçilir.
+ */
+export async function runAutoGreetingFollowups({ limit = 40, now = new Date() } = {}) {
+  const out = { checked: 0, sent: 0, skipped: 0, errors: 0 };
+  let rows = [];
+  try {
+    const { data, error } = await supabaseAdmin
+      .from(SESSION_TABLE)
+      .select('*')
+      .lte('followup_due_at', now.toISOString())
+      .is('followup_sent_at', null)
+      .is('human_takeover_at', null)
+      .not('followup_due_at', 'is', null)
+      .limit(Math.min(200, Math.max(1, Number(limit) || 40)));
+    if (error) {
+      if (tableMissing(error)) return { ...out, reason: 'table_missing' };
+      throw error;
+    }
+    rows = data || [];
+  } catch (e) {
+    console.warn('[auto-greeting] takip listesi:', errorMessage(e));
+    return { ...out, reason: 'query_failed', error: errorMessage(e) };
+  }
+
+  for (const session of rows) {
+    out.checked += 1;
+    const step = String(session.step || '');
+    if (step === 'completed' || step === 'stopped' || session.flow_kind === 'teacher') {
+      await clearFollowup(session.conversation_id);
+      out.skipped += 1;
+      continue;
+    }
+    try {
+      const settings = await getAutoGreetingSettings(session.institution_id);
+      if (!settings || settings.is_active !== true) {
+        await clearFollowup(session.conversation_id);
+        out.skipped += 1;
+        continue;
+      }
+      const { data: conversation } = await supabaseAdmin
+        .from('crm_conversations')
+        .select('*')
+        .eq('id', session.conversation_id)
+        .maybeSingle();
+      if (!conversation) {
+        await clearFollowup(session.conversation_id);
+        out.skipped += 1;
+        continue;
+      }
+
+      const base = {
+        institutionId: session.institution_id,
+        conversationId: session.conversation_id,
+        leadId: session.lead_id || null
+      };
+      const text = consultantText(settings);
+      const sent = await sendByChannel({
+        conversation,
+        text,
+        institutionId: session.institution_id
+      });
+      if (!sent.ok) {
+        await logEvent({ ...base, event: 'error', detail: { step: 'followup', error: sent.error } });
+        out.errors += 1;
+        continue;
+      }
+      await recordOutgoing({ conversation, text, institutionId: session.institution_id });
+      await supabaseAdmin
+        .from(SESSION_TABLE)
+        .update({
+          step: 'completed',
+          followup_due_at: null,
+          followup_sent_at: new Date().toISOString(),
+          stopped_reason: 'no_selection_followup',
+          completed_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        })
+        .eq('conversation_id', session.conversation_id);
+
+      await createQuickCallTask({
+        leadId: session.lead_id,
+        institutionId: session.institution_id,
+        assignedTo: conversation.assigned_user_id || null,
+        contactName: conversation.contact_name || conversation.contact_username,
+        gradeLabelText: session.grade_program || 'Sınıf belirtilmedi'
+      });
+      await addTags(conversation, ['Yeni Lead', 'Seçim yapılmadı']);
+      await logEvent({ ...base, event: 'followup_sent', detail: { step } });
+      out.sent += 1;
+    } catch (e) {
+      console.warn('[auto-greeting] takip:', errorMessage(e));
+      out.errors += 1;
+    }
+  }
+  return out;
+}
+
+async function clearFollowup(conversationId) {
+  try {
+    await supabaseAdmin
+      .from(SESSION_TABLE)
+      .update({ followup_due_at: null, updated_at: new Date().toISOString() })
+      .eq('conversation_id', conversationId);
+  } catch {
+    /* takip alanı temizlenemezse bir sonraki turda yeniden denenir */
   }
 }

@@ -749,8 +749,20 @@ export type CrmAutoGreetingSettings = {
   custom_start: string | null;
   custom_end: string | null;
   greeting_text: string | null;
+  /** Kademe seçildikten sonraki sınıf sorusu */
+  grade_text: string | null;
   call_time_text: string | null;
   closing_text: string | null;
+  /** Sınıf seçilince gönderilen "danışmanımız iletişime geçecek" mesajı */
+  consultant_text: string | null;
+  /** Numaralı liste yerine WhatsApp/Instagram seçim butonları */
+  use_interactive: boolean;
+  /** Eski akış: sınıftan sonra arama saati de sorulsun mu */
+  ask_call_slot: boolean;
+  /** Seçim yapılmazsa kaç dakika sonra danışman mesajı gitsin */
+  followup_minutes: number;
+  /** Sınıf form/reklam kaydından biliniyorsa sorma */
+  skip_grade_when_known: boolean;
   call_slots: string[];
   updated_at?: string;
 };

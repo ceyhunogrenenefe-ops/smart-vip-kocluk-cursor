@@ -7,6 +7,8 @@ import {
   isChannelEnabled,
   nextFlowAction,
   numberedOptions,
+  levelOfGrade,
+  gradeOptionsForLevel,
   DEFAULT_CALL_SLOTS,
   PREFER_MESSAGE_OPTION
 } from './crm-auto-greeting-core.js';
@@ -79,8 +81,14 @@ test('telefon istemeyen müşteri ayrılır', () => {
   assert.equal(detectCallSlot('6')?.slot, PREFER_MESSAGE_OPTION);
 });
 
-test('akış: oturum yokken sınıf belliyse doğrudan saat sorulur', () => {
+test('akış: oturum yokken sınıf belliyse soru sorulmadan danışmana devredilir', () => {
   const r = nextFlowAction({ session: null, body: 'LGS fiyatı nedir' });
+  assert.equal(r.action, 'complete');
+  assert.equal(r.grade.key, '8');
+});
+
+test('akış: ask_call_slot açıksa eski saat sorusu geri gelir', () => {
+  const r = nextFlowAction({ session: null, body: 'LGS fiyatı nedir', askCallSlot: true });
   assert.equal(r.action, 'ask_slot');
   assert.equal(r.grade.key, '8');
 });
@@ -115,4 +123,56 @@ test('akış: saat seçilince tamamlanır', () => {
 test('numaralı seçenek listesi üretilir', () => {
   const text = numberedOptions(['A', 'B']);
   assert.equal(text, '1) A\n2) B');
+});
+
+test('akış: form/reklam kaydından gelen sınıf bir daha sorulmaz', () => {
+  const r = nextFlowAction({
+    session: null,
+    body: 'Merhaba bilgi almak istiyorum',
+    knownGrade: { key: '6', label: '6. Sınıf' }
+  });
+  assert.equal(r.action, 'complete');
+  assert.equal(r.grade.key, '6');
+  assert.equal(r.reason, 'grade_from_lead');
+});
+
+test('akış: kademe seçilince o kademenin sınıfları sorulur', () => {
+  const r = nextFlowAction({ session: { step: 'level_asked' }, body: 'Ortaokul' });
+  assert.equal(r.action, 'ask_grade');
+  assert.equal(r.level.key, 'ortaokul');
+});
+
+test('akış: "Lise / Mezun" kademesi Mezun sınıfı sanılmaz', () => {
+  const r = nextFlowAction({ session: { step: 'level_asked' }, body: 'Lise / Mezun' });
+  assert.equal(r.action, 'ask_grade');
+  assert.equal(r.level.key, 'lise');
+});
+
+test('akış: kademe adımında doğrudan sınıf yazılırsa atlanır', () => {
+  const r = nextFlowAction({ session: { step: 'level_asked' }, body: '7. sınıf' });
+  assert.equal(r.action, 'complete');
+  assert.equal(r.grade.key, '7');
+});
+
+test('akış: sınıf seçilince danışman mesajına geçilir', () => {
+  const r = nextFlowAction({ session: { step: 'grade_asked' }, body: '8. Sınıf / LGS' });
+  assert.equal(r.action, 'complete');
+  assert.equal(r.grade.key, '8');
+});
+
+test('akış: kademe adımında seçim yapılmazsa beklenir', () => {
+  const r = nextFlowAction({ session: { step: 'level_asked' }, body: 'fiyat nedir' });
+  assert.equal(r.action, 'ignore');
+  assert.equal(r.reason, 'waiting_level');
+});
+
+test('kademe sınıf eşlemesi', () => {
+  assert.equal(levelOfGrade('5'), 'ortaokul');
+  assert.equal(levelOfGrade('mezun'), 'lise');
+  assert.equal(levelOfGrade('2'), 'ilkokul');
+  assert.deepEqual(
+    gradeOptionsForLevel('ilkokul').map((o) => o.key),
+    ['2', '3', '4']
+  );
+  assert.deepEqual(gradeOptionsForLevel('yok'), []);
 });

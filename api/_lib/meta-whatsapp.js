@@ -491,6 +491,58 @@ export async function sendMetaTextMessage({ toE164, text, institutionId = null }
 }
 
 /**
+ * Seçmeli (buton / liste) mesaj — Cloud API interactive.
+ * Gövde crm-interactive-message.js'de kurulur; burada yalnız gönderilir.
+ * Interactive reddedilirse çağıran taraf düz metne düşer.
+ */
+export async function sendMetaInteractiveMessage({ toE164, interactive, institutionId = null }) {
+  const own = await resolveInstitutionWhatsApp(institutionId);
+  const pid = own.phoneNumberId || phoneNumberId();
+  const tok = own.token || token();
+  if (!pid || !tok) {
+    const err = new Error('missing_meta_whatsapp_env');
+    err.code = 'ENV';
+    throw err;
+  }
+  const to = normalizePhoneDigitsForMeta(toE164);
+  if (!to || to.length < 8) {
+    const err = new Error('invalid_phone');
+    err.code = 'PHONE';
+    throw err;
+  }
+  if (!interactive || typeof interactive !== 'object') {
+    const err = new Error('interactive_payload_required');
+    err.code = 'PAYLOAD';
+    throw err;
+  }
+  const url = `https://graph.facebook.com/${GRAPH()}/${pid}/messages`;
+  console.info('[meta-whatsapp] send interactive', {
+    phone_number_id_suffix: pid.length > 6 ? pid.slice(-6) : pid,
+    to_suffix: to.length > 4 ? to.slice(-4) : to,
+    kind: interactive.type
+  });
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${tok}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to,
+      type: 'interactive',
+      interactive
+    })
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const err = new Error(graphUserMessage(json, res.status));
+    err.status = res.status;
+    err.meta = json;
+    throw err;
+  }
+  return { messageId: json?.messages?.[0]?.id || null, raw: json };
+}
+
+/**
  * Hazır HTTPS bağlantısı ile PDF/belge (oturum penceresi gerekir).
  */
 export async function sendMetaDocumentWithLink({
