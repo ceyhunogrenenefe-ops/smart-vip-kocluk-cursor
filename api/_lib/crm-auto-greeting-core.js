@@ -22,6 +22,20 @@ export const GRADE_OPTIONS = [
   { key: 'mezun', label: 'Mezun / YKS' }
 ];
 
+/**
+ * Kademe seçimi — sınıf sorusunun ilk adımı.
+ *
+ * Neden iki adım: WhatsApp Cloud API bir liste mesajında toplam 10 satır kabul
+ * ediyor, elimizde 12 sınıf var. Kademe → sınıf sırası hem limite sığıyor hem de
+ * 12 satırlık duvardan daha okunaklı. Etiketlerde "N. Sınıf" geçmez; yoksa
+ * kademe yanıtı sınıf sanılırdı.
+ */
+export const GRADE_LEVELS = [
+  { key: 'ilkokul', label: 'İlkokul', grades: ['2', '3', '4'] },
+  { key: 'ortaokul', label: 'Ortaokul', grades: ['5', '6', '7', '8'] },
+  { key: 'lise', label: 'Lise / Mezun', grades: ['9', '10', '11', '12', 'mezun'] }
+];
+
 export const DEFAULT_CALL_SLOTS = [
   '10:00 - 12:00',
   '12:00 - 14:00',
@@ -34,8 +48,14 @@ export const PREFER_MESSAGE_OPTION = 'Telefon yerine buradan bilgi almak istiyor
 
 export const DEFAULT_GREETING_TEXT = `Merhabalar 👋
 Online VIP Dershane ile iletişime geçtiğiniz için teşekkür ederiz.
-Size en doğru bilgiyi verebilmemiz için öncelikle öğrencimizin sınıfını öğrenebilir miyiz?
-Aşağıdan öğrencimizin sınıfını seçebilirsiniz. 👇`;
+Size en doğru bilgiyi verebilmemiz için öğrencimizin kademesini seçer misiniz?`;
+
+export const DEFAULT_GRADE_TEXT = `Teşekkürler. Öğrencimizin sınıfını seçebilir misiniz? 👇`;
+
+/** Sınıf seçildikten sonra ve 3 dk yanıt gelmezse gönderilen kapanış. */
+export const DEFAULT_CONSULTANT_TEXT = `Teşekkür ederiz 🙏
+Eğitim danışmanımız en kısa sürede sizinle iletişime geçecek.
+Bu arada merak ettiğiniz bir konu varsa buraya yazabilirsiniz.`;
 
 export const DEFAULT_CALL_TIME_TEXT = `Teşekkür ederiz. 🌟
 Eğitim danışmanımız {program} programımız hakkında size detaylı bilgi verebilir.
@@ -58,6 +78,46 @@ export function normalizeText(value) {
 
 export function gradeLabel(key) {
   return GRADE_OPTIONS.find((g) => g.key === String(key))?.label || String(key || '');
+}
+
+export function levelLabel(key) {
+  return GRADE_LEVELS.find((l) => l.key === String(key))?.label || String(key || '');
+}
+
+/** Bir kademenin sınıf seçenekleri (buton listesi için). */
+export function gradeOptionsForLevel(levelKey) {
+  const level = GRADE_LEVELS.find((l) => l.key === String(levelKey));
+  if (!level) return [];
+  return level.grades
+    .map((g) => GRADE_OPTIONS.find((o) => o.key === g))
+    .filter(Boolean);
+}
+
+/** Sınıf anahtarından kademe anahtarı. */
+export function levelOfGrade(gradeKey) {
+  const key = String(gradeKey || '');
+  return GRADE_LEVELS.find((l) => l.grades.includes(key))?.key || '';
+}
+
+/**
+ * Kademe seçimini çöz. Yalnız kademe etiketiyle eşleşir; "mezunum" gibi
+ * serbest metin buraya değil detectGrade'e gider.
+ */
+export function detectGradeLevel(body) {
+  const text = normalizeText(body);
+  if (!text) return null;
+  for (const level of GRADE_LEVELS) {
+    if (text === normalizeText(level.label) || text === level.key) {
+      return { key: level.key, label: level.label };
+    }
+  }
+  // Sıra numarası ile yanıt (butonsuz kanal / numaralı metin yedeği)
+  const idx = text.match(/^([1-3])$/);
+  if (idx) {
+    const level = GRADE_LEVELS[Number(idx[1]) - 1];
+    if (level) return { key: level.key, label: level.label };
+  }
+  return null;
 }
 
 /**
@@ -182,24 +242,54 @@ export function numberedOptions(options) {
 
 /**
  * Akışın bir sonraki adımı. Yan etkisiz karar fonksiyonu.
- * @returns {{ action: 'greet'|'ask_slot'|'complete'|'ignore', grade?: object, slot?: object, reason?: string }}
+ *
+ * Varsayılan akış (ask_call_slot kapalı):
+ *   karşılama + kademe → sınıf → "danışmanımız iletişime geçecek"
+ * Sınıf form/reklam kaydından zaten biliniyorsa hiç sorulmaz.
+ * Saat aralığı sorusu ask_call_slot=true ile geri açılabilir.
+ *
+ * @returns {{ action: 'greet'|'ask_grade'|'ask_slot'|'complete'|'ignore',
+ *             grade?: object, level?: object, slot?: object, reason?: string }}
  */
-export function nextFlowAction({ session, body, slots = DEFAULT_CALL_SLOTS }) {
+export function nextFlowAction({
+  session,
+  body,
+  slots = DEFAULT_CALL_SLOTS,
+  knownGrade = null,
+  askCallSlot = false
+}) {
   const step = String(session?.step || '');
 
   if (session?.human_takeover_at) return { action: 'ignore', reason: 'human_takeover' };
   if (step === 'completed' || step === 'stopped') return { action: 'ignore', reason: 'flow_finished' };
 
-  // Hiç başlamamış: sınıf zaten belliyse doğrudan saat sorulur
+  /** Sınıf belliyken sorulacak bir şey kalmaz. */
+  const afterGrade = (grade, reason) =>
+    askCallSlot ? { action: 'ask_slot', grade, reason } : { action: 'complete', grade, reason };
+
   if (!session) {
+    if (knownGrade?.key) {
+      return afterGrade({ ...knownGrade, confidence: 'high' }, 'grade_from_lead');
+    }
     const grade = detectGrade(body);
-    if (grade) return { action: 'ask_slot', grade };
+    if (grade) return afterGrade(grade, 'grade_in_first_message');
     return { action: 'greet' };
   }
 
-  if (step === 'greeted' || step === 'grade_asked') {
+  // Kademe soruldu: önce kademe etiketi, sonra doğrudan sınıf
+  if (step === 'greeted' || step === 'level_asked') {
+    const level = detectGradeLevel(body);
+    if (level) return { action: 'ask_grade', level };
     const grade = detectGrade(body);
-    if (grade) return { action: 'ask_slot', grade };
+    if (grade) return afterGrade(grade, 'grade_typed');
+    return { action: 'ignore', reason: 'waiting_level' };
+  }
+
+  if (step === 'grade_asked') {
+    const grade = detectGrade(body);
+    if (grade) return afterGrade(grade, 'grade_selected');
+    const level = detectGradeLevel(body);
+    if (level) return { action: 'ask_grade', level };
     return { action: 'ignore', reason: 'waiting_grade' };
   }
 

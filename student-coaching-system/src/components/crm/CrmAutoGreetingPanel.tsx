@@ -91,8 +91,14 @@ export default function CrmAutoGreetingPanel() {
           custom_start: null,
           custom_end: null,
           greeting_text: null,
+          grade_text: null,
           call_time_text: null,
           closing_text: null,
+          consultant_text: null,
+          use_interactive: true,
+          ask_call_slot: false,
+          followup_minutes: 3,
+          skip_grade_when_known: true,
           call_slots: r.defaults.call_slots
         };
         setForm(base);
@@ -318,9 +324,61 @@ export default function CrmAutoGreetingPanel() {
       </div>
 
       <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-3">
+        <p className="text-sm font-semibold text-slate-900">Akış biçimi</p>
+        <label className="flex items-start gap-2 text-xs text-slate-700">
+          <input
+            type="checkbox"
+            checked={form.use_interactive !== false}
+            onChange={(e) => patch({ use_interactive: e.target.checked })}
+            className="mt-0.5"
+          />
+          <span>
+            <b>Seçim butonları kullan</b> — WhatsApp ve Instagram&apos;ın kendi seçim bileşeni gönderilir.
+            Kapatılırsa numaralı liste gider. Kanal veya seçenek sayısı izin vermezse otomatik olarak
+            numaralı listeye düşer.
+          </span>
+        </label>
+        <label className="flex items-start gap-2 text-xs text-slate-700">
+          <input
+            type="checkbox"
+            checked={form.skip_grade_when_known !== false}
+            onChange={(e) => patch({ skip_grade_when_known: e.target.checked })}
+            className="mt-0.5"
+          />
+          <span>
+            <b>Sınıf biliniyorsa sorma</b> — form veya reklam kaydında sınıf yazıyorsa aday tekrar
+            sınıf sorusuyla karşılaşmaz, doğrudan danışman mesajı gider.
+          </span>
+        </label>
+        <label className="flex items-start gap-2 text-xs text-slate-700">
+          <input
+            type="checkbox"
+            checked={form.ask_call_slot === true}
+            onChange={(e) => patch({ ask_call_slot: e.target.checked })}
+            className="mt-0.5"
+          />
+          <span>
+            <b>Arama saati de sorulsun</b> — eski akış. Kapalıyken sınıf seçilir seçilmez
+            &quot;danışmanımız iletişime geçecek&quot; mesajı gider.
+          </span>
+        </label>
+        <label className="block text-xs font-medium text-slate-600">
+          Seçim yapılmazsa kaç dakika sonra danışman mesajı gitsin
+          <input
+            type="number"
+            min={1}
+            max={180}
+            value={form.followup_minutes ?? 3}
+            onChange={(e) => patch({ followup_minutes: Number(e.target.value) || 3 })}
+            className={input}
+          />
+        </label>
+      </div>
+
+      <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-3">
         <p className="text-sm font-semibold text-slate-900">Öğrenci / veli mesajları</p>
         <label className="block text-xs font-medium text-slate-600">
-          Karşılama mesajı (sınıf seçenekleri altına eklenir)
+          Karşılama mesajı (altına kademe seçenekleri eklenir)
           <textarea
             rows={4}
             value={form.greeting_text ?? ''}
@@ -330,7 +388,27 @@ export default function CrmAutoGreetingPanel() {
           />
         </label>
         <label className="block text-xs font-medium text-slate-600">
-          Arama saati sorusu — {'{program}'} seçilen sınıfla değişir
+          Sınıf sorusu (kademe seçildikten sonra)
+          <textarea
+            rows={2}
+            value={form.grade_text ?? ''}
+            onChange={(e) => patch({ grade_text: e.target.value })}
+            placeholder="Boş bırakılırsa varsayılan metin kullanılır"
+            className={input}
+          />
+        </label>
+        <label className="block text-xs font-medium text-slate-600">
+          Danışman mesajı — sınıf seçilince ve seçim yapılmazsa gönderilir
+          <textarea
+            rows={3}
+            value={form.consultant_text ?? ''}
+            onChange={(e) => patch({ consultant_text: e.target.value })}
+            placeholder="Boş bırakılırsa varsayılan metin kullanılır"
+            className={input}
+          />
+        </label>
+        <label className="block text-xs font-medium text-slate-600">
+          Arama saati sorusu — {'{program}'} seçilen sınıfla değişir (yalnız eski akışta)
           <textarea
             rows={3}
             value={form.call_time_text ?? ''}

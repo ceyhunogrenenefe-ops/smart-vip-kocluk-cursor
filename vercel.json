@@ -158,6 +158,10 @@
       "schedule": "* * * * *"
     },
     {
+      "path": "/api/cron/crm-auto-greeting-followup",
+      "schedule": "* * * * *"
+    },
+    {
       "path": "/api/cron/crm-staff-alerts",
       "schedule": "*/5 * * * *"
     },
