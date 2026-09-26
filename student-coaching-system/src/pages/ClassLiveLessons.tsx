@@ -390,8 +390,10 @@ export default function ClassLiveLessons() {
   const hintLessonReminderError = (note: string) => {
     const n = String(note || '').toLowerCase();
     if (n.includes('template_not_found')) return 'Grup dersi hatırlatma şablonu (class_lesson_reminder) tanımlı değil.';
-    if (n.includes('template_inactive') || n.includes('class_lesson_reminders_suspended'))
-      return 'Grup dersi hatırlatmaları askıda — yeniden açılana kadar gönderilmez.';
+    if (n.includes('class_lesson_reminders_suspended'))
+      return 'Grup dersi hatırlatmaları Vercel’de kapalı (CLASS_LESSON_REMINDER_ENABLED=0). Açmak için env’i 1 yapın veya kaldırın.';
+    if (n.includes('template_inactive'))
+      return 'Grup dersi hatırlatma şablonu pasif. Şablonlar’dan class_lesson_reminder’ı etkinleştirin veya sayfayı yenileyin (otomatik açılır).';
     if (n.includes('meta_whatsapp_not_ready')) return 'Meta WhatsApp yapılandırması eksik.';
     if (n.includes('meta_template_name_required')) return 'Şablonda Meta adı (meta_template_name) boş.';
     if (n.includes('invalid_phone') || n.includes('no_valid_phone')) return 'Öğrenci/veli telefonu geçersiz veya eksik.';
