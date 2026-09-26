@@ -739,6 +739,14 @@ export function inferEdesisExamProgramKeys(parts = {}) {
   if ((/\bktt\b/.test(blob) || /\b\d+\s*li\b/.test(blob)) && !keys.has('yks')) keys.add('lgs');
   if (/3\s*-\s*4/.test(blob)) keys.add('34');
   if (/5\s*-\s*6\s*-\s*7/.test(blob) || /5\s*-\s*6/.test(blob)) keys.add('56');
+  /**
+   * "5 SINIF LGS" / "6 SINIF OKYANUS CLASSMATE ÖSD-1" gibi türlerde ad LGS içerdiği
+   * için aşağıdaki 5-6 kuralı (!keys.has('lgs') koşullu) hiç çalışmıyordu. Sonuç:
+   * 5-6. sınıf öğrencisinin programı {56}, denemenin programı {lgs} çıkıyor ve
+   * kendi denemesi "Sınava gir" listesinde görünmüyordu; aynı deneme 8. sınıf LGS
+   * öğrencisine sızıyordu. Sınıf açıkça yazıyorsa LGS'den bağımsız olarak eklenir.
+   */
+  if (/\b(5|6)\s*\.?\s*sinif\b/.test(blob)) keys.add('56');
   if (/(?:^|[\s.])(7|8)(?:\.|\s|$)/.test(blob) || /\b(7|8)\s*\.?\s*sinif\b/.test(blob)) keys.add('lgs');
   if (/(?:^|[\s.])(9|10|11|12)(?:\.|\s|$)/.test(blob) || /\bmezun\b/.test(blob)) keys.add('yks');
   if (/(?:^|[\s.])(3|4)(?:\.|\s|$)/.test(blob) && !keys.has('lgs') && !keys.has('yks')) keys.add('34');
@@ -1185,6 +1193,13 @@ export function examCompatibleWithStudentGrade(exam, studentGradeName = '', opts
   if (!named) return true;
   const examGrade = Number(named[1]);
   if (!Number.isFinite(examGrade)) return true;
+  /**
+   * 5 ve 6. sinif ayni program kovasinda ('56'); komsu sinif toleransi
+   * (|examGrade - g| <= 1) burada 5. sinif ogrencisine 6. sinif denemesini
+   * acardi. 7-8'de oldugu gibi kademe tam eslesir; kurum isterse denemeyi
+   * ogrenciye elle atayabilir (atama bu filtreyi baypas eder).
+   */
+  if (g >= 5 && g <= 6) return examGrade === g;
   if (g >= 7 && g <= 8) {
     if (examGrade <= 6) return false;
     if (examGrade >= 9) return false;

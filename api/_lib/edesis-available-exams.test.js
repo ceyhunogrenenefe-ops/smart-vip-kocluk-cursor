@@ -2450,3 +2450,81 @@ describe('buildEdesisStudentRaporQuery', () => {
     assert.match(q, /donemId=113/);
   });
 });
+
+describe('5-6. sinif ÖSD denemeleri (26.09.2026 saha vakasi)', () => {
+  const exam5 = {
+    id: 1608990,
+    name: '5 SINIF OKYANUS CLASSMATE ÖSD-1 (13011005)',
+    examType: '5 SINIF LGS',
+    examDate: '2026-09-26T00:00:00',
+    createdAt: '2026-09-26T12:03:23',
+    resultStatus: 'Processing',
+    totalQuestions: 90
+  };
+  const exam6 = {
+    id: 1608987,
+    name: '6 SINIF OKYANUS CLASSMATE ÖSD-1',
+    examType: '6 SINIF LGS',
+    examDate: '2026-09-26T00:00:00',
+    createdAt: '2026-09-26T12:01:39',
+    resultStatus: 'None',
+    totalQuestions: 90
+  };
+  const examLgs = {
+    id: 1608976,
+    name: 'STRATEJİ MİS LGS-1 (0847470801)',
+    examType: 'LGS',
+    examDate: '2026-09-26T00:00:00',
+    createdAt: '2026-09-26T11:57:04',
+    resultStatus: 'Ready',
+    totalQuestions: 90
+  };
+
+  it('"5 SINIF LGS" turu hem lgs hem 56 anahtarini tasir', () => {
+    const keys = inferEdesisExamProgramKeys({ examType: exam5.examType, examName: exam5.name });
+    assert.equal(keys.has('56'), true);
+  });
+
+  it('5. sinif ogrencisi kendi ÖSD denemesini gorur', () => {
+    const studentKeys = inferEdesisExamProgramKeys({ gradeName: '5. Sınıf', classLevel: '5' });
+    assert.deepEqual([...studentKeys], ['56']);
+    assert.equal(examCompatibleWithStudentProgramSoft(exam5, studentKeys), true);
+    assert.equal(examCompatibleWithStudentGrade(exam5, '5. Sınıf'), true);
+  });
+
+  it('6. sinif ogrencisi kendi ÖSD denemesini gorur', () => {
+    const studentKeys = inferEdesisExamProgramKeys({ gradeName: '6. Sınıf', classLevel: '6' });
+    assert.equal(examCompatibleWithStudentProgramSoft(exam6, studentKeys), true);
+    assert.equal(examCompatibleWithStudentGrade(exam6, '6. Sınıf'), true);
+  });
+
+  it('5. sinif 6. sinif denemesini gormez, 8. sinif LGS denemesini de gormez', () => {
+    assert.equal(examCompatibleWithStudentGrade(exam6, '5. Sınıf'), false);
+    const studentKeys = inferEdesisExamProgramKeys({ gradeName: '5. Sınıf', classLevel: '5' });
+    assert.equal(examCompatibleWithStudentProgramSoft(examLgs, studentKeys), false);
+  });
+
+  it('8. sinif LGS ogrencisine 5-6. sinif denemesi sizmaz', () => {
+    const studentKeys = inferEdesisExamProgramKeys({ gradeName: '8. Sınıf', classLevel: '8' });
+    assert.deepEqual([...studentKeys], ['lgs']);
+    assert.equal(examCompatibleWithStudentProgramSoft(exam5, studentKeys), false);
+    assert.equal(examCompatibleWithStudentProgramSoft(exam6, studentKeys), false);
+    assert.equal(examCompatibleWithStudentProgramSoft(examLgs, studentKeys), true);
+  });
+
+  it('11. sinif TYT ogrencisi 5-6. sinif denemesi gormez', () => {
+    const studentKeys = inferEdesisExamProgramKeys({ gradeName: '11. Sınıf', classLevel: '11' });
+    assert.equal(examCompatibleWithStudentProgramSoft(exam5, studentKeys), false);
+  });
+
+  it('acik online listede 5. sinifa yalniz kendi denemesi dusser', () => {
+    const now = new Date('2026-09-26T13:30:00Z');
+    const keys = inferEdesisExamProgramKeys({ gradeName: '5. Sınıf', classLevel: '5' });
+    const open = collectOpenOnlineProgramExams([exam5, exam6, examLgs], {
+      programKeys: keys,
+      gradeName: '5. Sınıf',
+      now
+    });
+    assert.deepEqual(open.map((x) => x.id), [1608990]);
+  });
+});
