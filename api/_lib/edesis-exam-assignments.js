@@ -89,6 +89,13 @@ alter table public.edesis_exam_assignments add column if not exists starts_at ti
 alter table public.edesis_exam_assignments add column if not exists ends_at timestamptz;
 alter table public.edesis_exam_assignments add column if not exists notes text;
 alter table public.edesis_exam_assignments add column if not exists created_at timestamptz not null default now();
+-- Sinif atamasinda student_id NULL olmak zorunda; eski surumde NOT NULL kalmisti
+do $$ begin
+  begin
+    alter table public.edesis_exam_assignments alter column student_id drop not null;
+  exception when others then null;
+  end;
+end $$;
 do $$ begin
   update public.edesis_exam_assignments
   set target_type = case
@@ -176,9 +183,32 @@ function buildDatabaseUrl() {
   return `postgresql://postgres:${encodeURIComponent(password)}@db.${ref}.supabase.co:5432/postgres`;
 }
 
-function isSchemaMissingError(error) {
+/** Gercekten "tablo/kolon yok" diyen Postgres + PostgREST kodlari */
+const SCHEMA_MISSING_CODES = new Set([
+  '42P01', // undefined_table
+  '42703', // undefined_column
+  'PGRST106', // schema not exposed
+  'PGRST202', // function not found
+  'PGRST204', // column not found in schema cache
+  'PGRST205' // table not found in schema cache
+]);
+
+/**
+ * Eski surum tablo adini veya "relation" kelimesini gordugu an sema-eksik sayiyordu.
+ * Bu yuzden not-null / foreign key / check ihlalleri de "SUPABASE_DB_URL ekleyin"
+ * uyarisina donusuyor, asil hata hic gorunmuyordu (sinif atamasi vakasi).
+ * Artik once hata kodu, kod yoksa dar bir mesaj kalibi kullanilir.
+ */
+export function isSchemaMissingError(error) {
+  const code = String(error?.code || '').trim();
+  if (code) return SCHEMA_MISSING_CODES.has(code);
   const msg = errorMessage(error);
-  return /edesis_exams|edesis_exam_assignments|schema cache|PGRST|does not exist|relation/i.test(msg);
+  return (
+    /schema cache/i.test(msg) ||
+    /could not find the (table|column|function)/i.test(msg) ||
+    /relation\s+"[^"]+"\s+does not exist/i.test(msg) ||
+    /column\s+[^\s]+\s+does not exist/i.test(msg)
+  );
 }
 
 async function probeEdesisAssignSchema() {

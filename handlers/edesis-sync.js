@@ -1579,7 +1579,13 @@ export default async function handler(req, res) {
               'Tablolar otomatik kurulamadı. Vercel’e SUPABASE_DB_URL veya SUPABASE_DB_PASSWORD ekleyip Redeploy edin.'
           });
         }
-        return res.status(400).json({ error: errorMessage(e) });
+        // Asil Postgres hatasi gorunsun: eskiden her hata sema uyarisina donusuyordu
+        return res.status(400).json({
+          error: errorMessage(e),
+          code: e?.code || null,
+          detail: e?.details || e?.detail || null,
+          dbHint: e?.hint || null
+        });
       }
     }
 
