@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  buildTeacherApplicationMessage,
   detectTeacherApplication,
+  teacherFlowReady,
   withTeacherApplicationTag,
   TEACHER_APPLICATION_TAG
 } from './crm-teacher-application.js';
@@ -75,4 +77,42 @@ test('etiket iki kez eklenmez', () => {
   const once = withTeacherApplicationTag({});
   const twice = withTeacherApplicationTag(once);
   assert.equal(twice.tags.filter((t) => t === TEACHER_APPLICATION_TAG).length, 1);
+});
+
+test('şablondaki link değişkeni panel URL ile değişir', () => {
+  const text = buildTeacherApplicationMessage({
+    template: 'Merhaba\n🔗 [ÖĞRETMEN_BASVURU_LINKI]\nTeşekkürler',
+    applicationUrl: 'https://ornek.com/ogretmen'
+  });
+  assert.match(text, /https:\/\/ornek\.com\/ogretmen/);
+  assert.doesNotMatch(text, /\[ÖĞRETMEN_BASVURU_LINKI\]/);
+});
+
+test('şapkasız yazım ve eski değişken adı da desteklenir', () => {
+  const a = buildTeacherApplicationMessage({
+    template: '[OGRETMEN_BASVURU_LINKI]',
+    applicationUrl: 'https://x.co/a'
+  });
+  assert.equal(a, 'https://x.co/a');
+  const b = buildTeacherApplicationMessage({
+    template: '[ÖĞRETMEN BAŞVURU LİNKİ]',
+    applicationUrl: 'https://x.co/b'
+  });
+  assert.equal(b, 'https://x.co/b');
+});
+
+test('link yoksa değişken satırı mesaja sızmaz', () => {
+  const text = buildTeacherApplicationMessage({
+    template: 'Merhaba\n🔗 [ÖĞRETMEN_BASVURU_LINKI]\nTeşekkürler',
+    applicationUrl: ''
+  });
+  assert.doesNotMatch(text, /\[/);
+  assert.match(text, /Merhaba/);
+  assert.match(text, /Teşekkürler/);
+});
+
+test('link tanımlı değilse otomasyon hazır sayılmaz', () => {
+  assert.equal(teacherFlowReady({ teacher_application_url: '' }), false);
+  assert.equal(teacherFlowReady({ teacher_application_url: '  ' }), false);
+  assert.equal(teacherFlowReady({ teacher_application_url: 'https://x.co' }), true);
 });

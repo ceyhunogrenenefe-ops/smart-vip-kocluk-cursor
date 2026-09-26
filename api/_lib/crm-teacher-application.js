@@ -168,3 +168,48 @@ export function withTeacherApplicationTag(metadata) {
   meta.teacher_application = true;
   return meta;
 }
+
+/** Başvuru durumu adımları — panelde ve raporda aynı sıra kullanılır. */
+export const TEACHER_APPLICATION_STATUSES = [
+  { key: 'link_sent', label: 'Başvuru Linki Gönderildi' },
+  { key: 'profile_created', label: 'Profil Oluşturuldu' },
+  { key: 'to_review', label: 'İncelenecek' },
+  { key: 'reviewed', label: 'İncelendi' },
+  { key: 'interview', label: 'Görüşmeye Çağrıldı' },
+  { key: 'rejected', label: 'Olumsuz' },
+  { key: 'hired', label: 'İşe Alındı' }
+];
+
+export const TEACHER_APPLICATION_TAGS = ['Öğretmen Başvurusu', 'Kariyer'];
+
+export const DEFAULT_TEACHER_MESSAGE = `Merhaba Hocam, Online VIP Dershane'ye göstermiş olduğunuz ilgi için teşekkür ederiz. 🌟
+
+Öğretmen başvurunuzu değerlendirmeye alabilmemiz için aşağıdaki bağlantı üzerinden öğretmen profilinizi oluşturmanızı rica ederiz.
+
+🔗 [ÖĞRETMEN_BASVURU_LINKI]
+
+Profilinizi tamamladıktan sonra başvurunuz ilgili birimimiz tarafından incelenecek ve uygun görülmesi hâlinde sizinle iletişime geçilecektir.
+
+Online VIP Dershane`;
+
+/**
+ * Şablondaki başvuru linki değişkenini panelde kayıtlı URL ile değiştirir.
+ * Link tanımlı değilse değişken satırı düşürülür — müşteriye "[...]" gitmez.
+ */
+export function buildTeacherApplicationMessage({ template, applicationUrl } = {}) {
+  const raw = String(template || DEFAULT_TEACHER_MESSAGE);
+  const url = String(applicationUrl || '').trim();
+  const variants = /\[(ÖĞRETMEN_BASVURU_LINKI|OGRETMEN_BASVURU_LINKI|ÖĞRETMEN BAŞVURU LİNKİ|TEACHER_APPLICATION_URL)\]/g;
+  if (url) return raw.replace(variants, url).trim();
+  return raw
+    .split('\n')
+    .filter((line) => !variants.test(line))
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+/** Panelde kayıtlı link var mı? Yoksa otomasyon çalıştırılmamalı. */
+export function teacherFlowReady(settings) {
+  return Boolean(String(settings?.teacher_application_url || '').trim());
+}

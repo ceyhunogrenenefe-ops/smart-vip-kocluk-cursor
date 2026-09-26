@@ -1,89 +1,54 @@
 import { useEffect, useState } from 'react';
-import { GraduationCap, Loader2, Send, Settings } from 'lucide-react';
+import { GraduationCap, Loader2, Pencil, Send } from 'lucide-react';
 import { toast } from 'sonner';
-import {
-  crmGetTeacherTemplate,
-  crmSaveTeacherTemplate,
-  crmSendMessage,
-  crmListMetaTemplates,
-  type CrmMetaTemplate
-} from '../../lib/crmInboxApi';
+import { crmSendTeacherTemplate, crmTeacherFlowTemplate } from '../../lib/crmInboxApi';
 
 /**
  * Öğretmen başvurusu şeridi.
- * Gelen mesaj başvuru gibi göründüğünde konuşmada çıkar. Şablon KENDİLİĞİNDEN
- * gitmez; temsilci düğmeye basınca gönderilir.
+ * Gelen mesaj başvuru gibi göründüğünde konuşmada çıkar. Temsilci şablonu
+ * olduğu gibi ya da düzenleyerek gönderir; otomatik gönderim ayrı bir ayardır
+ * (Ayarlar > Otomatik Karşılama > Öğretmen Başvuru Otomasyonu).
  */
 export default function CrmTeacherApplicationBar({
   conversationId,
-  isAdmin,
   onSent
 }: {
   conversationId: string;
-  isAdmin: boolean;
+  isAdmin?: boolean;
   onSent?: () => void;
 }) {
-  const [templateName, setTemplateName] = useState<string | null>(null);
-  const [language, setLanguage] = useState('tr');
+  const [text, setText] = useState('');
+  const [hasUrl, setHasUrl] = useState(true);
+  const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [picking, setPicking] = useState(false);
-  const [options, setOptions] = useState<CrmMetaTemplate[]>([]);
 
   useEffect(() => {
     let cancelled = false;
-    void crmGetTeacherTemplate()
+    void crmTeacherFlowTemplate()
       .then((r) => {
         if (cancelled) return;
-        setTemplateName(r.data.template_name);
-        setLanguage(r.data.language || 'tr');
+        setText(r.data.text || '');
+        setHasUrl(Boolean(r.data.has_url));
       })
       .catch(() => {
-        /* ayar okunamazsa şerit yine görünür, düğme uyarır */
+        /* şablon okunamazsa düğme uyarır */
       });
     return () => {
       cancelled = true;
     };
   }, []);
 
-  const send = async () => {
-    if (!templateName) {
-      toast.error('Önce öğretmen başvurusu şablonunu seçin');
-      return;
-    }
+  const send = async (custom?: string) => {
     setBusy(true);
     try {
-      await crmSendMessage(conversationId, '', {
-        template_name: templateName,
-        template_language: language
-      });
-      toast.success('Öğretmen başvurusu şablonu gönderildi');
+      await crmSendTeacherTemplate(conversationId, custom);
+      toast.success('Öğretmen başvuru şablonu gönderildi');
+      setEditing(false);
       onSent?.();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Şablon gönderilemedi');
     } finally {
       setBusy(false);
-    }
-  };
-
-  const openPicker = async () => {
-    setPicking(true);
-    try {
-      const r = await crmListMetaTemplates();
-      setOptions(r.data || []);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Şablonlar alınamadı');
-      setPicking(false);
-    }
-  };
-
-  const choose = async (name: string) => {
-    try {
-      const r = await crmSaveTeacherTemplate(name, language);
-      setTemplateName(r.data.template_name);
-      setPicking(false);
-      toast.success('Şablon seçildi');
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Kaydedilemedi');
     }
   };
 
@@ -96,52 +61,61 @@ export default function CrmTeacherApplicationBar({
         </span>
         <button
           type="button"
-          disabled={busy}
+          disabled={busy || !text}
           onClick={() => void send()}
           className="inline-flex items-center gap-1.5 rounded-lg bg-violet-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-violet-800 disabled:opacity-60"
+          title="Öğretmen Başvuru Formu şablonunu gönder"
         >
           {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
-          {templateName ? 'Şablonu gönder' : 'Şablon seçilmedi'}
+          Gönder
         </button>
-        {isAdmin ? (
-          <button
-            type="button"
-            onClick={() => void openPicker()}
-            className="inline-flex items-center gap-1 rounded-lg border border-violet-300 bg-white px-2.5 py-1.5 text-xs font-medium text-violet-900 hover:bg-violet-100"
-          >
-            <Settings className="h-3.5 w-3.5" />
-            {templateName ? `Şablon: ${templateName}` : 'Şablon seç'}
-          </button>
-        ) : null}
+        <button
+          type="button"
+          disabled={busy || !text}
+          onClick={() => setEditing((v) => !v)}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-violet-300 bg-white px-3 py-1.5 text-xs font-semibold text-violet-900 hover:bg-violet-100 disabled:opacity-60"
+        >
+          <Pencil className="h-3.5 w-3.5" />
+          Düzenleyip gönder
+        </button>
       </div>
-      <p className="mt-1 text-[11px] text-violet-800">
-        Mesaj kendiliğinden gönderilmez; gönderme kararı sizde.
-      </p>
 
-      {picking ? (
-        <div className="mt-2 max-h-48 overflow-y-auto rounded-lg border border-violet-200 bg-white p-2">
-          {!options.length ? (
-            <p className="px-1 py-2 text-xs text-slate-500">Onaylı şablon bulunamadı.</p>
-          ) : (
-            options.map((t) => (
-              <button
-                key={`${t.name}-${t.language}`}
-                type="button"
-                onClick={() => void choose(t.name)}
-                className="block w-full rounded px-2 py-1.5 text-left text-xs text-slate-800 hover:bg-violet-50"
-              >
-                <span className="font-medium">{t.name}</span>
-                {t.language ? <span className="ml-1 text-slate-500">· {t.language}</span> : null}
-              </button>
-            ))
-          )}
-          <button
-            type="button"
-            onClick={() => setPicking(false)}
-            className="mt-1 w-full rounded px-2 py-1 text-xs text-slate-500 hover:bg-slate-50"
-          >
-            Kapat
-          </button>
+      {!hasUrl ? (
+        <p className="mt-1 text-[11px] font-medium text-rose-700">
+          Öğretmen başvuru linki tanımlı değil — CRM → Widgetler → Otomatik Karşılama bölümünden ekleyin.
+        </p>
+      ) : (
+        <p className="mt-1 text-[11px] text-violet-800">
+          Şablon "Öğretmen Başvuru Formu" metnidir; başvuru linki otomatik yerleşir.
+        </p>
+      )}
+
+      {editing ? (
+        <div className="mt-2 space-y-2">
+          <textarea
+            rows={8}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            className="w-full rounded-lg border border-violet-200 bg-white px-3 py-2 text-xs text-slate-900 focus:border-violet-500 focus:outline-none"
+          />
+          <div className="flex gap-2">
+            <button
+              type="button"
+              disabled={busy || !text.trim()}
+              onClick={() => void send(text)}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-violet-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-violet-800 disabled:opacity-60"
+            >
+              {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+              Düzenlenmiş hâlini gönder
+            </button>
+            <button
+              type="button"
+              onClick={() => setEditing(false)}
+              className="rounded-lg px-3 py-1.5 text-xs text-slate-600 hover:bg-white"
+            >
+              Vazgeç
+            </button>
+          </div>
         </div>
       ) : null}
     </div>
