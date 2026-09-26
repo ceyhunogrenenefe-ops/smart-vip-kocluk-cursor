@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { CheckCircle2, Loader2, Puzzle, Search } from 'lucide-react';
 import { toast } from 'sonner';
 import CrmInstitutionMetaCard from '../../components/crm/CrmInstitutionMetaCard';
+import CrmAutoGreetingPanel from '../../components/crm/CrmAutoGreetingPanel';
 import { useApp } from '../../context/AppContext';
 import { PLATFORM_PRIMARY_INSTITUTION_ID } from '../../lib/activeInstitutionScope';
 import {
@@ -291,6 +292,9 @@ export default function CrmWidgetsPage() {
 
       {/* Platform dışı kurumlar kendi Meta hesabını bağlar */}
       <CrmInstitutionMetaCard />
+
+      {/* Ayarlar > Otomatik Karşılama — varsayılan kapalı */}
+      <CrmAutoGreetingPanel />
 
       {isPlatform ? (
       <section

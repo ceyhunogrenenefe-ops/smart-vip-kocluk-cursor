@@ -453,6 +453,29 @@ export async function upsertCrmMessage({
     }
   }
 
+  /**
+   * Otomatik Karşılama: kurum ayarı açıksa yeni adayı karşılar, sınıf ve
+   * arama saatini sorar. Modül varsayılan kapalı; kapalıyken hiçbir şey yapmaz.
+   */
+  if (direction === 'inbound' && !conversation.is_internal && body) {
+    try {
+      const { runAutoGreetingFlow } = await import('./crm-auto-greeting.js');
+      await runAutoGreetingFlow({ conversation, body });
+    } catch (e) {
+      console.warn('[crm-inbox] otomatik karşılama:', e instanceof Error ? e.message : e);
+    }
+  }
+
+  /** Temsilci elle yazdıysa otomatik akış susar (bot müşteriyi rahatsız etmesin). */
+  if (direction === 'outbound' && (senderType === 'agent' || senderType === null)) {
+    try {
+      const { markHumanTakeover } = await import('./crm-auto-greeting.js');
+      if (senderType === 'agent') await markHumanTakeover(conversation.id);
+    } catch (e) {
+      console.warn('[crm-inbox] temsilci devri:', e instanceof Error ? e.message : e);
+    }
+  }
+
   if (direction === 'inbound' && !conversation.is_internal && !conversation.assigned_user_id) {
     try {
       const { assignConversationIfUnassigned } = await import('./crm-assignment.js');
