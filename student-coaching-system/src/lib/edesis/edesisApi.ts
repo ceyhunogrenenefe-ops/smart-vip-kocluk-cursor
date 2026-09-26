@@ -849,6 +849,47 @@ export async function checkEdesisExamVisibility(examId: string, studentId: strin
   return j as EdesisExamVisibility;
 }
 
+export type EdesisStudentVisibility = {
+  ok: boolean;
+  mode: 'student';
+  student: {
+    id: string;
+    name?: string | null;
+    classLevel?: string | null;
+    edesisStudentId?: string | null;
+    gradeName?: string | null;
+    className?: string | null;
+    classroomId?: string | null;
+    programKeys: string[];
+  };
+  counts: { catalogRows: number; visible: number; openOnline: number; edesisAssigned: number };
+  visibleExams: Array<{ examId: string; name?: string | null; examDate?: string | null }>;
+  recentCatalog: Array<{
+    examId: string;
+    name?: string | null;
+    examType?: string | null;
+    examDate?: string | null;
+    isOnline?: boolean | null;
+    visibleToStudent: boolean;
+    gradeOk: boolean;
+    programOk: boolean;
+  }>;
+  meta?: Record<string, unknown> | null;
+};
+
+/**
+ * Tanı: bu öğrenci Edesis kataloğundan neyi görüyor, neyi neden görmüyor.
+ * examId verilmez; kataloğun son 25 denemesi görünürlük bayraklarıyla döner.
+ */
+export async function fetchEdesisStudentVisibility(studentId: string): Promise<EdesisStudentVisibility> {
+  const res = await apiFetch(
+    `/api/edesis-sync?op=exam-visibility&studentId=${encodeURIComponent(studentId)}`
+  );
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(j.hint || j.error || res.statusText);
+  return j as EdesisStudentVisibility;
+}
+
 export async function assignEdesisExam(payload: {
   edesisExamId: string;
   targetType: 'class' | 'student';
