@@ -858,12 +858,36 @@ async function runSyncInner(actor) {
   } = fetchResult;
   const processed = processEdesisRows(rows, students);
   const exams = buildExamDrafts(processed, students, institutionId);
-  // Manuel sync: çok satırda upsert 504 yapmasın
-  const examCap = skipEnrich ? 150 : exams.length;
-  const cappedExams = exams.slice(0, examCap);
+  /**
+   * Üst sınır eskiden 150'ydi ve liste eskiden yeniye geldiği için hep ilk 150
+   * (en eski) kayıt yazılıyordu; yeni denemeler asla girmiyordu. Artık önce
+   * tarihe göre YENİDEN ESKİYE sıralanır, sınır da yükseltildi.
+   */
+  const sortedExams = [...exams].sort((a, b) => {
+    const da = String(a?.exam_date || a?.date || '');
+    const db = String(b?.exam_date || b?.date || '');
+    return db.localeCompare(da);
+  });
+  const examCap = isCron ? 1200 : 600;
+  const cappedExams = sortedExams.slice(0, examCap);
   const { imported, skipped, errors } = await upsertExams(cappedExams);
 
+  /**
+   * Sınav KATALOĞU (edesis_exams) ayrı bir işti ve ne cron ne de senkron
+   * düğmesi çalıştırıyordu; katalog 21 Eylül'de dondu, yeni tanımlanan
+   * denemeler sistemde hiç görünmedi. Artık her senkronda güncellenir.
+   */
+  let catalog = null;
+  try {
+    const { syncEdesisExamCatalogToDb } = await import('../api/_lib/edesis-exam-assignments.js');
+    catalog = await syncEdesisExamCatalogToDb({ institutionId, cfg });
+  } catch (e) {
+    catalog = { ok: false, error: errorMessage(e) };
+    console.warn('[edesis-sync] katalog:', errorMessage(e));
+  }
+
   return {
+    catalog,
     ok: true,
     baseUrl,
     path,
