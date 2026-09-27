@@ -146,6 +146,45 @@ export async function probeConnectedGatewaySessionIds(extraCandidates = []) {
   return connected;
 }
 
+/**
+ * Süper adminin bağlı WhatsApp hattı.
+ *
+ * Öğretmen ders hatırlatması varsayılan olarak buradan gider: yönetici hiçbir
+ * şey seçmese de kurumun ana hattı kullanılır. Birden çok süper admin bağlıysa
+ * en eski hesap seçilir ki hat gün içinde kendiliğinden değişmesin.
+ *
+ * @returns {Promise<{ sessionId: string, userId: string, name: string, phone: string } | null>}
+ */
+export async function resolveSuperAdminGatewaySession() {
+  const connected = await listConnectedGatewaySessionIds();
+  if (!connected.length) return null;
+  try {
+    const { supabaseAdmin } = await import('./supabase-admin.js');
+    const { data } = await supabaseAdmin
+      .from('users')
+      .select('id,name,role,roles,phone,created_at,is_active')
+      .in('id', connected);
+    const supers = (data || [])
+      .filter((u) => u.is_active !== false)
+      .filter((u) => {
+        const role = String(u.role || '').trim().toLowerCase();
+        const tags = Array.isArray(u.roles) ? u.roles.map((r) => String(r || '').trim().toLowerCase()) : [];
+        return role === 'super_admin' || tags.includes('super_admin');
+      })
+      .sort((a, b) => String(a.created_at || '').localeCompare(String(b.created_at || '')));
+    const hit = supers[0];
+    if (!hit) return null;
+    return {
+      sessionId: String(hit.id),
+      userId: String(hit.id),
+      name: String(hit.name || ''),
+      phone: String(hit.phone || '')
+    };
+  } catch {
+    return null;
+  }
+}
+
 /** Gönderim için oturum: önce canlı bağlı, yoksa ısıtılacak aday. */
 export async function resolveGatewaySessionForSend(candidates = [], { allowSharedFallback = false } = {}) {
   const uniq = [

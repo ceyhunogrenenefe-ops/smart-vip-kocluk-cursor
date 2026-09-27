@@ -7,6 +7,7 @@ import {
 } from '../api/_lib/whatsapp-gateway-send.js';
 import {
   loadTeacherReminderSettings,
+  resolveTeacherReminderSession,
   teacherReminderWindowConfig
 } from '../api/_lib/teacher-lesson-reminder-job.js';
 
@@ -45,12 +46,15 @@ export default async function handler(req, res) {
           }
         }
       }
+      const resolved = await resolveTeacherReminderSession(settings).catch(() => null);
       return res.status(200).json({
         ok: true,
         settings,
         window: teacherReminderWindowConfig(settings),
         env_session_id: teacherReminderGatewaySessionId() || null,
-        connected_sessions: sessions
+        connected_sessions: sessions,
+        // Elle seçim yoksa fiilen hangi hattan gideceği
+        resolved_session: resolved
       });
     }
 
