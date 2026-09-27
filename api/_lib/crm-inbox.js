@@ -691,6 +691,16 @@ export async function syncInstagramCommentsToCrm(changes, { institutionId } = {}
       const { applyConversationProfile } = await import('./social-profile.js');
       await applyConversationProfile(r.conversation_id, null, { usernameHint: norm.fromUsername }).catch(() => null);
     }
+    /**
+     * Yorum otomasyonu: seçili gönderiye anahtar kelime yazana otomatik DM.
+     * Hata verirse yorumun CRM'e düşmesini etkilemez.
+     */
+    try {
+      const { runCommentAutomationForComment } = await import('./crm-comment-automation.js');
+      await runCommentAutomationForComment({ comment: norm, institutionId });
+    } catch (e) {
+      console.warn('[crm-inbox] yorum otomasyonu:', e?.message || e);
+    }
     if (r?.skipped) skipped += 1;
     else processed += 1;
   }
@@ -783,6 +793,97 @@ export async function sendCrmWhatsAppInteractive({ phone, interactive, instituti
 }
 
 /** Instagram / Facebook DM quick reply (≤13 seçenek). */
+/**
+ * Yoruma özel mesaj (Meta "private reply").
+ *
+ * Resmî uç: recipient.comment_id. Bir yoruma yalnızca BİR kez ve yorumdan
+ * sonraki 7 gün içinde gönderilebilir; tekrar denenirse Meta hata döner.
+ * Bu yüzden çağıran taraf comment_id bazında tekilleştirir.
+ */
+export async function sendInstagramPrivateReply({ commentId, text }) {
+  await loadMetaWhatsAppSecretsFromDb();
+  const { resolveSocialToken, resolvePageId } = await import('./meta-social-inbound.js');
+  const { token } = resolveSocialToken();
+  const pageId = resolvePageId();
+  if (!token || !pageId) {
+    const err = new Error('instagram_not_configured');
+    err.code = 'ENV';
+    throw err;
+  }
+  const graphVer = String(process.env.META_GRAPH_API_VERSION || 'v21.0').trim() || 'v21.0';
+  const url = `https://graph.facebook.com/${graphVer}/${encodeURIComponent(pageId)}/messages`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      recipient: { comment_id: String(commentId) },
+      message: { text: String(text || '').slice(0, 1000) }
+    })
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const err = new Error(json?.error?.message || `instagram_private_reply_http_${res.status}`);
+    err.code = 'META';
+    err.meta = json;
+    throw err;
+  }
+  return { messageId: json?.message_id || null, raw: json };
+}
+
+/** Yorumun altına herkese açık yanıt (POST /{comment-id}/replies). */
+export async function replyToInstagramComment({ commentId, text }) {
+  await loadMetaWhatsAppSecretsFromDb();
+  const { resolveSocialToken } = await import('./meta-social-inbound.js');
+  const { token } = resolveSocialToken();
+  if (!token) {
+    const err = new Error('instagram_not_configured');
+    err.code = 'ENV';
+    throw err;
+  }
+  const graphVer = String(process.env.META_GRAPH_API_VERSION || 'v21.0').trim() || 'v21.0';
+  const url = `https://graph.facebook.com/${graphVer}/${encodeURIComponent(commentId)}/replies`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message: String(text || '').slice(0, 2200) })
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const err = new Error(json?.error?.message || `instagram_comment_reply_http_${res.status}`);
+    err.code = 'META';
+    err.meta = json;
+    throw err;
+  }
+  return { commentId: json?.id || null, raw: json };
+}
+
+/** Instagram hesabının son gönderileri — otomasyon kurarken seçim listesi. */
+export async function listInstagramMedia({ limit = 25 } = {}) {
+  await loadMetaWhatsAppSecretsFromDb();
+  const { resolveSocialToken, igBusinessIdEnv } = await import('./meta-social-inbound.js');
+  const { token } = resolveSocialToken();
+  const igUserId = igBusinessIdEnv();
+  if (!token || !igUserId) {
+    const err = new Error('instagram_business_account_missing');
+    err.code = 'ENV';
+    throw err;
+  }
+  const graphVer = String(process.env.META_GRAPH_API_VERSION || 'v21.0').trim() || 'v21.0';
+  const fields = 'id,caption,media_type,media_url,thumbnail_url,permalink,timestamp';
+  const url =
+    `https://graph.facebook.com/${graphVer}/${encodeURIComponent(igUserId)}/media` +
+    `?fields=${encodeURIComponent(fields)}&limit=${Math.min(50, Math.max(1, Number(limit) || 25))}`;
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const err = new Error(json?.error?.message || `instagram_media_http_${res.status}`);
+    err.code = 'META';
+    err.meta = json;
+    throw err;
+  }
+  return Array.isArray(json?.data) ? json.data : [];
+}
+
 export async function sendCrmInstagramQuickReplies({ igScopedId, text, quickReplies }) {
   await loadMetaWhatsAppSecretsFromDb();
   const { resolveSocialToken, resolvePageId } = await import('./meta-social-inbound.js');

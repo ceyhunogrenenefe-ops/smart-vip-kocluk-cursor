@@ -4,6 +4,7 @@ import { CheckCircle2, Loader2, Puzzle, Search } from 'lucide-react';
 import { toast } from 'sonner';
 import CrmInstitutionMetaCard from '../../components/crm/CrmInstitutionMetaCard';
 import CrmAutoGreetingPanel from '../../components/crm/CrmAutoGreetingPanel';
+import CrmCommentAutomationPanel from '../../components/crm/CrmCommentAutomationPanel';
 import { useApp } from '../../context/AppContext';
 import { PLATFORM_PRIMARY_INSTITUTION_ID } from '../../lib/activeInstitutionScope';
 import {
@@ -295,6 +296,9 @@ export default function CrmWidgetsPage() {
 
       {/* Ayarlar > Otomatik Karşılama — varsayılan kapalı */}
       <CrmAutoGreetingPanel />
+
+      {/* Instagram yorum → otomatik DM (PDF linki) — varsayılan kapalı */}
+      <CrmCommentAutomationPanel />
 
       {isPlatform ? (
       <section
