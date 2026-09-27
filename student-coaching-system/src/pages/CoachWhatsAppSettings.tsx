@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import GatewayBulkMessageCard from '../components/whatsapp/GatewayBulkMessageCard';
+import TeacherReminderSettingsPanel from '../components/whatsapp/TeacherReminderSettingsPanel';
 import { useAuth } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
 import {
@@ -2365,6 +2366,8 @@ export default function CoachWhatsAppSettings() {
           </button>
         </div>
       </section>
+
+      {isAdminActor ? <TeacherReminderSettingsPanel /> : null}
 
       <GatewayBulkMessageCard gatewayConnected={isConnected} />
 

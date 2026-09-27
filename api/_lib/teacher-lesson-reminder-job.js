@@ -12,6 +12,7 @@ import { msUntilLessonStart, normalizeTimeHms } from './class-lesson-reminder-lo
 import { ensureClassSessionsFromWeeklySlots } from './class-sessions-from-slots.js';
 import { sendNotification } from './message-service.js';
 import { metaWhatsAppConfigured } from './meta-whatsapp.js';
+import { sendGatewayTextMessage, teacherReminderGatewaySessionId } from './whatsapp-gateway-send.js';
 import { insertWhatsAppAutomationLog, alreadySentTeacherLessonReminder } from './message-log.js';
 
 export const TEACHER_LESSON_REMINDER_KIND = 'teacher_lesson_reminder';
@@ -27,14 +28,58 @@ export function teacherLessonReminderEnabled() {
   return String(process.env.TEACHER_LESSON_REMINDER_ENABLED ?? '1').trim() !== '0';
 }
 
-export function teacherReminderWindowConfig() {
+const SETTINGS_TABLE = 'teacher_lesson_reminder_settings';
+
+/** Panelden ayarlanan gönderim hattı ve zamanlama; tablo yoksa varsayılanlar. */
+export async function loadTeacherReminderSettings() {
+  const fallback = {
+    is_active: true,
+    channel: 'gateway',
+    gateway_user_id: '',
+    sender_phone: '',
+    minutes_before: 10,
+    window_minutes: 2,
+    source: 'default'
+  };
+  try {
+    const { data, error } = await supabaseAdmin.from(SETTINGS_TABLE).select('*').eq('id', true).maybeSingle();
+    if (error || !data) return fallback;
+    return {
+      is_active: data.is_active !== false,
+      channel: String(data.channel || 'gateway'),
+      gateway_user_id: String(data.gateway_user_id || '').trim(),
+      sender_phone: String(data.sender_phone || '').trim(),
+      minutes_before: Number(data.minutes_before) || 10,
+      window_minutes: Number(data.window_minutes) || 2,
+      source: 'db'
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+/**
+ * Hatırlatma penceresi: dersten `minutes_before` dakika önce başlar ve
+ * `window_minutes` kadar sürer. Cron 2 dakikada bir çalıştığı için 10–12 dk
+ * aralığı, hatırlatmanın fiilen 10. dakikada gitmesini sağlar.
+ */
+export function teacherReminderWindowConfig(settings = null) {
   const minMinutes = Math.max(
     1,
-    Math.min(55, Number(process.env.TEACHER_LESSON_REMINDER_MIN_MINUTES || 10) || 10)
+    Math.min(
+      55,
+      Number(settings?.minutes_before) ||
+        Number(process.env.TEACHER_LESSON_REMINDER_MIN_MINUTES) ||
+        10
+    )
   );
+  const span = Math.max(1, Math.min(30, Number(settings?.window_minutes) || 2));
   const maxMinutes = Math.max(
     minMinutes + 1,
-    Math.min(120, Number(process.env.TEACHER_LESSON_REMINDER_MAX_MINUTES || 25) || 25)
+    Math.min(
+      120,
+      Number(process.env.TEACHER_LESSON_REMINDER_MAX_MINUTES) || minMinutes + span
+    )
   );
   return {
     mode: 'narrow',
@@ -44,9 +89,45 @@ export function teacherReminderWindowConfig() {
   };
 }
 
-function isInTeacherReminderWindow(dateStr, timeStr, nowMs = Date.now()) {
+/**
+ * Hatırlatmayı ayarlanan kanaldan gönderir.
+ *
+ * Varsayılan gateway (kurumun kendi WhatsApp hattı). Gateway oturumu bağlı
+ * değilse Meta API'ye SESSİZCE düşülmez — hangi hattın gittiği belli olmalı;
+ * hata log'a yazılır ve yönetici panelde görür.
+ */
+async function dispatchTeacherReminder({ phone, text, settings }) {
+  if (settings.channel === 'meta') {
+    const r = await sendNotification({
+      notificationType: TEACHER_LESSON_REMINDER_KIND,
+      phone,
+      plainText: text
+    });
+    return { ...r, usedChannel: 'meta_api' };
+  }
+  const sessionId = settings.gateway_user_id || teacherReminderGatewaySessionId();
+  if (!sessionId) {
+    return {
+      ok: false,
+      usedChannel: 'gateway',
+      errorCode: 'GATEWAY_SESSION_MISSING',
+      error:
+        'Gönderim hattı seçilmemiş — Koç WhatsApp ayarlarından öğretmen hatırlatması için QR bağlı hesabı seçin.'
+    };
+  }
+  const r = await sendGatewayTextMessage({
+    phone,
+    message: text,
+    sessionId,
+    sessionCandidates: [sessionId],
+    allowSharedFallback: false
+  });
+  return { ...r, usedChannel: 'gateway' };
+}
+
+function isInTeacherReminderWindow(dateStr, timeStr, nowMs = Date.now(), windowCfg = null) {
   const until = msUntilLessonStart(dateStr, timeStr, nowMs);
-  return isWithinReminderWindowMs(until, teacherReminderWindowConfig());
+  return isWithinReminderWindowMs(until, windowCfg || teacherReminderWindowConfig());
 }
 
 function minutesUntilLesson(dateStr, timeStr, nowMs = Date.now()) {
@@ -212,11 +293,7 @@ async function sendTeacherReminder(opts) {
     minutes: minutesUntil
   }).trim();
 
-  const sent = await sendNotification({
-    notificationType: TEACHER_LESSON_REMINDER_KIND,
-    phone,
-    plainText: text
-  });
+  const sent = await dispatchTeacherReminder({ phone, text, settings: opts.settings });
 
   await insertWhatsAppAutomationLog({
     studentId: null,
@@ -249,7 +326,18 @@ export async function runTeacherLessonReminderJob(opts = {}) {
   const logDate = getIstanbulDateString();
   const now = Date.now();
   const log = [];
-  const windowCfg = teacherReminderWindowConfig();
+  const settings = await loadTeacherReminderSettings();
+  const windowCfg = teacherReminderWindowConfig(settings);
+
+  if (settings.is_active === false) {
+    await recordCronRun({
+      jobKey: 'teacher_lesson_reminders',
+      ok: true,
+      skipped: 'settings_disabled',
+      detail: { triggered_by: triggeredBy }
+    });
+    return { ok: true, skipped: 'settings_disabled', log, triggeredBy };
+  }
 
   if (!teacherLessonReminderEnabled()) {
     await recordCronRun({
@@ -261,7 +349,7 @@ export async function runTeacherLessonReminderJob(opts = {}) {
     return { ok: true, skipped: 'disabled', log, triggeredBy };
   }
 
-  if (!metaWhatsAppConfigured()) {
+  if (settings.channel === 'meta' && !metaWhatsAppConfigured()) {
     await recordCronRun({
       jobKey: 'teacher_lesson_reminders',
       ok: true,
@@ -272,6 +360,22 @@ export async function runTeacherLessonReminderJob(opts = {}) {
       ok: true,
       skipped: 'meta_not_configured',
       hint: 'META_WHATSAPP_TOKEN ve META_WHATSAPP_PHONE_NUMBER_ID gerekli',
+      log,
+      triggeredBy
+    };
+  }
+
+  if (settings.channel === 'gateway' && !(settings.gateway_user_id || teacherReminderGatewaySessionId())) {
+    await recordCronRun({
+      jobKey: 'teacher_lesson_reminders',
+      ok: true,
+      skipped: 'gateway_session_missing',
+      detail: { triggered_by: triggeredBy, sender_phone: settings.sender_phone || null }
+    });
+    return {
+      ok: true,
+      skipped: 'gateway_session_missing',
+      hint: 'Koç WhatsApp ayarlarından öğretmen hatırlatmasının gideceği QR bağlı hesabı seçin.',
       log,
       triggeredBy
     };
@@ -306,10 +410,10 @@ export async function runTeacherLessonReminderJob(opts = {}) {
     ]);
 
   const classSessions = [...(classToday || []), ...(classTomorrow || [])].filter((s) =>
-    isInTeacherReminderWindow(s.lesson_date, s.start_time, now)
+    isInTeacherReminderWindow(s.lesson_date, s.start_time, now, windowCfg)
   );
   const privateLessons = [...(privateToday || []), ...(privateTomorrow || [])].filter((l) =>
-    isInTeacherReminderWindow(l.lesson_date, l.start_time, now)
+    isInTeacherReminderWindow(l.lesson_date, l.start_time, now, windowCfg)
   );
 
   if (!classSessions.length && !privateLessons.length) {
@@ -371,7 +475,9 @@ export async function runTeacherLessonReminderJob(opts = {}) {
       templateContent,
       logDate,
       nowMs: now,
-      log
+      log,
+      settings,
+      windowCfg
     });
     if (result.skipped) continue;
     if (result.ok) sentOk += 1;
@@ -397,7 +503,9 @@ export async function runTeacherLessonReminderJob(opts = {}) {
       templateContent,
       logDate,
       nowMs: now,
-      log
+      log,
+      settings,
+      windowCfg
     });
     if (result.skipped) continue;
     if (result.ok) sentOk += 1;
@@ -413,7 +521,8 @@ export async function runTeacherLessonReminderJob(opts = {}) {
       due_class: classSessions.length,
       due_private: privateLessons.length,
       window_label: windowCfg.label,
-      channel: 'meta_api',
+      channel: settings.channel === 'meta' ? 'meta_api' : 'gateway',
+      sender_phone: settings.sender_phone || null,
       log_date: logDate,
       triggered_by: triggeredBy
     }
