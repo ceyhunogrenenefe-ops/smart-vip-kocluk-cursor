@@ -118,6 +118,10 @@
       "schedule": "*/5 * * * *"
     },
     {
+      "path": "/api/cron/teacher-lesson-reminders",
+      "schedule": "*/2 * * * *"
+    },
+    {
       "path": "/api/cron/lesson-reminders",
       "schedule": "*/5 * * * *"
     },
