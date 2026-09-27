@@ -1,6 +1,9 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { teacherReminderWindowConfig } from './teacher-lesson-reminder-job.js';
+import {
+  resolveTeacherReminderSession,
+  teacherReminderWindowConfig
+} from './teacher-lesson-reminder-job.js';
 import { isWithinReminderWindowMs } from './lesson-reminder-window.js';
 
 const dk = (n) => n * 60_000;
@@ -44,5 +47,20 @@ describe('öğretmen hatırlatma penceresi', () => {
   it('sınırlar zorlanamaz', () => {
     assert.equal(teacherReminderWindowConfig({ minutes_before: 0 }).minMinutes, 10);
     assert.equal(teacherReminderWindowConfig({ minutes_before: 999 }).minMinutes, 55);
+  });
+});
+
+describe('gönderim hattı çözümleme', () => {
+  it('panelden seçim her zaman önceliklidir', async () => {
+    const r = await resolveTeacherReminderSession({ gateway_user_id: 'abc-123' });
+    assert.equal(r.sessionId, 'abc-123');
+    assert.equal(r.source, 'manual');
+  });
+
+  it('seçim yoksa süper admin hattına bakılır', async () => {
+    // Bağlı oturum yoksa none döner; sıra manual -> super_admin -> env
+    const r = await resolveTeacherReminderSession({ gateway_user_id: '' });
+    assert.ok(['super_admin', 'env', 'none'].includes(r.source));
+    if (r.source === 'none') assert.equal(r.sessionId, '');
   });
 });

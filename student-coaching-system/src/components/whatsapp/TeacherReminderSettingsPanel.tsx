@@ -13,6 +13,14 @@ type Settings = {
 };
 
 type SessionRow = { id: string; name: string; role: string | null; phone: string | null };
+type Resolved = { sessionId: string; source: 'manual' | 'super_admin' | 'env' | 'none'; name: string; phone: string };
+
+const SOURCE_LABEL: Record<Resolved['source'], string> = {
+  manual: 'panelden seçildi',
+  super_admin: 'süper adminin bağlı hattı',
+  env: 'sunucu ayarı',
+  none: 'bağlı hat yok'
+};
 
 /**
  * Öğretmen ders hatırlatması — hangi WhatsApp hattından, kaç dakika önce.
@@ -22,6 +30,7 @@ export default function TeacherReminderSettingsPanel() {
   const [form, setForm] = useState<Settings | null>(null);
   const [sessions, setSessions] = useState<SessionRow[]>([]);
   const [windowLabel, setWindowLabel] = useState('');
+  const [resolved, setResolved] = useState<Resolved | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
 
@@ -34,6 +43,7 @@ export default function TeacherReminderSettingsPanel() {
       setForm(j.settings);
       setSessions(Array.isArray(j.connected_sessions) ? j.connected_sessions : []);
       setWindowLabel(j.window?.label || '');
+      setResolved(j.resolved_session || null);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Ayarlar alınamadı');
     } finally {
@@ -60,6 +70,7 @@ export default function TeacherReminderSettingsPanel() {
       setForm(j.settings);
       setWindowLabel(j.window?.label || '');
       toast.success('Öğretmen hatırlatma ayarları kaydedildi');
+      void load();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Kaydedilemedi');
     } finally {
@@ -138,7 +149,7 @@ export default function TeacherReminderSettingsPanel() {
               onChange={(e) => patch({ gateway_user_id: e.target.value })}
               className={input}
             >
-              <option value="">— seçilmedi —</option>
+              <option value="">Otomatik — süper adminin bağlı hattı</option>
               {sessions.map((s) => (
                 <option key={s.id} value={s.id}>
                   {s.name}
@@ -152,9 +163,8 @@ export default function TeacherReminderSettingsPanel() {
               ) : null}
             </select>
             <span className="mt-1 block text-[11px] text-slate-500">
-              {sessions.length
-                ? 'Listede yalnızca şu an bağlı WhatsApp oturumları görünür.'
-                : 'Bağlı oturum yok — yukarıdan QR ile bir hesap bağlayın, sonra bu listeyi yenileyin.'}
+              Boş bırakırsanız süper admin hangi WhatsApp hattıyla bağlıysa mesajlar oradan gider.
+              {sessions.length ? '' : ' Şu an bağlı oturum görünmüyor.'}
             </span>
           </label>
 
@@ -173,11 +183,19 @@ export default function TeacherReminderSettingsPanel() {
         </>
       ) : null}
 
-      {form.channel === 'gateway' && !form.gateway_user_id ? (
-        <p className="rounded-lg bg-amber-50 px-3 py-2 text-[11px] text-amber-900">
-          Gönderen hat seçilmeden hatırlatma gönderilmez — yanlış numaradan mesaj çıkmasın diye
-          otomasyon kendiliğinden başka bir hatta geçmez.
-        </p>
+      {form.channel === 'gateway' ? (
+        resolved && resolved.sessionId ? (
+          <p className="rounded-lg bg-emerald-50 px-3 py-2 text-[11px] text-emerald-900">
+            Mesajlar şu hattan gidecek: <b>{resolved.name || resolved.sessionId}</b>
+            {resolved.phone ? ` · ${resolved.phone}` : ''} ({SOURCE_LABEL[resolved.source]}).
+          </p>
+        ) : (
+          <p className="rounded-lg bg-amber-50 px-3 py-2 text-[11px] text-amber-900">
+            Bağlı WhatsApp hattı yok — süper admin hesabından QR ile bağlanın. Hat bulunana kadar
+            hatırlatma gönderilmez; yanlış numaradan mesaj çıkmasın diye otomasyon rastgele bir
+            hatta geçmez.
+          </p>
+        )
       ) : null}
 
       <button
