@@ -21,6 +21,30 @@ import { insertWhatsAppAutomationLog, alreadySentTeacherLessonReminder } from '.
 
 export const TEACHER_LESSON_REMINDER_KIND = 'teacher_lesson_reminder';
 
+/**
+ * Etüt ve deneme derslerine öğretmen atanmıyor; bu yüzden hatırlatma sınıfın
+ * rastgele bir öğretmenine gidiyordu ve o kişinin o saatte dersi olmuyordu.
+ * Bu derslerde hatırlatma gönderilmez.
+ *
+ * "Deneme analizi" de kapsam içindedir (içinde "deneme" geçer). Yoklamadaki
+ * classifyAttendanceKind bunu bilerek DERS sayar — orada amaç farklı, bu yüzden
+ * burada ayrı bir kural var.
+ */
+export function teacherReminderSkippedSubject(subject) {
+  const s = String(subject || '')
+    .toLocaleLowerCase('tr')
+    .replace(/ü/g, 'u')
+    .replace(/İ/g, 'i')
+    .replace(/ı/g, 'i')
+    .replace(/ş/g, 's')
+    .replace(/ç/g, 'c')
+    .replace(/ğ/g, 'g')
+    .replace(/ö/g, 'o')
+    .trim();
+  if (!s) return false;
+  return s.includes('etut') || s.includes('etud') || s.includes('deneme');
+}
+
 const DEFAULT_TEMPLATE = `Sayın {{teacher_name}},
 
 {{lesson_name}} dersiniz {{minutes_until}} dakika sonra (saat {{lesson_time}}) başlayacaktır.
@@ -43,6 +67,7 @@ export async function loadTeacherReminderSettings() {
     sender_phone: '',
     minutes_before: 10,
     window_minutes: 2,
+    skip_etut_deneme: true,
     source: 'default'
   };
   try {
@@ -55,6 +80,7 @@ export async function loadTeacherReminderSettings() {
       sender_phone: String(data.sender_phone || '').trim(),
       minutes_before: Number(data.minutes_before) || 10,
       window_minutes: Number(data.window_minutes) || 2,
+      skip_etut_deneme: data.skip_etut_deneme !== false,
       source: 'db'
     };
   } catch {
@@ -238,12 +264,22 @@ async function loadClassTeachersByClassId(classIds) {
     .select('class_id,teacher_id')
     .in('class_id', uniq);
   if (error) throw error;
-  const map = new Map();
+  /**
+   * Sınıfın öğretmeni yedeği YALNIZ tek öğretmenli sınıflarda kullanılır.
+   * Eskiden ilk bulunan öğretmen seçiliyordu; altı öğretmenli bir sınıfta
+   * dersi olmayan birine "dersiniz başlıyor" mesajı gidiyordu.
+   */
+  const counts = new Map();
   for (const row of data || []) {
     const cid = String(row.class_id || '').trim();
     const tid = String(row.teacher_id || '').trim();
     if (!cid || !tid) continue;
-    if (!map.has(cid)) map.set(cid, tid);
+    if (!counts.has(cid)) counts.set(cid, new Set());
+    counts.get(cid).add(tid);
+  }
+  const map = new Map();
+  for (const [cid, set] of counts) {
+    if (set.size === 1) map.set(cid, [...set][0]);
   }
   return map;
 }
@@ -441,9 +477,17 @@ export async function runTeacherLessonReminderJob(opts = {}) {
         .eq('status', 'scheduled')
     ]);
 
-  const classSessions = [...(classToday || []), ...(classTomorrow || [])].filter((s) =>
-    isInTeacherReminderWindow(s.lesson_date, s.start_time, now, windowCfg)
-  );
+  const skipEtutDeneme = settings.skip_etut_deneme !== false;
+  let skippedSubjectCount = 0;
+  const classSessions = [...(classToday || []), ...(classTomorrow || [])]
+    .filter((s) => isInTeacherReminderWindow(s.lesson_date, s.start_time, now, windowCfg))
+    .filter((s) => {
+      if (skipEtutDeneme && teacherReminderSkippedSubject(s.subject)) {
+        skippedSubjectCount += 1;
+        return false;
+      }
+      return true;
+    });
   const privateLessons = [...(privateToday || []), ...(privateTomorrow || [])].filter((l) =>
     isInTeacherReminderWindow(l.lesson_date, l.start_time, now, windowCfg)
   );
@@ -550,6 +594,7 @@ export async function runTeacherLessonReminderJob(opts = {}) {
     messagesSent: sentOk,
     messagesFailed: sentFail,
       detail: {
+      skipped_etut_deneme: skippedSubjectCount,
       due_class: classSessions.length,
       due_private: privateLessons.length,
       window_label: windowCfg.label,

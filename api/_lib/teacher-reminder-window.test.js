@@ -2,6 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   resolveTeacherReminderSession,
+  teacherReminderSkippedSubject,
   teacherReminderWindowConfig
 } from './teacher-lesson-reminder-job.js';
 import { isWithinReminderWindowMs } from './lesson-reminder-window.js';
@@ -62,5 +63,30 @@ describe('gönderim hattı çözümleme', () => {
     const r = await resolveTeacherReminderSession({ gateway_user_id: '' });
     assert.ok(['super_admin', 'env', 'none'].includes(r.source));
     if (r.source === 'none') assert.equal(r.sessionId, '');
+  });
+});
+
+describe('etüt / deneme derslerinde hatırlatma', () => {
+  it('etüt ve deneme atlanır', () => {
+    assert.equal(teacherReminderSkippedSubject('Etüt'), true);
+    assert.equal(teacherReminderSkippedSubject('etüt'), true);
+    assert.equal(teacherReminderSkippedSubject('ETÜT'), true);
+    assert.equal(teacherReminderSkippedSubject('Etüd'), true);
+    assert.equal(teacherReminderSkippedSubject('DENEME'), true);
+    assert.equal(teacherReminderSkippedSubject('Deneme analizi'), true);
+    assert.equal(teacherReminderSkippedSubject('Deneme Analizi'), true);
+  });
+
+  it('normal dersler atlanmaz', () => {
+    assert.equal(teacherReminderSkippedSubject('Matematik'), false);
+    assert.equal(teacherReminderSkippedSubject('Fizik'), false);
+    assert.equal(teacherReminderSkippedSubject('Türkçe'), false);
+    assert.equal(teacherReminderSkippedSubject('Biyoloji'), false);
+    assert.equal(teacherReminderSkippedSubject('Kimya'), false);
+  });
+
+  it('boş konu atlanmaz', () => {
+    assert.equal(teacherReminderSkippedSubject(''), false);
+    assert.equal(teacherReminderSkippedSubject(null), false);
   });
 });
