@@ -1,11 +1,18 @@
 import { CalendarRange, Users } from 'lucide-react';
 import type { RegCoach } from '../../lib/registrationTrackingApi';
 
-export type CrmTimePreset = 'today' | 'yesterday' | 'this_week' | 'this_month' | 'custom';
+export type CrmTimePreset =
+  | 'today'
+  | 'yesterday'
+  | 'last_7_days'
+  | 'this_week'
+  | 'this_month'
+  | 'custom';
 
 const PRESETS: { id: CrmTimePreset; label: string }[] = [
   { id: 'today', label: 'Bugün' },
   { id: 'yesterday', label: 'Dün' },
+  { id: 'last_7_days', label: 'Son 7 Gün' },
   { id: 'this_week', label: 'Bu Hafta' },
   { id: 'this_month', label: 'Bu Ay' },
   { id: 'custom', label: 'Tarih Aralığı' }

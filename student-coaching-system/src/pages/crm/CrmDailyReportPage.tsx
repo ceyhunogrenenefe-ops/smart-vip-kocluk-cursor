@@ -254,6 +254,56 @@ export default function CrmDailyReportPage() {
             </Section>
           </div>
 
+          <Section
+            title="Kurum dışına yönlendirilenler"
+            aside={
+              <span className="text-[11px] font-semibold text-orange-800">
+                Bugün {p.referred_out?.length || 0} kişi
+              </span>
+            }
+          >
+            {p.referred_out?.length ? (
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-left text-sm">
+                  <thead>
+                    <tr className="border-b text-[11px] uppercase text-slate-500">
+                      <th className="py-2 pr-3">Ad</th>
+                      <th className="py-2 pr-3">Telefon</th>
+                      <th className="py-2 pr-3">Kanal</th>
+                      <th className="py-2 pr-3">Sınıf / hizmet</th>
+                      <th className="py-2 pr-3">Neden</th>
+                      <th className="py-2 pr-3">Yönlendiren</th>
+                      <th className="py-2">Saat</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {p.referred_out.map((r) => (
+                      <tr key={r.id} className="border-b border-slate-100">
+                        <td className="py-2 pr-3 font-medium text-slate-900">{r.name}</td>
+                        <td className="py-2 pr-3 tabular-nums text-slate-600">{r.phone || '—'}</td>
+                        <td className="py-2 pr-3 text-slate-600">{r.channel_label}</td>
+                        <td className="py-2 pr-3 text-slate-600">{r.grade_program || '—'}</td>
+                        <td className="py-2 pr-3 text-slate-600">{r.reason || '—'}</td>
+                        <td className="py-2 pr-3 text-slate-600">{r.by_user_name || '—'}</td>
+                        <td className="py-2 whitespace-nowrap text-slate-500">
+                          {r.referred_out_at
+                            ? new Date(r.referred_out_at).toLocaleTimeString('tr-TR', {
+                                timeZone: 'Europe/Istanbul',
+                                hour: '2-digit',
+                                minute: '2-digit'
+                              })
+                            : '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className="text-sm text-slate-500">Bugün kurum dışına yönlendirilen kayıt yok.</p>
+            )}
+          </Section>
+
           <Section title="Temsilciler · kaç görüşme yapıldı">
             {p.representatives.length ? (
               <div className="overflow-x-auto">

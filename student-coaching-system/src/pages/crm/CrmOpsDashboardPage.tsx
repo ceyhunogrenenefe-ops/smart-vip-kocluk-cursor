@@ -2,6 +2,12 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { Clock, Globe, GraduationCap, Instagram, Loader2, MessageCircle, Trophy, Users } from 'lucide-react';
 import { toast } from 'sonner';
+import {
+  ExternalReferralPanel,
+  InternalFunnelPanel,
+  type ExternalSummary,
+  type InternalFunnel
+} from './CrmInternalExternalPanels';
 import { rtListCoaches, rtOpsDashboard, type CrmOpsDashboard, type RegCoach } from '../../lib/registrationTrackingApi';
 import CrmFilterBar, { type CrmTimePreset } from './CrmFilterBar';
 import CrmAgentLeadsPanel from './CrmAgentLeadsPanel';
@@ -223,6 +229,13 @@ export default function CrmOpsDashboardPage() {
           Canlı KPI boş veya erişilemedi — ekran <strong>örnek veri</strong> ile (Muzaffer Apaydın) test edilebilir.
         </p>
       )}
+
+      {data?.internal ? (
+        <InternalFunnelPanel funnel={data.internal as InternalFunnel} query={query} />
+      ) : null}
+      {data?.external ? (
+        <ExternalReferralPanel summary={data.external as ExternalSummary} query={query} />
+      ) : null}
 
       {loading && !data ? (
         <div className="flex justify-center py-16 text-slate-500">

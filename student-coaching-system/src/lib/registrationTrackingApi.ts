@@ -287,6 +287,38 @@ export type CrmOpsDashboard = {
     pct: number;
   }>;
   segments?: Array<{ id: string; label: string }>;
+  /** Kurum ici huni — kurum disina yonlendirilenler haric */
+  internal?: {
+    total: number;
+    contacted: number;
+    not_contacted: number;
+    in_progress: number;
+    call_again: number;
+    trial: number;
+    registered: number;
+    negative: number;
+    contact_rate: number;
+    conversion_rate: number;
+  };
+  /** Kurum disi — ayri bolum, kurum ici sayilara karismaz */
+  external?: {
+    total: number;
+    today: number;
+    this_week: number;
+    this_month: number;
+    in_range?: number;
+    rows?: Array<{
+      id: string;
+      name: string;
+      phone: string | null;
+      channel_label: string;
+      grade_program: string | null;
+      reason: string | null;
+      target: string | null;
+      by_user_name: string | null;
+      referred_out_at: string | null;
+    }>;
+  };
 };
 
 export type CrmOpsTask = {
@@ -307,6 +339,40 @@ export type CrmOpsTask = {
 
 export function rtOpsDashboard(query: Record<string, string> = {}) {
   return rtFetch<{ data: CrmOpsDashboard }>('ops-dashboard', { method: 'GET', query });
+}
+
+export type CrmLeadDrilldownRow = {
+  id: string;
+  name: string;
+  phone: string | null;
+  grade_program: string | null;
+  channel: string;
+  status: string;
+  assigned_user_name: string | null;
+  created_at: string | null;
+  last_contact_at: string | null;
+  referred_out_at: string | null;
+  referred_out_reason: string | null;
+  referred_out_target: string | null;
+  referred_out_by_name: string | null;
+};
+
+/** Dashboard kartina tiklayinca acilan lead listesi */
+export function rtOpsLeadDrilldown(query: Record<string, string> = {}) {
+  return rtFetch<{ data: { bucket: string; count: number; items: CrmLeadDrilldownRow[] } }>(
+    'ops-lead-drilldown',
+    { method: 'GET', query }
+  );
+}
+
+/** Lead'i kurum disina yonlendir / geri al */
+export function rtReferLeadOut(payload: {
+  lead_id: string;
+  reason?: string;
+  target?: string;
+  undo?: boolean;
+}) {
+  return rtFetch<{ ok: boolean }>('refer-out', { method: 'POST', body: JSON.stringify(payload) });
 }
 
 export function rtListOpsTasks(query: Record<string, string> = {}) {
@@ -434,6 +500,30 @@ export type CrmDailyReportPayload = {
     >;
   };
   tasks: { due: number; completed: number; open: number };
+  /** O gun gelen lead'lerin kurum ici hunisi */
+  internal?: {
+    total: number;
+    contacted: number;
+    not_contacted: number;
+    in_progress: number;
+    trial: number;
+    registered: number;
+    negative: number;
+    contact_rate: number;
+    conversion_rate: number;
+  };
+  /** O gun kurum disina yonlendirilenler */
+  referred_out?: Array<{
+    id: string;
+    name: string;
+    phone: string | null;
+    channel_label: string;
+    grade_program: string | null;
+    reason: string | null;
+    target: string | null;
+    by_user_name: string | null;
+    referred_out_at: string | null;
+  }>;
 };
 
 export type CrmDailyReportRow = {

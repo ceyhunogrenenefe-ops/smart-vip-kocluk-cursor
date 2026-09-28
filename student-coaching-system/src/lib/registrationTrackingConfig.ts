@@ -41,7 +41,8 @@ export const STAGE_LABELS: Record<string, string> = {
   registration_pending: 'Kayıt bekliyor',
   no_response: 'Cevap vermiyor',
   unreachable: 'Ulaşılamadı',
-  not_interested: 'İlgilenmiyor'
+  not_interested: 'İlgilenmiyor',
+  referred_out: 'Kurum dışına yönlendirildi'
 };
 
 export const TEMPERATURE_LABELS: Record<string, string> = {
@@ -81,7 +82,8 @@ export const KANBAN_STAGES = [
   'registration_pending',
   'no_response',
   'unreachable',
-  'not_interested'
+  'not_interested',
+  'referred_out'
 ] as const;
 
 /** Deneme dersi aşamaları (üst filtre + CRM sütunu) */
