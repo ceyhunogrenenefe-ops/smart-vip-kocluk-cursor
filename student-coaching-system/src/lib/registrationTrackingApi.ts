@@ -287,8 +287,8 @@ export type CrmOpsDashboard = {
     pct: number;
   }>;
   segments?: Array<{ id: string; label: string }>;
-  /** Kurum ici huni — kurum disina yonlendirilenler haric */
-  internal?: {
+  /** Kurum disi — yeni adaylarin satis hunisi */
+  external?: {
     total: number;
     contacted: number;
     not_contacted: number;
@@ -300,24 +300,12 @@ export type CrmOpsDashboard = {
     contact_rate: number;
     conversion_rate: number;
   };
-  /** Kurum disi — ayri bolum, kurum ici sayilara karismaz */
-  external?: {
+  /** Kurum ici — kendi ogrencilerimiz */
+  internal?: {
     total: number;
-    today: number;
-    this_week: number;
-    this_month: number;
-    in_range?: number;
-    rows?: Array<{
-      id: string;
-      name: string;
-      phone: string | null;
-      channel_label: string;
-      grade_program: string | null;
-      reason: string | null;
-      target: string | null;
-      by_user_name: string | null;
-      referred_out_at: string | null;
-    }>;
+    answered: number;
+    pending: number;
+    by_channel?: Array<{ id: string; label: string; count: number }>;
   };
 };
 
@@ -363,16 +351,6 @@ export function rtOpsLeadDrilldown(query: Record<string, string> = {}) {
     'ops-lead-drilldown',
     { method: 'GET', query }
   );
-}
-
-/** Lead'i kurum disina yonlendir / geri al */
-export function rtReferLeadOut(payload: {
-  lead_id: string;
-  reason?: string;
-  target?: string;
-  undo?: boolean;
-}) {
-  return rtFetch<{ ok: boolean }>('refer-out', { method: 'POST', body: JSON.stringify(payload) });
 }
 
 export function rtListOpsTasks(query: Record<string, string> = {}) {
@@ -500,8 +478,8 @@ export type CrmDailyReportPayload = {
     >;
   };
   tasks: { due: number; completed: number; open: number };
-  /** O gun gelen lead'lerin kurum ici hunisi */
-  internal?: {
+  /** Kurum disi — o gun gelen yeni adaylarin hunisi */
+  external?: {
     total: number;
     contacted: number;
     not_contacted: number;
@@ -512,20 +490,14 @@ export type CrmDailyReportPayload = {
     contact_rate: number;
     conversion_rate: number;
   };
-  /** O gun kurum disina yonlendirilenler */
-  referred_out?: Array<{
-    id: string;
-    name: string;
-    phone: string | null;
-    channel_label: string;
-    grade_program: string | null;
-    reason: string | null;
-    target: string | null;
-    by_user_name: string | null;
-    referred_out_at: string | null;
-  }>;
+  /** Kurum ici — kendi ogrencilerimizden gelenler */
+  internal?: {
+    total: number;
+    answered: number;
+    pending: number;
+    by_channel?: Array<{ id: string; label: string; count: number }>;
+  };
 };
-
 export type CrmDailyReportRow = {
   id: string;
   report_date: string;

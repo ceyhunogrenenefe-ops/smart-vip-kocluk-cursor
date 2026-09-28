@@ -1,0 +1,22 @@
+-- Dashboard: kurum içi / kurum dışı ayrımı — ŞEMA DEĞİŞİKLİĞİ GEREKMEDİ.
+--
+-- KURUM İÇİ  = kendi öğrencimiz / velimiz / personelimiz
+-- KURUM DIŞI = Instagram, WhatsApp, web sitesinden gelen YENİ ADAY
+--
+-- Bu ayrım zaten `registration_leads.is_internal` ve `crm_conversations.is_internal`
+-- kolonlarında tutuluyor (bkz. 2026-09-16-crm-internal-contacts.sql). Öğrenci /
+-- veli telefonuyla eşleşenler otomatik işaretleniyor, ayrıca elle de
+-- işaretlenebiliyor.
+--
+-- Tek sorun kolonun değil, kullanımının yanlış olmasıydı: dashboard sorgusu
+-- `is_internal = false` süzüyor, yani kurum içi kayıtlar ekrana HİÇ gelmiyordu.
+-- Artık çekiliyor ve ayrı bölümde gösteriliyor; satış hunisi yalnız kurum dışı
+-- adaylardan hesaplanıyor.
+--
+-- İletişim durumları (Dönüş yapıldı / yapılmadı / görüşmede / deneme / kayıt /
+-- olumsuz) için de yeni alan açılmadı; mevcut stage + primary_status
+-- alanlarından türetiliyor (api/_lib/crm-ops-metrics.js).
+--
+-- 2026-09-28'de eklenen referred_out_* kolonları ise yanlış bir yorumun
+-- sonucuydu ve kullanılmıyor. Veri kaybı riski olmasın diye DÜŞÜRÜLMEDİ;
+-- boş duruyorlar ve hiçbir ekranda görünmüyorlar.

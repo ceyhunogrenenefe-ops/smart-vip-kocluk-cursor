@@ -273,12 +273,20 @@ export function summarizeLeadSourceFunnel(newLeads) {
 /* ------------------------------------------------------------------ *
  * Kurum içi / kurum dışı ayrımı
  *
- * Kurum dışına yönlendirilen lead, kurum içi satış performansına HİÇ
- * karışmamalı — özellikle "dönüş yapılmadı" sayısına. Bu yüzden önce tip
- * ayrılır, sonra kurum içi olanlar iletişim durumuna göre sınıflanır.
+ * KURUM İÇİ  = kendi öğrencimiz / velimiz / personelimiz (is_internal = true)
+ * KURUM DIŞI = Instagram, WhatsApp vb. üzerinden gelen YENİ ADAY
+ *
+ * Satış performansı yalnızca kurum dışı adaylar üzerinden ölçülür; kendi
+ * öğrencimizin yazdığı mesaj "dönüş yapılmadı" sayısını şişirmemeli. Kurum içi
+ * konuşmalar da kaybolmasın diye ayrı bir bölümde sayılır.
  * ------------------------------------------------------------------ */
 
-/** Lead kurum dışına yönlendirilmiş mi? */
+/** Kayıt kurum içi mi (kendi öğrencimiz / velimiz)? */
+export function isInternalContact(row) {
+  return row?.is_internal === true;
+}
+
+/** Lead kurum dışına yönlendirilmiş mi? (ayrı bir eksen; aşama olarak durur) */
 export function isReferredOutLead(lead) {
   return Boolean(lead?.referred_out_at) || String(lead?.stage || '') === 'referred_out';
 }
@@ -347,11 +355,12 @@ function pct(part, total) {
 }
 
 /**
- * Kurum içi huni — kurum dışına yönlendirilenler HARİÇ.
+ * Bir lead kümesinin iletişim hunisi.
+ * Dashboard'da kurum dışı (yeni aday) kümesi için kullanılır.
  * @param {Array<object>} leads dönem içindeki lead'ler
  */
-export function summarizeInternalFunnel(leads) {
-  const internal = (leads || []).filter((l) => !isReferredOutLead(l));
+export function summarizeLeadFunnel(leads) {
+  const internal = leads || [];
   const counts = Object.fromEntries(LEAD_CONTACT_STATUSES.map((s) => [s.id, 0]));
   for (const l of internal) {
     const id = classifyLeadContactStatus(l);
@@ -417,4 +426,26 @@ export function referredOutRows(leads, { nameById = {} } = {}) {
       by_user_name: l.referred_out_by ? nameById[l.referred_out_by] || null : null,
       referred_out_at: l.referred_out_at || null
     }));
+}
+
+/**
+ * Kurum içi özet — kendi öğrencimizden/velimizden gelen konuşmalar.
+ * Satış hunisine girmez; burada sadece hacim ve yanıtsız kalan görülür.
+ */
+export function summarizeInternalContacts(leads) {
+  const rows = (leads || []).filter((l) => isInternalContact(l));
+  const byChannel = Object.fromEntries(CRM_SOURCE_BUCKETS.map((b) => [b.id, 0]));
+  let answered = 0;
+  for (const l of rows) {
+    byChannel[classifyLeadSource(l)] = (byChannel[classifyLeadSource(l)] || 0) + 1;
+    if (leadWasContacted(l)) answered += 1;
+  }
+  return {
+    total: rows.length,
+    answered,
+    pending: Math.max(0, rows.length - answered),
+    by_channel: CRM_SOURCE_BUCKETS.map((b) => ({ ...b, count: byChannel[b.id] || 0 })).filter(
+      (b) => b.count > 0
+    )
+  };
 }
