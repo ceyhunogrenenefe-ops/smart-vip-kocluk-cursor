@@ -178,6 +178,80 @@ async function findLeadByFacebookId(psid, institutionId) {
   return findLeadByInstagramId(`fb:${id}`, institutionId);
 }
 
+/**
+ * Aynı kişi için açılmış ikinci lead'i ilkine birleştirir.
+ *
+ * Neden gerekiyor: aynı anda gelen iki webhook (ya da webhook + senkron) "bu
+ * kişinin lead'i var mı?" kontrolünü İKİSİ DE boş bulup ikisi de kayıt açıyor.
+ * Sahada 2–121 milisaniye arayla açılmış 35 çift kayıt vardı. Konuşma yalnız
+ * birine bağlanıyor; diğeri Pipeline'da görünüp Gelen Kutusu'nda görünmüyor.
+ *
+ * En ESKİ kayıt kalır. Yenisinin mesajları ve konuşmaları kalana taşınır,
+ * kendisi soft-delete edilir — veri silinmez, yalnız listelerden çıkar.
+ *
+ * @returns {Promise<string>} kalan (asıl) lead id
+ */
+export async function mergeDuplicateInboundLead({
+  institutionId,
+  leadId,
+  instagramScopedId,
+  normalizedPhone
+}) {
+  const id = String(leadId || '').trim();
+  if (!id || !institutionId) return id;
+  try {
+    let q = supabaseAdmin
+      .from('registration_leads')
+      .select('id, created_at')
+      .eq('institution_id', institutionId)
+      .is('deleted_at', null)
+      .order('created_at', { ascending: true })
+      .limit(10);
+
+    const igId = String(instagramScopedId || '').trim();
+    const phone = String(normalizedPhone || '').trim();
+    if (igId) q = q.eq('instagram_scoped_id', igId);
+    else if (phone) q = q.eq('normalized_phone', phone);
+    else return id;
+
+    const { data, error } = await q;
+    if (error || !Array.isArray(data) || data.length < 2) return id;
+
+    const keeper = data[0];
+    const keeperId = String(keeper.id);
+    const extras = data.slice(1).map((r) => String(r.id));
+    if (!extras.length) return keeperId;
+
+    for (const extraId of extras) {
+      if (extraId === keeperId) continue;
+      // Kayıtları kaybetme: konuşma ve mesajlar kalan lead'e taşınır
+      await supabaseAdmin
+        .from('crm_conversations')
+        .update({ lead_id: keeperId })
+        .eq('lead_id', extraId)
+        .then(() => null, () => null);
+      await supabaseAdmin
+        .from('registration_channel_messages')
+        .update({ lead_id: keeperId })
+        .eq('lead_id', extraId)
+        .then(() => null, () => null);
+      await supabaseAdmin
+        .from('registration_leads')
+        .update({
+          deleted_at: new Date().toISOString(),
+          notes: `Aynı kişi için ikinci kez açıldı; ${keeperId} kaydına birleştirildi.`
+        })
+        .eq('id', extraId)
+        .then(() => null, () => null);
+      console.info('[channel-ingest] cift lead birlestirildi', { kalan: keeperId, birlesen: extraId });
+    }
+    return keeperId;
+  } catch (e) {
+    console.warn('[channel-ingest] lead birlestirme:', e?.message || e);
+    return id;
+  }
+}
+
 async function createLeadFromInbound({
   institutionId,
   channel,
@@ -260,6 +334,20 @@ async function createLeadFromInbound({
   if (error) {
     console.warn('[channel-ingest] auto lead create failed:', error.message || error);
     return null;
+  }
+
+  /**
+   * Yarış durumu: aynı anda gelen ikinci webhook da kayıt açmış olabilir.
+   * Hemen tekilleştir; kalan kayıt id'si döner.
+   */
+  if (data?.id) {
+    const kalan = await mergeDuplicateInboundLead({
+      institutionId,
+      leadId: data.id,
+      instagramScopedId: row.instagram_scoped_id || row.facebook_psid || instagramScopedId,
+      normalizedPhone
+    });
+    if (kalan && kalan !== data.id) return { ...data, id: kalan };
   }
   // FAZ 2: yeni aday otomatik dağıtım (kayıtlı öğrenci/veli numarası dağıtılmaz)
   try {
