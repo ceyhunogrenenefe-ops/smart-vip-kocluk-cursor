@@ -55,6 +55,9 @@ export function resolveOpsDateRange(preset, customFrom, customTo) {
     const y = addIstanbulDays(today, -1);
     return { from: y, to: y, preset: 'yesterday' };
   }
+  if (p === 'last_7_days' || p === 'last7') {
+    return { from: addIstanbulDays(today, -6), to: today, preset: 'last_7_days' };
+  }
   if (p === 'this_month') {
     return { from: `${today.slice(0, 7)}-01`, to: today, preset: 'this_month' };
   }
@@ -265,4 +268,153 @@ export function summarizeLeadSourceFunnel(newLeads) {
       responded_pct: came ? Math.round((answered / came) * 1000) / 10 : 0
     };
   });
+}
+
+/* ------------------------------------------------------------------ *
+ * Kurum içi / kurum dışı ayrımı
+ *
+ * Kurum dışına yönlendirilen lead, kurum içi satış performansına HİÇ
+ * karışmamalı — özellikle "dönüş yapılmadı" sayısına. Bu yüzden önce tip
+ * ayrılır, sonra kurum içi olanlar iletişim durumuna göre sınıflanır.
+ * ------------------------------------------------------------------ */
+
+/** Lead kurum dışına yönlendirilmiş mi? */
+export function isReferredOutLead(lead) {
+  return Boolean(lead?.referred_out_at) || String(lead?.stage || '') === 'referred_out';
+}
+
+export const LEAD_CONTACT_STATUSES = [
+  { id: 'not_contacted', label: 'Dönüş yapılmadı', tone: 'rose' },
+  { id: 'contacted', label: 'Dönüş yapıldı', tone: 'sky' },
+  { id: 'in_progress', label: 'Görüşme devam ediyor', tone: 'indigo' },
+  { id: 'call_again', label: 'Tekrar aranacak', tone: 'amber' },
+  { id: 'trial', label: 'Deneme dersine yönlendirildi', tone: 'violet' },
+  { id: 'registered', label: 'Kayıt oldu', tone: 'emerald' },
+  { id: 'negative', label: 'Olumsuz', tone: 'slate' },
+  { id: 'referred_out', label: 'Kurum dışına yönlendirildi', tone: 'orange' }
+];
+
+const STAGE_TO_CONTACT_STATUS = {
+  new_lead: 'not_contacted',
+  first_contact_pending: 'not_contacted',
+  first_contact_completed: 'contacted',
+  needs_identified: 'in_progress',
+  presentation_scheduled: 'in_progress',
+  program_offered: 'in_progress',
+  offer_sent: 'in_progress',
+  spouse_discussion: 'in_progress',
+  registration_pending: 'in_progress',
+  payment_pending: 'in_progress',
+  considering: 'call_again',
+  follow_up: 'call_again',
+  postponed: 'call_again',
+  trial_lesson_scheduled: 'trial',
+  trial_lesson_completed: 'trial',
+  confirmed: 'registered',
+  lost: 'negative',
+  no_response: 'negative',
+  unreachable: 'negative',
+  not_interested: 'negative',
+  referred_out: 'referred_out'
+};
+
+/**
+ * Lead'in iletişim durumu. Mevcut stage / primary_status alanlarından türetilir;
+ * yeni bir durum alanı tutulmaz.
+ */
+export function classifyLeadContactStatus(lead) {
+  if (isReferredOutLead(lead)) return 'referred_out';
+  const status = String(lead?.primary_status || 'tracking');
+  if (status === 'confirmed') return 'registered';
+  if (status === 'lost') return 'negative';
+
+  const mapped = STAGE_TO_CONTACT_STATUS[String(lead?.stage || '')];
+  if (mapped) {
+    // Aşama "yeni" görünse de temas edilmişse dönüş yapılmış sayılır
+    if (mapped === 'not_contacted' && leadWasContacted(lead)) return 'contacted';
+    return mapped;
+  }
+  return leadWasContacted(lead) ? 'contacted' : 'not_contacted';
+}
+
+/** Temsilci bu lead'e döndü mü? (mesaj / not / bilgi girişi) */
+export function leadWasContacted(lead) {
+  return Boolean(lead?.last_contact_at || lead?.first_contact_at);
+}
+
+function pct(part, total) {
+  return total ? Math.round((part / total) * 1000) / 10 : 0;
+}
+
+/**
+ * Kurum içi huni — kurum dışına yönlendirilenler HARİÇ.
+ * @param {Array<object>} leads dönem içindeki lead'ler
+ */
+export function summarizeInternalFunnel(leads) {
+  const internal = (leads || []).filter((l) => !isReferredOutLead(l));
+  const counts = Object.fromEntries(LEAD_CONTACT_STATUSES.map((s) => [s.id, 0]));
+  for (const l of internal) {
+    const id = classifyLeadContactStatus(l);
+    counts[id] = (counts[id] || 0) + 1;
+  }
+  const total = internal.length;
+  const contacted = total - (counts.not_contacted || 0);
+  return {
+    total,
+    contacted,
+    not_contacted: counts.not_contacted || 0,
+    in_progress: counts.in_progress || 0,
+    call_again: counts.call_again || 0,
+    trial: counts.trial || 0,
+    registered: counts.registered || 0,
+    negative: counts.negative || 0,
+    contact_rate: pct(contacted, total),
+    conversion_rate: pct(counts.registered || 0, total),
+    by_status: LEAD_CONTACT_STATUSES.filter((s) => s.id !== 'referred_out').map((s) => ({
+      ...s,
+      count: counts[s.id] || 0,
+      pct: pct(counts[s.id] || 0, total)
+    }))
+  };
+}
+
+/**
+ * Kurum dışı özeti. Sayımlar yönlendirme ANINA göre yapılır (referred_out_at),
+ * lead'in oluşturulma tarihine göre değil.
+ */
+export function summarizeReferredOut(allLeads, { todayYmd, weekStartYmd, monthStartYmd } = {}) {
+  const referred = (allLeads || []).filter((l) => isReferredOutLead(l));
+  const ymdOf = (l) => String(l.referred_out_at || '').slice(0, 10);
+  const inDay = (l, from) => {
+    const d = ymdOf(l);
+    return Boolean(d) && d >= from;
+  };
+  return {
+    total: referred.length,
+    today: todayYmd ? referred.filter((l) => ymdOf(l) === todayYmd).length : 0,
+    this_week: weekStartYmd ? referred.filter((l) => inDay(l, weekStartYmd)).length : 0,
+    this_month: monthStartYmd ? referred.filter((l) => inDay(l, monthStartYmd)).length : 0
+  };
+}
+
+/** Kurum dışına yönlendirilenlerin rapor/liste satırları. */
+export function referredOutRows(leads, { nameById = {} } = {}) {
+  return (leads || [])
+    .filter((l) => isReferredOutLead(l))
+    .sort((a, b) => String(b.referred_out_at || '').localeCompare(String(a.referred_out_at || '')))
+    .map((l) => ({
+      id: l.id,
+      name:
+        String(l.full_name || `${l.first_name || ''} ${l.last_name || ''}`).replace(/\s+/g, ' ').trim() ||
+        'İsimsiz',
+      phone: l.phone || l.normalized_phone || null,
+      channel: classifyLeadSource(l),
+      channel_label: CRM_SOURCE_BUCKETS.find((b) => b.id === classifyLeadSource(l))?.label || 'Diğer',
+      grade_program: l.grade_program || null,
+      reason: l.referred_out_reason || null,
+      target: l.referred_out_target || null,
+      by_user_id: l.referred_out_by || null,
+      by_user_name: l.referred_out_by ? nameById[l.referred_out_by] || null : null,
+      referred_out_at: l.referred_out_at || null
+    }));
 }

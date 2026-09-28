@@ -12,7 +12,16 @@ import {
   inIsoRange,
   isTrialLessonLead,
   resolveOpsDateRange,
-  summarizeLeadSourceFunnel
+  summarizeLeadSourceFunnel,
+  summarizeInternalFunnel,
+  summarizeReferredOut,
+  referredOutRows,
+  isReferredOutLead,
+  classifyLeadContactStatus,
+  classifyLeadSource,
+  istanbulYmd,
+  istanbulWeekStart,
+  LEAD_CONTACT_STATUSES
 } from './crm-ops-metrics.js';
 
 function boundsFromRange(fromYmd, toYmd) {
@@ -213,7 +222,102 @@ export async function handleOpsDashboard(institutionId, filters = {}) {
      * bunlardan DÖNÜLEN. Eskiden yalnız temas edilenlerin kaynağı sayılıyordu.
      */
     sources: summarizeLeadSourceFunnel(newLeadsInRange),
-    segments: CRM_OPS_SEGMENTS
+    segments: CRM_OPS_SEGMENTS,
+    /**
+     * Kurum içi satış performansı — kurum dışına yönlendirilenler hariç.
+     * Dönem içinde gelen lead'ler üzerinden hesaplanır.
+     */
+    internal: summarizeInternalFunnel(newLeadsInRange),
+    /**
+     * Kurum dışı ayrı bölüm. Sayımlar yönlendirme anına göre (referred_out_at),
+     * lead'in oluşturulma tarihine göre değil — bu yüzden tüm lead'ler taranır.
+     */
+    external: {
+      ...summarizeReferredOut(all, {
+        todayYmd: istanbulYmd(),
+        weekStartYmd: istanbulWeekStart(istanbulYmd()),
+        monthStartYmd: `${istanbulYmd().slice(0, 7)}-01`
+      }),
+      in_range: newLeadsInRange.filter((l) => isReferredOutLead(l)).length,
+      rows: referredOutRows(
+        all.filter((l) => {
+          const d = String(l.referred_out_at || '').slice(0, 10);
+          return d && d >= range.from && d <= range.to;
+        }),
+        { nameById }
+      ).slice(0, 100)
+    },
+    contact_statuses: LEAD_CONTACT_STATUSES
+  };
+}
+
+/**
+ * Dashboard kartına tıklanınca açılan liste.
+ * Kurum içi kartlar kurum dışına yönlendirilenleri içermez.
+ */
+export async function handleOpsLeadDrilldown(institutionId, filters = {}) {
+  const range = resolveOpsDateRange(filters.preset || 'today', filters.date_from, filters.date_to);
+  const { start, end } = boundsFromRange(range.from, range.to);
+  const fromMs = new Date(start).getTime();
+  const toMs = new Date(end).getTime();
+  const assignee = String(filters.assigned_user_id || filters.agent_id || '').trim();
+  const bucket = String(filters.bucket || 'not_contacted');
+  const channel = String(filters.channel || '').trim();
+
+  let q = supabaseAdmin
+    .from('registration_leads')
+    .select(
+      'id, first_name, last_name, full_name, phone, normalized_phone, assigned_user_id, primary_status, stage, grade_program, created_at, last_contact_at, first_contact_at, confirmed_at, source, last_inbound_channel, referred_out_at, referred_out_by, referred_out_reason, referred_out_target'
+    )
+    .eq('institution_id', institutionId)
+    .eq('is_internal', false)
+    .is('deleted_at', null);
+  if (assignee) q = q.eq('assigned_user_id', assignee);
+  const { data, error } = await q.limit(8000);
+  if (error) throw error;
+
+  const coaches = await loadCoaches(institutionId);
+  const nameById = Object.fromEntries(coaches.map((c) => [c.id, c.name]));
+  const all = data || [];
+
+  let items;
+  if (bucket === 'referred_out') {
+    items = all.filter((l) => {
+      const d = String(l.referred_out_at || '').slice(0, 10);
+      return d && d >= range.from && d <= range.to;
+    });
+  } else {
+    items = all
+      .filter((l) => inIsoRange(l.created_at, fromMs, toMs))
+      .filter((l) => !isReferredOutLead(l))
+      .filter((l) => (bucket === 'all' ? true : classifyLeadContactStatus(l) === bucket));
+  }
+  if (channel) items = items.filter((l) => classifyLeadSource(l) === channel);
+
+  return {
+    range,
+    bucket,
+    count: items.length,
+    items: items
+      .sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')))
+      .slice(0, 300)
+      .map((l) => ({
+        id: l.id,
+        name:
+          String(l.full_name || `${l.first_name || ''} ${l.last_name || ''}`).replace(/\s+/g, ' ').trim() ||
+          'İsimsiz',
+        phone: l.phone || l.normalized_phone || null,
+        grade_program: l.grade_program || null,
+        channel: classifyLeadSource(l),
+        status: classifyLeadContactStatus(l),
+        assigned_user_name: l.assigned_user_id ? nameById[l.assigned_user_id] || null : null,
+        created_at: l.created_at,
+        last_contact_at: l.last_contact_at || l.first_contact_at || null,
+        referred_out_at: l.referred_out_at || null,
+        referred_out_reason: l.referred_out_reason || null,
+        referred_out_target: l.referred_out_target || null,
+        referred_out_by_name: l.referred_out_by ? nameById[l.referred_out_by] || null : null
+      }))
   };
 }
 
