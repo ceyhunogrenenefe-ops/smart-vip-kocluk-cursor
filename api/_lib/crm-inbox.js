@@ -1020,12 +1020,17 @@ export async function sendCrmInstagramDm({ igScopedId, text, allowHumanAgentTag 
     });
     json = await res.json().catch(() => ({}));
     if (!res.ok) {
-      const err = new Error(
-        '24 saatlik yanıt penceresi kapandı. Instagram, kişi size yeniden yazmadan mesaj göndermeye ' +
-          'izin vermiyor (WhatsApp şablonları Instagram’da geçerli değildir). ' +
-          'Uygulamanızda human_agent izni varsa 7 güne kadar yanıt verebilirsiniz — ' +
-          `Meta yanıtı: ${json?.error?.message || firstError || 'bilinmiyor'}`
-      );
+      /**
+       * Kısa tut: ayrıntılı açıklama gelen kutusunda yazma alanının üstündeki
+       * şeritte zaten duruyor. Her denemede uzun bir uyarı göstermek gereksiz.
+       * Teşhis için tam Meta yanıtı sunucu günlüğüne ve err.raw'a yazılır.
+       */
+      console.warn('[instagram] pencere kapalı, HUMAN_AGENT da reddedildi:', {
+        first: firstError || null,
+        tagged: json?.error?.message || null,
+        code: json?.error?.code ?? null
+      });
+      const err = new Error('Instagram 24 saatlik yanıt penceresi kapalı.');
       err.code = 'IG_WINDOW';
       err.raw = json;
       throw err;
