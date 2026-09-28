@@ -1928,7 +1928,8 @@ export default async function handler(req, res) {
       const data = await handleOpsLeadDrilldown(institutionId, {
         ...filters,
         bucket: req.query?.bucket,
-        channel: req.query?.channel
+        channel: req.query?.channel,
+        scope: req.query?.scope
       });
       return res.status(200).json({ data });
     }
@@ -2155,39 +2156,6 @@ export default async function handler(req, res) {
     if (req.method === 'POST' && (op === 'send-channel-message' || op === 'send-message')) {
       const data = await handleSendChannelMessage(body, institutionId, actor);
       return res.status(200).json({ data });
-    }
-
-    /**
-     * Lead'i kurum disina yonlendir (veya geri al).
-     *
-     * Ayri bir uc nokta: stage ile birlikte KIM, NE ZAMAN ve NEDEN bilgisi de
-     * yazilir; gunluk rapor ve kurum disi bolumu bu alanlardan beslenir.
-     */
-    if ((req.method === 'POST' || req.method === 'PATCH') && op === 'refer-out') {
-      const leadId = String(body.lead_id || req.query.lead_id || '').trim();
-      if (!leadId) return res.status(400).json({ error: 'lead_id_required' });
-      const undo = body.undo === true;
-
-      const patch = undo
-        ? { referred_out_at: null, referred_out_by: null, referred_out_reason: null, referred_out_target: null, stage: String(body.stage || 'first_contact_completed') }
-        : {
-            referred_out_at: new Date().toISOString(),
-            referred_out_by: actor.sub || null,
-            referred_out_reason: String(body.reason || '').trim().slice(0, 500) || null,
-            referred_out_target: String(body.target || '').trim().slice(0, 200) || null,
-            stage: 'referred_out'
-          };
-
-      const { data, error } = await supabaseAdmin
-        .from('registration_leads')
-        .update({ ...patch, updated_at: new Date().toISOString() })
-        .eq('id', leadId)
-        .eq('institution_id', institutionId)
-        .select('id, stage, referred_out_at, referred_out_reason, referred_out_target')
-        .maybeSingle();
-      if (error) return res.status(500).json({ error: error.message });
-      if (!data) return res.status(404).json({ error: 'lead_not_found' });
-      return res.status(200).json({ ok: true, data });
     }
 
     if (req.method === 'PATCH' && op === 'update') {

@@ -10,8 +10,8 @@ import {
   bulkColumnIdForLead,
   classifyLeadSource,
   istanbulYmd,
-  referredOutRows,
-  summarizeInternalFunnel
+  summarizeInternalContacts,
+  summarizeLeadFunnel
 } from './crm-ops-metrics.js';
 import { summarizeCampaignMessages } from './crm-delivery-status.js';
 import { normalizePhoneToE164 } from './phone-whatsapp.js';
@@ -221,15 +221,17 @@ export function computeCrmDailyReport({
         .sort((a, b) => b.count - a.count)
     },
     pipeline: CRM_BULK_PIPELINE_COLUMNS.map((c) => ({ id: c.id, label: c.label, count: pipelineCounts[c.id] || 0 })),
-    /** O gün gelen lead'lerin kurum içi hunisi — kurum dışı hariç */
-    internal: summarizeInternalFunnel(leads.filter((l) => inRange(l.created_at, startMs, endMs))),
-    /**
-     * O gün KURUM DIŞINA YÖNLENDİRİLENLER. Yönlendirme anına göre süzülür;
-     * lead daha eski bir tarihte gelmiş olabilir.
-     */
-    referred_out: referredOutRows(
-      leads.filter((l) => inRange(l.referred_out_at, startMs, endMs)),
-      { nameById }
+    /** KURUM DIŞI — o gün gelen yeni adaylar (satış hunisi) */
+    external: summarizeLeadFunnel(
+      leads.filter((l) => l.is_internal !== true && inRange(l.created_at, startMs, endMs))
+    ),
+    /** KURUM İÇİ — kendi öğrencimizden/velimizden gelenler, satış sayılarına girmez */
+    internal: summarizeInternalContacts(
+      leads.filter(
+        (l) =>
+          l.is_internal === true &&
+          (inRange(l.created_at, startMs, endMs) || inRange(l.last_contact_at, startMs, endMs))
+      )
     ),
     bulk: { totals: bulkTotals, campaigns: bulkCampaigns },
     tasks: taskSummary
@@ -243,7 +245,7 @@ export function reportHasActivity(p) {
       p?.conversations?.outbound_messages ||
       p?.conversations?.notes ||
       p?.status?.stage_changes ||
-      p?.referred_out?.length ||
+      p?.internal?.total ||
       p?.bulk?.totals?.campaigns
   );
 }
@@ -284,45 +286,28 @@ export function formatCrmDailyReportText(p) {
   lines.push(`Aşama değişikliği: ${p.status.stage_changes} · Kesin kayıt: ${p.status.confirmed} · Kaybedilen: ${p.status.lost}`);
   for (const st of p.status.by_stage.slice(0, 6)) lines.push(`• ${st.label}: ${st.count}`);
 
-  if (p.internal) {
-    const i = p.internal;
-    lines.push('', `🏠 *Kurum içi* (${i.total} lead)`);
+  if (p.external) {
+    const e = p.external;
+    lines.push('', `🌐 *Kurum dışı — yeni adaylar* (${e.total})`);
     lines.push(
-      `Dönüldü ${i.contacted} · Dönülmedi ${i.not_contacted} · Görüşmede ${i.in_progress} · ` +
-        `Deneme ${i.trial} · Kayıt ${i.registered} · Olumsuz ${i.negative}`
+      `Dönüldü ${e.contacted} · Dönülmedi ${e.not_contacted} · Görüşmede ${e.in_progress} · ` +
+        `Deneme ${e.trial} · Kayıt ${e.registered} · Olumsuz ${e.negative}`
     );
-    lines.push(`Dönüş oranı %${i.contact_rate} · Kayıt dönüşümü %${i.conversion_rate}`);
-    if (i.not_contacted > 0) {
-      lines.push(`⚠️ ${i.not_contacted} lead'e henüz dönüş yapılmadı.`);
-    }
+    lines.push(`Dönüş oranı %${e.contact_rate} · Kayıt dönüşümü %${e.conversion_rate}`);
+    if (e.not_contacted > 0) lines.push(`⚠️ ${e.not_contacted} adaya henüz dönüş yapılmadı.`);
   }
 
-  const ro = Array.isArray(p.referred_out) ? p.referred_out : [];
-  lines.push('', `🔀 *Kurum dışına yönlendirilenler*: ${ro.length} kişi`);
-  if (!ro.length) {
-    lines.push('Bugün kurum dışına yönlendirilen yok.');
-  } else {
-    for (const r of ro.slice(0, 20)) {
-      const saat = r.referred_out_at
-        ? new Date(r.referred_out_at).toLocaleTimeString('tr-TR', {
-            timeZone: 'Europe/Istanbul',
-            hour: '2-digit',
-            minute: '2-digit'
-          })
-        : '';
-      const parts = [`• ${r.name}`];
-      if (r.phone) parts.push(r.phone);
-      if (r.channel_label) parts.push(r.channel_label);
-      if (r.grade_program) parts.push(r.grade_program);
-      lines.push(parts.join(' · '));
-      const alt = [];
-      if (r.reason) alt.push(`neden: ${r.reason}`);
-      if (r.target) alt.push(`yönlendirilen: ${r.target}`);
-      if (r.by_user_name) alt.push(`işlem: ${r.by_user_name}`);
-      if (saat) alt.push(saat);
-      if (alt.length) lines.push(`   ${alt.join(' · ')}`);
+  if (p.internal) {
+    const i = p.internal;
+    lines.push('', `🏫 *Kurum içi — kendi öğrencilerimiz* (${i.total})`);
+    if (i.total) {
+      lines.push(`Yanıtlanan ${i.answered} · Bekleyen ${i.pending}`);
+      if (i.by_channel?.length) {
+        lines.push(i.by_channel.map((c) => `${c.label} ${c.count}`).join(' · '));
+      }
+    } else {
+      lines.push('Bugün kurum içi mesaj yok.');
     }
-    if (ro.length > 20) lines.push(`   …ve ${ro.length - 20} kişi daha`);
   }
 
   lines.push('', `🧭 *Pipeline özeti*`);
@@ -368,7 +353,7 @@ export async function buildCrmDailyReport(institutionId, date) {
       supabaseAdmin
         .from('registration_leads')
         .select(
-          'id, first_name, last_name, full_name, phone, normalized_phone, grade_program, primary_status, stage, source, last_inbound_channel, created_at, first_contact_at, last_contact_at, referred_out_at, referred_out_by, referred_out_reason, referred_out_target'
+          'id, first_name, last_name, full_name, phone, normalized_phone, grade_program, primary_status, stage, source, last_inbound_channel, created_at, first_contact_at, last_contact_at, is_internal'
         )
         .eq('institution_id', institutionId)
         .eq('is_internal', false)

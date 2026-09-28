@@ -1,13 +1,10 @@
 import { useEffect, useState } from 'react';
-import { AlertTriangle, ExternalLink, Loader2, X } from 'lucide-react';
+import { AlertTriangle, GraduationCap, Globe, Loader2, X } from 'lucide-react';
 import { toast } from 'sonner';
-import {
-  rtOpsLeadDrilldown,
-  rtReferLeadOut,
-  type CrmLeadDrilldownRow
-} from '../../lib/registrationTrackingApi';
+import { rtOpsLeadDrilldown, type CrmLeadDrilldownRow } from '../../lib/registrationTrackingApi';
 
-export type InternalFunnel = {
+/** Kurum dışı (yeni aday) satış hunisi */
+export type ExternalFunnel = {
   total: number;
   contacted: number;
   not_contacted: number;
@@ -20,23 +17,12 @@ export type InternalFunnel = {
   conversion_rate: number;
 };
 
-export type ExternalSummary = {
+/** Kurum içi (kendi öğrencimiz) özeti */
+export type InternalSummary = {
   total: number;
-  today: number;
-  this_week: number;
-  this_month: number;
-  in_range?: number;
-  rows?: Array<{
-    id: string;
-    name: string;
-    phone: string | null;
-    channel_label: string;
-    grade_program: string | null;
-    reason: string | null;
-    target: string | null;
-    by_user_name: string | null;
-    referred_out_at: string | null;
-  }>;
+  answered: number;
+  pending: number;
+  by_channel?: Array<{ id: string; label: string; count: number }>;
 };
 
 const TONE: Record<string, string> = {
@@ -46,8 +32,7 @@ const TONE: Record<string, string> = {
   amber: 'border-amber-200 bg-amber-50 text-amber-900 hover:bg-amber-100',
   violet: 'border-violet-200 bg-violet-50 text-violet-900 hover:bg-violet-100',
   emerald: 'border-emerald-200 bg-emerald-50 text-emerald-900 hover:bg-emerald-100',
-  slate: 'border-slate-200 bg-slate-50 text-slate-800 hover:bg-slate-100',
-  orange: 'border-orange-200 bg-orange-50 text-orange-900 hover:bg-orange-100'
+  slate: 'border-slate-200 bg-slate-50 text-slate-800 hover:bg-slate-100'
 };
 
 function saatTr(iso: string | null): string {
@@ -64,44 +49,24 @@ function saatTr(iso: string | null): string {
 /** Karta tıklanınca açılan lead listesi */
 function DrilldownModal({
   bucket,
+  scope,
   title,
   query,
   onClose
 }: {
   bucket: string;
+  scope: 'external' | 'internal';
   title: string;
   query: Record<string, string>;
   onClose: () => void;
 }) {
   const [rows, setRows] = useState<CrmLeadDrilldownRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [busyId, setBusyId] = useState<string | null>(null);
-
-  /** Listede "bu bizim müşterimiz değil" denen lead'i kurum dışına al */
-  const disariYonlendir = async (row: CrmLeadDrilldownRow) => {
-    const reason = window.prompt(
-      `«${row.name}» kurum dışına yönlendirilecek.
-
-Nedenini yazın (günlük raporda görünecek):`,
-      ''
-    );
-    if (reason === null) return;
-    setBusyId(row.id);
-    try {
-      await rtReferLeadOut({ lead_id: row.id, reason: reason.trim() });
-      setRows((list) => list.filter((x) => x.id !== row.id));
-      toast.success('Kurum dışına yönlendirildi — kurum içi sayılardan çıkarıldı');
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'İşlem yapılamadı');
-    } finally {
-      setBusyId(null);
-    }
-  };
 
   useEffect(() => {
     let iptal = false;
     setLoading(true);
-    void rtOpsLeadDrilldown({ ...query, bucket })
+    void rtOpsLeadDrilldown({ ...query, bucket, scope })
       .then((r) => {
         if (!iptal) setRows(r.data?.items || []);
       })
@@ -112,7 +77,7 @@ Nedenini yazın (günlük raporda görünecek):`,
     return () => {
       iptal = true;
     };
-  }, [bucket, query]);
+  }, [bucket, scope, query]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center bg-slate-900/40 p-4 sm:p-8">
@@ -139,10 +104,7 @@ Nedenini yazın (günlük raporda görünecek):`,
                   <th className="px-3 py-2 font-medium">Telefon</th>
                   <th className="px-3 py-2 font-medium">Sınıf</th>
                   <th className="px-3 py-2 font-medium">Temsilci</th>
-                  <th className="px-3 py-2 font-medium">
-                    {bucket === 'referred_out' ? 'Yönlendirme' : 'Geldi'}
-                  </th>
-                  {bucket === 'referred_out' ? null : <th className="px-3 py-2" />}
+                  <th className="px-3 py-2 font-medium">Son iletişim</th>
                 </tr>
               </thead>
               <tbody>
@@ -153,30 +115,10 @@ Nedenini yazın (günlük raporda görünecek):`,
                     <td className="px-3 py-2 text-slate-600">{r.grade_program || '—'}</td>
                     <td className="px-3 py-2 text-slate-600">{r.assigned_user_name || '—'}</td>
                     <td className="px-3 py-2 text-slate-500">
-                      {bucket === 'referred_out' ? (
-                        <>
-                          {saatTr(r.referred_out_at)}
-                          {r.referred_out_reason ? (
-                            <span className="block text-[11px] text-slate-400">{r.referred_out_reason}</span>
-                          ) : null}
-                        </>
-                      ) : (
-                        saatTr(r.created_at)
+                      {saatTr(r.last_contact_at) || (
+                        <span className="text-rose-600">dönüş yok</span>
                       )}
                     </td>
-                    {bucket === 'referred_out' ? null : (
-                      <td className="px-3 py-2 text-right">
-                        <button
-                          type="button"
-                          disabled={busyId === r.id}
-                          onClick={() => void disariYonlendir(r)}
-                          className="rounded-lg border border-orange-200 bg-orange-50 px-2 py-1 text-[11px] font-medium text-orange-800 hover:bg-orange-100 disabled:opacity-50"
-                          title="Kurum içi satış sayılarından çıkar"
-                        >
-                          Kurum dışına
-                        </button>
-                      </td>
-                    )}
                   </tr>
                 ))}
               </tbody>
@@ -191,14 +133,14 @@ Nedenini yazın (günlük raporda görünecek):`,
 }
 
 /**
- * Kurum içi satış performansı — kurum dışına yönlendirilenler bu sayılara girmez.
- * Kartlara tıklanınca ilgili lead listesi açılır.
+ * KURUM DIŞI — Instagram / WhatsApp vb. üzerinden gelen yeni adaylar.
+ * Satış performansı burada ölçülür; kendi öğrencilerimiz bu sayılara girmez.
  */
-export function InternalFunnelPanel({
+export function ExternalFunnelPanel({
   funnel,
   query
 }: {
-  funnel: InternalFunnel;
+  funnel: ExternalFunnel;
   query: Record<string, string>;
 }) {
   const [open, setOpen] = useState<{ bucket: string; title: string } | null>(null);
@@ -216,12 +158,15 @@ export function InternalFunnelPanel({
   return (
     <div className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm">
       <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
-        <div>
-          <h3 className="text-sm font-semibold text-slate-800">Kurum içi satış performansı</h3>
-          <p className="mt-0.5 text-xs text-slate-500">
-            Seçili dönemde gelen {funnel.total} lead. Kurum dışına yönlendirilenler bu sayılara dahil değil.
-            Karta tıklayın, listesi açılsın.
-          </p>
+        <div className="flex items-center gap-2">
+          <Globe className="h-4 w-4 text-sky-700" />
+          <div>
+            <h3 className="text-sm font-semibold text-slate-800">Kurum dışı — yeni adaylar</h3>
+            <p className="mt-0.5 text-xs text-slate-500">
+              Instagram, WhatsApp ve web sitesinden gelen {funnel.total} aday. Kendi öğrencilerimiz bu
+              sayılara dahil değil. Karta tıklayın, listesi açılsın.
+            </p>
+          </div>
         </div>
         <div className="flex gap-4 text-right">
           <div>
@@ -238,11 +183,11 @@ export function InternalFunnelPanel({
       {funnel.not_contacted > 0 ? (
         <button
           type="button"
-          onClick={() => setOpen({ bucket: 'not_contacted', title: 'Dönüş yapılmayan lead’ler' })}
+          onClick={() => setOpen({ bucket: 'not_contacted', title: 'Dönüş yapılmayan adaylar' })}
           className="mb-3 flex w-full items-center gap-2 rounded-xl border-2 border-rose-300 bg-rose-50 px-3 py-2 text-left text-sm font-semibold text-rose-900 hover:bg-rose-100"
         >
           <AlertTriangle className="h-4 w-4 shrink-0" />
-          {funnel.not_contacted} lead’e henüz dönüş yapılmadı — listeyi aç
+          {funnel.not_contacted} adaya henüz dönüş yapılmadı — listeyi aç
         </button>
       ) : null}
 
@@ -261,92 +206,76 @@ export function InternalFunnelPanel({
       </div>
 
       {open ? (
-        <DrilldownModal bucket={open.bucket} title={open.title} query={query} onClose={() => setOpen(null)} />
+        <DrilldownModal
+          bucket={open.bucket}
+          scope="external"
+          title={open.title}
+          query={query}
+          onClose={() => setOpen(null)}
+        />
       ) : null}
     </div>
   );
 }
 
-/** Kurum dışına yönlendirilenler — kurum içi performanstan tamamen ayrı. */
-export function ExternalReferralPanel({
+/**
+ * KURUM İÇİ — kendi öğrencimiz / velimiz. Satış hunisine girmez;
+ * burada yalnız hacim ve yanıtsız kalan görünür.
+ */
+export function InternalContactsPanel({
   summary,
   query
 }: {
-  summary: ExternalSummary;
+  summary: InternalSummary;
   query: Record<string, string>;
 }) {
   const [open, setOpen] = useState(false);
-  const rows = summary.rows || [];
 
   return (
-    <div className="rounded-2xl border border-orange-200/80 bg-orange-50/40 p-4 shadow-sm">
+    <div className="rounded-2xl border border-teal-200/80 bg-teal-50/40 p-4 shadow-sm">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
-          <ExternalLink className="h-4 w-4 text-orange-700" />
+          <GraduationCap className="h-4 w-4 text-teal-700" />
           <div>
-            <h3 className="text-sm font-semibold text-slate-800">Kurum dışına yönlendirilenler</h3>
+            <h3 className="text-sm font-semibold text-slate-800">Kurum içi — kendi öğrencilerimiz</h3>
             <p className="mt-0.5 text-xs text-slate-500">
-              Bu kayıtlar kurum içi satış istatistiklerine karışmaz.
+              Mevcut öğrenci / veli mesajları. Satış performansı sayılarına karışmaz.
             </p>
           </div>
         </div>
         <button
           type="button"
           onClick={() => setOpen(true)}
-          className="rounded-lg border border-orange-200 bg-white px-3 py-1.5 text-xs font-semibold text-orange-800 hover:bg-orange-100"
+          className="rounded-lg border border-teal-200 bg-white px-3 py-1.5 text-xs font-semibold text-teal-800 hover:bg-teal-100"
         >
-          Dönem listesini aç
+          Listeyi aç
         </button>
       </div>
 
-      <div className="grid gap-2 sm:grid-cols-4">
+      <div className="grid gap-2 sm:grid-cols-3">
         {[
-          ['Bugün', summary.today],
-          ['Bu hafta', summary.this_week],
-          ['Bu ay', summary.this_month],
-          ['Toplam', summary.total]
-        ].map(([label, value]) => (
-          <div key={String(label)} className="rounded-xl border border-orange-200 bg-white px-3 py-2">
-            <p className="text-2xl font-semibold tabular-nums text-orange-900">{value as number}</p>
+          ['Toplam', summary.total, 'text-slate-900'],
+          ['Yanıtlanan', summary.answered, 'text-emerald-700'],
+          ['Bekleyen', summary.pending, summary.pending > 0 ? 'text-rose-700' : 'text-slate-400']
+        ].map(([label, value, cls]) => (
+          <div key={String(label)} className="rounded-xl border border-teal-200 bg-white px-3 py-2">
+            <p className={`text-2xl font-semibold tabular-nums ${cls as string}`}>{value as number}</p>
             <p className="mt-0.5 text-[11px] font-medium text-slate-600">{label}</p>
           </div>
         ))}
       </div>
 
-      {rows.length ? (
-        <div className="mt-3 max-h-60 overflow-auto rounded-xl border border-orange-100 bg-white">
-          <table className="w-full text-left text-xs">
-            <thead className="sticky top-0 bg-orange-50/80 text-slate-500">
-              <tr>
-                <th className="px-3 py-2 font-medium">Ad</th>
-                <th className="px-3 py-2 font-medium">Kanal</th>
-                <th className="px-3 py-2 font-medium">Neden</th>
-                <th className="px-3 py-2 font-medium">Yönlendiren</th>
-                <th className="px-3 py-2 font-medium">Tarih</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r) => (
-                <tr key={r.id} className="border-t border-orange-50">
-                  <td className="px-3 py-2 font-medium text-slate-800">
-                    {r.name}
-                    {r.phone ? <span className="block text-[11px] text-slate-400">{r.phone}</span> : null}
-                  </td>
-                  <td className="px-3 py-2 text-slate-600">{r.channel_label}</td>
-                  <td className="px-3 py-2 text-slate-600">{r.reason || '—'}</td>
-                  <td className="px-3 py-2 text-slate-600">{r.by_user_name || '—'}</td>
-                  <td className="px-3 py-2 text-slate-500">{saatTr(r.referred_out_at)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+      {summary.by_channel?.length ? (
+        <p className="mt-2 text-[11px] text-slate-600">
+          {summary.by_channel.map((c) => `${c.label}: ${c.count}`).join(' · ')}
+        </p>
       ) : null}
 
       {open ? (
         <DrilldownModal
-          bucket="referred_out"
-          title="Kurum dışına yönlendirilenler"
+          bucket="all"
+          scope="internal"
+          title="Kurum içi — kendi öğrencilerimiz"
           query={query}
           onClose={() => setOpen(false)}
         />

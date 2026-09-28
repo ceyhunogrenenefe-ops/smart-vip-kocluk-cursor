@@ -950,7 +950,36 @@ export async function sendCrmWhatsAppTemplate({
   };
 }
 
-export async function sendCrmInstagramDm({ igScopedId, text }) {
+/**
+ * Meta'nın 24 saat kuralına takılan hata mı?
+ *
+ * Instagram/Messenger'da kullanıcının son mesajından 24 saat sonra normal
+ * (RESPONSE) mesaj gönderilemez. Meta bunu farklı kodlarla bildiriyor:
+ * #10 (izin/pencere), #551 (kullanıcı ulaşılamaz), 2018278 ve
+ * "outside of allowed window" metni.
+ */
+export function instagramWindowClosedError(json, status) {
+  const e = json?.error || {};
+  const code = Number(e.code);
+  const sub = Number(e.error_subcode);
+  const msg = String(e.message || '');
+  if (code === 10 || code === 551 || sub === 2018278) return true;
+  return status === 400 && /outside.*(allowed|24).*window|24 ?hour|messaging window/i.test(msg);
+}
+
+/**
+ * Instagram / Facebook DM.
+ *
+ * ÖNEMLİ — WhatsApp şablonları Instagram'da YOKTUR. Meta'da onaylanan şablonlar
+ * yalnız WhatsApp Business Platform içindir. Instagram'a "şablon göndermek",
+ * şablonun metnini normal DM olarak yollamak demektir; bu fonksiyon onu yapar.
+ *
+ * 24 saatlik pencere kapandıysa RESPONSE reddedilir. Bu durumda Meta'nın resmî
+ * HUMAN_AGENT etiketiyle bir kez daha denenir (temsilcinin elle yanıtı için 7
+ * güne kadar izin verir). O da olmazsa neyin olduğunu anlatan bir hata döner —
+ * eskiden ham Meta metni geliyordu ve temsilci ne yapacağını bilmiyordu.
+ */
+export async function sendCrmInstagramDm({ igScopedId, text, allowHumanAgentTag = true }) {
   await loadMetaWhatsAppSecretsFromDb();
   const { resolveSocialToken, resolvePageId } = await import('./meta-social-inbound.js');
   const { token, source: tokenSource } = resolveSocialToken();
@@ -965,19 +994,44 @@ export async function sendCrmInstagramDm({ igScopedId, text }) {
   }
   const graphVer = String(process.env.META_GRAPH_API_VERSION || 'v21.0').trim() || 'v21.0';
   const url = `https://graph.facebook.com/${graphVer}/${encodeURIComponent(pageId)}/messages`;
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      recipient: { id: String(igScopedId) },
-      messaging_type: 'RESPONSE',
-      message: { text: String(text || '').slice(0, 1000) }
-    })
+  const body = String(text || '').slice(0, 1000);
+
+  const post = (payload) =>
+    fetch(url, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+  let res = await post({
+    recipient: { id: String(igScopedId) },
+    messaging_type: 'RESPONSE',
+    message: { text: body }
   });
-  const json = await res.json().catch(() => ({}));
+  let json = await res.json().catch(() => ({}));
+
+  if (!res.ok && allowHumanAgentTag && instagramWindowClosedError(json, res.status)) {
+    const firstError = json?.error?.message || '';
+    res = await post({
+      recipient: { id: String(igScopedId) },
+      messaging_type: 'MESSAGE_TAG',
+      tag: 'HUMAN_AGENT',
+      message: { text: body }
+    });
+    json = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const err = new Error(
+        '24 saatlik yanıt penceresi kapandı. Instagram, kişi size yeniden yazmadan mesaj göndermeye ' +
+          'izin vermiyor (WhatsApp şablonları Instagram’da geçerli değildir). ' +
+          'Uygulamanızda human_agent izni varsa 7 güne kadar yanıt verebilirsiniz — ' +
+          `Meta yanıtı: ${json?.error?.message || firstError || 'bilinmiyor'}`
+      );
+      err.code = 'IG_WINDOW';
+      err.raw = json;
+      throw err;
+    }
+  }
+
   if (!res.ok) {
     const err = new Error(json?.error?.message || `instagram_send_http_${res.status}`);
     err.code = 'META';

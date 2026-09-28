@@ -13,14 +13,11 @@ import {
   isTrialLessonLead,
   resolveOpsDateRange,
   summarizeLeadSourceFunnel,
-  summarizeInternalFunnel,
-  summarizeReferredOut,
-  referredOutRows,
-  isReferredOutLead,
+  summarizeLeadFunnel,
+  summarizeInternalContacts,
+  isInternalContact,
   classifyLeadContactStatus,
   classifyLeadSource,
-  istanbulYmd,
-  istanbulWeekStart,
   LEAD_CONTACT_STATUSES
 } from './crm-ops-metrics.js';
 
@@ -58,10 +55,9 @@ export async function handleOpsDashboard(institutionId, filters = {}) {
   let leadQ = supabaseAdmin
     .from('registration_leads')
     .select(
-      'id, first_name, last_name, full_name, assigned_user_id, primary_status, stage, confirmed_at, created_at, last_contact_at, last_inbound_at, first_contact_at, source, last_inbound_channel'
+      'id, first_name, last_name, full_name, phone, normalized_phone, grade_program, assigned_user_id, primary_status, stage, confirmed_at, created_at, last_contact_at, last_inbound_at, first_contact_at, source, last_inbound_channel, is_internal'
     )
     .eq('institution_id', institutionId)
-    .eq('is_internal', false)
     .is('deleted_at', null);
   if (assignee) leadQ = leadQ.eq('assigned_user_id', assignee);
   const { data: leads, error } = await leadQ.limit(8000);
@@ -71,7 +67,7 @@ export async function handleOpsDashboard(institutionId, filters = {}) {
       let q2 = supabaseAdmin
         .from('registration_leads')
         .select(
-          'id, first_name, last_name, full_name, assigned_user_id, primary_status, stage, confirmed_at, created_at, last_contact_at, last_inbound_at, first_contact_at, source'
+          'id, first_name, last_name, full_name, assigned_user_id, primary_status, stage, confirmed_at, created_at, last_contact_at, last_inbound_at, first_contact_at, source, is_internal'
         )
         .eq('institution_id', institutionId)
         .is('deleted_at', null);
@@ -84,14 +80,28 @@ export async function handleOpsDashboard(institutionId, filters = {}) {
     }
   }
 
+  /**
+   * Kurum içi kayıtlar (kendi öğrencimiz / velimiz) satış sayılarına karışmaz.
+   * Eskiden sorguda tamamen süzülüyordu; artık çekiliyor ama ayrı bölümde
+   * gösteriliyor, KPI ve huni yalnız kurum dışı adaylardan hesaplanıyor.
+   */
+  const externalAll = all.filter((l) => !isInternalContact(l));
+  const internalAll = all.filter((l) => isInternalContact(l));
+
   /** Dönem içinde oluşan yeni lead'ler — kanal kırılımının "gelen" ayağı */
-  const newLeadsInRange = all.filter((l) => inIsoRange(l.created_at, fromMs, toMs));
+  const newLeadsInRange = externalAll.filter((l) => inIsoRange(l.created_at, fromMs, toMs));
+  const internalInRange = internalAll.filter(
+    (l) =>
+      inIsoRange(l.created_at, fromMs, toMs) ||
+      inIsoRange(l.last_contact_at, fromMs, toMs) ||
+      inIsoRange(l.last_inbound_at, fromMs, toMs)
+  );
 
   // İletişim = temsilcinin mesaj / not / bilgi girişi (gelen mesaj sayılmaz)
-  const contacts = all.filter(
+  const contacts = externalAll.filter(
     (l) => inIsoRange(l.last_contact_at, fromMs, toMs) || inIsoRange(l.first_contact_at, fromMs, toMs)
   );
-  const trials = all.filter(
+  const trials = externalAll.filter(
     (l) =>
       isTrialLessonLead(l) &&
       (inIsoRange(l.last_contact_at, fromMs, toMs) ||
@@ -100,7 +110,7 @@ export async function handleOpsDashboard(institutionId, filters = {}) {
         l.stage === 'trial_lesson_scheduled' ||
         l.stage === 'trial_lesson_completed')
   );
-  const confirmed = all.filter(
+  const confirmed = externalAll.filter(
     (l) => l.primary_status === 'confirmed' && inIsoRange(l.confirmed_at || l.created_at, fromMs, toMs)
   );
 
@@ -115,7 +125,7 @@ export async function handleOpsDashboard(institutionId, filters = {}) {
       .limit(8000);
     const { data: msgs } = await mq;
     // Yalnız rapora giren (kurum içi olmayan, temsilci filtresine uyan) adayların mesajları
-    const allow = new Set(all.map((l) => l.id));
+    const allow = new Set(externalAll.map((l) => l.id));
     messages = (msgs || []).filter((m) => allow.has(m.lead_id));
   } catch {
     messages = [];
@@ -142,7 +152,7 @@ export async function handleOpsDashboard(institutionId, filters = {}) {
     return byAgent.get(id);
   };
 
-  for (const l of all) {
+  for (const l of externalAll) {
     const id = l.assigned_user_id || '_unassigned';
     const row = ensure(id, id === '_unassigned' ? 'Atanmamış' : nameById[id] || 'Temsilci');
     row.leads += 1;
@@ -166,7 +176,7 @@ export async function handleOpsDashboard(institutionId, filters = {}) {
       pending.delete(lid);
     }
   }
-  const leadOwner = Object.fromEntries(all.map((l) => [l.id, l.assigned_user_id || '_unassigned']));
+  const leadOwner = Object.fromEntries(externalAll.map((l) => [l.id, l.assigned_user_id || '_unassigned']));
   for (const [lid, ms] of frByLead) {
     const uid = leadOwner[lid];
     if (!uid || !byAgent.has(uid)) continue;
@@ -224,29 +234,15 @@ export async function handleOpsDashboard(institutionId, filters = {}) {
     sources: summarizeLeadSourceFunnel(newLeadsInRange),
     segments: CRM_OPS_SEGMENTS,
     /**
-     * Kurum içi satış performansı — kurum dışına yönlendirilenler hariç.
-     * Dönem içinde gelen lead'ler üzerinden hesaplanır.
+     * KURUM DIŞI — Instagram / WhatsApp vb. üzerinden gelen yeni adaylar.
+     * Satış performansı bu küme üzerinden ölçülür.
      */
-    internal: summarizeInternalFunnel(newLeadsInRange),
+    external: summarizeLeadFunnel(newLeadsInRange),
     /**
-     * Kurum dışı ayrı bölüm. Sayımlar yönlendirme anına göre (referred_out_at),
-     * lead'in oluşturulma tarihine göre değil — bu yüzden tüm lead'ler taranır.
+     * KURUM İÇİ — kendi öğrencimiz / velimiz. Satış hunisine girmez; burada
+     * yalnız hacim ve yanıtsız kalan görünür.
      */
-    external: {
-      ...summarizeReferredOut(all, {
-        todayYmd: istanbulYmd(),
-        weekStartYmd: istanbulWeekStart(istanbulYmd()),
-        monthStartYmd: `${istanbulYmd().slice(0, 7)}-01`
-      }),
-      in_range: newLeadsInRange.filter((l) => isReferredOutLead(l)).length,
-      rows: referredOutRows(
-        all.filter((l) => {
-          const d = String(l.referred_out_at || '').slice(0, 10);
-          return d && d >= range.from && d <= range.to;
-        }),
-        { nameById }
-      ).slice(0, 100)
-    },
+    internal: summarizeInternalContacts(internalInRange),
     contact_statuses: LEAD_CONTACT_STATUSES
   };
 }
@@ -267,10 +263,9 @@ export async function handleOpsLeadDrilldown(institutionId, filters = {}) {
   let q = supabaseAdmin
     .from('registration_leads')
     .select(
-      'id, first_name, last_name, full_name, phone, normalized_phone, assigned_user_id, primary_status, stage, grade_program, created_at, last_contact_at, first_contact_at, confirmed_at, source, last_inbound_channel, referred_out_at, referred_out_by, referred_out_reason, referred_out_target'
+      'id, first_name, last_name, full_name, phone, normalized_phone, assigned_user_id, primary_status, stage, grade_program, created_at, last_contact_at, first_contact_at, confirmed_at, source, last_inbound_channel, is_internal, referred_out_at, referred_out_by, referred_out_reason, referred_out_target'
     )
     .eq('institution_id', institutionId)
-    .eq('is_internal', false)
     .is('deleted_at', null);
   if (assignee) q = q.eq('assigned_user_id', assignee);
   const { data, error } = await q.limit(8000);
@@ -280,16 +275,21 @@ export async function handleOpsLeadDrilldown(institutionId, filters = {}) {
   const nameById = Object.fromEntries(coaches.map((c) => [c.id, c.name]));
   const all = data || [];
 
+  const scope = String(filters.scope || 'external');
   let items;
-  if (bucket === 'referred_out') {
-    items = all.filter((l) => {
-      const d = String(l.referred_out_at || '').slice(0, 10);
-      return d && d >= range.from && d <= range.to;
-    });
+  if (scope === 'internal') {
+    items = all
+      .filter((l) => isInternalContact(l))
+      .filter(
+        (l) =>
+          inIsoRange(l.created_at, fromMs, toMs) ||
+          inIsoRange(l.last_contact_at, fromMs, toMs) ||
+          inIsoRange(l.last_inbound_at, fromMs, toMs)
+      );
   } else {
     items = all
+      .filter((l) => !isInternalContact(l))
       .filter((l) => inIsoRange(l.created_at, fromMs, toMs))
-      .filter((l) => !isReferredOutLead(l))
       .filter((l) => (bucket === 'all' ? true : classifyLeadContactStatus(l) === bucket));
   }
   if (channel) items = items.filter((l) => classifyLeadSource(l) === channel);
@@ -297,6 +297,7 @@ export async function handleOpsLeadDrilldown(institutionId, filters = {}) {
   return {
     range,
     bucket,
+    scope,
     count: items.length,
     items: items
       .sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')))

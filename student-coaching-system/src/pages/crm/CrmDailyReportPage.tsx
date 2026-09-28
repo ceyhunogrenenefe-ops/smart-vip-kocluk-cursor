@@ -255,52 +255,29 @@ export default function CrmDailyReportPage() {
           </div>
 
           <Section
-            title="Kurum dışına yönlendirilenler"
+            title="Kurum içi — kendi öğrencilerimiz"
             aside={
-              <span className="text-[11px] font-semibold text-orange-800">
-                Bugün {p.referred_out?.length || 0} kişi
+              <span className="text-[11px] font-semibold text-teal-800">
+                {p.internal?.total || 0} mesaj · {p.internal?.pending || 0} bekliyor
               </span>
             }
           >
-            {p.referred_out?.length ? (
-              <div className="overflow-x-auto">
-                <table className="min-w-full text-left text-sm">
-                  <thead>
-                    <tr className="border-b text-[11px] uppercase text-slate-500">
-                      <th className="py-2 pr-3">Ad</th>
-                      <th className="py-2 pr-3">Telefon</th>
-                      <th className="py-2 pr-3">Kanal</th>
-                      <th className="py-2 pr-3">Sınıf / hizmet</th>
-                      <th className="py-2 pr-3">Neden</th>
-                      <th className="py-2 pr-3">Yönlendiren</th>
-                      <th className="py-2">Saat</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {p.referred_out.map((r) => (
-                      <tr key={r.id} className="border-b border-slate-100">
-                        <td className="py-2 pr-3 font-medium text-slate-900">{r.name}</td>
-                        <td className="py-2 pr-3 tabular-nums text-slate-600">{r.phone || '—'}</td>
-                        <td className="py-2 pr-3 text-slate-600">{r.channel_label}</td>
-                        <td className="py-2 pr-3 text-slate-600">{r.grade_program || '—'}</td>
-                        <td className="py-2 pr-3 text-slate-600">{r.reason || '—'}</td>
-                        <td className="py-2 pr-3 text-slate-600">{r.by_user_name || '—'}</td>
-                        <td className="py-2 whitespace-nowrap text-slate-500">
-                          {r.referred_out_at
-                            ? new Date(r.referred_out_at).toLocaleTimeString('tr-TR', {
-                                timeZone: 'Europe/Istanbul',
-                                hour: '2-digit',
-                                minute: '2-digit'
-                              })
-                            : '—'}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+            {p.internal?.total ? (
+              <p className="text-sm text-slate-600">
+                Kendi öğrenci/velilerimizden {p.internal.total} kayıt geldi;{' '}
+                <strong className="text-emerald-700">{p.internal.answered}</strong> yanıtlandı,{' '}
+                <strong className={p.internal.pending ? 'text-rose-700' : 'text-slate-500'}>
+                  {p.internal.pending}
+                </strong>{' '}
+                bekliyor. Bu sayılar satış performansına dahil değildir.
+                {p.internal.by_channel?.length ? (
+                  <span className="mt-1 block text-xs text-slate-500">
+                    {p.internal.by_channel.map((c) => `${c.label}: ${c.count}`).join(' · ')}
+                  </span>
+                ) : null}
+              </p>
             ) : (
-              <p className="text-sm text-slate-500">Bugün kurum dışına yönlendirilen kayıt yok.</p>
+              <p className="text-sm text-slate-500">Bugün kurum içi mesaj yok.</p>
             )}
           </Section>
 

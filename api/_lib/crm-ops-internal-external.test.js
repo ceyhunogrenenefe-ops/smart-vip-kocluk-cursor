@@ -2,20 +2,19 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   classifyLeadContactStatus,
-  isReferredOutLead,
+  isInternalContact,
   leadWasContacted,
-  referredOutRows,
   resolveOpsDateRange,
-  summarizeInternalFunnel,
-  summarizeReferredOut
+  summarizeInternalContacts,
+  summarizeLeadFunnel
 } from './crm-ops-metrics.js';
 
-describe('kurum dışı tespiti', () => {
-  it('referred_out_at veya stage ile anlaşılır', () => {
-    assert.equal(isReferredOutLead({ referred_out_at: '2026-09-28T10:00:00Z' }), true);
-    assert.equal(isReferredOutLead({ stage: 'referred_out' }), true);
-    assert.equal(isReferredOutLead({ stage: 'new_lead' }), false);
-    assert.equal(isReferredOutLead(null), false);
+describe('kurum içi / kurum dışı ayrımı', () => {
+  it('kendi öğrencimiz kurum içidir', () => {
+    assert.equal(isInternalContact({ is_internal: true }), true);
+    assert.equal(isInternalContact({ is_internal: false }), false);
+    assert.equal(isInternalContact({}), false);
+    assert.equal(isInternalContact(null), false);
   });
 });
 
@@ -39,13 +38,6 @@ describe('iletişim durumu', () => {
     assert.equal(classifyLeadContactStatus({ primary_status: 'lost', stage: 'offer_sent' }), 'negative');
   });
 
-  it('kurum dışı her şeyi yener', () => {
-    assert.equal(
-      classifyLeadContactStatus({ primary_status: 'confirmed', referred_out_at: '2026-09-28T10:00:00Z' }),
-      'referred_out'
-    );
-  });
-
   it('aşamalar doğru kovalara düşer', () => {
     assert.equal(classifyLeadContactStatus({ stage: 'offer_sent' }), 'in_progress');
     assert.equal(classifyLeadContactStatus({ stage: 'follow_up' }), 'call_again');
@@ -54,92 +46,58 @@ describe('iletişim durumu', () => {
   });
 });
 
-describe('kurum içi huni', () => {
+describe('kurum dışı satış hunisi', () => {
   const leads = [
     { id: '1', stage: 'new_lead' },
     { id: '2', stage: 'new_lead' },
     { id: '3', stage: 'offer_sent', last_contact_at: 'x' },
     { id: '4', primary_status: 'confirmed', stage: 'confirmed' },
-    { id: '5', stage: 'trial_lesson_scheduled', last_contact_at: 'x' },
-    { id: '6', referred_out_at: '2026-09-28T10:00:00Z' }
+    { id: '5', stage: 'trial_lesson_scheduled', last_contact_at: 'x' }
   ];
 
-  it('kurum dışı lead huniye hiç girmez', () => {
-    const f = summarizeInternalFunnel(leads);
+  it('dönüş yapılan / yapılmayan doğru sayılır', () => {
+    const f = summarizeLeadFunnel(leads);
     assert.equal(f.total, 5);
-    assert.equal(f.by_status.some((s) => s.id === 'referred_out'), false);
-  });
-
-  it('dönüş yapılmayan sayısına kurum dışı dahil edilmez', () => {
-    const f = summarizeInternalFunnel(leads);
     assert.equal(f.not_contacted, 2);
     assert.equal(f.contacted, 3);
   });
 
-  it('oranlar kurum içi toplam üzerinden', () => {
-    const f = summarizeInternalFunnel(leads);
+  it('oranlar toplam üzerinden', () => {
+    const f = summarizeLeadFunnel(leads);
     assert.equal(f.contact_rate, 60);
     assert.equal(f.conversion_rate, 20);
   });
 
   it('boş liste sıfır döner, bölme hatası olmaz', () => {
-    const f = summarizeInternalFunnel([]);
+    const f = summarizeLeadFunnel([]);
     assert.equal(f.total, 0);
     assert.equal(f.contact_rate, 0);
     assert.equal(f.conversion_rate, 0);
   });
 });
 
-describe('kurum dışı özeti', () => {
-  const leads = [
-    { id: 'a', referred_out_at: '2026-09-28T10:00:00Z' },
-    { id: 'b', referred_out_at: '2026-09-27T10:00:00Z' },
-    { id: 'c', referred_out_at: '2026-09-02T10:00:00Z' },
-    { id: 'd', stage: 'new_lead' }
-  ];
-  const opts = { todayYmd: '2026-09-28', weekStartYmd: '2026-09-28', monthStartYmd: '2026-09-01' };
-
-  it('gün / hafta / ay / toplam', () => {
-    const r = summarizeReferredOut(leads, opts);
-    assert.equal(r.today, 1);
-    assert.equal(r.this_week, 1);
-    assert.equal(r.this_month, 3);
-    assert.equal(r.total, 3);
+describe('kurum içi özet', () => {
+  it('hacim, yanıtlanan ve bekleyen', () => {
+    const r = summarizeInternalContacts([
+      { is_internal: true, last_inbound_channel: 'whatsapp' },
+      { is_internal: true, last_inbound_channel: 'instagram', last_contact_at: 'x' },
+      { is_internal: false, last_inbound_channel: 'whatsapp' }
+    ]);
+    assert.equal(r.total, 2);
+    assert.equal(r.answered, 1);
+    assert.equal(r.pending, 1);
+    assert.equal(r.by_channel.length, 2);
   });
 
-  it('yönlendirme anına göre sayılır, oluşturulma tarihine göre değil', () => {
-    const r = summarizeReferredOut([{ created_at: '2026-01-01', referred_out_at: '2026-09-28T08:00:00Z' }], opts);
-    assert.equal(r.today, 1);
-  });
-});
-
-describe('kurum dışı satırları', () => {
-  it('rapor için gerekli alanları çıkarır', () => {
-    const rows = referredOutRows(
-      [
-        {
-          id: 'x',
-          first_name: 'Ayşe',
-          last_name: 'Yılmaz',
-          phone: '05550001122',
-          last_inbound_channel: 'instagram',
-          grade_program: '8. Sınıf / LGS',
-          referred_out_at: '2026-09-28T10:00:00Z',
-          referred_out_by: 'u1',
-          referred_out_reason: 'Bölgemizde şube yok'
-        }
-      ],
-      { nameById: { u1: 'Sultan KURT' } }
-    );
-    assert.equal(rows.length, 1);
-    assert.equal(rows[0].name, 'Ayşe Yılmaz');
-    assert.equal(rows[0].channel_label, 'Instagram');
-    assert.equal(rows[0].by_user_name, 'Sultan KURT');
-    assert.equal(rows[0].reason, 'Bölgemizde şube yok');
+  it('kurum dışı kayıt kurum içi özete girmez', () => {
+    const r = summarizeInternalContacts([{ is_internal: false }, { is_internal: false }]);
+    assert.equal(r.total, 0);
   });
 
-  it('kurum içi lead listeye girmez', () => {
-    assert.deepEqual(referredOutRows([{ id: 'y', stage: 'new_lead' }]), []);
+  it('boş liste güvenli', () => {
+    const r = summarizeInternalContacts([]);
+    assert.equal(r.total, 0);
+    assert.equal(r.pending, 0);
   });
 });
 

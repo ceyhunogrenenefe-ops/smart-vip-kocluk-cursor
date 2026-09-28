@@ -3,10 +3,10 @@ import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer,
 import { Clock, Globe, GraduationCap, Instagram, Loader2, MessageCircle, Trophy, Users } from 'lucide-react';
 import { toast } from 'sonner';
 import {
-  ExternalReferralPanel,
-  InternalFunnelPanel,
-  type ExternalSummary,
-  type InternalFunnel
+  ExternalFunnelPanel,
+  InternalContactsPanel,
+  type ExternalFunnel,
+  type InternalSummary
 } from './CrmInternalExternalPanels';
 import { rtListCoaches, rtOpsDashboard, type CrmOpsDashboard, type RegCoach } from '../../lib/registrationTrackingApi';
 import CrmFilterBar, { type CrmTimePreset } from './CrmFilterBar';
@@ -230,11 +230,11 @@ export default function CrmOpsDashboardPage() {
         </p>
       )}
 
-      {data?.internal ? (
-        <InternalFunnelPanel funnel={data.internal as InternalFunnel} query={query} />
-      ) : null}
       {data?.external ? (
-        <ExternalReferralPanel summary={data.external as ExternalSummary} query={query} />
+        <ExternalFunnelPanel funnel={data.external as ExternalFunnel} query={query} />
+      ) : null}
+      {data?.internal ? (
+        <InternalContactsPanel summary={data.internal as InternalSummary} query={query} />
       ) : null}
 
       {loading && !data ? (
