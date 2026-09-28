@@ -466,6 +466,29 @@ export default function CrmInboxPage() {
     composeRef.current?.focus();
   };
 
+  /**
+   * Instagram / Messenger 24 saat kuralı.
+   *
+   * Kişi son 24 saat içinde yazmadıysa Meta normal mesajı reddeder. Temsilci
+   * bunu göndermeye çalışmadan önce görsün; WhatsApp'ta böyle bir kısıt yok
+   * (orada şablon devreye girer).
+   */
+  const socialWindow = useMemo(() => {
+    const ch = String(selected?.channel || '').toLowerCase();
+    if (ch !== 'instagram' && ch !== 'facebook') return null;
+    const inbound = messages.filter((m) => m.sender_type === 'lead');
+    const last = inbound.length ? inbound[inbound.length - 1] : null;
+    const iso = last?.created_at || null;
+    if (!iso) return null;
+    const ms = Date.now() - new Date(iso).getTime();
+    const kalanSaat = 24 - ms / 3_600_000;
+    return {
+      closed: kalanSaat <= 0,
+      hoursLeft: Math.max(0, Math.floor(kalanSaat)),
+      label: ch === 'facebook' ? 'Messenger' : 'Instagram'
+    };
+  }, [selected?.channel, messages]);
+
   const pickTemplate = (tpl: CrmMetaTemplate) => {
     if (!selectedId) {
       toast.error('Önce bir konuşma seçin.');
@@ -1000,6 +1023,19 @@ export default function CrmInboxPage() {
                       ) : null}
                     </button>
                   ))}
+                </div>
+              ) : null}
+
+              {socialWindow?.closed ? (
+                <div className="mb-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] leading-relaxed text-amber-900">
+                  <b>{socialWindow.label} yanıt penceresi kapandı.</b> Kişi 24 saattir yazmadığı için
+                  Meta yeni mesaja izin vermiyor — WhatsApp şablonları {socialWindow.label}’da geçerli
+                  değildir. Telefon numarası varsa WhatsApp’tan ulaşabilirsiniz.
+                </div>
+              ) : socialWindow && socialWindow.hoursLeft <= 4 ? (
+                <div className="mb-2 rounded-xl border border-amber-200 bg-amber-50/70 px-3 py-1.5 text-[11px] text-amber-900">
+                  {socialWindow.label} yanıt penceresi kapanmak üzere — yaklaşık{' '}
+                  <b>{socialWindow.hoursLeft} saat</b> kaldı.
                 </div>
               ) : null}
 
