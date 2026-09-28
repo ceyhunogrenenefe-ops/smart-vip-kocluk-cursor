@@ -76,6 +76,9 @@ export default async function handler(req, res) {
         if (!Number.isFinite(n) || n < 1 || n > 120) return res.status(400).json({ error: 'minutes_before_invalid' });
         patch.minutes_before = Math.round(n);
       }
+      if (body.skip_etut_deneme !== undefined) {
+        patch.skip_etut_deneme = Boolean(body.skip_etut_deneme);
+      }
       if (body.window_minutes !== undefined) {
         const n = Number(body.window_minutes);
         if (!Number.isFinite(n) || n < 1 || n > 30) return res.status(400).json({ error: 'window_minutes_invalid' });

@@ -10,6 +10,7 @@ type Settings = {
   sender_phone: string;
   minutes_before: number;
   window_minutes: number;
+  skip_etut_deneme: boolean;
 };
 
 type SessionRow = { id: string; name: string; role: string | null; phone: string | null };
@@ -111,6 +112,19 @@ export default function TeacherReminderSettingsPanel() {
         />
         <span>
           <b>Otomasyon açık</b> — kapatılırsa hiç mesaj gitmez.
+        </span>
+      </label>
+
+      <label className="flex items-start gap-2 text-xs text-slate-700">
+        <input
+          type="checkbox"
+          checked={form.skip_etut_deneme !== false}
+          onChange={(e) => patch({ skip_etut_deneme: e.target.checked })}
+          className="mt-0.5"
+        />
+        <span>
+          <b>Etüt ve deneme derslerinde gönderme</b> — bu derslere öğretmen atanmadığı için
+          hatırlatma yanlış kişilere gidiyordu.
         </span>
       </label>
 
