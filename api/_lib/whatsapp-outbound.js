@@ -354,6 +354,17 @@ async function sendWhatsAppUsingTemplateRowOnce({
  * Supabase `message_templates.type` ile gönderim.
  */
 export async function sendAutomatedWhatsApp({ phone, templateType, vars }) {
+  /** Pasife alinan ogrenciye otomatik mesaj gitmesin (elle gonderim etkilenmez). */
+  const { isAutomationMutedPhone } = await import('./student-messaging-mute.js');
+  if (await isAutomationMutedPhone(phone)) {
+    return {
+      ok: false,
+      skipped: true,
+      channel: 'none',
+      errorCode: 'STUDENT_INACTIVE',
+      error: 'Ogrenci pasif — otomatik mesaj gonderilmedi.'
+    };
+  }
   const { data: templateRow, error: tErr } = await supabaseAdmin
     .from('message_templates')
     .select('*')
