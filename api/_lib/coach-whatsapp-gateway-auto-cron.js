@@ -243,7 +243,9 @@ export async function runCoachWhatsappGatewayAutoCron(opts = {}) {
 
     const { data: students, error: stErr } = await supabaseAdmin
       .from('students')
-      .select('id,name,phone,parent_phone,coach_id,institution_id,whatsapp_automation_enabled,class_level,group_name')
+      .select(
+        'id,name,phone,parent_phone,coach_id,institution_id,whatsapp_automation_enabled,class_level,group_name,enrollment_status,deleted_at'
+      )
       .eq('coach_id', schedule.coach_id);
 
     if (stErr) {
@@ -251,9 +253,14 @@ export async function runCoachWhatsappGatewayAutoCron(opts = {}) {
       continue;
     }
 
+    /** Pasife alınan öğrenciye otomatik mesaj gitmez (elle gönderim etkilenmez). */
+    const { studentRowIsInactive } = await import('./student-messaging-mute.js');
+    const activeStudents = (students || []).filter((s) => !studentRowIsInactive(s));
+    const mutedCount = (students || []).length - activeStudents.length;
+
     const logDetail = [];
     let sentCount = 0;
-    const periodsMap = await loadPeriodsForStudents((students || []).map((s) => s.id), {
+    const periodsMap = await loadPeriodsForStudents(activeStudents.map((s) => s.id), {
       coachId: schedule.coach_id
     });
 
@@ -262,7 +269,7 @@ export async function runCoachWhatsappGatewayAutoCron(opts = {}) {
       : [];
     let studentClassMap = new Map();
     if (classTargets.length) {
-      const studentIds = (students || []).map((s) => s.id).filter(Boolean);
+      const studentIds = activeStudents.map((s) => s.id).filter(Boolean);
       if (studentIds.length) {
         const { data: csRows } = await supabaseAdmin
           .from('class_students')
@@ -278,7 +285,7 @@ export async function runCoachWhatsappGatewayAutoCron(opts = {}) {
       }
     }
 
-    for (const st of students || []) {
+    for (const st of activeStudents) {
       try {
         if (!studentMatchesTarget(st, schedule, studentClassMap.get(String(st.id)) || [])) {
           logDetail.push({ student_id: st.id, skipped: 'target_filter' });
@@ -377,7 +384,8 @@ export async function runCoachWhatsappGatewayAutoCron(opts = {}) {
     summary.push({
       schedule_id: schedule.id,
       coach_id: schedule.coach_id,
-      processed_students: (students || []).length,
+      processed_students: activeStudents.length,
+      skipped_inactive_students: mutedCount,
       sent_count: sentCount,
       log: logDetail
     });

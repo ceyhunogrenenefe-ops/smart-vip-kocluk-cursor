@@ -102,9 +102,38 @@ export async function sendAttendanceTemplateOrPlain({
         template_error: null
       };
     }
+    // Pasif ogrenci: duz metin yedegine DE dusulmez
+    if (sent.errorCode === 'STUDENT_INACTIVE') {
+      return {
+        ok: false,
+        skipped: true,
+        channel: 'none',
+        errorCode: 'STUDENT_INACTIVE',
+        error: sent.error,
+        template_error: null
+      };
+    }
     templateError = sent.error || sent.errorCode || 'template_send_failed';
   } else {
     templateError = 'template_row_missing';
+  }
+
+  /**
+   * Sablon yoksa da yedek gonderim yapilmadan once kontrol: pasif ogrenciye
+   * otomatik mesaj gitmemeli.
+   */
+  {
+    const { isAutomationMutedPhone } = await import('./student-messaging-mute.js');
+    if (await isAutomationMutedPhone(phone)) {
+      return {
+        ok: false,
+        skipped: true,
+        channel: 'none',
+        errorCode: 'STUDENT_INACTIVE',
+        error: 'Ogrenci pasif — otomatik mesaj gonderilmedi.',
+        template_error: templateError
+      };
+    }
   }
 
   // Meta şablon yok/hatalıysa: yalnızca süper admin / kurum gateway (BOOK_ORDER_GATEWAY_SESSION_ID)

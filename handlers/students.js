@@ -708,6 +708,9 @@ export default async function handler(req, res) {
         if (patchBody.enrollment_status === 'withdrawn' && patchBody.deleted_at === undefined) {
           patchBody.deleted_at = new Date().toISOString();
         }
+        /** Pasif/aktif degisti: otomatik mesaj susturma listesi hemen yenilensin */
+        const { resetMutedPhoneCache } = await import('../api/_lib/student-messaging-mute.js');
+        resetMutedPhoneCache();
       }
       if (actor.role === 'coach') {
         delete patchBody.coach_id;
@@ -806,6 +809,8 @@ export default async function handler(req, res) {
         };
         const softResult = await updateOneOptionalModerator('students', softPatch, 'id', id);
         if (softResult.error) throw softResult.error;
+        const { resetMutedPhoneCache } = await import('../api/_lib/student-messaging-mute.js');
+        resetMutedPhoneCache();
 
         const { data: refreshed } = await supabaseAdmin.from('students').select('*').eq('id', id).maybeSingle();
         const softApplied =
