@@ -1437,17 +1437,22 @@ export default async function handler(req, res) {
 
     if (op === 'delete_conversation' && req.method === 'POST') {
       // Kalıcı silme: mesajlar FK ON DELETE CASCADE ile gider; aday kartı ve raporlar kalır
-      if (!isAdmin) {
-        return res.status(403).json({ error: 'forbidden', hint: 'Sohbeti yalnızca yönetici silebilir.' });
-      }
       const conversationId = String(body.conversation_id || '').trim();
       if (!conversationId) return res.status(400).json({ error: 'conversation_id_required' });
       const { data: conv } = await supabaseAdmin
         .from('crm_conversations')
-        .select('id, institution_id')
+        .select('*')
         .eq('id', conversationId)
         .maybeSingle();
       if (!conv) return res.status(404).json({ error: 'conversation_not_found' });
+      /**
+       * Temsilci de silebilir — ama yalnız ERİŞEBİLDİĞİ sohbeti (kendine atanmış
+       * veya havuzdaki). Mesaj silmede zaten aynı kural vardı; sohbet silme
+       * yöneticide kalıyordu ve temsilci yanlış düşen konuşmayı temizleyemiyordu.
+       */
+      if (!(await assertConversationAccess(conv, actor, roleSet, assignment))) {
+        return res.status(403).json({ error: 'forbidden', hint: 'Bu sohbete erişiminiz yok.' });
+      }
       if (institutionId && conv.institution_id && String(conv.institution_id) !== String(institutionId)) {
         return res.status(403).json({ error: 'forbidden' });
       }

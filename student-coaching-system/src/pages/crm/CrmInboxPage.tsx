@@ -133,6 +133,11 @@ export default function CrmInboxPage() {
   const { effectiveUser } = useAuth();
   const tags = userRoleTags(effectiveUser);
   const isAdmin = tags.includes('super_admin') || tags.includes('admin');
+  /**
+   * Sohbet silme artik temsilcide de var. Sunucu tarafi yine erisim kontrolu
+   * yapiyor: temsilci yalnizca kendine atanmis veya havuzdaki sohbeti silebilir.
+   */
+  const canDeleteConversation = isAdmin || tags.includes('crm_agent');
 
   const [conversations, setConversations] = useState<CrmConversation[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -775,7 +780,7 @@ export default function CrmInboxPage() {
                     >
                       {c.is_internal ? 'Adaya çevir' : 'Kurum içi yap'}
                     </span>
-                    {isAdmin ? (
+                    {canDeleteConversation ? (
                       <span
                         role="button"
                         tabIndex={0}
@@ -853,7 +858,7 @@ export default function CrmInboxPage() {
                   {selected.is_internal ? 'Adaya çevir' : 'Kurum içi'}
                 </button>
               ) : null}
-              {selected && isAdmin ? (
+              {selected && canDeleteConversation ? (
                 <button
                   type="button"
                   onClick={() => void deleteConversation(selected)}

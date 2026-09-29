@@ -62,8 +62,11 @@ export default async function handler(req, res) {
   const body = req.method === 'GET' ? {} : parseBody(req);
   const op = String(req.query?.op || body.op || '').trim();
 
-  /** Temsilci ekip listesini görebilir; diğer her işlem yöneticiye ait. */
-  const AGENT_READABLE_OPS = new Set(['list_agents', 'list']);
+  /**
+   * Temsilci ekip listesini ve VARDİYA PLANINI görebilir; düzenleme yöneticide.
+   * Vardiya okuması GET ile yapılır — POST (kaydet/sil) yine yönetici işi.
+   */
+  const AGENT_READABLE_OPS = new Set(['list_agents', 'list', 'shifts']);
   const agentMayRead = AGENT_READABLE_OPS.has(op) && req.method === 'GET' && roleSet.has('crm_agent');
   if (!actorIsAdminLike(actor, roleSet) && !agentMayRead) {
     return res.status(403).json({ error: 'admin_only' });
