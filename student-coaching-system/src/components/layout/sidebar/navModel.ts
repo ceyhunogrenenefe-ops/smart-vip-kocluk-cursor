@@ -38,7 +38,8 @@ import {
   UserCheck,
   ShoppingBag,
   Store,
-  Puzzle
+  Puzzle,
+  PhoneCall
 } from 'lucide-react';
 import type { UserRole } from '../../../types';
 
@@ -263,6 +264,7 @@ const CRM_LABELS: Record<string, string> = {
   '/crm/toplu-mesaj': 'Toplu Mesaj',
   '/crm/dashboard': 'Dashboard',
   '/coach-reports': 'Koç Raporları',
+  '/veli-memnuniyet': 'Veli Memnuniyet ve Takip',
   '/crm/gunluk-rapor': 'Günlük Rapor',
   '/crm/widgetler': 'Widgetler'
 };
@@ -443,6 +445,7 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
     { path: '/edu-panel', icon: Presentation, label: EDU_HOMEWORK_ANIMATIONS_LABEL },
     STAFF_NAV_YARDIM,
     { path: '/students', icon: GraduationCap, label: 'Öğrenciler' },
+    { path: '/veli-memnuniyet', icon: PhoneCall, label: 'Veli Memnuniyet ve Takip' },
     { path: '/teachers', icon: GraduationCap, label: 'Öğretmenler' },
     { path: '/coaches', icon: Users, label: 'Koçlar' },
     { path: '/weekly-planner', icon: Calendar, label: 'Haftalık plan' },

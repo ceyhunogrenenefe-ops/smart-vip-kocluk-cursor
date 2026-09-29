@@ -53,6 +53,8 @@ export const ROUTE_ALLOWED_ROLES = {
   '/coach-dashboard': ['coach'],
   '/coach-kilavuz': ['coach'],
   '/coach-reports': ['coach', 'admin', 'super_admin'],
+  /** Arama temsilcisi kendi listesini gorur; yonetici hepsini */
+  '/veli-memnuniyet': ['admin', 'super_admin', 'crm_agent', 'coach'],
   '/coach-whatsapp-settings': ['super_admin', 'admin', 'coach', 'teacher'],
   '/meetings': ['super_admin', 'admin', 'coach'],
   '/live-lessons': ['super_admin', 'admin', 'teacher', 'coach'],
