@@ -11,7 +11,18 @@ function hhmm(v: string) {
 }
 
 /** Vardiya (nöbet) planı — kim hangi gün ve saatte görevde. Atama ve WhatsApp uyarısı buna bakar. */
-export default function CrmShiftsPanel({ agents }: { agents: RegCoach[] }) {
+/**
+ * Vardiya (nöbet) planı.
+ * canEdit=false iken temsilci planı görür ama değiştiremez — kimin ne zaman
+ * görevde olduğunu bilmesi gerekiyor, düzenleme yöneticide kalıyor.
+ */
+export default function CrmShiftsPanel({
+  agents,
+  canEdit = true
+}: {
+  agents: RegCoach[];
+  canEdit?: boolean;
+}) {
   const [shifts, setShifts] = useState<CrmShift[]>([]);
   const [onDuty, setOnDuty] = useState<string[] | null>(null);
   const [busy, setBusy] = useState(false);
@@ -61,7 +72,8 @@ export default function CrmShiftsPanel({ agents }: { agents: RegCoach[] }) {
             <CalendarClock className="h-5 w-5 text-emerald-600" /> Vardiya (nöbet) planı
           </h3>
           <p className="mt-1 max-w-3xl text-xs text-slate-500">
-            Her temsilcinin hangi gün ve saatlerde görevli olduğunu yazın. Yeni müşteri sırası yalnız o an görevde
+            {canEdit ? 'Her temsilcinin hangi gün ve saatlerde görevli olduğunu yazın. ' : 'Kimin hangi gün ve saatte görevli olduğunu buradan görebilirsiniz. '}
+            Yeni müşteri sırası yalnız o an görevde
             olanlar arasında döner; WhatsApp uyarısı sorumlu temsilci görevde değilse o an görevde olana gider. Aynı
             saatte birden çok temsilci olabilir. Gece yarısını geçen vardiya için bitişi 02:00 gibi yazın (24:00 = gün
             sonu).
@@ -75,6 +87,7 @@ export default function CrmShiftsPanel({ agents }: { agents: RegCoach[] }) {
         </div>
       </div>
 
+      {canEdit ? (
       <div className="mt-4 flex flex-wrap items-end gap-2 rounded-xl border border-slate-200 bg-slate-50/70 p-3">
         <label className="text-xs text-slate-600">
           Temsilci
@@ -150,6 +163,7 @@ export default function CrmShiftsPanel({ agents }: { agents: RegCoach[] }) {
           Her güne ekle
         </button>
       </div>
+      ) : null}
 
       <div className="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
         {DAYS.map((label, i) => {
@@ -175,14 +189,16 @@ export default function CrmShiftsPanel({ agents }: { agents: RegCoach[] }) {
                           {hhmm(s.start_time)}–{hhmm(s.end_time)}
                         </span>
                       </span>
-                      <button
-                        type="button"
-                        onClick={() => void run({ action: 'delete', id: s.id }, 'Silindi')}
-                        className="shrink-0 rounded p-0.5 text-rose-500 hover:bg-rose-50"
-                        aria-label="Sil"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
+                      {canEdit ? (
+                        <button
+                          type="button"
+                          onClick={() => void run({ action: 'delete', id: s.id }, 'Silindi')}
+                          className="shrink-0 rounded p-0.5 text-rose-500 hover:bg-rose-50"
+                          aria-label="Sil"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      ) : null}
                     </div>
                   ))}
                 </div>

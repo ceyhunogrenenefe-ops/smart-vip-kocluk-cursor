@@ -139,7 +139,7 @@ export default function CrmAgentsPage() {
         </p>
       </div>
 
-      {/* Yönetim panelleri yalnız yöneticide; temsilci listeyi görür */}
+      {/* Yönetim panelleri yalnız yöneticide; temsilci listeyi ve vardiyayı görür */}
       {canManage ? (
         <div className="grid gap-6 xl:grid-cols-2">
           <CrmAssignmentPanel agents={agents} />
@@ -148,7 +148,10 @@ export default function CrmAgentsPage() {
           <CrmStaffAlertsPanel />
           <CrmCannedRepliesPanel />
         </div>
-      ) : null}
+      ) : (
+        /* Temsilci: vardiya planını görür, düzenleyemez */
+        <CrmShiftsPanel agents={agents} canEdit={false} />
+      )}
 
       {canManage ? (
       <div className="grid gap-6 lg:grid-cols-2">
