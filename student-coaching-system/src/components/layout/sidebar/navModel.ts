@@ -367,6 +367,7 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
       STAFF_NAV_YARDIM,
       { path: '/ai-agents-admin', icon: Bot, label: 'AI Ders Ajanları' },
       { path: '/students', icon: GraduationCap, label: 'Öğrenciler' },
+      { path: '/veli-memnuniyet', icon: PhoneCall, label: 'Veli Memnuniyet ve Takip' },
       { path: '/teachers', icon: GraduationCap, label: 'Öğretmenler' },
       { path: '/coaches', icon: Users, label: 'Koçlar' },
       { path: '/super-admin', icon: Server, label: 'Kurum Yönetimi' },
@@ -418,6 +419,7 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
       { path: '/crm/toplu-mesaj', icon: MessageCircle, label: 'CRM Toplu mesaj' },
       { path: '/crm/gunluk-rapor', icon: FileText, label: 'CRM Günlük Rapor' },
       { path: '/crm/inbox', icon: ClipboardList, label: 'CRM Gelen Kutusu' },
+      { path: '/veli-memnuniyet', icon: PhoneCall, label: 'Veli Memnuniyet ve Takip' },
     ];
   }
 
@@ -521,6 +523,7 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
     ...privateLiveNavForRoles(['coach']),
     { path: '/meetings', icon: Video, label: 'Online görüşmeler' },
     { path: '/toplantilarim', icon: ClipboardCheck, label: 'Toplantılarım' },
+    { path: '/veli-memnuniyet', icon: PhoneCall, label: 'Veli Memnuniyet ve Takip' },
     { path: '/students', icon: GraduationCap, label: 'Öğrenciler' },
     { path: '/teachers', icon: GraduationCap, label: 'Öğretmenler' },
     { path: '/weekly-planner', icon: Calendar, label: 'Haftalık plan' },
