@@ -33,6 +33,7 @@ import StudentReports from './pages/StudentReports';
 import CoachDashboard from './pages/CoachDashboard';
 import CoachGuidePage from './pages/CoachGuidePage';
 import CoachReports from './pages/CoachReports';
+import ParentSatisfactionPage from './pages/ParentSatisfactionPage';
 import AdminPanel from './pages/AdminPanel';
 import BookTracking from './pages/BookTracking';
 import WrittenExamTracking from './components/WrittenExamTracking';
@@ -605,6 +606,15 @@ function App() {
               <ProtectedRoute allowedRoles={rolesForProtectedRoute('/coach-kilavuz')}>
                 <Layout>
                   <CoachGuidePage />
+                </Layout>
+              </ProtectedRoute>
+            } />
+
+            {/* Veli Memnuniyet ve Takip */}
+            <Route path="/veli-memnuniyet" element={
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/veli-memnuniyet')}>
+                <Layout>
+                  <ParentSatisfactionPage />
                 </Layout>
               </ProtectedRoute>
             } />
