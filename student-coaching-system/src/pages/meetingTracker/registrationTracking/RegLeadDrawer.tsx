@@ -350,8 +350,9 @@ function GeneralForm({
           onSave(form);
           return;
         }
-        // Temsilci / koç: ad-soyad ve sorumlu temsilci yönetici alanı — gönderilmez
-        const { first_name: _f, last_name: _l, assigned_user_id: _a, ...rest } = form;
+        // Temsilci / koç: ad-soyad yönetici alanı — gönderilmez.
+        // Sorumlu temsilci artık temsilcide de değiştirilebilir (kart ile tutarlı).
+        const { first_name: _f, last_name: _l, ...rest } = form;
         onSave(rest);
       }}
     >
@@ -419,7 +420,7 @@ function GeneralForm({
           ))}
         </select>
       </label>
-      {isManager && agents && agents.length > 0 && (
+      {agents && agents.length > 0 && (
         <label className="block">
           <span className="text-xs text-slate-500">Sorumlu temsilci</span>
           <select

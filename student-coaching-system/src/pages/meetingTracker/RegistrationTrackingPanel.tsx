@@ -58,6 +58,8 @@ type ViewMode = 'kanban' | 'list';
 
 type Props = {
   isManager: boolean;
+  /** Karttan temsilci degistirme — temsilcide de acik; silme yoneticide kalir */
+  canAssign?: boolean;
   institutionId: string | null;
 };
 
@@ -70,7 +72,7 @@ function useDebouncedValue<T>(value: T, ms = 350) {
   return debounced;
 }
 
-export default function RegistrationTrackingPanel({ isManager, institutionId }: Props) {
+export default function RegistrationTrackingPanel({ isManager, canAssign, institutionId }: Props) {
   const [params, setParams] = useSearchParams();
   const { effectiveUser } = useAuth();
   const myUserId = effectiveUser?.id ? String(effectiveUser.id) : '';
@@ -555,7 +557,7 @@ export default function RegistrationTrackingPanel({ isManager, institutionId }: 
           onLeadsChange={setLeads}
           agents={coaches}
           agentLoad={agentLoadMap}
-          canAssign={isManager}
+          canAssign={canAssign}
           canDelete={isManager}
           onAssign={assignLead}
           onDelete={deleteLead}
