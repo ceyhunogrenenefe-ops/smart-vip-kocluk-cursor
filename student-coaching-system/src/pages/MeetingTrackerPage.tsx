@@ -124,6 +124,8 @@ function parsePageTab(raw: string | null): PageTab {
 export default function MeetingTrackerPage() {
   const { effectiveUser } = useAuth();
   const isManager = userHasAnyRole(effectiveUser, ['super_admin', 'admin']);
+  /** Karttan temsilci degistirmeyi temsilci de yapabilir */
+  const canAssignLead = isManager || userHasAnyRole(effectiveUser, ['crm_agent']);
   const location = useLocation();
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
@@ -412,6 +414,7 @@ export default function MeetingTrackerPage() {
       {pageTab === 'crm' ? (
         <RegistrationTrackingPanel
           isManager={isManager}
+          canAssign={canAssignLead}
           institutionId={effectiveUser?.institutionId || null}
         />
       ) : null}
