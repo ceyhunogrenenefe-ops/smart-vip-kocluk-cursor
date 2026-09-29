@@ -178,6 +178,36 @@ async function findLeadByFacebookId(psid, institutionId) {
   return findLeadByInstagramId(`fb:${id}`, institutionId);
 }
 
+/** Tekillik kısıtı ihlali mi? (aynı kişi için ikinci kayıt denemesi) */
+export function isDuplicateLeadError(error) {
+  const code = String(error?.code || '').trim();
+  if (code === '23505') return true;
+  const msg = String(error?.message || '');
+  return /duplicate key|unique constraint|registration_leads_(instagram|phone)_unq/i.test(msg);
+}
+
+/** Kısıt reddettiğinde: kaydı açan diğer isteğin lead'ini bul. */
+async function findExistingLeadForInbound({ institutionId, instagramScopedId, normalizedPhone }) {
+  try {
+    let q = supabaseAdmin
+      .from('registration_leads')
+      .select('id, institution_id')
+      .eq('institution_id', institutionId)
+      .is('deleted_at', null)
+      .order('created_at', { ascending: true })
+      .limit(1);
+    const igId = String(instagramScopedId || '').trim();
+    const phone = String(normalizedPhone || '').trim();
+    if (igId) q = q.eq('instagram_scoped_id', igId);
+    else if (phone) q = q.eq('normalized_phone', phone);
+    else return null;
+    const { data } = await q;
+    return data?.[0] || null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Aynı kişi için açılmış ikinci lead'i ilkine birleştirir.
  *
@@ -331,6 +361,23 @@ async function createLeadFromInbound({
     row.instagram_scoped_id = `fb:${instagramScopedId}`;
     ({ data, error } = await supabaseAdmin.from('registration_leads').insert(row).select('id, institution_id').maybeSingle());
   }
+  /**
+   * Tekillik kısıtı (registration_leads_instagram_unq / _phone_unq) yarışı
+   * kaybeden isteği reddeder. Bu bir HATA DEĞİL: kaydı diğer istek açtı.
+   * Mevcut kaydı bulup onu döndür — yoksa mesaj lead'siz kalırdı.
+   */
+  if (error && isDuplicateLeadError(error)) {
+    const mevcut = await findExistingLeadForInbound({
+      institutionId,
+      instagramScopedId: row.instagram_scoped_id || row.facebook_psid || instagramScopedId,
+      normalizedPhone
+    });
+    if (mevcut) {
+      console.info('[channel-ingest] cift kayit engellendi, mevcut lead kullanildi', { lead_id: mevcut.id });
+      return mevcut;
+    }
+  }
+
   if (error) {
     console.warn('[channel-ingest] auto lead create failed:', error.message || error);
     return null;
