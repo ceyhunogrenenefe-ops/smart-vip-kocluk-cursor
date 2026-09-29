@@ -1,0 +1,1131 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Enums ───────────────────────────────────────────────────────────────────
+
+enum InstitutionStatus {
+  ACTIVE
+  SUSPENDED
+  TRIAL
+  CHURNED
+}
+
+enum ContactType {
+  PARENT
+  STUDENT
+  TEACHER
+  PROSPECT
+  ALUMNI
+  OTHER
+}
+
+enum ContactStatus {
+  ACTIVE
+  INACTIVE
+  BLOCKED
+  MERGED
+}
+
+enum Provider {
+  WHATSAPP
+  INSTAGRAM
+  FACEBOOK
+  EMAIL
+  WEBSITE
+  PHONE
+  MOCK
+}
+
+enum ChannelConnectionStatus {
+  CONNECTED
+  DEGRADED
+  TOKEN_EXPIRED
+  PERMISSION_REVOKED
+  WEBHOOK_ERROR
+  DISCONNECTED
+  SETUP_REQUIRED
+}
+
+enum ConversationStatus {
+  OPEN
+  PENDING
+  WAITING_CUSTOMER
+  RESOLVED
+  ARCHIVED
+  SPAM
+}
+
+enum Priority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+enum MessageDirection {
+  INBOUND
+  OUTBOUND
+  INTERNAL
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  VIDEO
+  AUDIO
+  DOCUMENT
+  LOCATION
+  CONTACT
+  TEMPLATE
+  SYSTEM
+  UNSUPPORTED
+}
+
+enum MessageStatus {
+  RECEIVED
+  QUEUED
+  SENDING
+  SENT
+  DELIVERED
+  READ
+  FAILED
+}
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  OVERDUE
+}
+
+enum TaskType {
+  CALL_PARENT
+  CALL_STUDENT
+  SEND_OFFER
+  TRIAL_LESSON_REMINDER
+  PAYMENT_CHECK
+  WAITING_DOCUMENTS
+  FOLLOW_UP
+  CUSTOM
+}
+
+enum ProcessingStatus {
+  PENDING
+  PROCESSING
+  PROCESSED
+  FAILED
+  DEAD_LETTER
+  SKIPPED
+}
+
+enum SyncStatus {
+  IDLE
+  SYNCING
+  SUCCESS
+  ERROR
+}
+
+// ─── Platform / SaaS ─────────────────────────────────────────────────────────
+
+model Institution {
+  id        String            @id @default(uuid()) @db.Uuid
+  name      String
+  slug      String            @unique
+  status    InstitutionStatus @default(TRIAL)
+  timezone  String            @default("Europe/Istanbul")
+  locale    String            @default("tr-TR")
+  createdAt DateTime          @default(now()) @map("created_at")
+  updatedAt DateTime          @updatedAt @map("updated_at")
+  deletedAt DateTime?         @map("deleted_at")
+
+  settings            InstitutionSettings?
+  subscription        Subscription?
+  users               UserInstitution[]
+  sessions            Session[]
+  channelConnections  ChannelConnection[]
+  contacts            Contact[]
+  contactIdentities   ContactIdentity[]
+  students            Student[]
+  parents             Parent[]
+  tags                Tag[]
+  conversations       Conversation[]
+  messages            Message[]
+  pipelines           Pipeline[]
+  leads               Lead[]
+  lostReasons         LostReason[]
+  tasks               Task[]
+  notifications       Notification[]
+  cannedResponses     CannedResponse[]
+  messageTemplates    MessageTemplate[]
+  webhookEvents       WebhookEvent[]
+  integrationJobs     IntegrationJob[]
+  integrationErrors   IntegrationError[]
+  deadLetterEvents    DeadLetterEvent[]
+  files               FileObject[]
+  auditLogs           AuditLog[]
+  consentRecords      ConsentRecord[]
+  dataRetentionPolicies DataRetentionPolicy[]
+  internalNotes       InternalNote[]
+
+  @@map("institutions")
+}
+
+model InstitutionSettings {
+  id             String   @id @default(uuid()) @db.Uuid
+  institutionId  String   @unique @map("institution_id") @db.Uuid
+  brandName      String?  @map("brand_name")
+  logoUrl        String?  @map("logo_url")
+  /// CSS variables / theme tokens (primary, secondary, etc.)
+  brandColors    Json     @default("{}") @map("brand_colors")
+  contactEmail   String?  @map("contact_email")
+  contactPhone   String?  @map("contact_phone")
+  websiteUrl     String?  @map("website_url")
+  address        String?
+  settings       Json     @default("{}")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  institution Institution @relation(fields: [institutionId], references: [id], onDelete: Cascade)
+
+  @@map("institution_settings")
+}
+
+model Plan {
+  id          String   @id @default(uuid()) @db.Uuid
+  code        String   @unique
+  name        String
+  description String?
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  features      PlanFeature[]
+  subscriptions Subscription[]
+
+  @@map("plans")
+}
+
+model PlanFeature {
+  id        String   @id @default(uuid()) @db.Uuid
+  planId    String   @map("plan_id") @db.Uuid
+  featureKey String  @map("feature_key")
+  limitValue Int?    @map("limit_value")
+  metadata  Json     @default("{}")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  plan Plan @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  @@unique([planId, featureKey])
+  @@map("plan_features")
+}
+
+model Subscription {
+  id             String    @id @default(uuid()) @db.Uuid
+  institutionId  String    @unique @map("institution_id") @db.Uuid
+  planId         String    @map("plan_id") @db.Uuid
+  status         String    @default("active")
+  startsAt       DateTime  @default(now()) @map("starts_at")
+  endsAt         DateTime? @map("ends_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  institution Institution @relation(fields: [institutionId], references: [id], onDelete: Cascade)
+  plan        Plan        @relation(fields: [planId], references: [id])
+
+  @@map("subscriptions")
+}
+
+// ─── Auth / RBAC ─────────────────────────────────────────────────────────────
+
+model User {
+  id           String    @id @default(uuid()) @db.Uuid
+  email        String    @unique
+  passwordHash String    @map("password_hash")
+  firstName    String    @map("first_name")
+  lastName     String    @map("last_name")
+  displayName  String?   @map("display_name")
+  phone        String?
+  avatarUrl    String?   @map("avatar_url")
+  isActive     Boolean   @default(true) @map("is_active")
+  isPlatformAdmin Boolean @default(false) @map("is_platform_admin")
+  lastLoginAt  DateTime? @map("last_login_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+  deletedAt    DateTime? @map("deleted_at")
+
+  institutions          UserInstitution[]
+  roles                 UserRole[]
+  sessions              Session[]
+  assignedContacts      Contact[]                 @relation("ContactAssignee")
+  assignedConversations ConversationAssignment[]
+  assignedLeads         Lead[]                    @relation("LeadAssignee")
+  createdTasks          Task[]                    @relation("TaskCreator")
+  assignedTasks         Task[]                    @relation("TaskAssignee")
+  notifications         Notification[]
+  sentMessages          Message[]                 @relation("MessageSenderUser")
+  internalNotes         InternalNote[]
+  auditLogs             AuditLog[]
+
+  @@map("users")
+}
+
+model Role {
+  id          String   @id @default(uuid()) @db.Uuid
+  code        String   @unique
+  name        String
+  description String?
+  isSystem    Boolean  @default(true) @map("is_system")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  permissions RolePermission[]
+  users       UserRole[]
+
+  @@map("roles")
+}
+
+model Permission {
+  id          String   @id @default(uuid()) @db.Uuid
+  key         String   @unique
+  groupName   String   @map("group_name")
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  roles RolePermission[]
+
+  @@map("permissions")
+}
+
+model RolePermission {
+  id           String @id @default(uuid()) @db.Uuid
+  roleId       String @map("role_id") @db.Uuid
+  permissionId String @map("permission_id") @db.Uuid
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+model UserRole {
+  id            String  @id @default(uuid()) @db.Uuid
+  userId        String  @map("user_id") @db.Uuid
+  roleId        String  @map("role_id") @db.Uuid
+  institutionId String? @map("institution_id") @db.Uuid
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, roleId, institutionId])
+  @@map("user_roles")
+}
+
+model UserInstitution {
+  id            String   @id @default(uuid()) @db.Uuid
+  userId        String   @map("user_id") @db.Uuid
+  institutionId String   @map("institution_id") @db.Uuid
+  isDefault     Boolean  @default(false) @map("is_default")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  institution Institution @relation(fields: [institutionId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, institutionId])
+  @@map("user_institutions")
+}
+
+model Session {
+  id            String   @id @default(uuid()) @db.Uuid
+  userId        String   @map("user_id") @db.Uuid
+  institutionId String?  @map("institution_id") @db.Uuid
+  tokenHash     String   @unique @map("token_hash")
+  ipAddress     String?  @map("ip_address")
+  userAgent     String?  @map("user_agent")
+  expiresAt     DateTime @map("expires_at")
+  createdAt     DateTime @default(now()) @map("created_at")
+  revokedAt     DateTime? @map("revoked_at")
+
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  institution Institution? @relation(fields: [institutionId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+// ─── Channels ────────────────────────────────────────────────────────────────
+
+model ChannelConnection {
+  id                String                  @id @default(uuid()) @db.Uuid
+  institutionId     String                  @map("institution_id") @db.Uuid
+  provider          Provider
+  displayName       String                  @map("display_name")
+  accountName       String?                 @map("account_name")
+  providerAccountId String?                 @map("provider_account_id")
+  status            ChannelConnectionStatus @default(SETUP_REQUIRED)
+  lastSyncedAt      DateTime?               @map("last_synced_at")
+  syncStatus        SyncStatus              @default(IDLE) @map("sync_status")
+  syncError         String?                 @map("sync_error")
+  webhookStatus     String?                 @map("webhook_status")
+  metadata          Json                    @default("{}")
+  createdAt         DateTime                @default(now()) @map("created_at")
+  updatedAt         DateTime                @updatedAt @map("updated_at")
+  deletedAt         DateTime?               @map("deleted_at")
+
+  institution   Institution         @relation(fields: [institutionId], references: [id], onDelete: Cascade)
+  credentials   ChannelCredential?
+  healthChecks  ChannelHealthCheck[]
+  conversations Conversation[]
+  messages      Message[]
+
+  @@unique([institutionId, provider, providerAccountId])
+  @@index([institutionId, provider])
+  @@map("channel_connections")
+}
+
+model ChannelCredential {
+  id                  String    @id @default(uuid()) @db.Uuid
+  channelConnectionId String    @unique @map("channel_connection_id") @db.Uuid
+  /// Encrypted secret blob — never store plaintext tokens
+  encryptedPayload    String    @map("encrypted_payload")
+  tokenExpiresAt      DateTime? @map("token_expires_at")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+
+  channelConnection ChannelConnection @relation(fields: [channelConnectionId], references: [id], onDelete: Cascade)
+
+  @@map("channel_credentials")
+}
+
+model ChannelHealthCheck {
+  id                  String   @id @default(uuid()) @db.Uuid
+  channelConnectionId String   @map("channel_connection_id") @db.Uuid
+  status              String
+  message             String?
+  details             Json     @default("{}")
+  checkedAt           DateTime @default(now()) @map("checked_at")
+
+  channelConnection ChannelConnection @relation(fields: [channelConnectionId], references: [id], onDelete: Cascade)
+
+  @@index([channelConnectionId, checkedAt])
+  @@map("channel_health_checks")
+}
+
+// ─── Contacts ────────────────────────────────────────────────────────────────
+
+model Contact {
+  id             String        @id @default(uuid()) @db.Uuid
+  institutionId  String        @map("institution_id") @db.Uuid
+  firstName      String        @map("first_name")
+  lastName       String        @map("last_name")
+  displayName    String?       @map("display_name")
+  primaryPhone   String?       @map("primary_phone")
+  primaryEmail   String?       @map("primary_email")
+  city           String?
+  district       String?
+  country        String?       @default("TR")
+  contactType    ContactType   @default(PROSPECT) @map("contact_type")
+  source         String?
+  assignedUserId String?       @map("assigned_user_id") @db.Uuid
+  status         ContactStatus @default(ACTIVE)
+  notes          String?
+  mergedIntoId   String?       @map("merged_into_id") @db.Uuid
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
+  createdBy      String?       @map("created_by") @db.Uuid
+  updatedBy      String?       @map("updated_by") @db.Uuid
+  deletedAt      DateTime?     @map("deleted_at")
+
+  institution   Institution          @relation(fields: [institutionId], references: [id], onDelete: Cascade)
+  assignedUser  User?                @relation("ContactAssignee", fields: [assignedUserId], references: [id], onDelete: SetNull)
+  identities    ContactIdentity[]
+  student       Student?
+  parent        Parent?
+  tags          ContactTag[]
+  mergeHistoryAsSource ContactMergeHistory[] @relation("MergeSource")
+  mergeHistoryAsTarget ContactMergeHistory[] @relation("MergeTarget")
+  conversations Conversation[]
+  participants  ConversationParticipant[]
+  leads         Lead[]               @relation("LeadContact")
+  studentLeads  Lead[]               @relation("LeadStudentContact")
+  tasks         Task[]
+  messages      Message[]            @relation("MessageSenderContact")
+  internalNotes InternalNote[]
+  consentRecords ConsentRecord[]
+
+  @@index([institutionId, primaryPhone])
+  @@index([institutionId, primaryEmail])
+  @@index([institutionId, assignedUserId])
+  @@map("contacts")
+}
+
+model ContactIdentity {
+  id                String   @id @default(uuid()) @db.Uuid
+  contactId         String   @map("contact_id") @db.Uuid
+  institutionId     String   @map("institution_id") @db.Uuid
+  provider          Provider
+  providerAccountId String?  @map("provider_account_id")
+  externalUserId    String   @map("external_user_id")
+  username          String?
+  normalizedValue   String?  @map("normalized_value")
+  isVerified        Boolean  @default(false) @map("is_verified")
+  metadata          Json     @default("{}")
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  contact     Contact     @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  institution Institution @relation(fields: [institutionId], references: [id], onDelete: Cascade)
+
+  @@unique([institutionId, provider, externalUserId])
+  @@index([contactId])
+  @@map("contact_identities")
+}
+
+model Student {
+  id            String    @id @default(uuid()) @db.Uuid
+  institutionId String    @map("institution_id") @db.Uuid
+  contactId     String    @unique @map("contact_id") @db.Uuid
+  gradeLevel    String?   @map("grade_level")
+  schoolName    String?   @map("school_name")
+  program       String?
+  enrollmentStatus String? @map("enrollment_status")
+  metadata      Json      @default("{}")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+  deletedAt     DateTime? @map("deleted_at")
+
+  institution Institution     @relation(fields: [institutionId], references: [id], onDelete: Cascade)
+  contact     Contact         @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  parents     StudentParent[]
+
+  @@index([institutionId])
+  @@map("students")
+}
+
+model Parent {
+  id            String    @id @default(uuid()) @db.Uuid
+  institutionId String    @map("institution_id") @db.Uuid
+  contactId     String    @unique @map("contact_id") @db.Uuid
+  relationship  String?
+  metadata      Json      @default("{}")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+  deletedAt     DateTime? @map("deleted_at")
+
+  institution Institution     @relation(fields: [institutionId], references: [id], onDelete: Cascade)
+  contact     Contact         @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  students    StudentParent[]
+
+  @@index([institutionId])
+  @@map("parents")
+}
+
+model StudentParent {
+  id        String @id @default(uuid()) @db.Uuid
+  studentId String @map("student_id") @db.Uuid
+  parentId  String @map("parent_id") @db.Uuid
+  isPrimary Boolean @default(false) @map("is_primary")
+
+  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  parent  Parent  @relation(fields: [parentId], references: [id], onDelete: Cascade)
+
+  @@unique([studentId, parentId])
+  @@map("student_parents")
+}
+
+model Tag {
+  id            String   @id @default(uuid()) @db.Uuid
+  institutionId String   @map("institution_id") @db.Uuid
+  name          String
+  color         String?
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  institution Institution  @relation(fields: [institutionId], references: [id], onDelete: Cascade)
+  contacts    ContactTag[]
+
+  @@unique([institutionId, name])
+  @@map("tags")
+}
+
+model ContactTag {
+  id        String @id @default(uuid()) @db.Uuid
+  contactId String @map("contact_id") @db.Uuid
+  tagId     String @map("tag_id") @db.Uuid
+
+  contact Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  tag     Tag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@unique([contactId, tagId])
+  @@map("contact_tags")
+}
+
+model ContactMergeHistory {
+  id              String   @id @default(uuid()) @db.Uuid
+  institutionId   String   @map("institution_id") @db.Uuid
+  sourceContactId String   @map("source_contact_id") @db.Uuid
+  targetContactId String   @map("target_contact_id") @db.Uuid
+  mergedByUserId  String?  @map("merged_by_user_id") @db.Uuid
+  preview         Json     @default("{}")
+  redirectInfo    Json     @default("{}") @map("redirect_info")
+  canRevert       Boolean  @default(true) @map("can_revert")
+  revertedAt      DateTime? @map("reverted_at")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  sourceContact Contact @relation("MergeSource", fields: [sourceContactId], references: [id], onDelete: Cascade)
+  targetContact Contact @relation("MergeTarget", fields: [targetContactId], references: [id], onDelete: Cascade)
+
+  @@index([institutionId])
+  @@map("contact_merge_history")
+}
+
+// ─── Conversations / Messages ────────────────────────────────────────────────
+
+model Conversation {
+  id                  String             @id @default(uuid()) @db.Uuid
+  institutionId       String             @map("institution_id") @db.Uuid
+  channelConnectionId String?            @map("channel_connection_id") @db.Uuid
+  contactId           String?            @map("contact_id") @db.Uuid
+  provider            Provider
+  externalConversationId String?         @map("external_conversation_id")
+  status              ConversationStatus @default(OPEN)
+  priority            Priority           @default(NORMAL)
+  subject             String?
+  lastMessageAt       DateTime?          @map("last_message_at")
+  lastMessagePreview  String?            @map("last_message_preview")
+  unreadCount         Int                @default(0) @map("unread_count")
+  metadata            Json               @default("{}")
+  createdAt           DateTime           @default(now()) @map("created_at")
+  updatedAt           DateTime           @updatedAt @map("updated_at")
+  deletedAt           DateTime?          @map("deleted_at")
+
+  institution       Institution                @relation(fields: [institutionId], references: [id], onDelete: Cascade)
+  channelConnection ChannelConnection?         @relation(fields: [channelConnectionId], references: [id], onDelete: SetNull)
+  contact           Contact?                   @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  participants      ConversationParticipant[]
+  assignments       ConversationAssignment[]
+  messages          Message[]
+  internalNotes     InternalNote[]
+  tasks             Task[]
+
+  @@unique([institutionId, provider, externalConversationId])
+  @@index([institutionId, status, lastMessageAt])
+  @@index([institutionId, contactId])
+  @@map("conversations")
+}
+
+model ConversationParticipant {
+  id             String   @id @default(uuid()) @db.Uuid
+  conversationId String   @map("conversation_id") @db.Uuid
+  contactId      String?  @map("contact_id") @db.Uuid
+  externalUserId String?  @map("external_user_id")
+  role           String   @default("customer")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  contact      Contact?     @relation(fields: [contactId], references: [id], onDelete: SetNull)
+
+  @@index([conversationId])
+  @@map("conversation_participants")
+}
+
+model ConversationAssignment {
+  id             String    @id @default(uuid()) @db.Uuid
+  conversationId String    @map("conversation_id") @db.Uuid
+  userId         String    @map("user_id") @db.Uuid
+  assignedAt     DateTime  @default(now()) @map("assigned_at")
+  unassignedAt   DateTime? @map("unassigned_at")
+  isActive       Boolean   @default(true) @map("is_active")
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, isActive])
+  @@index([userId, isActive])
+  @@map("conversation_assignments")
+}
+
+model Message {
+  id                   String           @id @default(uuid()) @db.Uuid
+  institutionId        String           @map("institution_id") @db.Uuid
+  conversationId       String           @map("conversation_id") @db.Uuid
+  channelConnectionId  String?          @map("channel_connection_id") @db.Uuid
+  provider             Provider
+  externalMessageId    String?          @map("external_message_id")
+  direction            MessageDirection
+  messageType          MessageType      @default(TEXT) @map("message_type")
+  textContent          String?          @map("text_content")
+  replyToMessageId     String?          @map("reply_to_message_id") @db.Uuid
+  senderContactId      String?          @map("sender_contact_id") @db.Uuid
+  senderUserId         String?          @map("sender_user_id") @db.Uuid
+  status               MessageStatus    @default(RECEIVED)
+  providerTimestamp    DateTime?        @map("provider_timestamp")
+  sentAt               DateTime?        @map("sent_at")
+  deliveredAt          DateTime?        @map("delivered_at")
+  readAt               DateTime?        @map("read_at")
+  failedAt             DateTime?        @map("failed_at")
+  failureCode          String?          @map("failure_code")
+  failureMessage       String?          @map("failure_message")
+  metadata             Json             @default("{}")
+  createdAt            DateTime         @default(now()) @map("created_at")
+  updatedAt            DateTime         @updatedAt @map("updated_at")
+
+  institution       Institution            @relation(fields: [institutionId], references: [id], onDelete: Cascade)
+  conversation      Conversation           @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  channelConnection ChannelConnection?     @relation(fields: [channelConnectionId], references: [id], onDelete: SetNull)
+  replyTo           Message?               @relation("MessageReply", fields: [replyToMessageId], references: [id], onDelete: SetNull)
+  replies           Message[]              @relation("MessageReply")
+  senderContact     Contact?               @relation("MessageSenderContact", fields: [senderContactId], references: [id], onDelete: SetNull)
+  senderUser        User?                  @relation("MessageSenderUser", fields: [senderUserId], references: [id], onDelete: SetNull)
+  attachments       MessageAttachment[]
+  statusHistory     MessageStatusHistory[]
+
+  @@unique([institutionId, provider, externalMessageId])
+  @@index([conversationId, createdAt])
+  @@index([institutionId, status])
+  @@map("messages")
+}
+
+model MessageAttachment {
+  id          String   @id @default(uuid()) @db.Uuid
+  messageId   String   @map("message_id") @db.Uuid
+  fileId      String?  @map("file_id") @db.Uuid
+  url         String?
+  mimeType    String?  @map("mime_type")
+  filename    String?
+  sizeBytes   Int?     @map("size_bytes")
+  providerMediaId String? @map("provider_media_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  message Message     @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  file    FileObject? @relation(fields: [fileId], references: [id], onDelete: SetNull)
+
+  @@index([messageId])
+  @@map("message_attachments")
+}
+
+model MessageStatusHistory {
+  id        String        @id @default(uuid()) @db.Uuid
+  messageId String        @map("message_id") @db.Uuid
+  status    MessageStatus
+  occurredAt DateTime     @default(now()) @map("occurred_at")
+  metadata  Json          @default("{}")
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@index([messageId, occurredAt])
+  @@map("message_status_history")
+}
+
+model InternalNote {
+  id             String   @id @default(uuid()) @db.Uuid
+  institutionId  String   @map("institution_id") @db.Uuid
+  conversationId String?  @map("conversation_id") @db.Uuid
+  contactId      String?  @map("contact_id") @db.Uuid
+  authorUserId   String   @map("author_user_id") @db.Uuid
+  body           String
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+  deletedAt      DateTime? @map("deleted_at")
+
+  institution  Institution   @relation(fields: [institutionId], references: [id], onDelete: Cascade)
+  conversation Conversation? @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  contact      Contact?      @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  author       User          @relation(fields: [authorUserId], references: [id], onDelete: Cascade)
+
+  @@index([institutionId, conversationId])
+  @@map("internal_notes")
+}
+
+// ─── Sales / Leads ───────────────────────────────────────────────────────────
+
+model Pipeline {
+  id            String    @id @default(uuid()) @db.Uuid
+  institutionId String    @map("institution_id") @db.Uuid
+  name          String
+  isDefault     Boolean   @default(false) @map("is_default")
+  isActive      Boolean   @default(true) @map("is_active")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+  deletedAt     DateTime? @map("deleted_at")
+
+  institution Institution     @relation(fields: [institutionId], references: [id], onDelete: Cascade)
+  stages      PipelineStage[]
+  leads       Lead[]
+
+  @@index([institutionId])
+  @@map("pipelines")
+}
+
+model PipelineStage {
+  id         String   @id @default(uuid()) @db.Uuid
+  pipelineId String   @map("pipeline_id") @db.Uuid
+  key        String
+  name       String
+  color      String?
+  sortOrder  Int      @map("sort_order")
+  isWon      Boolean  @default(false) @map("is_won")
+  isLost     Boolean  @default(false) @map("is_lost")
+  isActive   Boolean  @default(true) @map("is_active")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  pipeline Pipeline @relation(fields: [pipelineId], references: [id], onDelete: Cascade)
+  leads    Lead[]
+  history  LeadStageHistory[]
+
+  @@unique([pipelineId, key])
+  @@index([pipelineId, sortOrder])
+  @@map("pipeline_stages")
+}
+
+model LostReason {
+  id            String   @id @default(uuid()) @db.Uuid
+  institutionId String   @map("institution_id") @db.Uuid
+  name          String
+  isActive      Boolean  @default(true) @map("is_active")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  institution Institution @relation(fields: [institutionId], references: [id], onDelete: Cascade)
+  leads       Lead[]
+
+  @@unique([institutionId, name])
+  @@map("lost_reasons")
+}
+
+model Lead {
+  id              String    @id @default(uuid()) @db.Uuid
+  institutionId   String    @map("institution_id") @db.Uuid
+  contactId       String    @map("contact_id") @db.Uuid
+  studentId       String?   @map("student_id") @db.Uuid
+  pipelineId      String    @map("pipeline_id") @db.Uuid
+  stageId         String    @map("stage_id") @db.Uuid
+  title           String
+  source          String?
+  campaign        String?
+  formName        String?   @map("form_name")
+  program         String?
+  gradeLevel      String?   @map("grade_level")
+  estimatedValue  Decimal?  @map("estimated_value") @db.Decimal(12, 2)
+  currency        String    @default("TRY")
+  probability     Int?
+  assignedUserId  String?   @map("assigned_user_id") @db.Uuid
+  lostReasonId    String?   @map("lost_reason_id") @db.Uuid
+  nextActionAt    DateTime? @map("next_action_at")
+  lastContactAt   DateTime? @map("last_contact_at")
+  wonAt           DateTime? @map("won_at")
+  lostAt          DateTime? @map("lost_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+  deletedAt       DateTime? @map("deleted_at")
+
+  institution  Institution        @relation(fields: [institutionId], references: [id], onDelete: Cascade)
+  contact      Contact            @relation("LeadContact", fields: [contactId], references: [id], onDelete: Cascade)
+  studentContact Contact?         @relation("LeadStudentContact", fields: [studentId], references: [id], onDelete: SetNull)
+  pipeline     Pipeline           @relation(fields: [pipelineId], references: [id], onDelete: Cascade)
+  stage        PipelineStage      @relation(fields: [stageId], references: [id])
+  assignedUser User?              @relation("LeadAssignee", fields: [assignedUserId], references: [id], onDelete: SetNull)
+  lostReason   LostReason?        @relation(fields: [lostReasonId], references: [id], onDelete: SetNull)
+  stageHistory LeadStageHistory[]
+  tasks        Task[]
+
+  @@index([institutionId, stageId])
+  @@index([institutionId, assignedUserId])
+  @@map("leads")
+}
+
+model LeadStageHistory {
+  id         String   @id @default(uuid()) @db.Uuid
+  leadId     String   @map("lead_id") @db.Uuid
+  fromStageId String? @map("from_stage_id") @db.Uuid
+  toStageId  String   @map("to_stage_id") @db.Uuid
+  changedBy  String?  @map("changed_by") @db.Uuid
+  note       String?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  lead     Lead          @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  toStage  PipelineStage @relation(fields: [toStageId], references: [id], onDelete: Cascade)
+
+  @@index([leadId, createdAt])
+  @@map("lead_stage_history")
+}
+
+// ─── Tasks ───────────────────────────────────────────────────────────────────
+
+model Task {
+  id             String     @id @default(uuid()) @db.Uuid
+  institutionId  String     @map("institution_id") @db.Uuid
+  title          String
+  description    String?
+  taskType       TaskType   @default(CUSTOM) @map("task_type")
+  priority       Priority   @default(NORMAL)
+  status         TaskStatus @default(TODO)
+  assignedUserId String?    @map("assigned_user_id") @db.Uuid
+  createdBy      String?    @map("created_by") @db.Uuid
+  contactId      String?    @map("contact_id") @db.Uuid
+  leadId         String?    @map("lead_id") @db.Uuid
+  conversationId String?    @map("conversation_id") @db.Uuid
+  dueAt          DateTime?  @map("due_at")
+  completedAt    DateTime?  @map("completed_at")
+  reminderAt     DateTime?  @map("reminder_at")
+  createdAt      DateTime   @default(now()) @map("created_at")
+  updatedAt      DateTime   @updatedAt @map("updated_at")
+  deletedAt      DateTime?  @map("deleted_at")
+
+  institution  Institution    @relation(fields: [institutionId], references: [id], onDelete: Cascade)
+  assignee     User?          @relation("TaskAssignee", fields: [assignedUserId], references: [id], onDelete: SetNull)
+  creator      User?          @relation("TaskCreator", fields: [createdBy], references: [id], onDelete: SetNull)
+  contact      Contact?       @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  lead         Lead?          @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  conversation Conversation?  @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  reminders    TaskReminder[]
+
+  @@index([institutionId, status, dueAt])
+  @@index([assignedUserId, status])
+  @@map("tasks")
+}
+
+model TaskReminder {
+  id          String    @id @default(uuid()) @db.Uuid
+  taskId      String    @map("task_id") @db.Uuid
+  remindAt    DateTime  @map("remind_at")
+  sentAt      DateTime? @map("sent_at")
+  channel     String    @default("in_app")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([remindAt, sentAt])
+  @@map("task_reminders")
+}
+
+// ─── Content / Templates ─────────────────────────────────────────────────────
+
+model Notification {
+  id            String    @id @default(uuid()) @db.Uuid
+  institutionId String    @map("institution_id") @db.Uuid
+  userId        String    @map("user_id") @db.Uuid
+  type          String
+  title         String
+  body          String?
+  linkUrl       String?   @map("link_url")
+  isRead        Boolean   @default(false) @map("is_read")
+  readAt        DateTime? @map("read_at")
+  metadata      Json      @default("{}")
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  institution Institution @relation(fields: [institutionId], references: [id], onDelete: Cascade)
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead, createdAt])
+  @@map("notifications")
+}
+
+model CannedResponse {
+  id            String    @id @default(uuid()) @db.Uuid
+  institutionId String    @map("institution_id") @db.Uuid
+  title         String
+  body          String
+  shortcut      String?
+  isActive      Boolean   @default(true) @map("is_active")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+  deletedAt     DateTime? @map("deleted_at")
+
+  institution Institution @relation(fields: [institutionId], references: [id], onDelete: Cascade)
+
+  @@index([institutionId])
+  @@map("canned_responses")
+}
+
+model MessageTemplate {
+  id            String    @id @default(uuid()) @db.Uuid
+  institutionId String    @map("institution_id") @db.Uuid
+  provider      Provider?
+  name          String
+  language      String    @default("tr")
+  body          String
+  category      String?
+  isActive      Boolean   @default(true) @map("is_active")
+  externalTemplateId String? @map("external_template_id")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+  deletedAt     DateTime? @map("deleted_at")
+
+  institution Institution        @relation(fields: [institutionId], references: [id], onDelete: Cascade)
+  variables   TemplateVariable[]
+
+  @@unique([institutionId, name, language])
+  @@map("message_templates")
+}
+
+model TemplateVariable {
+  id         String @id @default(uuid()) @db.Uuid
+  templateId String @map("template_id") @db.Uuid
+  key        String
+  label      String?
+  example    String?
+
+  template MessageTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@unique([templateId, key])
+  @@map("template_variables")
+}
+
+// ─── Integrations / Jobs ─────────────────────────────────────────────────────
+
+model WebhookEvent {
+  id               String           @id @default(uuid()) @db.Uuid
+  institutionId    String?          @map("institution_id") @db.Uuid
+  provider         Provider
+  externalEventId  String?          @map("external_event_id")
+  eventType        String           @map("event_type")
+  payloadHash      String           @map("payload_hash")
+  /// Minimized / masked payload — avoid storing full PII when possible
+  payload          Json             @default("{}")
+  processingStatus ProcessingStatus @default(PENDING) @map("processing_status")
+  attemptCount     Int              @default(0) @map("attempt_count")
+  receivedAt       DateTime         @default(now()) @map("received_at")
+  processedAt      DateTime?        @map("processed_at")
+  lastError        String?          @map("last_error")
+
+  institution Institution? @relation(fields: [institutionId], references: [id], onDelete: SetNull)
+
+  @@unique([provider, externalEventId])
+  @@index([processingStatus, receivedAt])
+  @@index([payloadHash])
+  @@map("webhook_events")
+}
+
+model IntegrationJob {
+  id            String           @id @default(uuid()) @db.Uuid
+  institutionId String           @map("institution_id") @db.Uuid
+  provider      Provider?
+  jobType       String           @map("job_type")
+  status        ProcessingStatus @default(PENDING)
+  payload       Json             @default("{}")
+  attemptCount  Int              @default(0) @map("attempt_count")
+  runAt         DateTime         @default(now()) @map("run_at")
+  startedAt     DateTime?        @map("started_at")
+  finishedAt    DateTime?        @map("finished_at")
+  lastError     String?          @map("last_error")
+  createdAt     DateTime         @default(now()) @map("created_at")
+
+  institution Institution @relation(fields: [institutionId], references: [id], onDelete: Cascade)
+
+  @@index([status, runAt])
+  @@map("integration_jobs")
+}
+
+model IntegrationError {
+  id            String   @id @default(uuid()) @db.Uuid
+  institutionId String   @map("institution_id") @db.Uuid
+  provider      Provider?
+  code          String?
+  message       String
+  details       Json     @default("{}")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  institution Institution @relation(fields: [institutionId], references: [id], onDelete: Cascade)
+
+  @@index([institutionId, createdAt])
+  @@map("integration_errors")
+}
+
+model DeadLetterEvent {
+  id            String   @id @default(uuid()) @db.Uuid
+  institutionId String?  @map("institution_id") @db.Uuid
+  provider      Provider?
+  sourceTable   String   @map("source_table")
+  sourceId      String   @map("source_id")
+  payload       Json     @default("{}")
+  lastError     String?
+  createdAt     DateTime @default(now()) @map("created_at")
+  replayedAt    DateTime? @map("replayed_at")
+
+  institution Institution? @relation(fields: [institutionId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@map("dead_letter_events")
+}
+
+// ─── Files / Audit / Compliance ──────────────────────────────────────────────
+
+model FileObject {
+  id            String    @id @default(uuid()) @db.Uuid
+  institutionId String    @map("institution_id") @db.Uuid
+  storageKey    String    @map("storage_key")
+  filename      String
+  mimeType      String?   @map("mime_type")
+  sizeBytes     Int?      @map("size_bytes")
+  checksum      String?
+  createdBy     String?   @map("created_by") @db.Uuid
+  createdAt     DateTime  @default(now()) @map("created_at")
+  deletedAt     DateTime? @map("deleted_at")
+
+  institution Institution         @relation(fields: [institutionId], references: [id], onDelete: Cascade)
+  attachments MessageAttachment[]
+
+  @@index([institutionId])
+  @@map("files")
+}
+
+model AuditLog {
+  id            String   @id @default(uuid()) @db.Uuid
+  institutionId String?  @map("institution_id") @db.Uuid
+  actorUserId   String?  @map("actor_user_id") @db.Uuid
+  action        String
+  entityType    String   @map("entity_type")
+  entityId      String?  @map("entity_id")
+  before        Json?
+  after         Json?
+  ipAddress     String?  @map("ip_address")
+  userAgent     String?  @map("user_agent")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  institution Institution? @relation(fields: [institutionId], references: [id], onDelete: SetNull)
+  actor       User?        @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([institutionId, createdAt])
+  @@index([entityType, entityId])
+  @@map("audit_logs")
+}
+
+model ConsentRecord {
+  id            String    @id @default(uuid()) @db.Uuid
+  institutionId String    @map("institution_id") @db.Uuid
+  contactId     String?   @map("contact_id") @db.Uuid
+  channel       Provider?
+  consentType   String    @map("consent_type")
+  granted       Boolean
+  evidence      Json      @default("{}")
+  grantedAt     DateTime? @map("granted_at")
+  revokedAt     DateTime? @map("revoked_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  institution Institution @relation(fields: [institutionId], references: [id], onDelete: Cascade)
+  contact     Contact?    @relation(fields: [contactId], references: [id], onDelete: SetNull)
+
+  @@index([institutionId, contactId])
+  @@map("consent_records")
+}
+
+model DataRetentionPolicy {
+  id            String   @id @default(uuid()) @db.Uuid
+  institutionId String   @map("institution_id") @db.Uuid
+  entityType    String   @map("entity_type")
+  retentionDays Int      @map("retention_days")
+  isActive      Boolean  @default(true) @map("is_active")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  institution Institution @relation(fields: [institutionId], references: [id], onDelete: Cascade)
+
+  @@unique([institutionId, entityType])
+  @@map("data_retention_policies")
+}

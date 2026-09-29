@@ -1,0 +1,100 @@
+# Online VIP CRM — local infrastructure
+# Default: postgres + redis only
+# Full stack: docker compose --profile full up -d
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: ovip-crm-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: online_vip_crm
+      POSTGRES_USER: crm
+      POSTGRES_PASSWORD: crm
+    ports:
+      - "5432:5432"
+    volumes:
+      - ovip_crm_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U crm -d online_vip_crm"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7
+    container_name: ovip-crm-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - ovip_crm_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    profiles: ["full"]
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    container_name: ovip-crm-api
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: development
+      PORT: 4000
+      DATABASE_URL: postgresql://crm:crm@postgres:5432/online_vip_crm?schema=public
+      REDIS_URL: redis://redis:6379
+      APP_URL: http://localhost:3000
+      API_URL: http://localhost:4000
+    ports:
+      - "4000:4000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    profiles: ["full"]
+    build:
+      context: .
+      dockerfile: apps/worker/Dockerfile
+    container_name: ovip-crm-worker
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://crm:crm@postgres:5432/online_vip_crm?schema=public
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  web:
+    profiles: ["full"]
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    container_name: ovip-crm-web
+    restart: unless-stopped
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      NEXT_PUBLIC_API_URL: http://localhost:4000
+      API_URL: http://api:4000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
+volumes:
+  ovip_crm_pgdata:
+  ovip_crm_redis:
