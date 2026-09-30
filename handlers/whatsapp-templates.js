@@ -10,6 +10,7 @@ import {
 } from '../api/_lib/meta-template-payload.js';
 import { createOrReuseMetaMessageTemplate } from '../api/_lib/meta-template-create.js';
 import { loadMetaWhatsAppSecretsFromDb } from '../api/_lib/meta-whatsapp.js';
+import { deleteMetaMessageTemplate } from '../api/_lib/meta-template-delete.js';
 import { HEADER_MEDIA_RULES, uploadTemplateHeaderMedia } from '../api/_lib/meta-template-media.js';
 import {
   fetchAllMetaMessageTemplates,
@@ -353,17 +354,50 @@ export default async function handler(req, res) {
       });
     }
 
+    /**
+     * Silme.
+     *
+     * Taslak yalnız CRM'den silinir. Meta'ya gitmiş şablonda önce Meta'dan
+     * silinir, sonra CRM kaydı düşer; Meta reddederse CRM kaydına dokunulmaz,
+     * yoksa listede olmayan bir şablon görünmeye devam eder.
+     */
     if (req.method === 'DELETE') {
       const id = String(req.query?.id || '').trim();
       if (!id) return res.status(400).json({ error: 'id_required' });
-      // Yalnız taslak silinir; Meta'daki şablona dokunulmaz
-      const { data: row } = await supabaseAdmin.from(TABLE).select('whatsapp_template_status').eq('id', id).maybeSingle();
-      if (String(row?.whatsapp_template_status || '') !== 'DRAFT') {
-        return res.status(400).json({ error: 'only_draft', message: 'Yalnız taslak silinebilir.' });
+
+      // Yalnız Meta'da olan satır: id "meta:<ad>:<dil>" biçiminde, CRM kaydı yok
+      if (id.startsWith('meta:')) {
+        const parts = id.split(':');
+        const metaName = parts.slice(1, -1).join(':');
+        const r = await deleteMetaMessageTemplate({ name: metaName });
+        if (!r.ok) return res.status(400).json({ error: 'meta_delete_failed', message: r.error });
+        invalidateCrmTemplateCache();
+        return res.status(200).json({ ok: true, message: 'Şablon Meta’dan silindi.' });
       }
+
+      const { data: row } = await supabaseAdmin
+        .from(TABLE)
+        .select('whatsapp_template_status, meta_template_name, meta_template_id')
+        .eq('id', id)
+        .maybeSingle();
+      const status = String(row?.whatsapp_template_status || '');
+      const metaName = String(row?.meta_template_name || '').trim();
+
+      if (status !== 'DRAFT' && metaName) {
+        const r = await deleteMetaMessageTemplate({
+          name: metaName,
+          metaTemplateId: row?.meta_template_id || null
+        });
+        if (!r.ok) return res.status(400).json({ error: 'meta_delete_failed', message: r.error });
+        invalidateCrmTemplateCache();
+      }
+
       const { error } = await supabaseAdmin.from(TABLE).delete().eq('id', id);
       if (error) return res.status(500).json({ error: error.message });
-      return res.status(200).json({ ok: true });
+      return res.status(200).json({
+        ok: true,
+        message: status === 'DRAFT' ? 'Taslak silindi.' : 'Şablon Meta’dan ve CRM’den silindi.'
+      });
     }
 
     return res.status(405).json({ error: 'Method not allowed' });

@@ -124,6 +124,28 @@ function slashQuery(text: string): string | null {
   return m[2] ?? '';
 }
 
+/**
+ * Arama anahtarı.
+ *
+ * Şablon adları `10_agustos_matematik_kampi` gibi ASCII ve alt çizgili
+ * yazılıyor; kullanıcı ise Türkçe harflerle ve alt çizgi koymadan arıyor.
+ * Türkçe büyük I küçültülünce `i` değil `ı` olduğu için `/Ingilizce` aramasi
+ * `ingilizce` ile eşleşmiyordu. İkisini aynı zemine indirir.
+ */
+function searchKey(text: string): string {
+  return String(text || '')
+    .toLocaleLowerCase('tr')
+    .replace(/ı/g, 'i')
+    .replace(/ş/g, 's')
+    .replace(/ğ/g, 'g')
+    .replace(/ü/g, 'u')
+    .replace(/ö/g, 'o')
+    .replace(/ç/g, 'c')
+    .replace(/[_\-.]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function replaceSlashToken(text: string, replacement: string) {
   return text.replace(/(^|\s)\/([^\s]*)$/, `$1${replacement}`);
 }
@@ -502,20 +524,24 @@ export default function CrmInboxPage() {
   const slashNeedle = slashQuery(draft);
   const slashItems = useMemo(() => {
     if (slashNeedle == null) return [];
-    const q = slashNeedle.toLocaleLowerCase('tr');
+    // Alt çizgi boşluğa döndüğü için `/matematik_kampi` iki kelimeye ayrılır;
+    // her kelimenin ayrı ayrı bulunması aranır
+    const words = searchKey(slashNeedle).split(' ').filter(Boolean);
+    const hits = (haystack: string) => {
+      if (!words.length) return true;
+      const hay = searchKey(haystack);
+      return words.every((w) => hay.includes(w));
+    };
+    // Ad eşleşmesi metin eşleşmesinden önde gelsin: kullanıcı şablon adını yazıyor
+    const rank = (name: string) => (words.length && hits(name) ? 0 : 1);
+
     const tpls = metaTemplates
-      .filter((t) => {
-        if (!q) return true;
-        const hay = `${t.name} ${t.body} ${t.category || ''}`.toLocaleLowerCase('tr');
-        return hay.includes(q);
-      })
+      .filter((t) => hits(`${t.name} ${t.body} ${t.category || ''}`))
+      .sort((a, b) => rank(a.name) - rank(b.name))
       .map((t) => ({ kind: 'meta' as const, id: t.id, title: t.name, subtitle: t.body, tpl: t }));
     const cans = canned
-      .filter((c) => {
-        if (!q) return true;
-        const hay = `${c.category} ${c.title} ${c.body}`.toLocaleLowerCase('tr');
-        return hay.includes(q);
-      })
+      .filter((c) => hits(`${c.category} ${c.title} ${c.body}`))
+      .sort((a, b) => rank(a.title) - rank(b.title))
       .map((c) => ({ kind: 'canned' as const, id: c.id, title: `${c.category} · ${c.title}`, subtitle: c.body, canned: c }));
     return [...tpls, ...cans].slice(0, 12);
   }, [slashNeedle, metaTemplates, canned]);
