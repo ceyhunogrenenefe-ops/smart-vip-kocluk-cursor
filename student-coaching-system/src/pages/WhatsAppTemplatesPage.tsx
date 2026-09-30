@@ -178,7 +178,18 @@ export default function WhatsAppTemplatesPage() {
   };
 
   const sil = async (t: Template) => {
-    if (!window.confirm(`«${t.name}» taslağı silinsin mi?`)) return;
+    // Meta'ya gitmiş şablonda silme geri alınamaz: aynı ad yeniden açılabilir
+    // ama baştan incelemeye girer. Onay metni bunu açıkça söylesin.
+    const soru =
+      t.status === 'DRAFT'
+        ? `«${t.name}» taslağı silinsin mi?`
+        : `«${t.name}» şablonu Meta'dan da silinecek.
+
+Bu işlem geri alınamaz; ` +
+          `aynı şablona yine ihtiyacınız olursa baştan oluşturup onaya göndermeniz gerekir.
+
+Silinsin mi?`;
+    if (!window.confirm(soru)) return;
     const res = await apiFetch(`/api/whatsapp-templates?id=${encodeURIComponent(t.id)}`, { method: 'DELETE' });
     const j = await res.json().catch(() => ({}));
     if (!res.ok) {
@@ -615,15 +626,14 @@ export default function WhatsAppTemplatesPage() {
                         Düzenle
                       </button>
                     ) : null}
-                    {t.status === 'DRAFT' ? (
-                      <button
-                        type="button"
-                        onClick={() => void sil(t)}
-                        className="ml-1 rounded-lg border border-red-200 bg-red-50 p-1 text-red-600"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    ) : null}
+                    <button
+                      type="button"
+                      title={t.status === 'DRAFT' ? 'Taslağı sil' : 'Şablonu Meta’dan sil'}
+                      onClick={() => void sil(t)}
+                      className="ml-1 rounded-lg border border-red-200 bg-red-50 p-1 text-red-600 hover:bg-red-100"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
                   </td>
                 </tr>
               ))}
