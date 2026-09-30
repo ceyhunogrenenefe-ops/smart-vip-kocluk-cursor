@@ -1,14 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { FileText, Loader2, Plus, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '../../../context/AuthContext';
 import {
-  crmCreateMetaTemplate,
   crmListMetaTemplates,
   type CrmMetaTemplate
 } from '../../../lib/crmInboxApi';
 import {
-  CrmTemplateCreateModal,
   CrmTemplateSendPreviewModal,
   fillTemplatePreview,
   type PreviewTemplate
@@ -589,10 +588,6 @@ function MessagesTab({
   const [tplQuery, setTplQuery] = useState('');
   const [metaTemplates, setMetaTemplates] = useState<CrmMetaTemplate[]>([]);
   const [pendingMeta, setPendingMeta] = useState<CrmMetaTemplate[]>([]);
-  const [showCreate, setShowCreate] = useState(false);
-  const [createName, setCreateName] = useState('');
-  const [createBody, setCreateBody] = useState('');
-  const [createCategory, setCreateCategory] = useState<'UTILITY' | 'MARKETING'>('UTILITY');
   const [creating, setCreating] = useState(false);
   const [previewTpl, setPreviewTpl] = useState<PreviewTemplate | null>(null);
   const [previewParams, setPreviewParams] = useState<string[]>([]);
@@ -733,14 +728,13 @@ function MessagesTab({
             <FileText className="h-3.5 w-3.5" />
             Şablonlar
           </button>
-          <button
-            type="button"
-            onClick={() => setShowCreate(true)}
+          <Link
+            to="/crm/sablonlar"
             className="inline-flex items-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-xs font-semibold text-emerald-800 hover:bg-emerald-100"
           >
             <Plus className="h-3.5 w-3.5" />
             Şablon ekle
-          </button>
+          </Link>
         </div>
         {pickerOpen ? (
           <div className="rounded-xl border border-slate-200 bg-white p-2 dark:border-slate-600 dark:bg-slate-800">
@@ -875,44 +869,6 @@ function MessagesTab({
         </p>
       </div>
 
-      <CrmTemplateCreateModal
-        open={showCreate}
-        creating={creating}
-        name={createName}
-        body={createBody}
-        category={createCategory}
-        onName={setCreateName}
-        onBody={setCreateBody}
-        onCategory={setCreateCategory}
-        onClose={() => setShowCreate(false)}
-        onSubmit={() => {
-          if (!createName.trim() || !createBody.trim()) {
-            toast.error('Şablon adı ve metin gerekli.');
-            return;
-          }
-          setCreating(true);
-          void crmCreateMetaTemplate({
-            name: createName.trim(),
-            body: createBody.trim(),
-            category: createCategory,
-            language: 'tr'
-          })
-            .then((res) => {
-              toast.success(res.message || `Onaya gönderildi: ${res.data?.status || 'PENDING'}`);
-              setCreateName('');
-              setCreateBody('');
-              setShowCreate(false);
-              return crmListMetaTemplates(true);
-            })
-            .then((res) => {
-              if (!res) return;
-              setMetaTemplates(res.data || []);
-              setPendingMeta(res.pending || []);
-            })
-            .catch((e) => toast.error(e instanceof Error ? e.message : 'Şablon onaya gönderilemedi'))
-            .finally(() => setCreating(false));
-        }}
-      />
 
       <CrmTemplateSendPreviewModal
         open={Boolean(previewTpl)}
