@@ -68,6 +68,7 @@ import {
   suggestOdemeSekliFromVeliTercihi,
   type OdemeSekli
 } from '../lib/odemeSekli';
+import { downloadParentSignContractPdf } from '../lib/parentSignPdfDownload';
 import {
   Copy,
   Loader2,

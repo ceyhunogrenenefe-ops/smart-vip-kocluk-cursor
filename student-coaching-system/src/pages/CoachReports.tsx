@@ -1,6 +1,7 @@
 // Türkçe: Eğitim Koçu Raporları Sayfası - Öğrenci deneme takibi ve raporlama
 import React, { useState, useMemo, useRef } from 'react';
 import { useApp } from '../context/AppContext';
+import { useAuth } from '../context/AuthContext';
 import { formatClassLevelLabel } from '../types';
 import {
   FileText,
@@ -72,6 +73,7 @@ type TabType = 'overview' | 'exams' | 'reports' | 'send';
 
 export default function CoachReports() {
   const { students, weeklyEntries, getStudentStats } = useApp();
+  const { effectiveUser } = useAuth();
   const [activeTab, setActiveTab] = useState<TabType>('overview');
   const [selectedStudent, setSelectedStudent] = useState<string>('');
   const [searchTerm, setSearchTerm] = useState('');
@@ -329,7 +331,7 @@ export default function CoachReports() {
     { id: 'send' as TabType, label: 'WhatsApp Gönder', icon: MessageCircle }
   ];
 
-  if (!user) return null;
+  if (!effectiveUser) return null;
 
   return (
     <div className="space-y-6">
