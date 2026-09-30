@@ -6,7 +6,7 @@ import { useAuth } from '../context/AuthContext';
 import { formatClassLevelLabel, type WeeklyEntry } from '../types';
 import { userRoleTags } from '../config/rolePermissions';
 import { resolveStudentRecordId } from '../lib/coachResolve';
-import { eachDayOfInterval, differenceInCalendarDays } from 'date-fns';
+import { eachDayOfInterval, differenceInCalendarDays, parseISO } from 'date-fns';
 import type { CoachWeeklyGoalRow, WeeklyPlannerEntryRow } from '../lib/weeklyPlannerApi';
 import { loadStudentCoachAnalyticsBundle } from '../lib/studentCoachQuestionStats';
 import { getAuthToken, getGatewaySessionUserId } from '../lib/session';
