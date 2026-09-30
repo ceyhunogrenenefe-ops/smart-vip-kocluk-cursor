@@ -95,6 +95,49 @@ function formatted(text: string): string {
     .replace(/\n/g, '<br/>');
 }
 
+/**
+ * Telefon önizlemesi.
+ *
+ * Hem editörde yazarken hem listeden bakarken aynı bileşen kullanılır; iki ayrı
+ * kopya olsa biri değişip diğeri unutulur ve önizleme gerçeği göstermez.
+ */
+function PhonePreview({ t }: { t: Partial<Template> }) {
+  const headerType = String(t.header_type || 'NONE');
+  const buttons = (t.buttons || []).filter((b) => b.text);
+  return (
+    <div className="rounded-[28px] border-8 border-slate-800 bg-[#e5ddd5] p-3 shadow-lg">
+      <div className="rounded-xl bg-white p-2 shadow-sm">
+        {t.header_media_url && headerType === 'IMAGE' ? (
+          <img src={t.header_media_url} alt="" className="mb-2 max-h-36 w-full rounded-lg object-cover" />
+        ) : ['IMAGE', 'VIDEO', 'DOCUMENT'].includes(headerType) ? (
+          <div className="mb-2 flex h-24 items-center justify-center rounded-lg bg-slate-100 text-slate-400">
+            {headerType === 'DOCUMENT' ? <FileText className="h-8 w-8" /> : <ImageIcon className="h-8 w-8" />}
+          </div>
+        ) : null}
+        {headerType === 'TEXT' && t.header_text ? (
+          <p className="mb-1 text-sm font-bold text-slate-900">{t.header_text}</p>
+        ) : null}
+        <p
+          className="whitespace-pre-wrap text-sm leading-relaxed text-slate-800"
+          dangerouslySetInnerHTML={{
+            __html: formatted(preview(String(t.body || 'Mesajınız burada görünecek'), t.body_examples || {}))
+          }}
+        />
+        {t.footer_text ? <p className="mt-1.5 text-[11px] text-slate-400">{t.footer_text}</p> : null}
+      </div>
+      {buttons.length ? (
+        <div className="mt-1 space-y-1">
+          {buttons.map((b, i) => (
+            <div key={i} className="rounded-lg bg-white py-2 text-center text-sm font-medium text-sky-600 shadow-sm">
+              {b.text}
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export default function WhatsAppTemplatesPage() {
   const [items, setItems] = useState<Template[]>([]);
   const [meta, setMeta] = useState<Meta | null>(null);
@@ -103,6 +146,7 @@ export default function WhatsAppTemplatesPage() {
   const [draft, setDraft] = useState<Partial<Template> | null>(null);
   const [busy, setBusy] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [onizleme, setOnizleme] = useState<Template | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -201,6 +245,11 @@ Silinsin mi?`;
   };
 
   const varNums = useMemo(() => variableNumbers(String(draft?.body || '')), [draft?.body]);
+  const varLabel = useMemo(() => {
+    const m: Record<string, string> = {};
+    for (const f of meta?.variable_fields || []) m[f.id] = f.label;
+    return m;
+  }, [meta]);
   const input = 'mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm';
   const limits = meta?.limits || { bodyMax: 1024, footerMax: 60, headerTextMax: 60 };
 
@@ -537,38 +586,7 @@ Silinsin mi?`;
           {/* Canlı telefon önizlemesi */}
           <div className="lg:sticky lg:top-4 lg:self-start">
             <p className="mb-2 text-xs font-semibold text-slate-600">Önizleme</p>
-            <div className="rounded-[28px] border-8 border-slate-800 bg-[#e5ddd5] p-3 shadow-lg">
-              <div className="rounded-xl bg-white p-2 shadow-sm">
-                {draft.header_media_url && ['IMAGE'].includes(String(draft.header_type)) ? (
-                  <img src={draft.header_media_url} alt="" className="mb-2 max-h-36 w-full rounded-lg object-cover" />
-                ) : ['IMAGE', 'VIDEO', 'DOCUMENT'].includes(String(draft.header_type)) ? (
-                  <div className="mb-2 flex h-24 items-center justify-center rounded-lg bg-slate-100 text-slate-400">
-                    {String(draft.header_type) === 'DOCUMENT' ? <FileText className="h-8 w-8" /> : <ImageIcon className="h-8 w-8" />}
-                  </div>
-                ) : null}
-                {draft.header_type === 'TEXT' && draft.header_text ? (
-                  <p className="mb-1 text-sm font-bold text-slate-900">{draft.header_text}</p>
-                ) : null}
-                <p
-                  className="whitespace-pre-wrap text-sm leading-relaxed text-slate-800"
-                  dangerouslySetInnerHTML={{
-                    __html: formatted(preview(String(draft.body || 'Mesajınız burada görünecek'), draft.body_examples || {}))
-                  }}
-                />
-                {draft.footer_text ? <p className="mt-1.5 text-[11px] text-slate-400">{draft.footer_text}</p> : null}
-              </div>
-              {(draft.buttons || []).filter((b) => b.text).length ? (
-                <div className="mt-1 space-y-1">
-                  {(draft.buttons || [])
-                    .filter((b) => b.text)
-                    .map((b, i) => (
-                      <div key={i} className="rounded-lg bg-white py-2 text-center text-sm font-medium text-sky-600 shadow-sm">
-                        {b.text}
-                      </div>
-                    ))}
-                </div>
-              ) : null}
-            </div>
+            <PhonePreview t={draft} />
           </div>
         </div>
       ) : loading ? (
@@ -617,11 +635,18 @@ Silinsin mi?`;
                     {t.updated_at ? new Date(t.updated_at).toLocaleString('tr-TR') : '—'}
                   </td>
                   <td className="px-3 py-2 text-right">
+                    <button
+                      type="button"
+                      onClick={() => setOnizleme(t)}
+                      className="rounded-lg border border-slate-200 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                    >
+                      Önizle
+                    </button>
                     {t.status === 'DRAFT' || t.status === 'REJECTED' ? (
                       <button
                         type="button"
                         onClick={() => setDraft({ ...t })}
-                        className="rounded-lg border border-slate-200 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                        className="ml-1 rounded-lg border border-slate-200 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
                       >
                         Düzenle
                       </button>
@@ -648,6 +673,80 @@ Silinsin mi?`;
           </table>
         </div>
       )}
+
+      {onizleme ? (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4">
+          <div className="flex max-h-[92vh] w-full max-w-md flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+            <div className="flex shrink-0 items-start justify-between gap-2 border-b border-slate-200 px-4 py-3">
+              <div className="min-w-0">
+                <h3 className="truncate text-base font-semibold text-slate-900">{onizleme.name}</h3>
+                <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500">
+                  <span className={`rounded-full px-1.5 py-0.5 font-semibold ${STATUS_STYLE[onizleme.status] || 'bg-slate-100'}`}>
+                    {onizleme.status_label || onizleme.status}
+                  </span>
+                  <span>{onizleme.language}</span>
+                  {onizleme.category ? <span>· {onizleme.category}</span> : null}
+                  <span>· {HEADER_LABEL[onizleme.header_type] || 'Başlık yok'}</span>
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setOnizleme(null)}
+                className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto bg-slate-50 p-4">
+              <PhonePreview t={onizleme} />
+              {onizleme.rejected_reason ? (
+                <p className="rounded-lg bg-rose-50 px-3 py-2 text-xs text-rose-800">{onizleme.rejected_reason}</p>
+              ) : null}
+              {/* Degiskenlerde ornek deger yoksa onizlemede "ornek1" gorunur; hangi
+                  CRM alanindan doldugu burada yaziyor */}
+              {Object.keys(onizleme.variable_map || {}).length ? (
+                <div className="rounded-lg border border-slate-200 bg-white p-3">
+                  <p className="text-[11px] font-semibold text-slate-600">Değişkenler</p>
+                  <ul className="mt-1 space-y-0.5">
+                    {Object.entries(onizleme.variable_map).map(([n, field]) => (
+                      <li key={n} className="text-[11px] text-slate-500">
+                        <span className="font-mono text-slate-700">{`{{${n}}}`}</span> ·{' '}
+                        {varLabel[field] || field}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+              {onizleme.meta_template_id ? (
+                <p className="text-center font-mono text-[10px] text-slate-400">ID: {onizleme.meta_template_id}</p>
+              ) : null}
+            </div>
+
+            <div className="flex shrink-0 justify-end gap-2 border-t border-slate-200 px-4 py-3">
+              {onizleme.status === 'DRAFT' || onizleme.status === 'REJECTED' ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDraft({ ...onizleme });
+                    setOnizleme(null);
+                  }}
+                  className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  Düzenle
+                </button>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => setOnizleme(null)}
+                className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white"
+              >
+                Kapat
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
