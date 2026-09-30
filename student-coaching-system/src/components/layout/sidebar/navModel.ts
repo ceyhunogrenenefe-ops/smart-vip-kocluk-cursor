@@ -422,6 +422,7 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
       { path: '/crm/toplu-mesaj', icon: MessageCircle, label: 'CRM Toplu mesaj' },
       { path: '/crm/gunluk-rapor', icon: FileText, label: 'CRM Günlük Rapor' },
       { path: '/crm/inbox', icon: ClipboardList, label: 'CRM Gelen Kutusu' },
+      { path: '/crm/sablonlar', icon: FileText, label: 'WhatsApp Şablonları' },
       { path: '/veli-memnuniyet', icon: PhoneCall, label: 'Veli Memnuniyet ve Takip' },
     ];
   }

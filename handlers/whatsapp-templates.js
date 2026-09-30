@@ -44,10 +44,17 @@ export const CRM_VARIABLE_FIELDS = [
   { id: 'serbest', label: 'Serbest metin (elle yazılır)' }
 ];
 
-function isManager(actor, tags) {
+/**
+ * Sablon yonetimi yetkisi.
+ *
+ * Eski gelen kutusu modalinda yetki kontrolu yoktu; CRM temsilcileri de sablon
+ * acabiliyordu. Yeni ekran o yetkiyi daraltmasin diye crm_agent da kabul edilir.
+ */
+function canManageTemplates(actor, tags) {
   const r = String(actor?.role || '').toLowerCase();
   const t = Array.isArray(tags) ? tags : [];
-  return r === 'admin' || r === 'super_admin' || t.includes('admin') || t.includes('super_admin');
+  const allowed = ['admin', 'super_admin', 'crm_agent'];
+  return allowed.includes(r) || t.some((x) => allowed.includes(String(x)));
 }
 
 function parseJson(value, fallback) {
@@ -131,7 +138,7 @@ export default async function handler(req, res) {
     return res.status(401).json({ error: 'Missing token' });
   }
   const tags = await normalizedUserRolesFromDb(actor.sub).catch(() => []);
-  if (!isManager(actor, tags)) return res.status(403).json({ error: 'forbidden' });
+  if (!canManageTemplates(actor, tags)) return res.status(403).json({ error: 'forbidden' });
 
   const op = String(req.query?.op || '').trim();
   const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : req.body || {};

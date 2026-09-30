@@ -25,7 +25,6 @@ import {
   crmInboundStatus,
   readCachedInboundStatus,
   crmListAgents,
-  crmCreateMetaTemplate,
   crmListCanned,
   fillCannedVars,
   CANNED_CATEGORIES,
@@ -50,7 +49,7 @@ import {
 } from '../../lib/crmInboxApi';
 import { contactInitials, contactSubtitle, contactTitle } from '../../lib/crmContactDisplay';
 import { playCrmLeadChime } from '../../lib/crmLiveSound';
-import { CrmTemplateCreateModal, CrmTemplateSendPreviewModal } from './CrmTemplateModals';
+import { CrmTemplateSendPreviewModal } from './CrmTemplateModals';
 
 /** Profil fotoğrafı varsa o, yoksa baş harfler */
 function ContactAvatar({ c, size = 'sm' }: { c: CrmConversation; size?: 'sm' | 'md' }) {
@@ -176,11 +175,6 @@ export default function CrmInboxPage() {
   const [pendingMetaTemplates, setPendingMetaTemplates] = useState<CrmMetaTemplate[]>([]);
   const [metaTplHint, setMetaTplHint] = useState<string | null>(null);
   const [metaTplLoading, setMetaTplLoading] = useState(false);
-  const [showCreateTpl, setShowCreateTpl] = useState(false);
-  const [createTplName, setCreateTplName] = useState('');
-  const [createTplBody, setCreateTplBody] = useState('');
-  const [createTplCategory, setCreateTplCategory] = useState<'UTILITY' | 'MARKETING'>('UTILITY');
-  const [creatingTpl, setCreatingTpl] = useState(false);
   const [slashOpen, setSlashOpen] = useState(false);
   const [slashHighlight, setSlashHighlight] = useState(0);
   const [pendingTpl, setPendingTpl] = useState<CrmMetaTemplate | null>(null);
@@ -503,31 +497,6 @@ export default function CrmInboxPage() {
     setSlashOpen(false);
     setPendingTpl(tpl);
     setTplParams(Array.from({ length: tpl.variableCount }, () => ''));
-  };
-
-  const onCreateTemplate = async () => {
-    if (!createTplName.trim() || !createTplBody.trim()) {
-      toast.error('Şablon adı ve metin gerekli.');
-      return;
-    }
-    setCreatingTpl(true);
-    try {
-      const res = await crmCreateMetaTemplate({
-        name: createTplName.trim(),
-        body: createTplBody.trim(),
-        category: createTplCategory,
-        language: 'tr'
-      });
-      toast.success(res.message || `Onaya gönderildi: ${res.data?.status || 'PENDING'}`);
-      setCreateTplName('');
-      setCreateTplBody('');
-      setShowCreateTpl(false);
-      void loadMetaTemplates(true);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Şablon onaya gönderilemedi');
-    } finally {
-      setCreatingTpl(false);
-    }
   };
 
   const slashNeedle = slashQuery(draft);
@@ -1119,17 +1088,16 @@ export default function CrmInboxPage() {
             </button>
           </div>
           <p className="mb-2 text-[10px] text-slate-400">
-            WA / IG / FB. <span className="font-mono">/</span> ile seçin. Kommo gibi yeni şablon yazıp Meta’ya onaya
-            gönderebilirsiniz.
+            WA / IG / FB. <span className="font-mono">/</span> ile seçin. Başlık görseli, alt bilgi ve butonlu şablonlar
+            Şablon Yöneticisi’nde hazırlanır.
           </p>
-          <button
-            type="button"
-            onClick={() => setShowCreateTpl(true)}
+          <Link
+            to="/crm/sablonlar"
             className="mb-2 inline-flex w-full items-center justify-center gap-1 rounded-lg border border-emerald-200 bg-white px-2 py-1.5 text-[11px] font-semibold text-emerald-800 hover:bg-emerald-50"
           >
             <Plus className="h-3.5 w-3.5" />
             Şablon ekle
-          </button>
+          </Link>
           {metaTemplates.length ? (
             <div className="flex max-h-56 flex-col gap-1 overflow-y-auto">
               {metaTemplates.map((t) => (
@@ -1413,18 +1381,6 @@ export default function CrmInboxPage() {
       </aside>
       </div>
 
-      <CrmTemplateCreateModal
-        open={showCreateTpl}
-        creating={creatingTpl}
-        name={createTplName}
-        body={createTplBody}
-        category={createTplCategory}
-        onName={setCreateTplName}
-        onBody={setCreateTplBody}
-        onCategory={setCreateTplCategory}
-        onClose={() => setShowCreateTpl(false)}
-        onSubmit={() => void onCreateTemplate()}
-      />
       <CrmTemplateSendPreviewModal
         open={Boolean(pendingTpl)}
         template={pendingTpl}
