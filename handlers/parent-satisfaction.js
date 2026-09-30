@@ -97,6 +97,7 @@ async function loadRows(institutionId) {
       class_name: classOf.get(String(s.id)) || null,
       parent_name: s.parent_name || null,
       parent_phone: s.parent_phone || null,
+      institution_id: s.institution_id || null,
       coach_id: s.coach_id || null,
       coach_name: s.coach_id ? coachById[String(s.coach_id)] || null : null,
       agent_user_id: assignBy.get(String(s.id))?.agent_user_id || null,
@@ -113,6 +114,19 @@ async function loadRows(institutionId) {
     };
   });
   return { rows, coachById };
+}
+
+/** Satirlarda gecen kurumlarin adlari — liste ve filtre icin. */
+async function loadInstitutionNames(ids) {
+  const uniq = [...new Set(ids.filter(Boolean).map(String))];
+  if (!uniq.length) return {};
+  const { data, error } = await supabaseAdmin.from('institutions').select('id, name').in('id', uniq);
+  // Kurum tablosu okunamazsa liste yine calissin; yalniz ad bos kalir
+  if (error) {
+    console.warn('[parent-satisfaction] kurum adlari:', error.message);
+    return {};
+  }
+  return Object.fromEntries((data || []).map((i) => [String(i.id), i.name || '']));
 }
 
 async function loadAgentNames(ids) {
@@ -135,15 +149,26 @@ export default async function handler(req, res) {
   }
   const tags = await normalizedUserRolesFromDb(actor.sub).catch(() => []);
   const manager = isManager(actor, tags);
-  const institutionId = actor.institution_id || null;
   const op = String(req.query?.op || '').trim();
   const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : req.body || {};
+  /**
+   * Kurum kapsami.
+   *
+   * Temsilci her zaman kendi kurumuna kilitli. Yonetici birden cok kuruma
+   * bakabildigi icin istekte kurum gonderebilir; gondermezse kendi kurumu,
+   * o da yoksa tum kurumlar gelir.
+   */
+  const requestedInstitution = String(req.query?.institution_id || body?.institution_id || '').trim();
+  const institutionId = manager
+    ? requestedInstitution || actor.institution_id || null
+    : actor.institution_id || null;
 
   try {
     if (req.method === 'GET' && (op === '' || op === 'list')) {
       const { rows } = await loadRows(institutionId);
       const mine = manager ? rows : rows.filter((r) => String(r.agent_user_id || '') === String(actor.sub));
       const nameById = await loadAgentNames(rows.map((r) => r.agent_user_id));
+      const instById = await loadInstitutionNames(rows.map((r) => r.institution_id));
 
       let agents = [];
       if (manager) {
@@ -163,6 +188,12 @@ export default async function handler(req, res) {
         rows: mine,
         agent_names: nameById,
         agents,
+        institution_names: instById,
+        // Filtre kutusu yalnız listede gerçekten geçen kurumları göstersin
+        institutions: [...new Set(mine.map((r) => String(r.institution_id || '')).filter(Boolean))]
+          .map((id) => ({ id, name: instById[id] || 'Kurum' }))
+          .sort((a, b) => a.name.localeCompare(b.name, 'tr')),
+        institution_id: institutionId,
         summary: summarizeCalls(mine),
         by_agent: manager ? summarizeByAgent(rows, nameById) : [],
         meta: { questions: SURVEY_QUESTIONS, call_results: CALL_RESULTS, statuses: CALL_STATUSES, action_types: ACTION_TYPES }

@@ -13,6 +13,7 @@ type Row = {
   parent_name: string | null;
   parent_phone: string | null;
   coach_name: string | null;
+  institution_id: string | null;
   agent_user_id: string | null;
   call_status: string;
   last_call_at: string | null;
@@ -68,11 +69,13 @@ export default function ParentSatisfactionPage() {
   const [summary, setSummary] = useState<Record<string, number>>({});
   const [byAgent, setByAgent] = useState<Array<Record<string, unknown>>>([]);
   const [meta, setMeta] = useState<Meta | null>(null);
+  const [institutions, setInstitutions] = useState<Array<{ id: string; name: string }>>([]);
 
   const [q, setQ] = useState('');
   const [fClass, setFClass] = useState('');
   const [fAgent, setFAgent] = useState('');
   const [fStatus, setFStatus] = useState('');
+  const [fInstitution, setFInstitution] = useState('');
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [assignTo, setAssignTo] = useState('');
   const [open, setOpen] = useState<Row | null>(null);
@@ -90,6 +93,7 @@ export default function ParentSatisfactionPage() {
       setSummary(j.summary || {});
       setByAgent(j.by_agent || []);
       setMeta(j.meta || null);
+      setInstitutions(j.institutions || []);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Liste alınamadı');
     } finally {
@@ -100,6 +104,12 @@ export default function ParentSatisfactionPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  const instName = useMemo(() => {
+    const m: Record<string, string> = {};
+    for (const i of institutions) m[i.id] = i.name;
+    return m;
+  }, [institutions]);
 
   const classes = useMemo(
     () => [...new Set(rows.map((r) => r.class_name || r.class_level || '').filter(Boolean))].sort(),
@@ -112,12 +122,13 @@ export default function ParentSatisfactionPage() {
       if (fClass && (r.class_name || r.class_level || '') !== fClass) return false;
       if (fAgent && String(r.agent_user_id || '') !== fAgent) return false;
       if (fStatus && r.call_status !== fStatus) return false;
+      if (fInstitution && String(r.institution_id || '') !== fInstitution) return false;
       if (!needle) return true;
       return `${r.student_name} ${r.parent_name || ''} ${r.parent_phone || ''}`
         .toLocaleLowerCase('tr')
         .includes(needle);
     });
-  }, [rows, q, fClass, fAgent, fStatus]);
+  }, [rows, q, fClass, fAgent, fStatus, fInstitution]);
 
   const toggle = (id: string) =>
     setSelected((prev) => {
@@ -243,6 +254,21 @@ export default function ParentSatisfactionPage() {
             </select>
           </label>
         ) : null}
+        {institutions.length > 1 ? (
+          <label className="text-xs text-slate-600">
+            Kurum
+            <select
+              value={fInstitution}
+              onChange={(e) => setFInstitution(e.target.value)}
+              className="mt-1 block w-48 rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
+            >
+              <option value="">Tümü</option>
+              {institutions.map((i) => (
+                <option key={i.id} value={i.id}>{i.name}</option>
+              ))}
+            </select>
+          </label>
+        ) : null}
         <label className="text-xs text-slate-600">
           Durum
           <select value={fStatus} onChange={(e) => setFStatus(e.target.value)} className="mt-1 block w-48 rounded-lg border border-slate-200 px-2 py-1.5 text-sm">
@@ -319,6 +345,10 @@ export default function ParentSatisfactionPage() {
                   <td className="px-3 py-2">
                     <span className="font-medium text-slate-900">{r.student_name}</span>
                     {r.coach_name ? <span className="block text-[11px] text-slate-500">Koç: {r.coach_name}</span> : null}
+                    {/* Kurum adı yalnız birden çok kurum listelenirken anlamlı */}
+                    {institutions.length > 1 && r.institution_id ? (
+                      <span className="block text-[11px] text-slate-400">{instName[r.institution_id] || 'Kurum'}</span>
+                    ) : null}
                   </td>
                   <td className="px-3 py-2 text-slate-600">
                     {r.class_name || r.class_level || '—'}
