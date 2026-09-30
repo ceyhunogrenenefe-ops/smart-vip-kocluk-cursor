@@ -39,10 +39,43 @@ export function validateHeaderMedia({ headerType, mimeType, size }) {
   return { ok: true };
 }
 
-function appId() {
+function appIdFromEnv() {
   return String(
     process.env.META_APP_ID || process.env.FACEBOOK_APP_ID || process.env.VITE_META_APP_ID || ''
   ).trim();
+}
+
+/** Süreç ömrü boyunca bir kez çözülür — her yüklemede Graph'a sormayalım. */
+let cachedAppId = '';
+
+/**
+ * Uygulama kimliği.
+ *
+ * Ortamda META_APP_ID tanımlı değilse mevcut token'ın kendisinden okunur:
+ * `debug_token` token'ın hangi uygulamaya ait olduğunu söylüyor. Böylece
+ * yükleme için yeni bir ortam değişkeni veya yeni token gerekmiyor.
+ */
+async function resolveAppId(token) {
+  const fromEnv = appIdFromEnv();
+  if (fromEnv) return fromEnv;
+  if (cachedAppId) return cachedAppId;
+  try {
+    const url =
+      `https://graph.facebook.com/${GRAPH()}/debug_token` +
+      `?input_token=${encodeURIComponent(token)}&access_token=${encodeURIComponent(token)}`;
+    const res = await fetch(url);
+    const json = await res.json().catch(() => ({}));
+    const id = String(json?.data?.app_id || '').trim();
+    if (id) {
+      cachedAppId = id;
+      console.info('[template-media] app id token uzerinden cozuldu');
+      return id;
+    }
+    console.warn('[template-media] app id cozulemedi', { status: res.status, error: json?.error || null });
+  } catch (e) {
+    console.warn('[template-media] app id cozulemedi:', e instanceof Error ? e.message : e);
+  }
+  return '';
 }
 
 function graphError(json, status) {
@@ -63,14 +96,16 @@ function graphError(json, status) {
 export async function uploadTemplateHeaderMedia({ buffer, mimeType, headerType }) {
   await loadMetaWhatsAppSecretsFromDb();
   const token = String(process.env.META_WHATSAPP_TOKEN || '').trim();
-  const app = appId();
   if (!token) {
     return { ok: false, error: 'Meta erişim anahtarı tanımlı değil.', detail: { code: 'ENV_TOKEN' } };
   }
+  const app = await resolveAppId(token);
   if (!app) {
     return {
       ok: false,
-      error: 'Meta uygulama kimliği (META_APP_ID) tanımlı değil — örnek medya yüklenemiyor.',
+      error:
+        'Meta uygulama kimliği bulunamadı — örnek medya yüklenemiyor. ' +
+        'Vercel ortamına META_APP_ID ekleyin.',
       detail: { code: 'ENV_APP_ID' }
     };
   }
