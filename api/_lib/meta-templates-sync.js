@@ -166,7 +166,7 @@ export function isMetaTemplateSendableStatus(status) {
 
 export async function fetchTemplatesForWaba(waba, tok, { includeComponents = false } = {}) {
   const fields = includeComponents
-    ? 'name,status,language,category,components,parameter_format'
+    ? 'id,name,status,language,category,components,parameter_format'
     : 'name,status,language,category,parameter_format';
   const rows = [];
   let url = `https://graph.facebook.com/${GRAPH()}/${encodeURIComponent(waba)}/message_templates?fields=${fields}&limit=250`;

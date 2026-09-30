@@ -9,6 +9,7 @@ import {
   normalizeMetaTemplateName
 } from '../api/_lib/meta-template-payload.js';
 import { createOrReuseMetaMessageTemplate } from '../api/_lib/meta-template-create.js';
+import { loadMetaWhatsAppSecretsFromDb } from '../api/_lib/meta-whatsapp.js';
 import { HEADER_MEDIA_RULES, uploadTemplateHeaderMedia } from '../api/_lib/meta-template-media.js';
 import {
   fetchAllMetaMessageTemplates,
@@ -140,6 +141,13 @@ export default async function handler(req, res) {
   const tags = await normalizedUserRolesFromDb(actor.sub).catch(() => []);
   if (!canManageTemplates(actor, tags)) return res.status(403).json({ error: 'forbidden' });
 
+  // Token ve WABA kimligi panel ayarlarinda tutulabiliyor; ortam degiskeni tek
+  // basina yeterli degil. Diger Meta uclari gibi once bunlari yukle, yoksa
+  // Graph listesi bos donuyor.
+  await loadMetaWhatsAppSecretsFromDb().catch((e) => {
+    console.warn('[whatsapp-templates] meta ayarlari:', errorMessage(e));
+  });
+
   const op = String(req.query?.op || '').trim();
   const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : req.body || {};
 
@@ -158,8 +166,18 @@ export default async function handler(req, res) {
       let metaError = null;
       try {
         const live = await fetchAllMetaMessageTemplates({ includeComponents: true });
-        if (live.ok) meta = (live.templates || []).map(graphToTemplate);
-        else metaError = live.error || null;
+        if (live.ok) {
+          meta = (live.templates || []).map(graphToTemplate);
+        } else {
+          metaError = [live.error, live.hint].filter(Boolean).join(' — ') || null;
+          // Hangi WABA'ya bakildigi ve her birinin ne dondugu yalniz sunucu
+          // gunlugunde; istemciye kimlik bilgisi sizdirmayalim.
+          console.warn('[whatsapp-templates] Graph listesi bos', {
+            waba_ids: live.waba_ids || [],
+            waba_errors: live.waba_errors || {},
+            error: live.error || null
+          });
+        }
       } catch (e) {
         metaError = errorMessage(e);
       }
