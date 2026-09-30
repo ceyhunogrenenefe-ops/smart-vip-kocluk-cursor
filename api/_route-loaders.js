@@ -54,6 +54,7 @@ export const routeLoaders = {
   'teacher-reminder-settings': () => import('../handlers/teacher-reminder-settings.js'),
   'crm-comment-automations': () => import('../handlers/crm-comment-automations.js'),
   'parent-satisfaction': () => import('../handlers/parent-satisfaction.js'),
+  'whatsapp-templates': () => import('../handlers/whatsapp-templates.js'),
   'coach-whatsapp-gateway-bulk': () => import('../handlers/coach-whatsapp-gateway-bulk.js'),
   'coach-whatsapp-test-send': () => import('../handlers/coach-whatsapp-test-send.js'),
   'google/oauth': () => import('../handlers/google-oauth.js'),

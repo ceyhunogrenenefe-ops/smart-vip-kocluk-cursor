@@ -253,7 +253,8 @@ const CRM_ORDER = [
   '/crm/toplu-mesaj',
   '/crm/dashboard',
   '/crm/gunluk-rapor',
-  '/crm/widgetler'
+  '/crm/widgetler',
+  '/crm/sablonlar'
 ] as const;
 const CRM_PATHS = new Set<string>(CRM_ORDER);
 /** Grup başlığı "CRM" olduğu için alt öğelerde tekrar edilmez */
@@ -266,7 +267,8 @@ const CRM_LABELS: Record<string, string> = {
   '/coach-reports': 'Koç Raporları',
   '/veli-memnuniyet': 'Veli Memnuniyet ve Takip',
   '/crm/gunluk-rapor': 'Günlük Rapor',
-  '/crm/widgetler': 'Widgetler'
+  '/crm/widgetler': 'Widgetler',
+  '/crm/sablonlar': 'WhatsApp Şablonları'
 };
 
 const SETTINGS_PATHS = new Set(['/settings', '/webhooks']);
@@ -381,6 +383,7 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
       { path: '/crm/gunluk-rapor', icon: FileText, label: 'CRM Günlük Rapor' },
       { path: '/crm/inbox', icon: ClipboardList, label: 'CRM Inbox' },
       { path: '/crm/widgetler', icon: Puzzle, label: 'CRM Widgetler' },
+      { path: '/crm/sablonlar', icon: FileText, label: 'WhatsApp Şablonları' },
       { path: '/crm', icon: ClipboardList, label: 'CRM Pipeline' },
       NAV_OZEL_DERS_TALEPLERI,
       NAV_TEACHER_PROFILE_APPROVALS,
@@ -482,6 +485,7 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
     { path: '/crm/gunluk-rapor', icon: FileText, label: 'CRM Günlük Rapor' },
     { path: '/crm/inbox', icon: ClipboardList, label: 'CRM Inbox' },
     { path: '/crm/widgetler', icon: Puzzle, label: 'CRM Widgetler' },
+    { path: '/crm/sablonlar', icon: FileText, label: 'WhatsApp Şablonları' },
     { path: '/crm', icon: ClipboardList, label: 'CRM Pipeline' },
     { path: '/kitap-pazaryeri', icon: ShoppingBag, label: 'Kitap Pazaryeri' },
     { path: '/kitap-magazasi', icon: ShoppingBag, label: 'Kitap Mağazası' },
