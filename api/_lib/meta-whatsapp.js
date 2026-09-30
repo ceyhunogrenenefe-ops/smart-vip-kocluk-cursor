@@ -271,6 +271,9 @@ function metaGraphHint(graphErr) {
  * - Yeni Meta “adlandırılmış” gövde değişkenleri için: her öğe `parameter_name` + `text` gönderilir.
  * @param {string[]} bodyParameterTexts
  * @param {string[] | null | undefined} bodyParameterNames Meta’daki değişken adları (sıra `bodyParameterTexts` ile aynı)
+ * @param {string} [headerType] NONE | TEXT | IMAGE | VIDEO | DOCUMENT
+ * @param {string} [headerMediaUrl] Medya başlığı için herkese açık http(s) adresi
+ * @param {Array<{index?: number, type?: string, text?: string}>} [buttonParameters] Dinamik buton değerleri
  */
 export async function sendMetaTemplateMessage({
   toE164,
@@ -278,7 +281,13 @@ export async function sendMetaTemplateMessage({
   languageCode = 'tr',
   languageCandidates = null,
   bodyParameterTexts,
-  bodyParameterNames = null
+  bodyParameterNames = null,
+  headerType = 'NONE',
+  headerText = '',
+  headerMediaUrl = '',
+  headerMediaId = '',
+  documentFilename = '',
+  buttonParameters = []
 }) {
   const pid = phoneNumberId();
   const tok = token();
@@ -310,12 +319,17 @@ export async function sendMetaTemplateMessage({
   )
     .map((c) => normalizeMetaLanguageCode(c))
     .filter(Boolean);
-  const texts = Array.isArray(bodyParameterTexts) ? bodyParameterTexts : [];
-  const names = Array.isArray(bodyParameterNames) ? bodyParameterNames : null;
-  const useNamed =
-    names != null &&
-    names.length === texts.length &&
-    names.every((n) => String(n || '').trim().length > 0);
+  const { buildTemplateSendComponents } = await import('./meta-template-send-components.js');
+  const sendComponents = buildTemplateSendComponents({
+    bodyParameterTexts,
+    bodyParameterNames,
+    headerType,
+    headerText,
+    headerMediaUrl,
+    headerMediaId,
+    documentFilename,
+    buttonParameters
+  });
 
   function buildPayload(code) {
     /** @type {Record<string, unknown>} */
@@ -329,24 +343,7 @@ export async function sendMetaTemplateMessage({
         language: { code }
       }
     };
-    if (texts.length > 0) {
-      payload.template.components = [
-        {
-          type: 'body',
-          parameters: texts.map((t, i) => {
-            const text = String(t ?? '').slice(0, 4096);
-            if (!useNamed) {
-              return { type: 'text', text };
-            }
-            const parameter_name = String(names[i] || '')
-              .trim()
-              .replace(/^\{\{|\}\}$/g, '')
-              .slice(0, 256);
-            return { type: 'text', parameter_name, text };
-          })
-        }
-      ];
-    }
+    if (sendComponents) payload.template.components = sendComponents;
     return payload;
   }
 

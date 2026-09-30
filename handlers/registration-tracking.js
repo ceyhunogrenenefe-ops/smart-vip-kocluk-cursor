@@ -1560,6 +1560,11 @@ async function handleSendChannelMessage(body, institutionId, actor) {
     ? body.template_param_names.map((x) => String(x ?? '').trim()).filter(Boolean)
     : null;
   const templateBodyPreview = String(body.template_body || '').trim();
+  // Şablonun başlık medyası ve dinamik buton değerleri (varsa)
+  const templateHeaderType = String(body.template_header_type || 'NONE').trim().toUpperCase();
+  const templateHeaderText = String(body.template_header_text || '').trim();
+  const templateHeaderMediaUrl = String(body.template_header_media_url || '').trim();
+  const templateButtonParams = Array.isArray(body.template_button_params) ? body.template_button_params : [];
   let text = String(body.body || '').trim();
   if (templateName && !text) {
     const { fillCrmTemplateBody } = await import('../api/_lib/meta-templates-sync.js');
@@ -1597,7 +1602,11 @@ async function handleSendChannelMessage(body, institutionId, actor) {
             templateName,
             languageCode: templateLanguage,
             bodyParameterTexts: templateParams,
-            bodyParameterNames: templateParamNames
+            bodyParameterNames: templateParamNames,
+            headerType: templateHeaderType,
+            headerText: templateHeaderText,
+            headerMediaUrl: templateHeaderMediaUrl,
+            buttonParameters: templateButtonParams
           });
           sendMeta = {
             ok: true,
@@ -1802,6 +1811,10 @@ async function handleBulkTemplateSend(body, institutionId, actor) {
           template_params: body.template_params || [],
           template_param_names: body.template_param_names || null,
           template_body: templateBody,
+          template_header_type: body.template_header_type || 'NONE',
+          template_header_text: body.template_header_text || '',
+          template_header_media_url: body.template_header_media_url || '',
+          template_button_params: body.template_button_params || [],
           campaign_id: campaignId
         },
         institutionId,

@@ -920,7 +920,12 @@ export async function sendCrmWhatsAppTemplate({
   templateName,
   languageCode = 'tr',
   bodyParameterTexts = [],
-  bodyParameterNames = null
+  bodyParameterNames = null,
+  headerType = 'NONE',
+  headerText = '',
+  headerMediaUrl = '',
+  documentFilename = '',
+  buttonParameters = []
 }) {
   await loadMetaWhatsAppSecretsFromDb();
   if (!metaWhatsAppConfigured()) {
@@ -941,7 +946,12 @@ export async function sendCrmWhatsAppTemplate({
     templateName,
     languageCode: languageCode || 'tr',
     bodyParameterTexts: Array.isArray(bodyParameterTexts) ? bodyParameterTexts : [],
-    bodyParameterNames: Array.isArray(bodyParameterNames) ? bodyParameterNames : null
+    bodyParameterNames: Array.isArray(bodyParameterNames) ? bodyParameterNames : null,
+    headerType,
+    headerText,
+    headerMediaUrl,
+    documentFilename,
+    buttonParameters: Array.isArray(buttonParameters) ? buttonParameters : []
   });
   return {
     messageId: result?.messageId || result?.messages?.[0]?.id || result?.id || null,

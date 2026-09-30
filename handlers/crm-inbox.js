@@ -1067,6 +1067,11 @@ export default async function handler(req, res) {
         ? body.template_param_names.map((x) => String(x ?? '').trim()).filter(Boolean)
         : null;
       const templateBodyPreview = String(body.template_body || '').trim();
+      // Şablonun başlık medyası ve dinamik buton değerleri (varsa)
+      const templateHeaderType = String(body.template_header_type || 'NONE').trim().toUpperCase();
+      const templateHeaderText = String(body.template_header_text || '').trim();
+      const templateHeaderMediaUrl = String(body.template_header_media_url || '').trim();
+      const templateButtonParams = Array.isArray(body.template_button_params) ? body.template_button_params : [];
       if (!conversationId) return res.status(400).json({ error: 'conversation_id_required' });
       if (!templateName && !text) return res.status(400).json({ error: 'body_required' });
 
@@ -1102,7 +1107,11 @@ export default async function handler(req, res) {
                 templateName,
                 languageCode: templateLanguage,
                 bodyParameterTexts: templateParams,
-                bodyParameterNames: templateParamNames
+                bodyParameterNames: templateParamNames,
+                headerType: templateHeaderType,
+                headerText: templateHeaderText,
+                headerMediaUrl: templateHeaderMediaUrl,
+                buttonParameters: templateButtonParams
               });
               sendResult = {
                 ok: true,

@@ -54,12 +54,126 @@ export function extractPositionalTemplateCount(content) {
   return nums.reduce((max, n) => Math.max(max, n), 0);
 }
 
+/** Meta şablon limitleri — UI ve sunucu aynı sayıyı kullansın diye tek yerde. */
+export const TEMPLATE_LIMITS = {
+  nameMax: 512,
+  headerTextMax: 60,
+  bodyMax: 1024,
+  footerMax: 60,
+  quickReplyMax: 3,
+  /** Meta: en çok 1 telefon + 2 URL butonu */
+  phoneButtonMax: 1,
+  urlButtonMax: 2,
+  buttonTextMax: 25,
+  totalButtonMax: 10
+};
+
+export const HEADER_TYPES = ['NONE', 'TEXT', 'IMAGE', 'VIDEO', 'DOCUMENT'];
+
+/**
+ * HEADER bileşeni.
+ *
+ * Medya başlığında Meta, incelemede kullanacağı ÖRNEK medyayı ister; bu örnek
+ * Resumable Upload ile alınan `header_handle` olarak gönderilir. Elimizde
+ * handle yoksa bileşeni hiç üretmeyiz — eksik örnekle gönderim Meta'da
+ * "media example required" hatasıyla döner ve kullanıcı sebebini anlamaz.
+ */
+export function buildHeaderComponent({ headerType, headerText, headerHandle, headerExample } = {}) {
+  const type = String(headerType || 'NONE').toUpperCase();
+  if (type === 'NONE' || !HEADER_TYPES.includes(type)) return null;
+
+  if (type === 'TEXT') {
+    const text = String(headerText || '').trim().slice(0, TEMPLATE_LIMITS.headerTextMax);
+    if (!text) return null;
+    const comp = { type: 'HEADER', format: 'TEXT', text };
+    // Başlıkta değişken kullanıldıysa Meta örnek ister
+    const count = extractPositionalTemplateCount(text);
+    const named = extractNamedTemplateParams(text);
+    if (named.length) {
+      comp.example = {
+        header_text_named_params: named.map((param_name) => ({
+          param_name,
+          example: String(headerExample || exampleForNamedParam(param_name)).slice(0, 60)
+        }))
+      };
+    } else if (count > 0) {
+      comp.example = { header_text: [String(headerExample || 'ornek').slice(0, 60)] };
+    }
+    return comp;
+  }
+
+  const handle = String(headerHandle || '').trim();
+  if (!handle) return null;
+  return { type: 'HEADER', format: type, example: { header_handle: [handle] } };
+}
+
+/** FOOTER bileşeni — değişken kabul etmez. */
+export function buildFooterComponent(footerText) {
+  const text = String(footerText || '').trim().slice(0, TEMPLATE_LIMITS.footerMax);
+  return text ? { type: 'FOOTER', text } : null;
+}
+
+/**
+ * BUTTONS bileşeni.
+ *
+ * Meta karışık kullanıma izin verir ama sayılar sınırlı: en çok 3 hızlı yanıt,
+ * 1 telefon, 2 URL. Sınırı aşanlar sessizce kırpılır — gönderim tamamen
+ * reddedilmektense butonun fazlası düşsün.
+ */
+export function buildButtonsComponent(buttons) {
+  const list = Array.isArray(buttons) ? buttons : [];
+  const out = [];
+  let quick = 0;
+  let phone = 0;
+  let url = 0;
+
+  for (const b of list) {
+    const kind = String(b?.type || '').toUpperCase();
+    const text = String(b?.text || '').trim().slice(0, TEMPLATE_LIMITS.buttonTextMax);
+    if (!text) continue;
+
+    if (kind === 'QUICK_REPLY') {
+      if (quick >= TEMPLATE_LIMITS.quickReplyMax) continue;
+      quick += 1;
+      out.push({ type: 'QUICK_REPLY', text });
+      continue;
+    }
+    if (kind === 'PHONE_NUMBER') {
+      if (phone >= TEMPLATE_LIMITS.phoneButtonMax) continue;
+      const num = String(b?.phone_number || '').replace(/[^\d+]/g, '');
+      if (!num) continue;
+      phone += 1;
+      out.push({ type: 'PHONE_NUMBER', text, phone_number: num });
+      continue;
+    }
+    if (kind === 'URL') {
+      if (url >= TEMPLATE_LIMITS.urlButtonMax) continue;
+      const link = String(b?.url || '').trim();
+      if (!/^https?:\/\//i.test(link)) continue;
+      url += 1;
+      const comp = { type: 'URL', text, url: link };
+      // Dinamik URL: sonunda {{1}} varsa Meta örnek ister
+      if (/\{\{\s*1\s*\}\}/.test(link)) {
+        comp.example = [String(b?.url_example || link.replace(/\{\{\s*1\s*\}\}/, 'ornek'))];
+      }
+      out.push(comp);
+    }
+  }
+  return out.length ? { type: 'BUTTONS', buttons: out } : null;
+}
+
 export function buildMetaTemplateCreatePayload({
   name,
   language = 'tr',
   category = 'UTILITY',
   bodyText,
   examples = {},
+  headerType = 'NONE',
+  headerText = '',
+  headerHandle = '',
+  headerExample = '',
+  footerText = '',
+  buttons = []
 } = {}) {
   const templateName = normalizeMetaTemplateName(name);
   if (!templateName) throw new Error('meta_template_name_required');
@@ -87,12 +201,20 @@ export function buildMetaTemplateCreatePayload({
       ],
     };
   }
+  /**
+   * Bileşen sırası Meta'da anlamlı: HEADER → BODY → FOOTER → BUTTONS.
+   * Header/footer/buton yoksa hiç eklenmez, yani eski davranış birebir korunur.
+   */
+  const header = buildHeaderComponent({ headerType, headerText, headerHandle, headerExample });
+  const footer = buildFooterComponent(footerText);
+  const buttonComp = buildButtonsComponent(buttons);
+
   return {
     name: templateName,
     language: String(language || 'tr').trim() || 'tr',
     category: String(category || 'UTILITY').trim().toUpperCase() || 'UTILITY',
     parameter_format,
     allow_category_change: true,
-    components: [body],
+    components: [header, body, footer, buttonComp].filter(Boolean),
   };
 }

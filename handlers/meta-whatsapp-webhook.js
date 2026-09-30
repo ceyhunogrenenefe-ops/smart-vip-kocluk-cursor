@@ -610,6 +610,21 @@ export default async function handler(req, res) {
 
 const changes = Array.isArray(entry?.changes) ? entry.changes : [];
       for (const change of changes) {
+        /**
+         * Sablon onay/ret bildirimi. Ayri bir alan; mesaj akisiyla ilgisi yok,
+         * bu yuzden 'messages' kontrolunden ONCE ele alinir ve gecilir.
+         */
+        try {
+          const { isTemplateStatusChange, applyTemplateStatusUpdate } = await import(
+            '../api/_lib/meta-template-status-webhook.js'
+          );
+          if (isTemplateStatusChange(change)) {
+            await applyTemplateStatusUpdate(change);
+            continue;
+          }
+        } catch (e) {
+          console.warn('[meta-webhook] sablon durumu:', e instanceof Error ? e.message : e);
+        }
         if (String(change?.field || '') !== 'messages') continue;
         const value = change?.value && typeof change.value === 'object' ? change.value : {};
 

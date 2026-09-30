@@ -34,6 +34,7 @@ import CoachDashboard from './pages/CoachDashboard';
 import CoachGuidePage from './pages/CoachGuidePage';
 import CoachReports from './pages/CoachReports';
 import ParentSatisfactionPage from './pages/ParentSatisfactionPage';
+import WhatsAppTemplatesPage from './pages/WhatsAppTemplatesPage';
 import AdminPanel from './pages/AdminPanel';
 import BookTracking from './pages/BookTracking';
 import WrittenExamTracking from './components/WrittenExamTracking';
@@ -606,6 +607,15 @@ function App() {
               <ProtectedRoute allowedRoles={rolesForProtectedRoute('/coach-kilavuz')}>
                 <Layout>
                   <CoachGuidePage />
+                </Layout>
+              </ProtectedRoute>
+            } />
+
+            {/* WhatsApp / Meta şablon yöneticisi */}
+            <Route path="/crm/sablonlar" element={
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/crm/sablonlar')}>
+                <Layout>
+                  <WhatsAppTemplatesPage />
                 </Layout>
               </ProtectedRoute>
             } />
