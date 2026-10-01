@@ -19,6 +19,7 @@ import {
 } from '../api/_lib/registration-channel-ingest.js';
 import {
   syncWhatsAppValueToCrm,
+  syncWhatsAppEchoesToCrm,
   syncInstagramMessagingToCrm,
   syncInstagramCommentsToCrm,
   syncFacebookCommentsToCrm
@@ -624,6 +625,26 @@ const changes = Array.isArray(entry?.changes) ? entry.changes : [];
           }
         } catch (e) {
           console.warn('[meta-webhook] sablon durumu:', e instanceof Error ? e.message : e);
+        }
+        // WhatsApp Business uygulamasından (telefondan) verilen cevaplar → CRM'e giden mesaj
+        if (String(change?.field || '') === 'smb_message_echoes') {
+          const echoValue = change?.value && typeof change.value === 'object' ? change.value : {};
+          statusOnly = false;
+          try {
+            const echoInstitutionId = await institutionForIncoming({
+              phoneNumberId: echoValue?.metadata?.phone_number_id
+            });
+            const er = await syncWhatsAppEchoesToCrm(
+              echoValue,
+              echoInstitutionId ? { institutionId: echoInstitutionId } : {}
+            );
+            console.info('[meta-webhook] wa telefondan cevap (echo) synced', er?.processed || 0);
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            console.warn('[meta-webhook] wa echo sync:', msg);
+            crmSyncErrors.push(`whatsapp_echo:${msg}`);
+          }
+          continue;
         }
         if (String(change?.field || '') !== 'messages') continue;
         const value = change?.value && typeof change.value === 'object' ? change.value : {};
