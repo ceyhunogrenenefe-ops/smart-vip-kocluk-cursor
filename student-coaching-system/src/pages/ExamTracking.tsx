@@ -736,59 +736,8 @@ export default function ExamTracking() {
 
   const hasPdfErrors = pdfErrors.some(Boolean);
 
-  // Varsayılan mock veriler
-  const defaultExamResults: ExamResult[] = [
-    {
-      id: '1',
-      studentId: '1',
-      examType: 'TYT',
-      examDate: '2024-01-15',
-      source: 'webhook',
-      totalNet: 28.5,
-      subjects: [
-        { name: 'Türkçe', net: 8.75, correct: 9, wrong: 0, blank: 1 },
-        { name: 'Matematik', net: 7.25, correct: 8, wrong: 1, blank: 1 },
-        { name: 'Sosyal', net: 6.0, correct: 6, wrong: 2, blank: 2 },
-        { name: 'Fen', net: 6.5, correct: 7, wrong: 1, blank: 2 }
-      ],
-      createdAt: '2024-01-15T14:30:00Z'
-    },
-    {
-      id: '2',
-      studentId: '1',
-      examType: 'TYT',
-      examDate: '2024-01-08',
-      source: 'manual',
-      totalNet: 25.0,
-      subjects: [
-        { name: 'Türkçe', net: 7.0, correct: 7, wrong: 2, blank: 1 },
-        { name: 'Matematik', net: 6.5, correct: 7, wrong: 2, blank: 1 },
-        { name: 'Sosyal', net: 5.5, correct: 6, wrong: 3, blank: 1 },
-        { name: 'Fen', net: 6.0, correct: 6, wrong: 2, blank: 2 }
-      ],
-      createdAt: '2024-01-08T10:00:00Z'
-    },
-    {
-      id: '3',
-      studentId: '2',
-      examType: 'AYT',
-      examDate: '2024-01-14',
-      source: 'webhook',
-      totalNet: 45.0,
-      subjects: [
-        { name: 'Matematik', net: 15.0, correct: 15, wrong: 2, blank: 3 },
-        { name: 'Fizik', net: 10.0, correct: 10, wrong: 1, blank: 4 },
-        { name: 'Kimya', net: 10.0, correct: 10, wrong: 0, blank: 5 },
-        { name: 'Biyoloji', net: 10.0, correct: 10, wrong: 0, blank: 5 }
-      ],
-      createdAt: '2024-01-14T16:00:00Z'
-    }
-  ];
-
-  // AppContext'ten gelen examResults veya varsayılan veriler
-  const allExamResults = useMemo(() => {
-    return examResults.length > 0 ? examResults : defaultExamResults;
-  }, [examResults]);
+  // Yalnız gerçek (AppContext) deneme sonuçları — örnek veri gösterilmez
+  const allExamResults = examResults;
 
   // PDF'den eklenenleri göstermek için kaynak etiketi
   const getSourceLabel = (source: string) => {
