@@ -181,3 +181,68 @@ export function summarizeByAgent(rows, nameById = {}) {
   }
   return [...map.values()].sort((a, b) => b.assigned - a.assigned);
 }
+
+/**
+ * Olumlu sayılan yanıtlar.
+ *
+ * Her sorunun ölçeği farklı: ders sürecinde "Çok Memnun", koçlukta "Çok
+ * Düzenli", teknikte "Sorunsuz". Tek bir memnuniyet oranı verebilmek için
+ * hangi seçeneğin olumlu sayıldığı burada, soru tanımlarının yanında durur —
+ * ekranda tekrar tekrar karar verilmesin.
+ */
+const POSITIVE_ANSWERS = {
+  q_lessons: ['very_satisfied', 'satisfied'],
+  q_coach: ['very_regular', 'enough'],
+  q_tech: ['fine'],
+  q_recommend: ['definitely', 'maybe']
+};
+
+/** Dikkat isteyen yanıtlar — yöneticinin önce bakması gerekenler. */
+const NEGATIVE_ANSWERS = {
+  q_lessons: ['unsatisfied'],
+  q_coach: ['insufficient', 'unreachable'],
+  q_tech: ['serious'],
+  q_recommend: ['no']
+};
+
+/**
+ * Anket yanıtlarının soru bazlı dağılımı.
+ *
+ * Yalnız yanıtlanmış görüşmeler sayılır: aranmamış öğrenci oranı bozmasın.
+ * Yüzdeler o sorunun kendi yanıt sayısına göre hesaplanır, çünkü her soru
+ * aynı sayıda yanıtlanmayabiliyor (görüşme yarıda kesilebiliyor).
+ *
+ * @param {Array<Record<string, unknown>>} rows satır başına en güncel yanıtlar
+ * @returns {Array<{id,title,answered,options,positive,negative,positive_rate}>}
+ */
+export function summarizeSurveyAnswers(rows) {
+  return SURVEY_QUESTIONS.map((q) => {
+    const counts = new Map(q.options.map((o) => [o.id, 0]));
+    let answered = 0;
+    for (const r of rows || []) {
+      const v = String(r?.[q.id] ?? '').trim();
+      if (!v || !counts.has(v)) continue;
+      counts.set(v, counts.get(v) + 1);
+      answered += 1;
+    }
+    const positive = (POSITIVE_ANSWERS[q.id] || []).reduce((n, id) => n + (counts.get(id) || 0), 0);
+    const negative = (NEGATIVE_ANSWERS[q.id] || []).reduce((n, id) => n + (counts.get(id) || 0), 0);
+    return {
+      id: q.id,
+      title: q.title,
+      answered,
+      options: q.options.map((o) => ({
+        id: o.id,
+        label: o.label,
+        count: counts.get(o.id) || 0,
+        // Yanıt yokken 0'a bölmeyelim; çubuklar boş görünsün
+        percent: answered ? Math.round((counts.get(o.id) || 0) * 1000 / answered) / 10 : 0,
+        positive: (POSITIVE_ANSWERS[q.id] || []).includes(o.id),
+        negative: (NEGATIVE_ANSWERS[q.id] || []).includes(o.id)
+      })),
+      positive,
+      negative,
+      positive_rate: answered ? Math.round(positive * 1000 / answered) / 10 : 0
+    };
+  });
+}

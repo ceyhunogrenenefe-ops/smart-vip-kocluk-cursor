@@ -14,6 +14,10 @@ type Row = {
   parent_phone: string | null;
   coach_name: string | null;
   institution_id: string | null;
+  q_lessons: string | null;
+  q_coach: string | null;
+  q_tech: string | null;
+  q_recommend: string | null;
   agent_user_id: string | null;
   call_status: string;
   last_call_at: string | null;
@@ -158,6 +162,49 @@ export default function ParentSatisfactionPage() {
     }
   };
 
+  /**
+   * Anket istatistiği filtrelenmiş listeden hesaplanır: üstteki kurum, sınıf,
+   * temsilci ve durum filtreleri sonuçlara da uygulansın.
+   */
+  const surveyStats = useMemo(() => {
+    const positive: Record<string, string[]> = {
+      q_lessons: ['very_satisfied', 'satisfied'],
+      q_coach: ['very_regular', 'enough'],
+      q_tech: ['fine'],
+      q_recommend: ['definitely', 'maybe']
+    };
+    const negative: Record<string, string[]> = {
+      q_lessons: ['unsatisfied'],
+      q_coach: ['insufficient', 'unreachable'],
+      q_tech: ['serious'],
+      q_recommend: ['no']
+    };
+    return (meta?.questions || []).map((q) => {
+      const counts: Record<string, number> = {};
+      let answered = 0;
+      for (const r of filtered) {
+        const v = String((r as unknown as Record<string, unknown>)[q.id] ?? '').trim();
+        if (!v || !q.options.some((o) => o.id === v)) continue;
+        counts[v] = (counts[v] || 0) + 1;
+        answered += 1;
+      }
+      const pos = (positive[q.id] || []).reduce((n, id) => n + (counts[id] || 0), 0);
+      return {
+        id: q.id,
+        title: q.title,
+        answered,
+        positiveRate: answered ? Math.round((pos * 1000) / answered) / 10 : 0,
+        options: q.options.map((o) => ({
+          ...o,
+          count: counts[o.id] || 0,
+          percent: answered ? Math.round(((counts[o.id] || 0) * 1000) / answered) / 10 : 0,
+          good: (positive[q.id] || []).includes(o.id),
+          bad: (negative[q.id] || []).includes(o.id)
+        }))
+      };
+    });
+  }, [filtered, meta]);
+
   const statusLabel = (id: string) => meta?.statuses.find((s) => s.id === id)?.label || 'Aranacak';
   const statusDot = (id: string) => meta?.statuses.find((s) => s.id === id)?.dot || '🟡';
 
@@ -191,6 +238,61 @@ export default function ParentSatisfactionPage() {
           </div>
         ))}
       </div>
+
+      {/* Anket sonuçları — üstteki filtrelere göre */}
+      {surveyStats.some((q) => q.answered > 0) ? (
+        <section className="rounded-xl border border-slate-200 bg-white p-4">
+          <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+            <h2 className="text-sm font-semibold text-slate-900">Anket Sonuçları</h2>
+            <p className="text-[11px] text-slate-500">
+              Yalnız görüşmesi tamamlanmış veliler sayılır · seçili filtrelere göre
+            </p>
+          </div>
+          <div className="grid gap-4 lg:grid-cols-2">
+            {surveyStats.map((q) => (
+              <div key={q.id} className="rounded-lg border border-slate-100 bg-slate-50/60 p-3">
+                <div className="flex flex-wrap items-baseline justify-between gap-2">
+                  <h3 className="text-xs font-semibold text-slate-800">{q.title}</h3>
+                  <span className="text-[11px] text-slate-500">
+                    {q.answered} yanıt ·{' '}
+                    <span
+                      className={`font-semibold ${
+                        q.positiveRate >= 75
+                          ? 'text-emerald-700'
+                          : q.positiveRate >= 50
+                            ? 'text-amber-700'
+                            : 'text-rose-700'
+                      }`}
+                    >
+                      %{q.positiveRate} olumlu
+                    </span>
+                  </span>
+                </div>
+                <div className="mt-2 space-y-1.5">
+                  {q.options.map((o) => (
+                    <div key={o.id} className="flex items-center gap-2">
+                      <span className="w-40 shrink-0 truncate text-[11px] text-slate-600" title={o.label}>
+                        {o.label}
+                      </span>
+                      <span className="h-2 flex-1 overflow-hidden rounded-full bg-slate-200">
+                        <span
+                          className={`block h-full rounded-full ${
+                            o.good ? 'bg-emerald-500' : o.bad ? 'bg-rose-500' : 'bg-amber-400'
+                          }`}
+                          style={{ width: `${o.percent}%` }}
+                        />
+                      </span>
+                      <span className="w-20 shrink-0 text-right text-[11px] tabular-nums text-slate-600">
+                        {o.count} · %{o.percent}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       {isManager && byAgent.length ? (
         <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
