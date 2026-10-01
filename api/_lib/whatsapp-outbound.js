@@ -210,6 +210,28 @@ async function sendWhatsAppUsingTemplateRowOnce({
     };
   }
 
+  // Yalnız-gateway kurumu: şablon metni düz yazı olarak kurum gateway'inden gider, Meta kullanılmaz
+  {
+    const { gatewayOnlyPolicyForPhone, sendViaInstitutionGateway } = await import('./institution-wa-policy.js');
+    const policy = await gatewayOnlyPolicyForPhone(e164);
+    if (policy) {
+      const text = renderMessageTemplate(String(templateRow?.content || ''), vars || {}).trim();
+      const r = await sendViaInstitutionGateway({ policy, phone: e164, text });
+      return {
+        ok: r.ok,
+        sid: r.ok ? r.sid || null : null,
+        channel: 'institution_gateway',
+        error: r.ok ? null : r.error,
+        errorCode: r.ok ? null : r.errorCode,
+        bodyPreview: text.slice(0, 800),
+        templateType: templateType || null,
+        meta_template_name: 'gateway_plain',
+        gateway_message_id: r.ok ? r.sid || null : null,
+        twilio_content_sid: null
+      };
+    }
+  }
+
   const metaName = resolveMetaTemplateName(templateRow, templateType);
   const lang = normalizeMetaLanguageCode(templateRow?.meta_template_language);
 
