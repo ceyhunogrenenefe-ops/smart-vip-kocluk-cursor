@@ -160,7 +160,8 @@ export async function buildSalesBoard({ institutionId, userId = null, channel = 
       });
     }
   }
-  waiting.sort((a, b) => b.waiting_minutes - a.waiting_minutes);
+  // En yeni mesaj en üstte (en kısa bekleyen önce)
+  waiting.sort((a, b) => a.waiting_minutes - b.waiting_minutes);
 
   // Görevler: gecikmiş + bugün
   let tq = supabaseAdmin
@@ -168,7 +169,7 @@ export async function buildSalesBoard({ institutionId, userId = null, channel = 
     .select('id, lead_id, title, task_type, priority, due_at, assigned_to, auto_generated, follow_up_stage, review_required')
     .eq('status', 'pending')
     .lt('due_at', new Date(dayEnd).toISOString())
-    .order('due_at', { ascending: true })
+    .order('due_at', { ascending: false })
     .limit(300);
   if (institutionId) tq = tq.eq('institution_id', institutionId);
   if (userId) tq = tq.eq('assigned_to', userId);
