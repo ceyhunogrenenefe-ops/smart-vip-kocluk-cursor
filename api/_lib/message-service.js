@@ -242,7 +242,8 @@ async function sendViaMetaApi({ phone, text, templateRow, vars, notificationType
     }
     return {
       ...meta,
-      channel: SEND_CHANNELS.META_API,
+      // Yalnız-gateway kurumunda mesaj kurum gateway'inden gider; kanal etiketi korunur
+      channel: meta.channel === 'institution_gateway' ? meta.channel : SEND_CHANNELS.META_API,
       bodyPreview: text.slice(0, 800)
     };
   }

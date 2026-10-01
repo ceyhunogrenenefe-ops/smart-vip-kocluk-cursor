@@ -275,6 +275,42 @@ function metaGraphHint(graphErr) {
  * @param {string} [headerMediaUrl] Medya başlığı için herkese açık http(s) adresi
  * @param {Array<{index?: number, type?: string, text?: string}>} [buttonParameters] Dinamik buton değerleri
  */
+/**
+ * Yalnız-gateway kurumları (institutions.whatsapp_send_mode='gateway_only'):
+ * bu kurumların öğrenci/veli numaralarına Meta'dan mesaj gitmez.
+ * Döngüsel import olmasın diye dinamik yüklenir.
+ */
+async function gatewayOnlyPolicyFor(toE164) {
+  try {
+    const { gatewayOnlyPolicyForPhone } = await import('./institution-wa-policy.js');
+    return await gatewayOnlyPolicyForPhone(toE164);
+  } catch {
+    return null;
+  }
+}
+
+async function blockIfGatewayOnly(toE164, kind) {
+  const policy = await gatewayOnlyPolicyFor(toE164);
+  if (!policy) return;
+  const { gatewayOnlyBlockedError } = await import('./institution-wa-policy.js');
+  console.warn('[meta-whatsapp] yalnız-gateway kurum, Meta engellendi', { kind, institution: policy.institutionName });
+  throw gatewayOnlyBlockedError(policy, kind);
+}
+
+/** Yalnız-gateway kurumunda metni kurum gateway'inden gönderir; aksi halde null. */
+async function sendTextViaGatewayIfRequired(toE164, text) {
+  const policy = await gatewayOnlyPolicyFor(toE164);
+  if (!policy) return null;
+  const { sendViaInstitutionGateway, gatewayOnlyBlockedError } = await import('./institution-wa-policy.js');
+  const r = await sendViaInstitutionGateway({ policy, phone: toE164, text });
+  if (!r.ok) {
+    const err = gatewayOnlyBlockedError(policy, r.errorCode || 'gateway_failed');
+    err.gateway = r;
+    throw err;
+  }
+  return { messageId: r.sid || null, raw: { provider: 'institution_gateway' }, provider: 'institution_gateway' };
+}
+
 export async function sendMetaTemplateMessage({
   toE164,
   templateName,
@@ -303,6 +339,8 @@ export async function sendMetaTemplateMessage({
     err.code = 'PHONE';
     throw err;
   }
+
+  await blockIfGatewayOnly(toE164, 'template');
 
   const url = `https://graph.facebook.com/${GRAPH()}/${pid}/messages`;
   const name = String(templateName || '').trim();
@@ -437,6 +475,8 @@ export async function sendMetaTemplateMessage({
  * institutionId verilirse o kurumun kendi Meta hesabı kullanılır (platform dışı kurumlar).
  */
 export async function sendMetaTextMessage({ toE164, text, institutionId = null }) {
+  const viaGateway = await sendTextViaGatewayIfRequired(toE164, text);
+  if (viaGateway) return viaGateway;
   const own = await resolveInstitutionWhatsApp(institutionId);
   const pid = own.phoneNumberId || phoneNumberId();
   const tok = own.token || token();
@@ -493,6 +533,7 @@ export async function sendMetaTextMessage({ toE164, text, institutionId = null }
  * Interactive reddedilirse çağıran taraf düz metne düşer.
  */
 export async function sendMetaInteractiveMessage({ toE164, interactive, institutionId = null }) {
+  await blockIfGatewayOnly(toE164, 'interactive');
   const own = await resolveInstitutionWhatsApp(institutionId);
   const pid = own.phoneNumberId || phoneNumberId();
   const tok = own.token || token();
@@ -548,6 +589,13 @@ export async function sendMetaDocumentWithLink({
   filename = 'document.pdf',
   caption = ''
 }) {
+  {
+    const cap = String(caption || '').trim();
+    const link = String(documentUrl || '').trim();
+    const gatewayText = [cap, `📄 ${String(filename || 'Belge')}: ${link}`].filter(Boolean).join('\n\n');
+    const viaGateway = link ? await sendTextViaGatewayIfRequired(toE164, gatewayText) : null;
+    if (viaGateway) return { ...viaGateway, contactWaId: null };
+  }
   const pid = phoneNumberId();
   const tok = token();
   if (!pid || !tok) {
@@ -644,6 +692,7 @@ export async function sendMetaDocumentMessage({
   caption = '',
   mimeType = 'application/pdf'
 }) {
+  await blockIfGatewayOnly(toE164, 'document');
   const pid = phoneNumberId();
   const tok = token();
   if (!pid || !tok) {
