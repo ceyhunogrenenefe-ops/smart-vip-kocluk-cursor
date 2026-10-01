@@ -334,7 +334,8 @@ export async function handleListOpsTasks(institutionId, filters = {}) {
       'id, lead_id, assigned_to, title, description, task_type, priority, status, due_at, completed_at, created_at, registration_leads(id, first_name, last_name, full_name, phone, normalized_phone, stage, primary_status)'
     )
     .eq('institution_id', institutionId)
-    .order('due_at', { ascending: true, nullsFirst: false })
+    // Yeni tarihten eskiye
+    .order('due_at', { ascending: false, nullsFirst: false })
     .limit(400);
   if (assignee) q = q.eq('assigned_to', assignee);
 
@@ -345,7 +346,7 @@ export async function handleListOpsTasks(institutionId, filters = {}) {
         .from('registration_tasks')
         .select('*')
         .eq('institution_id', institutionId)
-        .order('due_at', { ascending: true })
+        .order('due_at', { ascending: false, nullsFirst: false })
         .limit(400);
       if (e2) throw e2;
       return { items: await hydrateTasks(flat || [], institutionId, bucket, start, end), range };
