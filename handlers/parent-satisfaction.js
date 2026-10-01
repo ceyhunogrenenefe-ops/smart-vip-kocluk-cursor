@@ -109,6 +109,12 @@ async function loadRows(institutionId) {
       action_type: last?.action_type || null,
       satisfaction: last?.q_lessons || null,
       recommend: last?.q_recommend || null,
+      // Dört yanıt da satırda: istatistik ekrandaki filtrelere (kurum, sınıf,
+      // temsilci) uyacak şekilde süzülmüş listeden hesaplansın
+      q_lessons: last?.q_lessons || null,
+      q_coach: last?.q_coach || null,
+      q_tech: last?.q_tech || null,
+      q_recommend: last?.q_recommend || null,
       has_referral: list.some((x) => x.referral_lead_id),
       survey_count: list.length
     };

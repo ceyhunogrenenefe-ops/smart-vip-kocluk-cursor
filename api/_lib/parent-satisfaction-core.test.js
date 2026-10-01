@@ -9,7 +9,8 @@ import {
   deriveCallStatus,
   recommendOpensReferral,
   summarizeByAgent,
-  summarizeCalls
+  summarizeCalls,
+  summarizeSurveyAnswers
 } from './parent-satisfaction-core.js';
 
 describe('arama durumu türetimi', () => {
@@ -121,5 +122,63 @@ describe('yönetici özeti', () => {
   it('boş liste sıfır döner', () => {
     assert.equal(summarizeCalls([]).total, 0);
     assert.deepEqual(summarizeByAgent([]), []);
+  });
+});
+
+describe('anket yanit dagilimi', () => {
+  it('yalnız yanıtlanmış görüşmeler sayılır', () => {
+    const r = summarizeSurveyAnswers([
+      { q_lessons: 'satisfied' },
+      { q_lessons: '' },
+      { q_lessons: null },
+      {}
+    ]);
+    assert.equal(r[0].answered, 1);
+  });
+
+  it('yüzde o sorunun kendi yanıt sayısına göre', () => {
+    const r = summarizeSurveyAnswers([
+      { q_lessons: 'satisfied', q_tech: 'fine' },
+      { q_lessons: 'unsatisfied' }
+    ]);
+    const lessons = r.find((x) => x.id === 'q_lessons');
+    const tech = r.find((x) => x.id === 'q_tech');
+    assert.equal(lessons.answered, 2);
+    assert.equal(tech.answered, 1);
+    assert.equal(tech.options.find((o) => o.id === 'fine').percent, 100);
+  });
+
+  it('her sorunun olumlu seçeneği kendi ölçeğine göre', () => {
+    const r = summarizeSurveyAnswers([{ q_coach: 'enough', q_tech: 'fine', q_recommend: 'definitely' }]);
+    assert.equal(r.find((x) => x.id === 'q_coach').positive_rate, 100);
+    assert.equal(r.find((x) => x.id === 'q_tech').positive_rate, 100);
+    assert.equal(r.find((x) => x.id === 'q_recommend').positive_rate, 100);
+  });
+
+  it('olumsuz yanıtlar ayrı sayılır', () => {
+    const r = summarizeSurveyAnswers([
+      { q_coach: 'unreachable' },
+      { q_coach: 'insufficient' },
+      { q_coach: 'enough' }
+    ]);
+    const coach = r.find((x) => x.id === 'q_coach');
+    assert.equal(coach.negative, 2);
+    assert.equal(coach.positive, 1);
+  });
+
+  it('tanınmayan yanıt sayılmaz', () => {
+    const r = summarizeSurveyAnswers([{ q_lessons: 'bilinmeyen' }]);
+    assert.equal(r[0].answered, 0);
+  });
+
+  it('boş listede sıfıra bölme yok', () => {
+    const r = summarizeSurveyAnswers([]);
+    assert.equal(r.length, 4);
+    for (const q of r) {
+      assert.equal(q.answered, 0);
+      assert.equal(q.positive_rate, 0);
+      assert.equal(q.options.every((o) => o.percent === 0), true);
+    }
+    assert.equal(summarizeSurveyAnswers(null).length, 4);
   });
 });
