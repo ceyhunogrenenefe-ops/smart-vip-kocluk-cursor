@@ -7,6 +7,7 @@ import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { errorMessage } from '../api/_lib/error-msg.js';
 import { isMissingTableError } from '../api/_lib/supabase-schema.js';
 import { isUuid } from '../api/_lib/uuid.js';
+import { loadCrmInboxMessagesForLead, mergeLeadChannelMessages } from '../api/_lib/crm-lead-messages.js';
 import { isContactUpdate, markLeadContacted } from '../api/_lib/registration-lead-contact.js';
 import {
   normalizeTrPhone,
@@ -412,10 +413,11 @@ async function handleGetLead(leadId, institutionId, tags) {
       .order('created_at', { ascending: false })
       .limit(100),
     supabaseAdmin.from('registration_lead_tags').select('tag_id, registration_tags(id, name, color)').eq('lead_id', leadId),
+    // En yeni 200 mesaj (aşağıda eskiden yeniye çevrilir)
     supabaseAdmin
       .from('registration_channel_messages').select('id, channel, direction, body, message_type, contact_name, phone, occurred_at, external_message_id, created_at')
       .eq('lead_id', leadId)
-      .order('occurred_at', { ascending: true })
+      .order('occurred_at', { ascending: false })
       .limit(200)
   ]);
 
@@ -437,6 +439,15 @@ async function handleGetLead(leadId, institutionId, tags) {
       external_message_id: m.external_message_id,
       created_at: m.created_at
     }));
+  }
+
+  // CRM Gelen Kutusu mesajları (temsilcinin panelden / telefondan yazdıkları dahil) kartta da görünsün
+  try {
+    const crmMsgs = await loadCrmInboxMessagesForLead(lead);
+    channelMessages = mergeLeadChannelMessages(channelMessages, crmMsgs);
+  } catch (e) {
+    console.warn('[registration-tracking] crm mesajları birleştirilemedi:', e instanceof Error ? e.message : e);
+    channelMessages = mergeLeadChannelMessages(channelMessages, []);
   }
 
   return {

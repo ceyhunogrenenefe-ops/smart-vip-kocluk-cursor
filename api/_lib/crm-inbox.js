@@ -606,6 +606,51 @@ export async function syncWhatsAppValueToCrm(value, { institutionId } = {}) {
   return { processed, skipped, issues };
 }
 
+/**
+ * WhatsApp Business uygulamasından (telefondan) gönderilen mesajlar.
+ * Coexistence hatlarında Meta bunları `smb_message_echoes` alanıyla yollar:
+ * value.message_echoes[] = { from: işletme, to: müşteri, id, timestamp, type, text }.
+ * CRM'e giden (outbound) temsilci mesajı olarak yazılır.
+ */
+export async function syncWhatsAppEchoesToCrm(value, { institutionId } = {}) {
+  const echoes = Array.isArray(value?.message_echoes) ? value.message_echoes : [];
+  if (!echoes.length) return { processed: 0, skipped: 0, issues: [] };
+
+  await ensureCrmInboxSchema().catch(() => null);
+
+  let processed = 0;
+  let skipped = 0;
+  const issues = [];
+  for (const m of echoes) {
+    const to = String(m?.to || '').trim();
+    if (!to) continue;
+    const { body: textBody, mediaUrl } = whatsappInboundBody(m);
+    const r = await upsertCrmMessage({
+      channel: 'whatsapp',
+      contactIdentifier: to,
+      contactName: null,
+      body: textBody,
+      mediaUrl,
+      messageType: String(m?.type || 'text').toLowerCase(),
+      messageId: m?.id ? String(m.id) : null,
+      timestamp: m?.timestamp,
+      direction: 'outbound',
+      senderType: 'agent',
+      institutionId,
+      payload: { ...m, source: 'whatsapp_business_app_echo' },
+      deliveryStatus: 'sent'
+    });
+    if (r?.ok) {
+      processed += 1;
+    } else {
+      skipped += 1;
+      const reason = String(r?.reason || 'unknown');
+      if (!issues.includes(reason)) issues.push(reason);
+    }
+  }
+  return { processed, skipped, issues };
+}
+
 export async function syncInstagramMessagingToCrm(events, { institutionId, channel = 'instagram' } = {}) {
   const ch = normalizeCrmChannel(channel) === 'whatsapp' ? 'instagram' : normalizeCrmChannel(channel);
   const list = Array.isArray(events) ? events : [];
