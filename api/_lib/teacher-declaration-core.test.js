@@ -178,15 +178,21 @@ describe('tür tanımları', () => {
   });
 });
 
-describe('bozuk kimlik koruması', () => {
-  it('UUID olmayan değer sorguya girmemeli', async () => {
+describe('kimlik biçimi', () => {
+  it('UUID tanıma doğru çalışır', async () => {
     const { isUuid } = await import('./teacher-declaration-notify.js');
     assert.equal(isUuid('73323d75-eea1-4552-8bba-d50555423589'), true);
-    // Gerçek veride görülen bozuk değer: tek başına bütün listeyi düşürüyordu
-    assert.equal(isUuid('demo-coach'), false);
+    assert.equal(isUuid('user-1777390290346-2saxl7phn'), false);
     assert.equal(isUuid(''), false);
     assert.equal(isUuid(null), false);
-    assert.equal(isUuid('123'), false);
+  });
+
+  it('kullanıcı kimlikleri UUID olmak zorunda değil', async () => {
+    const { isUuid } = await import('./teacher-declaration-notify.js');
+    // Bu veritabanında users.id TEXT; bir kısmı "user-1777..." biçiminde.
+    // Kimlikleri UUID'e zorlamak o kullanıcıları sessizce listeden düşürürdü;
+    // bu yüzden süzme YAPILMAZ, kolonlar text'e çevrildi.
+    assert.equal(isUuid('user-1777390290346-2saxl7phn'), false);
   });
 });
 

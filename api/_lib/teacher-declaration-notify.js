@@ -32,11 +32,11 @@ const DEFAULT_MESSAGE =
 /**
  * Kimlik gerçekten UUID mi?
  *
- * Eski/deneme kayıtlarında `meetings.coach_user_id` gibi alanlarda
- * "demo-coach" benzeri UUID olmayan değerler bulunabiliyor. Böyle bir değer
- * `in(...)` sorgusuna girdiğinde Postgres bütün sorguyu reddediyor ve tek bir
- * bozuk satır yüzünden hiç kimse listeye eklenemiyor. Bu yüzden kimlikler
- * sorguya girmeden önce süzülür.
+ * Bu veritabanında kullanıcı kimlikleri TEXT'tir ve bir kısmı
+ * "user-1777390290346-2saxl7phn" biçimindedir. Bu yüzden kimlikleri UUID
+ * olmaya zorlamak YANLIŞTIR — öyle yapılırsa o kullanıcılar sessizce listeden
+ * düşer. Fonksiyon yalnız biçim bilgisi gerektiğinde kullanılır, süzme
+ * amacıyla değil.
  */
 export function isUuid(value) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(value || '').trim());
@@ -131,7 +131,7 @@ export async function loadActiveWorkerIds({ period, institutionId = null }) {
 
   const ekle = (v) => {
     const id = String(v || '').trim();
-    if (isUuid(id)) ids.add(id);
+    if (id) ids.add(id);
   };
   for (const r of cls) ekle(r.teacher_id);
   for (const r of prv) ekle(r.teacher_id);
@@ -163,7 +163,7 @@ export async function ensureDeclarationsForPeriod({ period, institutionId = null
   // O dönem çalışmış ama rolü teacher/coach olmayanlar da listeye girsin
   const activeIds = await loadActiveWorkerIds({ period: p, institutionId });
   const known = new Set((roleUsers || []).map((u) => String(u.id)));
-  const extraIds = [...activeIds].filter((id) => !known.has(id) && isUuid(id));
+  const extraIds = [...activeIds].filter((id) => !known.has(id));
   let extras = [];
   if (extraIds.length) {
     const { data } = await supabaseAdmin
@@ -366,7 +366,7 @@ export async function runTeacherDeclarationNotifyJob(opts = {}) {
   const r = await sendDeclarationMessages({
     period,
     kind: isFirst ? 'initial' : 'reminder',
-    onlyTeacherIds: [...activeIds].filter(isUuid),
+    onlyTeacherIds: [...activeIds],
     dryRun: opts.dryRun === true
   });
   const sent = r.sent;
