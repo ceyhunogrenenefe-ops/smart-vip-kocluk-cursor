@@ -189,3 +189,32 @@ describe('bozuk kimlik koruması', () => {
     assert.equal(isUuid('123'), false);
   });
 });
+
+describe('beyanın hakedişe bağlanması', () => {
+  it('dönem tam bir takvim ayıysa beyan eşleşir', async () => {
+    const { periodMonthForRange } = await import('./teacher-declaration-payroll.js');
+    assert.equal(periodMonthForRange('2026-09-01', '2026-09-30'), '2026-09-01');
+    assert.equal(periodMonthForRange('2026-02-01', '2026-02-28'), '2026-02-01');
+    assert.equal(periodMonthForRange('2028-02-01', '2028-02-29'), '2028-02-01');
+  });
+
+  it('yarım dönemde beyan eşleşmez', async () => {
+    const { periodMonthForRange } = await import('./teacher-declaration-payroll.js');
+    // Beyan ayın tamamını kapsıyor; yarım aralıkla karşılaştırmak yanıltıcı olur
+    assert.equal(periodMonthForRange('2026-09-05', '2026-09-30'), null);
+    assert.equal(periodMonthForRange('2026-09-01', '2026-09-20'), null);
+    assert.equal(periodMonthForRange('2026-09-01', '2026-10-31'), null);
+    assert.equal(periodMonthForRange('', ''), null);
+  });
+
+  it('fark yalnız ders kalemlerinde uyuşmazlık sayılır', async () => {
+    const { declarationMismatch } = await import('./teacher-declaration-payroll.js');
+    assert.equal(declarationMismatch({ group: 40, private: 8 }, { group_units: 40, private_units: 8 }), false);
+    assert.equal(declarationMismatch({ group: 42, private: 8 }, { group_units: 40, private_units: 8 }), true);
+    // Rehberlik farkı hakediş uyuşmazlığı sayılmaz
+    assert.equal(
+      declarationMismatch({ group: 40, private: 8, guidance: 16 }, { group_units: 40, private_units: 8 }),
+      false
+    );
+  });
+});

@@ -12,6 +12,11 @@ import {
 } from '../api/_lib/actor-roles.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import {
+  declarationMismatch,
+  loadDeclarationsForPayroll,
+  periodMonthForRange
+} from '../api/_lib/teacher-declaration-payroll.js';
+import {
   GROUP_LESSON_UNIT_MINUTES,
   roundUnits,
   sessionLessonUnits40
@@ -321,6 +326,13 @@ async function handleSummary(req, res, actor, roleSet) {
   const names = await loadTeacherNames([...teacherIds]);
   const defaultRates = await loadDefaultRates();
   const ratesMap = await loadRatesMap([...teacherIds], defaultRates);
+  // CRM'deki aylık beyanlar: hakedişi belirlemez, yanına konur
+  const declarations = await loadDeclarationsForPayroll({
+    from: period.from,
+    to: period.to,
+    institutionId,
+    teacherIds: [...teacherIds]
+  });
 
   const extrasByTeacher = new Map();
   for (const item of lineItems) {
@@ -402,6 +414,20 @@ async function handleSummary(req, res, actor, roleSet) {
         private_units: roundUnits(approvedPrivate),
         guidance_units: roundUnits(approvedGuidance)
       },
+      declaration: (() => {
+        const d = declarations.get(tid);
+        if (!d) return null;
+        return {
+          id: d.id,
+          status: d.status,
+          submitted_at: d.submitted_at,
+          declared: d.declared,
+          mismatch: declarationMismatch(d.declared, {
+            group_units: roundUnits(sys.system_group_units),
+            private_units: roundUnits(sys.system_private_units)
+          })
+        };
+      })(),
       rates: {
         group_unit_price_tl: money(groupRate) || defaultRates.group_unit_price_tl,
         private_unit_price_tl: money(privateRate) || defaultRates.private_unit_price_tl,
@@ -473,6 +499,8 @@ async function handleSummary(req, res, actor, roleSet) {
     teachers,
     overview,
     default_rates: defaultRates,
+    // Beyan yalnız dönem tam bir takvim ayıysa eşleşir
+    declaration_period: periodMonthForRange(period.from, period.to),
     schema_hint:
       settlementsMissing || linesMissing
         ? 'student-coaching-system/sql/2026-09-08-teacher-payroll-hakedis.sql'
@@ -656,6 +684,58 @@ async function handleSaveRates(req, res, actor, roleSet) {
   }
 
   return res.status(200).json({ data });
+}
+
+/**
+ * CRM'deki beyanı hakedişe aktarır.
+ *
+ * Beyandaki ders ve görüşme sayıları ONAYLI sayı olarak yazılır; ödeme bunun
+ * üzerinden hesaplanır. Sistem sayıları kartta durmaya devam eder, böylece
+ * farkın ne olduğu sonradan da görülebilir. Ödenmiş kart kilitlidir.
+ */
+async function handleApplyDeclaration(req, res, actor, roleSet) {
+  const body = req.body || {};
+  const teacherId = String(body.teacher_id || '').trim();
+  const period = parsePeriod(body);
+  if (!teacherId) return jsonError(res, 400, 'teacher_id_required');
+  if (!period) return jsonError(res, 400, 'from_to_invalid');
+  const institutionId = scopeInstitution(actor, roleSet, body.institution_id);
+
+  const existing = await findSettlement(teacherId, institutionId, period).catch((e) => {
+    if (schemaMissing(e)) return null;
+    throw e;
+  });
+  if (existing && (existing.locked || existing.status === 'paid')) {
+    return jsonError(res, 409, 'settlement_locked', { hint: 'Ödenen hakediş kartı kilitlidir.' });
+  }
+
+  const declarations = await loadDeclarationsForPayroll({
+    from: period.from,
+    to: period.to,
+    institutionId,
+    teacherIds: [teacherId]
+  });
+  const decl = declarations.get(teacherId);
+  if (!decl) {
+    return jsonError(res, 404, 'declaration_not_found', {
+      hint: 'Bu öğretmenin bu aya ait gönderilmiş beyanı yok.'
+    });
+  }
+
+  req.body = {
+    ...body,
+    teacher_id: teacherId,
+    from: period.from,
+    to: period.to,
+    approved_group_units: decl.declared.group,
+    approved_private_units: decl.declared.private,
+    approved_guidance_units: decl.declared.guidance,
+    notes: [String(body.notes || existing?.notes || '').trim(), 'Beyandan aktarıldı']
+      .filter(Boolean)
+      .join(' · ')
+      .slice(0, 500)
+  };
+  return handleSaveDraft(req, res, actor, roleSet);
 }
 
 async function handleSaveDraft(req, res, actor, roleSet) {
@@ -1128,6 +1208,7 @@ export default async function handler(req, res) {
       if (op === 'save-settings') return handleSaveDefaultRates(req, res, actor, roleSet);
       if (op === 'save-rates') return handleSaveRates(req, res, actor, roleSet);
       if (op === 'save-draft') return handleSaveDraft(req, res, actor, roleSet);
+      if (op === 'apply-declaration') return handleApplyDeclaration(req, res, actor, roleSet);
       if (op === 'add-extra' || op === 'upsert-extra') return handleUpsertExtra(req, res, actor, roleSet);
       if (op === 'delete-extra') return handleDeleteExtra(req, res, actor, roleSet);
       if (op === 'pay') return handlePay(req, res, actor, roleSet);

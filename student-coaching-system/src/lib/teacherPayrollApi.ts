@@ -14,9 +14,19 @@ export type PayrollExtraItem = {
   created_at?: string;
 };
 
+export type PayrollDeclaration = {
+  id: string;
+  status: string;
+  submitted_at: string | null;
+  declared: { group: number; private: number; guidance: number; other: number };
+  mismatch: boolean;
+};
+
 export type PayrollTeacherCard = {
   teacher_id: string;
   teacher_name: string;
+  /** CRM'deki aylık çalışma beyanı — dönem tam bir takvim ayıysa dolu gelir */
+  declaration?: PayrollDeclaration | null;
   system: {
     group_units: number;
     private_units: number;
@@ -76,6 +86,7 @@ export type PayrollSummary = {
     private_unit_price_tl: number;
     guidance_unit_price_tl: number;
   };
+  declaration_period?: string | null;
   schema_hint?: string | null;
 };
 
@@ -138,6 +149,22 @@ export async function saveTeacherPayrollRates(body: {
   });
   const j = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(j.error || j.hint || 'Ücretler kaydedilemedi');
+  return j;
+}
+
+/** CRM beyanindaki sayilari onayli sayi olarak hakedise aktarir. */
+export async function applyTeacherDeclaration(body: {
+  teacher_id: string;
+  from: string;
+  to: string;
+  institution_id?: string;
+}) {
+  const res = await apiFetch('/api/teacher-payroll?op=apply-declaration', {
+    method: 'POST',
+    body: JSON.stringify(body)
+  });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(j.hint || j.error || 'Beyan aktarılamadı');
   return j;
 }
 
