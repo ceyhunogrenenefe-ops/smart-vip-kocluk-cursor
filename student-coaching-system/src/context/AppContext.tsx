@@ -234,6 +234,9 @@ interface AppState {
     totalTarget: number;
     totalSolved: number;
     totalCorrect: number;
+    /** Koç hedefi varken sayıların ait olduğu tarih aralığı */
+    rangeFrom?: string;
+    rangeTo?: string;
     totalWrong: number;
     totalBlank: number;
     realizationRate: number;
@@ -1895,18 +1898,35 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const totalReadingMinutes = entries.reduce((sum, e) => sum + (e.readingMinutes || 0), 0);
 
     if (coachCached?.hasCoachGoals && coachCached.coachTarget > 0) {
+      /**
+       * Koç hedefi varken "çözülen" yalnız hedefin dönemine (bu hafta) aittir.
+       * Doğru/yanlış/boş sayıları ise tüm zamanlardan toplanıyordu; aynı satırda
+       * farklı dönemler yan yana gelince doğru sayısı çözülenden büyük
+       * çıkabiliyordu (örn. 10 çözülen, 32 doğru, %320 başarı).
+       * Bu yüzden hepsi hedefle AYNI tarih aralığından sayılır.
+       */
+      const inRange = entries.filter((e) => {
+        const d = String(e.date || '').slice(0, 10);
+        return d >= coachCached.rangeFrom && d <= coachCached.rangeTo;
+      });
+      const rangeCorrect = inRange.reduce((sum, e) => sum + e.correctAnswers, 0);
+      const rangeWrong = inRange.reduce((sum, e) => sum + e.wrongAnswers, 0);
+      const rangeBlank = inRange.reduce((sum, e) => sum + e.blankAnswers, 0);
+      const rangeReading = inRange.reduce((sum, e) => sum + (e.readingMinutes || 0), 0);
       const totalSolved = coachCached.solved;
       const successRate =
-        totalSolved > 0 ? Math.round((totalCorrect / totalSolved) * 100) : 0;
+        totalSolved > 0 ? Math.min(100, Math.round((rangeCorrect / totalSolved) * 100)) : 0;
       return {
         totalTarget: coachCached.coachTarget,
         totalSolved,
-        totalCorrect,
-        totalWrong,
-        totalBlank,
+        totalCorrect: rangeCorrect,
+        totalWrong: rangeWrong,
+        totalBlank: rangeBlank,
         realizationRate: coachCached.realizationPct,
         successRate,
-        totalReadingMinutes,
+        totalReadingMinutes: rangeReading,
+        rangeFrom: coachCached.rangeFrom,
+        rangeTo: coachCached.rangeTo,
       };
     }
 

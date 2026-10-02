@@ -143,8 +143,12 @@ export default function CoachDashboard() {
     });
   }, [assignedStudents, rosterTab, activityByStudent]);
 
-  // Koçun öğrenci ID'leri
-  const myStudentIds = useMemo(() => myStudents.map(s => s.id), [myStudents]);
+  /**
+   * Kitap okuma ve yazılı karşılaştırmaları yalnız koçun KENDİ öğrencileri
+   * üzerinden yapılır. `myStudents` canlı ders öğrencilerini de içeriyor;
+   * onlarla kıyaslamak koçun kendi tablosunu yanlış gösteriyordu.
+   */
+  const myStudentIds = useMemo(() => assignedStudents.map((s) => s.id), [assignedStudents]);
 
   // Koçun öğrencilerinin kayıtları
   const myEntries = useMemo(() => {
@@ -158,16 +162,18 @@ export default function CoachDashboard() {
 
   // Okuma yapan öğrenciler
   const studentsWithReading = useMemo(() => {
-    return myStudents.filter(student => {
-      const studentEntries = weeklyEntries.filter(e => e.studentId === student.id && e.readingMinutes && e.readingMinutes > 0);
+    return assignedStudents.filter((student) => {
+      const studentEntries = myEntries.filter(
+        (e) => e.studentId === student.id && e.readingMinutes && e.readingMinutes > 0
+      );
       return studentEntries.length > 0;
     });
-  }, [myStudents, weeklyEntries]);
+  }, [assignedStudents, myEntries]);
 
   // En çok okuyan öğrenciler
   const topReaders = useMemo(() => {
-    return myStudents
-      .map(student => {
+    return assignedStudents
+      .map((student) => {
         const studentReading = myEntries.filter(e => e.studentId === student.id && e.readingMinutes && e.readingMinutes > 0);
         const totalMinutes = studentReading.reduce((sum, e) => sum + (e.readingMinutes || 0), 0);
         return { ...student, totalReadingMinutes: totalMinutes };
@@ -175,12 +181,12 @@ export default function CoachDashboard() {
       .filter(s => s.totalReadingMinutes > 0)
       .sort((a, b) => b.totalReadingMinutes - a.totalReadingMinutes)
       .slice(0, 5);
-  }, [myStudents, myEntries]);
+  }, [assignedStudents, myEntries]);
 
   // Yazılı takip istatistikleri
   const writtenExamStats = useMemo(() => {
-    const stats = myStudents.map(student => {
-      const studentScores = writtenExamScores.filter(s => s.studentId === student.id);
+    const stats = assignedStudents.map((student) => {
+      const studentScores = writtenExamScores.filter((s) => s.studentId === student.id);
       const studentStats = getWrittenExamStats(student.id);
       return {
         ...student,
@@ -193,7 +199,7 @@ export default function CoachDashboard() {
       };
     });
     return stats.filter(s => s.totalExams > 0);
-  }, [myStudents, writtenExamScores, getWrittenExamStats]);
+  }, [assignedStudents, writtenExamScores, getWrittenExamStats]);
 
   // Yazılı başarı sıralaması
   const topWrittenPerformers = useMemo(() => {
@@ -210,7 +216,7 @@ export default function CoachDashboard() {
     let totalCorrect = 0;
     let totalWrong = 0;
     let totalBlank = 0;
-    for (const student of myStudents) {
+    for (const student of assignedStudents) {
       const st = getStudentStats(student.id);
       totalTarget += st.totalTarget;
       totalSolved += st.totalSolved;
@@ -222,7 +228,7 @@ export default function CoachDashboard() {
     const realizationRate = totalTarget > 0 ? Math.round((totalSolved / totalTarget) * 100) : 0;
 
     return { totalTarget, totalSolved, totalCorrect, totalWrong, totalBlank, successRate, realizationRate };
-  }, [myStudents, getStudentStats, coachQuestionStatsTick]);
+  }, [assignedStudents, getStudentStats, coachQuestionStatsTick]);
 
   // Ders bazlı başarı
   const subjectStats = useMemo(() => {
@@ -268,21 +274,41 @@ export default function CoachDashboard() {
     return 'text-red-600 bg-red-50';
   };
 
+  /**
+   * Tablodaki sayıların ait olduğu tarih aralığı.
+   *
+   * Hedef koç kotasından geldiği için sayılar tüm zamanları değil, kotanın
+   * dönemini kapsıyor. Bunu yazmadan tablo yanıltıcı oluyordu.
+   */
+  const hedefAraligi = useMemo(() => {
+    for (const student of assignedStudents) {
+      const st = getStudentStats(student.id);
+      if (st?.rangeFrom && st?.rangeTo) {
+        const g = (d: string) => {
+          const [y, m, gun] = d.split('-');
+          return `${gun}.${m}.${y}`;
+        };
+        return `${g(st.rangeFrom)} – ${g(st.rangeTo)}`;
+      }
+    }
+    return null;
+  }, [assignedStudents, getStudentStats, coachQuestionStatsTick]);
+
   // Riskli öğrenciler (başarı %70'in altında)
   const atRiskStudents = useMemo(() => {
-    return myStudents.filter(student => {
+    return assignedStudents.filter((student) => {
       const stats = getStudentStats(student.id);
       return stats && stats.successRate < 70;
     });
-  }, [myStudents, getStudentStats]);
+  }, [assignedStudents, getStudentStats]);
 
   // Başarılı öğrenciler (başarı %90 ve üzeri)
   const topPerformers = useMemo(() => {
-    return myStudents.filter(student => {
+    return assignedStudents.filter((student) => {
       const stats = getStudentStats(student.id);
       return stats && stats.successRate >= 90;
     });
-  }, [myStudents, getStudentStats]);
+  }, [assignedStudents, getStudentStats]);
 
   useEffect(() => {
     if (!isCoachUser || !getAuthToken()) return;
@@ -453,7 +479,7 @@ export default function CoachDashboard() {
                 <Users className="w-4 h-4 text-blue-200" />
                 <span className="text-sm text-green-100">Okuyan Öğrenci</span>
               </div>
-              <p className="text-2xl font-bold">{studentsWithReading.length} / {myStudents.length}</p>
+              <p className="text-2xl font-bold">{studentsWithReading.length} / {assignedStudents.length}</p>
             </div>
             <div className="bg-white/10 rounded-xl p-4">
               <div className="flex items-center gap-2 mb-1">
@@ -692,6 +718,11 @@ export default function CoachDashboard() {
               Size koç olarak atanmış {assignedStudents.length} öğrenci. Canlı ders öğrencileri bu listede yer
               almaz.
             </p>
+            {hedefAraligi ? (
+              <p className="mt-1 inline-flex items-center gap-1 rounded-lg bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600">
+                Hedef, çözülen ve doğru sayıları {hedefAraligi} aralığına aittir
+              </p>
+            ) : null}
           </div>
           <div className="flex flex-wrap gap-2">
             {(
