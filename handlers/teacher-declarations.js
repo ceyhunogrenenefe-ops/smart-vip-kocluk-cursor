@@ -22,6 +22,7 @@ import {
 import { loadTeacherSystemWork } from '../api/_lib/teacher-declaration-system.js';
 import {
   ensureDeclarationsForPeriod,
+  isUuid,
   loadActiveWorkerIds,
   loadDeclarationSettings,
   sendDeclarationMessages
@@ -222,7 +223,9 @@ export default async function handler(req, res) {
      * yönetici özellikle isterse `include_submitted` ile gider.
      */
     if (req.method === 'POST' && op === 'send') {
-      const ids = Array.isArray(body.ids) ? body.ids.map((x) => String(x || '').trim()).filter(Boolean) : [];
+      const ids = Array.isArray(body.ids)
+        ? body.ids.map((x) => String(x || '').trim()).filter((x) => isUuid(x))
+        : [];
       if (!ids.length) return res.status(400).json({ error: 'ids_required', message: 'Öğretmen seçilmedi.' });
 
       const r = await sendDeclarationMessages({
@@ -310,6 +313,8 @@ export default async function handler(req, res) {
 
     return res.status(405).json({ error: 'Method not allowed' });
   } catch (e) {
+    // Sebebi gunluge yaz: istemciye yalniz mesaj doner, teshis burada kalir
+    console.error('[teacher-declarations] hata', { op, period, error: errorMessage(e) });
     return res.status(500).json({ error: errorMessage(e) });
   }
 }

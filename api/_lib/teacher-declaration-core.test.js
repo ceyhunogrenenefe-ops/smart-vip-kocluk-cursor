@@ -177,3 +177,15 @@ describe('tür tanımları', () => {
     }
   });
 });
+
+describe('bozuk kimlik koruması', () => {
+  it('UUID olmayan değer sorguya girmemeli', async () => {
+    const { isUuid } = await import('./teacher-declaration-notify.js');
+    assert.equal(isUuid('73323d75-eea1-4552-8bba-d50555423589'), true);
+    // Gerçek veride görülen bozuk değer: tek başına bütün listeyi düşürüyordu
+    assert.equal(isUuid('demo-coach'), false);
+    assert.equal(isUuid(''), false);
+    assert.equal(isUuid(null), false);
+    assert.equal(isUuid('123'), false);
+  });
+});
