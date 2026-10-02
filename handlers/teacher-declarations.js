@@ -22,6 +22,8 @@ import {
 import { loadTeacherSystemWork } from '../api/_lib/teacher-declaration-system.js';
 import {
   ensureDeclarationsForPeriod,
+  loadActiveWorkerIds,
+  loadDeclarationSettings,
   sendDeclarationMessages
 } from '../api/_lib/teacher-declaration-notify.js';
 
@@ -83,7 +85,7 @@ export default async function handler(req, res) {
           ? supabaseAdmin.from(MSGS).select('declaration_id, kind, sent_at').in('declaration_id', ids)
           : Promise.resolve({ data: [] }),
         teacherIds.length
-          ? supabaseAdmin.from('users').select('id, name, phone').in('id', teacherIds)
+          ? supabaseAdmin.from('users').select('id, name, phone, role').in('id', teacherIds)
           : Promise.resolve({ data: [] })
       ]);
 
@@ -100,6 +102,8 @@ export default async function handler(req, res) {
         msgBy.set(m.declaration_id, cur);
       }
       const teacherBy = Object.fromEntries((teachers || []).map((t) => [String(t.id), t]));
+      // O dönemde fiilen derse/koçluğa girenler — otomatik mesaj bunlara gider
+      const activeIds = await loadActiveWorkerIds({ period, institutionId }).catch(() => new Set());
 
       // Sistem kayıtları öğretmen başına ayrı taranır; liste ekranında yalnız
       // toplamlar gerekiyor, satır detayı detay ucunda hesaplanır
@@ -124,6 +128,9 @@ export default async function handler(req, res) {
           id: d.id,
           teacher_id: d.teacher_id,
           teacher_name: teacherBy[String(d.teacher_id)]?.name || 'Öğretmen',
+          teacher_role: teacherBy[String(d.teacher_id)]?.role || '',
+          has_phone: Boolean(String(teacherBy[String(d.teacher_id)]?.phone || '').trim()),
+          active_in_period: activeIds.has(String(d.teacher_id)),
           status: d.status,
           opened_at: d.opened_at,
           submitted_at: d.submitted_at,
@@ -236,6 +243,41 @@ export default async function handler(req, res) {
         failed: r.failed,
         errors: r.errors || [],
         message: parcalar.join(' · ')
+      });
+    }
+
+    /** Mesaj şablonu ve otomatik gönderim ayarları */
+    if (req.method === 'GET' && op === 'settings') {
+      const st = await loadDeclarationSettings();
+      return res.status(200).json({ ok: true, settings: st });
+    }
+
+    if (req.method === 'POST' && op === 'save-settings') {
+      const days = Array.isArray(body.reminder_days)
+        ? [...new Set(body.reminder_days.map((d) => Number(d)).filter((d) => Number.isInteger(d) && d >= 1 && d <= 28))]
+            .sort((a, b) => a - b)
+        : null;
+      const patch = {
+        is_active: body.is_active === true,
+        message_text: String(body.message_text || '').trim().slice(0, 2000) || null,
+        form_base_url: String(body.form_base_url || '').trim().slice(0, 300) || null,
+        updated_by: actor.sub || null,
+        updated_at: new Date().toISOString()
+      };
+      if (days && days.length) patch.reminder_days = days;
+
+      const { error } = await supabaseAdmin
+        .from('teacher_declaration_settings')
+        .update(patch)
+        .eq('id', true);
+      if (error) return res.status(500).json({ error: error.message });
+      const st = await loadDeclarationSettings();
+      return res.status(200).json({
+        ok: true,
+        settings: st,
+        message: st.is_active
+          ? 'Kaydedildi. Her ayın 1’inde otomatik gönderim açık.'
+          : 'Kaydedildi. Otomatik gönderim kapalı.'
       });
     }
 

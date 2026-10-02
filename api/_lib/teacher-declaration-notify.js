@@ -11,7 +11,7 @@
 import crypto from 'node:crypto';
 import { supabaseAdmin } from './supabase-admin.js';
 import { errorMessage } from './error-msg.js';
-import { periodLabel, previousPeriod } from './teacher-declaration-core.js';
+import { periodLabel, periodRange, previousPeriod } from './teacher-declaration-core.js';
 import {
   loadTeacherReminderSettings,
   resolveTeacherReminderSession
@@ -67,9 +67,67 @@ export async function buildDeclarationFormUrl(token) {
 }
 
 /**
+ * Dönemde fiilen çalışmış kişilerin kimlikleri.
+ *
+ * Rol tek başına yetmiyor: Eylül'de ders veren 35 kişi varken rolü "teacher"
+ * olan 27 kişi — bir kısmı koç ya da başka rolde görünüyor. Mesajın doğru
+ * kişilere gitmesi için role değil, o ay gerçekten derse/koçluğa giren
+ * kayıtlara bakılır.
+ */
+export async function loadActiveWorkerIds({ period, institutionId = null }) {
+  const range = periodRange(period);
+  const ids = new Set();
+  if (!range) return ids;
+
+  let cq = supabaseAdmin
+    .from('class_sessions')
+    .select('teacher_id')
+    .eq('status', 'completed')
+    .not('teacher_id', 'is', null)
+    .gte('lesson_date', range.from)
+    .lte('lesson_date', range.to)
+    .limit(8000);
+  if (institutionId) cq = cq.eq('institution_id', institutionId);
+
+  let pq = supabaseAdmin
+    .from('teacher_lessons')
+    .select('teacher_id')
+    .eq('status', 'completed')
+    .not('teacher_id', 'is', null)
+    .gte('lesson_date', range.from)
+    .lte('lesson_date', range.to)
+    .limit(8000);
+  if (institutionId) pq = pq.eq('institution_id', institutionId);
+
+  // Koçluk görüşmeleri: attended alanı doldurulmadığı için planlanan
+  // görüşmeler de aktiflik sayılır
+  let mq = supabaseAdmin
+    .from('meetings')
+    .select('coach_user_id')
+    .not('coach_user_id', 'is', null)
+    .gte('start_time', `${range.from}T00:00:00`)
+    .lte('start_time', `${range.to}T23:59:59`)
+    .limit(8000);
+  if (institutionId) mq = mq.eq('institution_id', institutionId);
+
+  const [cls, prv, mtg] = await Promise.all([
+    cq.then((r) => r.data || []).catch(() => []),
+    pq.then((r) => r.data || []).catch(() => []),
+    mq.then((r) => r.data || []).catch(() => [])
+  ]);
+
+  for (const r of cls) ids.add(String(r.teacher_id));
+  for (const r of prv) ids.add(String(r.teacher_id));
+  for (const r of mtg) ids.add(String(r.coach_user_id));
+  return ids;
+}
+
+/**
  * Dönem için eksik beyan kayıtlarını açar (token üretir).
- * Var olan kayda dokunmaz — token yeniden üretilirse öğretmenin elindeki
- * bağlantı çalışmaz hâle gelir.
+ *
+ * Kapsam: aktif öğretmen VE koç kullanıcıları, ayrıca o dönemde fiilen
+ * çalışmış herkes (rolü farklı olsa bile). Var olan kayda dokunulmaz —
+ * token yeniden üretilirse öğretmenin elindeki bağlantı çalışmaz hâle gelir.
  */
 export async function ensureDeclarationsForPeriod({ period, institutionId = null }) {
   const p = String(period || '').trim();
@@ -77,14 +135,30 @@ export async function ensureDeclarationsForPeriod({ period, institutionId = null
 
   let tq = supabaseAdmin
     .from('users')
-    .select('id, name, phone, institution_id')
-    .eq('role', 'teacher')
+    .select('id, name, phone, institution_id, role')
+    .in('role', ['teacher', 'coach'])
     .eq('is_active', true)
-    .limit(500);
+    .limit(1000);
   if (institutionId) tq = tq.eq('institution_id', institutionId);
-  const { data: teachers, error } = await tq;
+  const { data: roleUsers, error } = await tq;
   if (error) throw error;
-  if (!teachers?.length) return { created: 0, total: 0 };
+
+  // O dönem çalışmış ama rolü teacher/coach olmayanlar da listeye girsin
+  const activeIds = await loadActiveWorkerIds({ period: p, institutionId });
+  const known = new Set((roleUsers || []).map((u) => String(u.id)));
+  const extraIds = [...activeIds].filter((id) => !known.has(id));
+  let extras = [];
+  if (extraIds.length) {
+    const { data } = await supabaseAdmin
+      .from('users')
+      .select('id, name, phone, institution_id, role')
+      .in('id', extraIds.slice(0, 500))
+      .eq('is_active', true);
+    extras = data || [];
+  }
+
+  const teachers = [...(roleUsers || []), ...extras];
+  if (!teachers.length) return { created: 0, total: 0 };
 
   const { data: existing } = await supabaseAdmin
     .from(DECL)
@@ -139,6 +213,7 @@ function fillMessage(template, { donem, link, ad }) {
 export async function sendDeclarationMessages({
   period,
   declarationIds = null,
+  onlyTeacherIds = null,
   institutionId = null,
   includeSubmitted = false,
   kind = 'initial',
@@ -154,6 +229,7 @@ export async function sendDeclarationMessages({
   // Formu doldurana tekrar mesaj gitmesin; yönetici özellikle isterse gider
   if (!includeSubmitted) q = q.in('status', ['pending', 'opened']);
   if (Array.isArray(declarationIds) && declarationIds.length) q = q.in('id', declarationIds);
+  if (Array.isArray(onlyTeacherIds) && onlyTeacherIds.length) q = q.in('teacher_id', onlyTeacherIds);
   if (institutionId) q = q.eq('institution_id', institutionId);
 
   const { data: decls, error } = await q;
@@ -254,9 +330,13 @@ export async function runTeacherDeclarationNotifyJob(opts = {}) {
   const period = previousPeriod(now);
   await ensureDeclarationsForPeriod({ period });
 
+  // Otomatik gönderim yalnız o ay derse/koçluğa girenlere gider; çalışmamış
+  // kişiye "çalışmanı bildir" mesajı atmak anlamsız
+  const activeIds = await loadActiveWorkerIds({ period });
   const r = await sendDeclarationMessages({
     period,
     kind: isFirst ? 'initial' : 'reminder',
+    onlyTeacherIds: [...activeIds],
     dryRun: opts.dryRun === true
   });
   const sent = r.sent;

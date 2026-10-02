@@ -18,6 +18,9 @@ type Row = {
   id: string;
   teacher_id: string;
   teacher_name: string;
+  teacher_role: string;
+  has_phone: boolean;
+  active_in_period: boolean;
   status: string;
   submitted_at: string | null;
   edit_allowed: boolean;
@@ -62,6 +65,14 @@ export default function TeacherDeclarationsPage() {
   const [fStatus, setFStatus] = useState('');
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [sending, setSending] = useState(false);
+  const [ayarAcik, setAyarAcik] = useState(false);
+  const [ayar, setAyar] = useState<{
+    is_active: boolean;
+    reminder_days: number[];
+    message_text: string;
+    form_base_url: string;
+  } | null>(null);
+  const [ayarKaydet, setAyarKaydet] = useState(false);
   const [detail, setDetail] = useState<Record<string, unknown> | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
 
@@ -87,6 +98,36 @@ export default function TeacherDeclarationsPage() {
     // Dönem değişince önceki seçim taşınmasın; yanlış aya mesaj gitmesin
     setSelected(new Set());
   }, [load]);
+
+  const ayarlariYukle = useCallback(async () => {
+    const res = await apiFetch('/api/teacher-declarations?op=settings');
+    const j = await res.json().catch(() => ({}));
+    if (res.ok) setAyar(j.settings);
+  }, []);
+
+  useEffect(() => {
+    void ayarlariYukle();
+  }, [ayarlariYukle]);
+
+  const ayariKaydet = async () => {
+    if (!ayar) return;
+    setAyarKaydet(true);
+    try {
+      const res = await apiFetch('/api/teacher-declarations?op=save-settings', {
+        method: 'POST',
+        body: JSON.stringify(ayar)
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j.error || 'Kaydedilemedi');
+      setAyar(j.settings);
+      toast.success(j.message || 'Kaydedildi');
+      setAyarAcik(false);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Kaydedilemedi');
+    } finally {
+      setAyarKaydet(false);
+    }
+  };
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLocaleLowerCase('tr');
@@ -258,6 +299,17 @@ Devam edilsin mi?`
       <div className="flex flex-wrap items-center gap-2 rounded-xl border border-indigo-100 bg-indigo-50/50 p-3">
         <button
           type="button"
+          onClick={() =>
+            setSelected(
+              new Set(filtered.filter((r) => r.active_in_period && r.status !== 'submitted').map((r) => r.id))
+            )
+          }
+          className="rounded-lg border border-emerald-200 bg-white px-3 py-1.5 text-xs font-semibold text-emerald-800"
+        >
+          Bu ay çalışanları seç
+        </button>
+        <button
+          type="button"
           onClick={() => setSelected(new Set(filtered.filter((r) => r.status !== 'submitted').map((r) => r.id)))}
           className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700"
         >
@@ -270,7 +322,21 @@ Devam edilsin mi?`
         >
           Seçimi temizle
         </button>
-        <span className="text-xs text-slate-600">{selected.size} öğretmen seçili</span>
+        <span className="text-xs text-slate-600">{selected.size} kişi seçili</span>
+        <button
+          type="button"
+          onClick={() => setAyarAcik(true)}
+          className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700"
+        >
+          ⚙ Mesaj ve otomatik gönderim
+        </button>
+        <span
+          className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+            ayar?.is_active ? 'bg-emerald-100 text-emerald-900' : 'bg-slate-200 text-slate-600'
+          }`}
+        >
+          {ayar?.is_active ? 'Otomatik: açık' : 'Otomatik: kapalı'}
+        </span>
         <button
           type="button"
           disabled={!selected.size || sending}
@@ -338,6 +404,27 @@ Devam edilsin mi?`
                       >
                         {r.teacher_name}
                       </button>
+                      <span className="mt-0.5 flex flex-wrap items-center gap-1">
+                        {r.teacher_role === 'coach' ? (
+                          <span className="rounded bg-indigo-100 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-800">
+                            Koç
+                          </span>
+                        ) : null}
+                        {r.active_in_period ? (
+                          <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] text-emerald-800">
+                            Bu ay çalıştı
+                          </span>
+                        ) : (
+                          <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-500">
+                            Kayıt yok
+                          </span>
+                        )}
+                        {!r.has_phone ? (
+                          <span className="rounded bg-rose-50 px-1.5 py-0.5 text-[10px] text-rose-700">
+                            Telefon yok
+                          </span>
+                        ) : null}
+                      </span>
                       {r.unassigned?.count ? (
                         <span className="mt-0.5 flex items-center gap-1 text-[10px] text-amber-700">
                           <AlertTriangle className="h-3 w-3" />
@@ -392,6 +479,110 @@ Devam edilsin mi?`
           </table>
         </div>
       )}
+
+      {ayarAcik && ayar ? (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4">
+          <div className="flex max-h-[92vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+            <div className="flex shrink-0 items-center justify-between border-b border-slate-200 px-4 py-3">
+              <h3 className="text-base font-semibold text-slate-900">Mesaj ve otomatik gönderim</h3>
+              <button
+                type="button"
+                onClick={() => setAyarAcik(false)}
+                className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
+              <label className="flex items-start gap-2 rounded-xl border border-slate-200 p-3">
+                <input
+                  type="checkbox"
+                  checked={ayar.is_active}
+                  onChange={(e) => setAyar({ ...ayar, is_active: e.target.checked })}
+                  className="mt-0.5"
+                />
+                <span>
+                  <span className="block text-sm font-semibold text-slate-900">
+                    Her ayın 1’inde otomatik gönder
+                  </span>
+                  <span className="mt-0.5 block text-xs text-slate-500">
+                    Bir önceki ayın formu, o ay derse veya koçluğa giren kişilere gider. Formunu
+                    gönderene hatırlatma gitmez.
+                  </span>
+                </span>
+              </label>
+
+              <label className="block text-xs font-medium text-slate-600">
+                Hatırlatma günleri
+                <input
+                  value={ayar.reminder_days.join(', ')}
+                  onChange={(e) =>
+                    setAyar({
+                      ...ayar,
+                      reminder_days: e.target.value
+                        .split(/[,\s]+/)
+                        .map((x) => Number(x))
+                        .filter((x) => Number.isInteger(x) && x >= 1 && x <= 28)
+                    })
+                  }
+                  placeholder="1, 3, 5"
+                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                />
+                <span className="mt-1 block text-[11px] text-slate-500">
+                  Ayın kaçıncı günlerinde gidecek. İlk gün bildirim, sonrakiler hatırlatma.
+                </span>
+              </label>
+
+              <label className="block text-xs font-medium text-slate-600">
+                Mesaj metni
+                <textarea
+                  rows={9}
+                  value={ayar.message_text}
+                  onChange={(e) => setAyar({ ...ayar, message_text: e.target.value })}
+                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                />
+                <span className="mt-1 block text-[11px] text-slate-500">
+                  <code>{'{{donem}}'}</code> dönem adı (Eylül 2026), <code>{'{{link}}'}</code> kişiye özel
+                  form bağlantısı, <code>{'{{ad}}'}</code> öğretmen adı.
+                </span>
+              </label>
+
+              <label className="block text-xs font-medium text-slate-600">
+                Form adresi kökü
+                <input
+                  value={ayar.form_base_url}
+                  onChange={(e) => setAyar({ ...ayar, form_base_url: e.target.value })}
+                  placeholder="https://www.dersonlinevipkocluk.com"
+                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                />
+                <span className="mt-1 block text-[11px] text-slate-500">
+                  Boş bırakılırsa panelin kendi adresi kullanılır.
+                </span>
+              </label>
+            </div>
+
+            <div className="flex shrink-0 justify-end gap-2 border-t border-slate-200 px-4 py-3">
+              <button
+                type="button"
+                onClick={() => setAyarAcik(false)}
+                className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700"
+              >
+                Vazgeç
+              </button>
+              <button
+                type="button"
+                disabled={ayarKaydet}
+                onClick={() => void ayariKaydet()}
+                className="inline-flex items-center gap-2 rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+              >
+                {ayarKaydet ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                Kaydet
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {detail || detailLoading ? (
         <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4">
