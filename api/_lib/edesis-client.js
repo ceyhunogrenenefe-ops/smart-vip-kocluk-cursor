@@ -1508,10 +1508,47 @@ export async function fetchEdesisOgrenciAssignedSinavIds(edesisStudentId, cfgOve
   return detailed.ids;
 }
 
+/**
+ * Sınav listesi açılırken her sınav için ayrı roster sorgusu atılıyor; 48
+ * sınavda bu, Edesis'e onlarca uzak çağrı demek ve sayfa geç açılıyordu.
+ * Bir sınavın öğrenci listesi dakikalar içinde değişmediği için sonuç kısa
+ * süre bellekte tutulur. Önbellek süreç ömrüyle sınırlıdır; yeni atama
+ * yapıldığında en geç bir dakika içinde görünür.
+ */
+const ROSTER_CACHE = new Map();
+const ROSTER_CACHE_MS = 60_000;
+const ROSTER_CACHE_MAX = 500;
+
+function rosterFromCache(id) {
+  const hit = ROSTER_CACHE.get(id);
+  if (!hit) return undefined;
+  if (Date.now() - hit.at > ROSTER_CACHE_MS) {
+    ROSTER_CACHE.delete(id);
+    return undefined;
+  }
+  return hit.value;
+}
+
+function rosterToCache(id, value) {
+  // Bellek sınırsız büyümesin: en eski kayıt düşer
+  if (ROSTER_CACHE.size >= ROSTER_CACHE_MAX) {
+    const first = ROSTER_CACHE.keys().next().value;
+    if (first !== undefined) ROSTER_CACHE.delete(first);
+  }
+  ROSTER_CACHE.set(id, { at: Date.now(), value });
+}
+
+/** Test ve atama sonrası elle temizlemek için. */
+export function clearEdesisRosterCache() {
+  ROSTER_CACHE.clear();
+}
+
 /** GET /OgrenciSinavs/GetOgrenciBySinavId — sınava tanımlı öğrenci listesi */
 export async function fetchEdesisExamRosterStudentIds(examId, cfgOverride = {}) {
   const id = String(examId || '').trim();
   if (!id) return null;
+  const cached = rosterFromCache(id);
+  if (cached !== undefined) return cached;
   const cfg = { ...getEdesisConfig(), ...cfgOverride };
   const localCfg = { ...cfg, baseUrl: cfg.baseUrl || cfg.bases[0] };
   try {
@@ -1530,6 +1567,7 @@ export async function fetchEdesisExamRosterStudentIds(examId, cfgOverride = {}) 
         pickStr(flat, ['id', 'ogrenciId', 'studentId']);
       if (sid) ids.push(normEdesisId(sid) || String(sid).trim());
     }
+    rosterToCache(id, ids);
     return ids;
   } catch {
     return null;

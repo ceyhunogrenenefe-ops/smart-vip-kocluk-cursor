@@ -381,8 +381,10 @@ async function loadAvailableEdesisExamsForStudent({
   let openOnlineRosterHidden = 0;
   if (rosterFilterEnabled && !items.length && openOnline.length) {
     const kept = [];
-    for (let i = 0; i < openOnline.length; i += 6) {
-      const batch = openOnline.slice(i, i + 6);
+    // Önbellek sayesinde eş zamanlı istek sayısı artırılabiliyor; Edesis'e
+    // giden gerçek çağrı sayısı aynı kalıyor
+    for (let i = 0; i < openOnline.length; i += 12) {
+      const batch = openOnline.slice(i, i + 12);
       const rosters = await Promise.all(
         batch.map((it) => fetchEdesisExamRosterStudentIds(it.examId, cfg).catch(() => null))
       );

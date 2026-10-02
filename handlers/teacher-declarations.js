@@ -19,7 +19,10 @@ import {
   sumByKind,
   summarizeDeclarations
 } from '../api/_lib/teacher-declaration-core.js';
-import { loadTeacherSystemWork } from '../api/_lib/teacher-declaration-system.js';
+import {
+  loadTeacherSystemWork,
+  loadTeacherSystemWorkBatch
+} from '../api/_lib/teacher-declaration-system.js';
 import {
   ensureDeclarationsForPeriod,
   isUuid,
@@ -106,24 +109,25 @@ export default async function handler(req, res) {
       // O dönemde fiilen derse/koçluğa girenler — otomatik mesaj bunlara gider
       const activeIds = await loadActiveWorkerIds({ period, institutionId }).catch(() => new Set());
 
-      // Sistem kayıtları öğretmen başına ayrı taranır; liste ekranında yalnız
-      // toplamlar gerekiyor, satır detayı detay ucunda hesaplanır
+      // Sistem kayıtları TEK seferde taranır. Öğretmen başına ayrı sorgu atmak
+      // 48 kişilik listede yüzlerce gidiş-dönüş demekti ve sayfa geç açılıyordu.
+      let systemByTeacher = new Map();
+      try {
+        systemByTeacher = await loadTeacherSystemWorkBatch({
+          period,
+          teacherIds: teacherIds,
+          institutionId
+        });
+      } catch (e) {
+        console.warn('[teacher-declarations] sistem taramasi:', errorMessage(e));
+      }
+
       const rows = [];
       for (const d of decls || []) {
         const dl = linesBy.get(d.id) || [];
-        let system = { group: 0, private: 0, guidance: 0 };
-        let unassigned = { count: 0, units: 0 };
-        try {
-          const sys = await loadTeacherSystemWork({
-            teacherId: d.teacher_id,
-            period,
-            institutionId: d.institution_id || institutionId
-          });
-          system = sys.totals;
-          unassigned = sys.unassigned;
-        } catch (e) {
-          console.warn('[teacher-declarations] sistem taramasi:', errorMessage(e));
-        }
+        const sys = systemByTeacher.get(String(d.teacher_id));
+        const system = sys?.totals || { group: 0, private: 0, guidance: 0 };
+        const unassigned = sys?.unassigned || { count: 0, units: 0 };
         const msg = msgBy.get(d.id) || { count: 0, last: null };
         rows.push({
           id: d.id,
