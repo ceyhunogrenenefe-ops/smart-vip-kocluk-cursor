@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { toast } from 'sonner';
 import {
   CheckCircle2,
   Lock,
@@ -18,8 +19,10 @@ import {
   formatPayrollTry,
   payTeacherPayroll,
   saveTeacherPayrollDraft,
+  saveTeacherPayrollDefaultRates,
   saveTeacherPayrollRates,
   unpayTeacherPayroll,
+  type PayrollSummary,
   type PayrollTeacherCard
 } from '../../lib/teacherPayrollApi';
 
@@ -81,18 +84,15 @@ type Props = {
 
 export function TeacherPaymentsPanel({ onTeacherTotalChange }: Props) {
   const [teachers, setTeachers] = useState<TeacherOption[]>([]);
+  const [odemeFiltre, setOdemeFiltre] = useState<'all' | 'paid' | 'unpaid'>('all');
+  const [varsayilan, setVarsayilan] = useState<{ ders: string; gorusme: string } | null>(null);
+  const [varsayilanKaydet, setVarsayilanKaydet] = useState(false);
   const [from, setFrom] = useState(monthStartIso);
   const [to, setTo] = useState(todayIso);
   const [teacherId, setTeacherId] = useState('');
   const [cards, setCards] = useState<PayrollTeacherCard[]>([]);
-  const [overview, setOverview] = useState<{
-    total_hours: number;
-    gross_tl: number;
-    extras_tl: number;
-    net_tl: number;
-    unpaid_tl: number;
-    paid_tl: number;
-  } | null>(null);
+  // Tip, uç noktanın döndürdüğü özetle aynı kalsın diye API tipinden türetilir
+  const [overview, setOverview] = useState<PayrollSummary['overview'] | null>(null);
   const [drafts, setDrafts] = useState<Record<string, DraftState>>({});
   const [loading, setLoading] = useState(false);
   const [busyId, setBusyId] = useState('');
@@ -147,6 +147,12 @@ export function TeacherPaymentsPanel({ onTeacherTotalChange }: Props) {
       setCards(data.teachers || []);
       setOverview(data.overview || null);
       setSchemaHint(data.schema_hint || null);
+      if (data.default_rates) {
+        setVarsayilan({
+          ders: String(data.default_rates.group_unit_price_tl ?? ''),
+          gorusme: String(data.default_rates.guidance_unit_price_tl ?? '')
+        });
+      }
       setDrafts((prev) => {
         const next: Record<string, DraftState> = {};
         for (const card of data.teachers || []) {
@@ -308,7 +314,15 @@ export function TeacherPaymentsPanel({ onTeacherTotalChange }: Props) {
   };
 
   const filteredCount = cards.length;
+  /** Ödeme durumu filtresi — özet kartları tüm aya ait kalır, tablo süzülür. */
+  const gorunenKartlar = useMemo(() => {
+    if (odemeFiltre === 'all') return cards;
+    const odendi = (c: PayrollTeacherCard) => c.settlement?.status === 'paid';
+    return cards.filter((c) => (odemeFiltre === 'paid' ? odendi(c) : !odendi(c)));
+  }, [cards, odemeFiltre]);
+
   const summaryLive = useMemo(() => {
+    // Kart yoksa sunucu özeti aynen; varsa taslaktaki canlı sayılar üstüne yazılır
     if (!cards.length) return overview;
     let gross = 0;
     let extras = 0;
@@ -321,7 +335,10 @@ export function TeacherPaymentsPanel({ onTeacherTotalChange }: Props) {
       extras += live.extras;
       hours += live.hours;
     }
+    // Taslakta değiştirilen sayılar anında yansısın; sunucudan gelen diğer
+    // toplamlar (ders/görüşme kırılımı, ödenen) olduğu gibi korunur
     return {
+      ...(overview as NonNullable<typeof overview>),
       total_hours: Math.round(hours * 100) / 100,
       gross_tl: Math.round(gross * 100) / 100,
       extras_tl: Math.round(extras * 100) / 100,
@@ -375,7 +392,7 @@ export function TeacherPaymentsPanel({ onTeacherTotalChange }: Props) {
       ) : null}
 
       <div className="rounded-2xl border border-slate-200/80 bg-gradient-to-br from-slate-50 via-white to-teal-50/40 p-4 shadow-sm dark:border-slate-700 dark:from-slate-900 dark:via-slate-900 dark:to-slate-800">
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
           <label className="block text-sm">
             <span className="mb-1 block font-medium text-slate-700 dark:text-slate-200">Öğretmen</span>
             <select
@@ -409,6 +426,18 @@ export function TeacherPaymentsPanel({ onTeacherTotalChange }: Props) {
               className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-800"
             />
           </label>
+          <label className="block text-sm">
+            <span className="mb-1 block font-medium text-slate-700 dark:text-slate-200">Ödeme durumu</span>
+            <select
+              value={odemeFiltre}
+              onChange={(e) => setOdemeFiltre(e.target.value as 'all' | 'paid' | 'unpaid')}
+              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-800"
+            >
+              <option value="all">Tümü</option>
+              <option value="unpaid">🔴 Ödenmedi</option>
+              <option value="paid">🟢 Ödendi</option>
+            </select>
+          </label>
           <div className="flex items-end gap-2">
             <button
               type="button"
@@ -436,12 +465,83 @@ export function TeacherPaymentsPanel({ onTeacherTotalChange }: Props) {
         </div>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      {varsayilan ? (
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
+          <div className="flex flex-wrap items-end gap-3">
+            <div>
+              <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Birim Ücret Ayarları</h3>
+              <p className="mt-0.5 text-xs text-slate-500">
+                Öğretmene özel tarife tanımlanmadıysa bu ücretler kullanılır. Değiştirmek geçmiş
+                ödemeleri etkilemez; ödenen aylarda o anki ücretler kayıtlı kalır.
+              </p>
+            </div>
+            <label className="block text-sm">
+              <span className="mb-1 block font-medium text-slate-700 dark:text-slate-200">Ders Ücreti (₺)</span>
+              <input
+                type="number"
+                min={0}
+                value={varsayilan.ders}
+                onChange={(e) => setVarsayilan({ ...varsayilan, ders: e.target.value })}
+                className="w-32 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-800"
+              />
+            </label>
+            <label className="block text-sm">
+              <span className="mb-1 block font-medium text-slate-700 dark:text-slate-200">Görüşme Ücreti (₺)</span>
+              <input
+                type="number"
+                min={0}
+                value={varsayilan.gorusme}
+                onChange={(e) => setVarsayilan({ ...varsayilan, gorusme: e.target.value })}
+                className="w-32 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-800"
+              />
+            </label>
+            <button
+              type="button"
+              disabled={varsayilanKaydet}
+              onClick={async () => {
+                setVarsayilanKaydet(true);
+                try {
+                  const ders = Number(varsayilan.ders) || 0;
+                  const r = await saveTeacherPayrollDefaultRates({
+                    // Grup ve özel ders aynı birim ücretten hesaplanır
+                    group_unit_price_tl: ders,
+                    private_unit_price_tl: ders,
+                    guidance_unit_price_tl: Number(varsayilan.gorusme) || 0
+                  });
+                  toast.success(r.message || 'Kaydedildi');
+                  await reload();
+                } catch (e) {
+                  toast.error(e instanceof Error ? e.message : 'Kaydedilemedi');
+                } finally {
+                  setVarsayilanKaydet(false);
+                }
+              }}
+              className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+            >
+              {varsayilanKaydet ? 'Kaydediliyor…' : 'Kaydet'}
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
         {[
-          { label: 'Toplam Saat', value: `${summaryLive?.total_hours ?? 0} sa` },
-          { label: 'Brüt Hakediş', value: formatPayrollTry(summaryLive?.gross_tl ?? 0) },
+          { label: 'Öğretmen', value: String(summaryLive?.teacher_count ?? 0) },
+          {
+            label: 'Ders Hakedişi',
+            value: formatPayrollTry(summaryLive?.lesson_tl ?? 0),
+            alt: `${summaryLive?.lesson_units ?? 0} ders`
+          },
+          {
+            label: 'Görüşme Hakedişi',
+            value: formatPayrollTry(summaryLive?.guidance_tl ?? 0),
+            alt: `${summaryLive?.guidance_units ?? 0} görüşme`
+          },
           { label: 'Ek Kalemler', value: formatPayrollTry(summaryLive?.extras_tl ?? 0) },
-          { label: 'Ödenecek Net', value: formatPayrollTry(summaryLive?.net_tl ?? 0) }
+          { label: 'Toplam Ödenecek', value: formatPayrollTry(summaryLive?.net_tl ?? 0) },
+          { label: 'Ödenen', value: formatPayrollTry(summaryLive?.paid_tl ?? 0) },
+          { label: 'Kalan Ödeme', value: formatPayrollTry(summaryLive?.unpaid_tl ?? 0) },
+          { label: 'Toplam Saat', value: `${summaryLive?.total_hours ?? 0} sa` }
         ].map((s) => (
           <div
             key={s.label}
@@ -449,6 +549,9 @@ export function TeacherPaymentsPanel({ onTeacherTotalChange }: Props) {
           >
             <div className="text-xs font-medium uppercase tracking-wide text-slate-500">{s.label}</div>
             <div className="mt-1 text-xl font-bold text-slate-900 dark:text-white">{s.value}</div>
+            {'alt' in s && s.alt ? (
+              <div className="mt-0.5 text-[11px] text-slate-500">{s.alt}</div>
+            ) : null}
           </div>
         ))}
       </div>
@@ -480,7 +583,7 @@ export function TeacherPaymentsPanel({ onTeacherTotalChange }: Props) {
               </tr>
             </thead>
             <tbody>
-              {cards.map((card) => {
+              {gorunenKartlar.map((card) => {
                 const d = drafts[card.teacher_id] || draftFromCard(card);
                 const extrasSum = (card.extras || []).reduce((a, x) => a + Number(x.amount_tl || 0), 0);
                 const live = liveTotal(d, extrasSum);
@@ -542,7 +645,7 @@ export function TeacherPaymentsPanel({ onTeacherTotalChange }: Props) {
       ) : null}
 
       {view === 'cards'
-        ? cards.map((card) => {
+        ? gorunenKartlar.map((card) => {
             const d = drafts[card.teacher_id] || draftFromCard(card);
             const locked = Boolean(card.settlement?.locked);
             const extrasSum = (card.extras || []).reduce((a, x) => a + Number(x.amount_tl || 0), 0);
