@@ -90,6 +90,7 @@ export const ROUTE_ALLOWED_ROLES = {
   '/crm/inbox': ['super_admin', 'admin', 'crm_agent', 'coach'],
   '/crm/widgetler': ['super_admin', 'admin'],
   '/crm/sablonlar': ['super_admin', 'admin', 'crm_agent'],
+  '/ogretmen-beyanlari': ['super_admin', 'admin'],
   // Temsilciler de listeyi görür; ekleme/çıkarma sayfa içinde yöneticiye kapalı
   '/crm/agents': ['super_admin', 'admin', 'crm_agent'],
   '/kayit-takibi': ['super_admin', 'admin'],
