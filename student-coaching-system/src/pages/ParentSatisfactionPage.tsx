@@ -43,6 +43,60 @@ type Meta = {
 };
 type Agent = { id: string; name: string; email?: string };
 
+/**
+ * Tek bir görüşmenin tam dökümü: her soru, verilen cevap ve o soruya yazılan not.
+ *
+ * Geçmiş listesinde yalnız notlar görünüyordu; hangi soruya ne cevap verildiği
+ * hiçbir yerde okunamıyordu. İki ayrı yerde kullanıldığı için tek bileşen.
+ */
+function SurveyAnswers({
+  survey,
+  questions,
+  actionTypes
+}: {
+  survey: Record<string, unknown>;
+  questions: Question[];
+  actionTypes: Option[];
+}) {
+  const cevap = (q: Question) => {
+    const v = String(survey[q.id] ?? '').trim();
+    if (!v) return null;
+    return q.options.find((o) => o.id === v)?.label || v;
+  };
+  const aksiyon = String(survey.action_type ?? '').trim();
+  return (
+    <div className="space-y-2">
+      {questions.map((q) => {
+        const c = cevap(q);
+        const not = q.noteField ? String(survey[q.noteField] ?? '').trim() : '';
+        if (!c && !not) return null;
+        return (
+          <div key={q.id} className="rounded-lg border border-slate-100 bg-white px-2.5 py-2">
+            <p className="text-[11px] font-semibold text-slate-500">{q.title}</p>
+            {c ? <p className="mt-0.5 text-sm font-medium text-slate-900">{c}</p> : null}
+            {not ? <p className="mt-0.5 text-xs text-slate-600">“{not}”</p> : null}
+          </div>
+        );
+      })}
+      {survey.general_note ? (
+        <div className="rounded-lg border border-slate-100 bg-white px-2.5 py-2">
+          <p className="text-[11px] font-semibold text-slate-500">Genel not</p>
+          <p className="mt-0.5 text-xs text-slate-700">{String(survey.general_note)}</p>
+        </div>
+      ) : null}
+      {aksiyon || survey.action_note ? (
+        <div className="rounded-lg border border-orange-100 bg-orange-50 px-2.5 py-2">
+          <p className="text-[11px] font-semibold text-orange-800">Aksiyon</p>
+          <p className="mt-0.5 text-xs text-orange-900">
+            {actionTypes.find((a) => a.id === aksiyon)?.label || aksiyon}
+            {survey.action_note ? ` — ${String(survey.action_note)}` : ''}
+          </p>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 const STATUS_STYLE: Record<string, string> = {
   pending: 'bg-amber-100 text-amber-900',
   call_later: 'bg-sky-100 text-sky-900',
@@ -83,6 +137,8 @@ export default function ParentSatisfactionPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [assignTo, setAssignTo] = useState('');
   const [open, setOpen] = useState<Row | null>(null);
+  const [cevaplar, setCevaplar] = useState<{ row: Row; items: Array<Record<string, unknown>> } | null>(null);
+  const [cevapYukleniyor, setCevapYukleniyor] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -133,6 +189,25 @@ export default function ParentSatisfactionPage() {
         .includes(needle);
     });
   }, [rows, q, fClass, fAgent, fStatus, fInstitution]);
+
+  /** Öğrencinin tüm görüşmelerini salt okunur aç — görüşme başlatmadan. */
+  const cevaplariAc = async (row: Row) => {
+    setCevapYukleniyor(true);
+    setCevaplar({ row, items: [] });
+    try {
+      const res = await apiFetch(
+        `/api/parent-satisfaction?op=history&student_id=${encodeURIComponent(row.student_id)}`
+      );
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j.error || 'Cevaplar alınamadı');
+      setCevaplar({ row, items: j.items || [] });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Cevaplar alınamadı');
+      setCevaplar(null);
+    } finally {
+      setCevapYukleniyor(false);
+    }
+  };
 
   const toggle = (id: string) =>
     setSelected((prev) => {
@@ -489,6 +564,15 @@ export default function ParentSatisfactionPage() {
                     >
                       Görüşmeyi Aç
                     </button>
+                    {r.survey_count ? (
+                      <button
+                        type="button"
+                        onClick={() => void cevaplariAc(r)}
+                        className="ml-1 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                      >
+                        Cevaplar ({r.survey_count})
+                      </button>
+                    ) : null}
                   </td>
                 </tr>
               ))}
@@ -515,6 +599,79 @@ export default function ParentSatisfactionPage() {
             setOpen(next);
           }}
         />
+      ) : null}
+
+      {/* Salt okunur cevap dökümü — görüşme başlatmadan bakmak için */}
+      {cevaplar && meta ? (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4">
+          <div className="flex max-h-[92vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+            <div className="flex shrink-0 items-start justify-between gap-2 border-b border-slate-200 px-4 py-3">
+              <div className="min-w-0">
+                <h3 className="truncate text-base font-semibold text-slate-900">
+                  {cevaplar.row.student_name}
+                </h3>
+                <p className="mt-0.5 truncate text-xs text-slate-500">
+                  Veli: {cevaplar.row.parent_name || '—'}
+                  {cevaplar.row.class_name ? ` · ${cevaplar.row.class_name}` : ''}
+                  {cevaplar.row.coach_name ? ` · Koç: ${cevaplar.row.coach_name}` : ''}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCevaplar(null)}
+                className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto bg-slate-50 p-4">
+              {cevapYukleniyor ? (
+                <div className="flex justify-center py-8 text-slate-400">
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                </div>
+              ) : cevaplar.items.length ? (
+                cevaplar.items.map((h) => (
+                  <section key={String(h.id)} className="rounded-xl border border-slate-200 bg-slate-100/60 p-3">
+                    <p className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-slate-600">
+                      <span className="font-semibold text-slate-800">{tarih(String(h.created_at))}</span>
+                      <span>· {String(h.agent_name || 'Temsilci')}</span>
+                      <span>
+                        ·{' '}
+                        {meta.call_results.find((c) => c.id === h.call_result)?.label ||
+                          String(h.call_result || '')}
+                      </span>
+                    </p>
+                    <SurveyAnswers survey={h} questions={meta.questions} actionTypes={meta.action_types} />
+                  </section>
+                ))
+              ) : (
+                <p className="py-8 text-center text-sm text-slate-500">Henüz görüşme kaydı yok.</p>
+              )}
+            </div>
+
+            <div className="flex shrink-0 justify-end gap-2 border-t border-slate-200 px-4 py-3">
+              <button
+                type="button"
+                onClick={() => {
+                  const r = cevaplar.row;
+                  setCevaplar(null);
+                  setOpen(r);
+                }}
+                className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              >
+                Yeni görüşme aç
+              </button>
+              <button
+                type="button"
+                onClick={() => setCevaplar(null)}
+                className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white"
+              >
+                Kapat
+              </button>
+            </div>
+          </div>
+        </div>
       ) : null}
     </div>
   );
@@ -756,12 +913,12 @@ function SurveyModal({
                         {tarih(String(h.created_at))} — {String(h.agent_name || 'Temsilci')} —{' '}
                         {meta.call_results.find((c) => c.id === h.call_result)?.label || String(h.call_result)}
                       </summary>
-                      <div className="mt-1 space-y-0.5 text-slate-600">
-                        {h.q_lessons_note ? <p>Ders notu: {String(h.q_lessons_note)}</p> : null}
-                        {h.q_coach_note ? <p>Koç notu: {String(h.q_coach_note)}</p> : null}
-                        {h.q_tech_note ? <p>Teknik not: {String(h.q_tech_note)}</p> : null}
-                        {h.general_note ? <p>Genel: {String(h.general_note)}</p> : null}
-                        {h.action_note ? <p>Aksiyon: {String(h.action_note)}</p> : null}
+                      <div className="mt-2">
+                        <SurveyAnswers
+                          survey={h}
+                          questions={meta.questions}
+                          actionTypes={meta.action_types}
+                        />
                       </div>
                     </details>
                   ))}
