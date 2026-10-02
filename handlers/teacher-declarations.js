@@ -20,7 +20,10 @@ import {
   summarizeDeclarations
 } from '../api/_lib/teacher-declaration-core.js';
 import { loadTeacherSystemWork } from '../api/_lib/teacher-declaration-system.js';
-import { ensureDeclarationsForPeriod } from '../api/_lib/teacher-declaration-notify.js';
+import {
+  ensureDeclarationsForPeriod,
+  sendDeclarationMessages
+} from '../api/_lib/teacher-declaration-notify.js';
 
 const DECL = 'teacher_month_declarations';
 const LINES = 'teacher_declaration_lines';
@@ -201,6 +204,38 @@ export default async function handler(req, res) {
         comparison: compareTotals(named, sys.totals),
         details: compareDetails(named, sys.rows),
         meta: { kinds: DECLARATION_KINDS }
+      });
+    }
+
+    /**
+     * Seçilen öğretmenlere formu gönder.
+     *
+     * Aylık otomatik gönderimi beklemeden, yalnız istenen öğretmenlere.
+     * Formunu zaten göndermiş öğretmene varsayılan olarak gidilmez;
+     * yönetici özellikle isterse `include_submitted` ile gider.
+     */
+    if (req.method === 'POST' && op === 'send') {
+      const ids = Array.isArray(body.ids) ? body.ids.map((x) => String(x || '').trim()).filter(Boolean) : [];
+      if (!ids.length) return res.status(400).json({ error: 'ids_required', message: 'Öğretmen seçilmedi.' });
+
+      const r = await sendDeclarationMessages({
+        period,
+        declarationIds: ids,
+        institutionId,
+        includeSubmitted: body.include_submitted === true,
+        kind: body.kind === 'reminder' ? 'reminder' : 'initial'
+      });
+
+      if (r.error) return res.status(400).json({ ok: false, error: 'send_failed', message: r.error });
+
+      const parcalar = [`${r.sent} öğretmene gönderildi`];
+      if (r.failed) parcalar.push(`${r.failed} gönderilemedi`);
+      return res.status(200).json({
+        ok: true,
+        sent: r.sent,
+        failed: r.failed,
+        errors: r.errors || [],
+        message: parcalar.join(' · ')
       });
     }
 

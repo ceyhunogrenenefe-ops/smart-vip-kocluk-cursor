@@ -122,6 +122,116 @@ function fillMessage(template, { donem, link, ad }) {
 }
 
 /**
+ * Beyan formunu gönderir.
+ *
+ * Hem aylık cron hem yöneticinin "seçilenlere gönder" düğmesi buradan geçer;
+ * iki ayrı gönderim kodu olsa biri düzelir diğeri eski kalırdı.
+ *
+ * @param {{
+ *   period: string,
+ *   declarationIds?: string[] | null,
+ *   institutionId?: string | null,
+ *   includeSubmitted?: boolean,
+ *   kind?: 'initial'|'reminder',
+ *   dryRun?: boolean
+ * }} args
+ */
+export async function sendDeclarationMessages({
+  period,
+  declarationIds = null,
+  institutionId = null,
+  includeSubmitted = false,
+  kind = 'initial',
+  dryRun = false
+}) {
+  const settings = await loadDeclarationSettings();
+
+  let q = supabaseAdmin
+    .from(DECL)
+    .select('id, teacher_id, token, status, institution_id')
+    .eq('period_month', period)
+    .limit(500);
+  // Formu doldurana tekrar mesaj gitmesin; yönetici özellikle isterse gider
+  if (!includeSubmitted) q = q.in('status', ['pending', 'opened']);
+  if (Array.isArray(declarationIds) && declarationIds.length) q = q.in('id', declarationIds);
+  if (institutionId) q = q.eq('institution_id', institutionId);
+
+  const { data: decls, error } = await q;
+  if (error) throw error;
+  if (!decls?.length) return { ok: true, sent: 0, failed: 0, skipped: 'yok', period };
+
+  const { data: teachers } = await supabaseAdmin
+    .from('users')
+    .select('id, name, phone')
+    .in('id', decls.map((d) => d.teacher_id));
+  const byId = Object.fromEntries((teachers || []).map((t) => [String(t.id), t]));
+
+  const reminderSettings = await loadTeacherReminderSettings();
+  const session = await resolveTeacherReminderSession(reminderSettings);
+  if (!session.sessionId && !dryRun) {
+    return {
+      ok: false,
+      sent: 0,
+      failed: 0,
+      period,
+      error: 'Bağlı WhatsApp hattı yok — süper admin hesabından QR ile bağlanın veya panelden bir hat seçin.'
+    };
+  }
+
+  const label = periodLabel(period);
+  const errors = [];
+  let sent = 0;
+  let failed = 0;
+
+  for (const d of decls) {
+    const t = byId[String(d.teacher_id)];
+    const phone = String(t?.phone || '').trim();
+    if (!phone) {
+      failed += 1;
+      errors.push(`${t?.name || 'Öğretmen'}: telefon kayıtlı değil`);
+      continue;
+    }
+    const link = await buildDeclarationFormUrl(d.token);
+    const text = fillMessage(settings.message_text, { donem: label, link, ad: t?.name || '' });
+
+    if (dryRun) {
+      sent += 1;
+      continue;
+    }
+
+    let result;
+    try {
+      result = await sendGatewayTextMessage({
+        phone,
+        message: text,
+        sessionId: session.sessionId,
+        sessionCandidates: [session.sessionId],
+        allowSharedFallback: false
+      });
+    } catch (e) {
+      result = { ok: false, error: errorMessage(e) };
+    }
+
+    if (result?.ok) {
+      sent += 1;
+    } else {
+      failed += 1;
+      errors.push(`${t?.name || 'Öğretmen'}: ${String(result?.error || 'gönderilemedi')}`);
+    }
+
+    await supabaseAdmin.from(MSGS).insert({
+      declaration_id: d.id,
+      kind,
+      channel: 'gateway',
+      ok: Boolean(result?.ok),
+      error: result?.ok ? null : String(result?.error || 'gonderilemedi').slice(0, 500)
+    });
+  }
+
+  return { ok: true, period, sent, failed, errors: errors.slice(0, 10) };
+}
+
+/**
  * Günlük iş: ayın 1'inde bildirim, ayarlı günlerde hatırlatma.
  *
  * @param {{ now?: Date, force?: boolean, dryRun?: boolean }} opts
@@ -144,76 +254,14 @@ export async function runTeacherDeclarationNotifyJob(opts = {}) {
   const period = previousPeriod(now);
   await ensureDeclarationsForPeriod({ period });
 
-  // Yalnız hâlâ doldurmamış olanlara gidilir
-  const { data: decls, error } = await supabaseAdmin
-    .from(DECL)
-    .select('id, teacher_id, token, status, institution_id')
-    .eq('period_month', period)
-    .in('status', ['pending', 'opened'])
-    .limit(500);
-  if (error) throw error;
-  if (!decls?.length) return { ok: true, sent: 0, period, skipped: 'all_submitted' };
-
-  const { data: teachers } = await supabaseAdmin
-    .from('users')
-    .select('id, name, phone')
-    .in('id', decls.map((d) => d.teacher_id));
-  const byId = Object.fromEntries((teachers || []).map((t) => [String(t.id), t]));
-
-  const reminderSettings = await loadTeacherReminderSettings();
-  const session = await resolveTeacherReminderSession(reminderSettings);
-  if (!session.sessionId && !opts.dryRun) {
-    return {
-      ok: false,
-      error: 'Bağlı WhatsApp hattı yok — süper admin hesabından QR ile bağlanın.',
-      sent: 0,
-      period
-    };
-  }
-
-  const label = periodLabel(period);
-  let sent = 0;
-  let failed = 0;
-
-  for (const d of decls) {
-    const t = byId[String(d.teacher_id)];
-    const phone = String(t?.phone || '').trim();
-    if (!phone) {
-      failed += 1;
-      continue;
-    }
-    const link = await buildDeclarationFormUrl(d.token);
-    const text = fillMessage(settings.message_text, { donem: label, link, ad: t?.name || '' });
-
-    if (opts.dryRun) {
-      sent += 1;
-      continue;
-    }
-
-    let result;
-    try {
-      result = await sendGatewayTextMessage({
-        phone,
-        message: text,
-        sessionId: session.sessionId,
-        sessionCandidates: [session.sessionId],
-        allowSharedFallback: false
-      });
-    } catch (e) {
-      result = { ok: false, error: errorMessage(e) };
-    }
-
-    if (result?.ok) sent += 1;
-    else failed += 1;
-
-    await supabaseAdmin.from(MSGS).insert({
-      declaration_id: d.id,
-      kind: isFirst ? 'initial' : 'reminder',
-      channel: 'gateway',
-      ok: Boolean(result?.ok),
-      error: result?.ok ? null : String(result?.error || 'gonderilemedi').slice(0, 500)
-    });
-  }
+  const r = await sendDeclarationMessages({
+    period,
+    kind: isFirst ? 'initial' : 'reminder',
+    dryRun: opts.dryRun === true
+  });
+  const sent = r.sent;
+  const failed = r.failed;
+  if (r.error) return { ...r, period };
 
   console.info('[declaration-notify] tamam', { period, sent, failed, day: dayOfMonth });
   return { ok: true, period, sent, failed, kind: isFirst ? 'initial' : 'reminder' };

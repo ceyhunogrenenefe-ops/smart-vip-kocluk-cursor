@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, Check, Copy, Loader2, X } from 'lucide-react';
+import { AlertTriangle, Check, Copy, Loader2, Send, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiFetch } from '../lib/session';
 
@@ -60,6 +60,8 @@ export default function TeacherDeclarationsPage() {
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState('');
   const [fStatus, setFStatus] = useState('');
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [sending, setSending] = useState(false);
   const [detail, setDetail] = useState<Record<string, unknown> | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
 
@@ -82,6 +84,8 @@ export default function TeacherDeclarationsPage() {
 
   useEffect(() => {
     void load();
+    // Dönem değişince önceki seçim taşınmasın; yanlış aya mesaj gitmesin
+    setSelected(new Set());
   }, [load]);
 
   const filtered = useMemo(() => {
@@ -105,6 +109,48 @@ export default function TeacherDeclarationsPage() {
       toast.error(e instanceof Error ? e.message : 'Detay alınamadı');
     } finally {
       setDetailLoading(false);
+    }
+  };
+
+  const toggle = (id: string) =>
+    setSelected((prev) => {
+      const n = new Set(prev);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
+
+  const gonder = async () => {
+    const ids = [...selected];
+    if (!ids.length) return;
+    const gonderenler = rows.filter((r) => ids.includes(r.id) && r.status === 'submitted').length;
+    const soru = gonderenler
+      ? `${ids.length} öğretmene ${periodLabel} formu gönderilecek.
+
+${gonderenler} öğretmen formunu zaten göndermiş; onlara mesaj GİTMEYECEK.
+
+Devam edilsin mi?`
+      : `${ids.length} öğretmene ${periodLabel} çalışma formu gönderilecek. Devam edilsin mi?`;
+    if (!window.confirm(soru)) return;
+
+    setSending(true);
+    try {
+      const res = await apiFetch('/api/teacher-declarations?op=send', {
+        method: 'POST',
+        body: JSON.stringify({ period, ids })
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j.message || j.error || 'Gönderilemedi');
+      toast.success(j.message || 'Gönderildi');
+      if (Array.isArray(j.errors) && j.errors.length) {
+        toast.error(j.errors.join(' · '), { duration: 10000 });
+      }
+      setSelected(new Set());
+      await load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Gönderilemedi', { duration: 10000 });
+    } finally {
+      setSending(false);
     }
   };
 
@@ -209,6 +255,33 @@ export default function TeacherDeclarationsPage() {
         ))}
       </div>
 
+      <div className="flex flex-wrap items-center gap-2 rounded-xl border border-indigo-100 bg-indigo-50/50 p-3">
+        <button
+          type="button"
+          onClick={() => setSelected(new Set(filtered.filter((r) => r.status !== 'submitted').map((r) => r.id)))}
+          className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700"
+        >
+          Formu göndermeyenleri seç
+        </button>
+        <button
+          type="button"
+          onClick={() => setSelected(new Set())}
+          className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600"
+        >
+          Seçimi temizle
+        </button>
+        <span className="text-xs text-slate-600">{selected.size} öğretmen seçili</span>
+        <button
+          type="button"
+          disabled={!selected.size || sending}
+          onClick={() => void gonder()}
+          className="ml-auto inline-flex items-center gap-2 rounded-xl bg-emerald-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+        >
+          {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+          Seçilenlere formu gönder
+        </button>
+      </div>
+
       {loading ? (
         <div className="flex justify-center py-16 text-slate-400">
           <Loader2 className="h-6 w-6 animate-spin" />
@@ -218,6 +291,16 @@ export default function TeacherDeclarationsPage() {
           <table className="w-full text-left text-sm">
             <thead className="bg-slate-50 text-[11px] uppercase text-slate-500">
               <tr>
+                <th className="px-3 py-2">
+                  <input
+                    type="checkbox"
+                    aria-label="Tümünü seç"
+                    checked={Boolean(filtered.length) && filtered.every((r) => selected.has(r.id))}
+                    onChange={(e) =>
+                      setSelected(e.target.checked ? new Set(filtered.map((r) => r.id)) : new Set())
+                    }
+                  />
+                </th>
                 <th className="px-3 py-2 font-medium">Öğretmen</th>
                 <th className="px-3 py-2 font-medium">Grup</th>
                 <th className="px-3 py-2 font-medium">Özel</th>
@@ -239,6 +322,14 @@ export default function TeacherDeclarationsPage() {
                 );
                 return (
                   <tr key={r.id} className="border-t border-slate-100 hover:bg-slate-50/60">
+                    <td className="px-3 py-2">
+                      <input
+                        type="checkbox"
+                        aria-label={`${r.teacher_name} seç`}
+                        checked={selected.has(r.id)}
+                        onChange={() => toggle(r.id)}
+                      />
+                    </td>
                     <td className="px-3 py-2">
                       <button
                         type="button"
@@ -292,7 +383,7 @@ export default function TeacherDeclarationsPage() {
               })}
               {!filtered.length ? (
                 <tr>
-                  <td colSpan={8} className="px-3 py-10 text-center text-sm text-slate-500">
+                  <td colSpan={9} className="px-3 py-10 text-center text-sm text-slate-500">
                     Bu dönemde kayıt yok.
                   </td>
                 </tr>
