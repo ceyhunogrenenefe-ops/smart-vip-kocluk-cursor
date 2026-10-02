@@ -5,6 +5,10 @@
  * birimi (`class-lesson-payment-units.js`). İki modül farklı birim kullansa
  * ekranda tutan rakam hakedişte tutmaz, öğretmenle tartışma çıkar.
  *
+ * Tarama TOPLU yapılır: öğretmen başına ayrı sorgu atmak 48 kişilik listede
+ * yüzlerce gidiş-dönüş demekti ve sayfa geç açılıyordu. Artık dönemin bütün
+ * kayıtları birkaç sorguyla çekilip bellekte öğretmenlere dağıtılır.
+ *
  * Yalnız OKUR; hiçbir ders kaydına dokunmaz.
  */
 import { supabaseAdmin } from './supabase-admin.js';
@@ -27,111 +31,137 @@ function privateUnits(row) {
   return sessionLessonUnits40(row);
 }
 
-/**
- * Bir öğretmenin dönemdeki sistem kayıtları.
- *
- * @returns {Promise<{
- *   totals: { group:number, private:number, guidance:number },
- *   rows: Array<{kind,class_id,student_id,label,quantity}>,
- *   unassigned: { count:number, units:number }
- * }>}
- */
-export async function loadTeacherSystemWork({ teacherId, period, institutionId = null }) {
-  const range = periodRange(period);
-  const empty = {
+function emptyWork() {
+  return {
     totals: { group: 0, private: 0, guidance: 0 },
     rows: [],
     unassigned: { count: 0, units: 0 }
   };
-  if (!teacherId || !range) return empty;
+}
 
-  const totals = { group: 0, private: 0, guidance: 0 };
-  /** @type {Map<string, {kind:string,class_id:string|null,student_id:string|null,label:string,quantity:number}>} */
-  const rows = new Map();
-  const add = (kind, refKey, label, qty, extra) => {
-    const k = `${kind}|${refKey}`;
-    if (!rows.has(k)) rows.set(k, { kind, class_id: null, student_id: null, label, quantity: 0, ...extra });
-    const cur = rows.get(k);
-    cur.quantity = roundUnits(cur.quantity + qty);
-    if (!cur.label && label) cur.label = label;
-  };
+/**
+ * Dönemin bütün sistem kayıtlarını bir kerede tarar.
+ *
+ * @param {{ period: string, teacherIds?: string[]|null, institutionId?: string|null }} args
+ * @returns {Promise<Map<string, ReturnType<typeof emptyWork>>>}
+ */
+export async function loadTeacherSystemWorkBatch({ period, teacherIds = null, institutionId = null }) {
+  const range = periodRange(period);
+  const out = new Map();
+  if (!range) return out;
+
+  const ids = Array.isArray(teacherIds) && teacherIds.length ? [...new Set(teacherIds.map(String))] : null;
 
   // --- Grup dersleri ve rehberlik ---
   let sq = supabaseAdmin
     .from('class_sessions')
     .select('id, class_id, teacher_id, lesson_date, start_time, end_time, subject, status, institution_id')
     .eq('status', 'completed')
-    .eq('teacher_id', teacherId)
     .gte('lesson_date', range.from)
     .lte('lesson_date', range.to)
-    .limit(5000);
+    .limit(20000);
   if (institutionId) sq = sq.eq('institution_id', institutionId);
   const { data: sessions, error: se } = await sq;
   if (se) throw se;
-
-  const classIds = [...new Set((sessions || []).map((s) => s.class_id).filter(Boolean))];
-  let classNames = {};
-  if (classIds.length) {
-    const { data: cls } = await supabaseAdmin.from('classes').select('id, name').in('id', classIds);
-    classNames = Object.fromEntries((cls || []).map((c) => [String(c.id), c.name || '']));
-  }
-
-  for (const s of sessions || []) {
-    const units = sessionLessonUnits40(s);
-    const kind = isGuidanceSubject(s.subject) ? 'guidance' : 'group';
-    totals[kind] = roundUnits(totals[kind] + units);
-    const ref = String(s.class_id || 'sinifsiz');
-    add(kind, ref, classNames[String(s.class_id)] || 'Sınıf belirtilmemiş', units, {
-      class_id: s.class_id || null
-    });
-  }
 
   // --- Özel dersler ---
   let pq = supabaseAdmin
     .from('teacher_lessons')
     .select('id, teacher_id, student_id, lesson_date, start_time, end_time, duration_minutes, status, institution_id')
     .eq('status', 'completed')
-    .eq('teacher_id', teacherId)
     .gte('lesson_date', range.from)
     .lte('lesson_date', range.to)
-    .limit(5000);
+    .limit(20000);
   if (institutionId) pq = pq.eq('institution_id', institutionId);
   const { data: privates, error: pe } = await pq;
   // Tablo yoksa özel ders sıfır kalır, modül yine çalışır
   if (pe && !/does not exist|schema cache|PGRST205/i.test(errorMessage(pe))) throw pe;
 
+  // --- Ad çözümleri: sınıf ve öğrenci adları tek seferde ---
+  const classIds = [...new Set((sessions || []).map((s) => s.class_id).filter(Boolean))];
   const studentIds = [...new Set((privates || []).map((p) => p.student_id).filter(Boolean))];
-  let studentNames = {};
-  if (studentIds.length) {
-    const { data: st } = await supabaseAdmin.from('students').select('id, name').in('id', studentIds);
-    studentNames = Object.fromEntries((st || []).map((s) => [String(s.id), s.name || '']));
+  const [clsRes, stuRes] = await Promise.all([
+    classIds.length
+      ? supabaseAdmin.from('classes').select('id, name').in('id', classIds.slice(0, 1000))
+      : Promise.resolve({ data: [] }),
+    studentIds.length
+      ? supabaseAdmin.from('students').select('id, name').in('id', studentIds.slice(0, 1000))
+      : Promise.resolve({ data: [] })
+  ]);
+  const classNames = Object.fromEntries((clsRes.data || []).map((c) => [String(c.id), c.name || '']));
+  const studentNames = Object.fromEntries((stuRes.data || []).map((s) => [String(s.id), s.name || '']));
+
+  const ensure = (tid) => {
+    const id = String(tid || '').trim();
+    if (!id) return null;
+    if (!out.has(id)) out.set(id, { ...emptyWork(), _rows: new Map() });
+    return out.get(id);
+  };
+  const addRow = (bucket, kind, refKey, label, qty, extra) => {
+    const k = `${kind}|${refKey}`;
+    if (!bucket._rows.has(k)) {
+      bucket._rows.set(k, { kind, class_id: null, student_id: null, label, quantity: 0, ...extra });
+    }
+    const cur = bucket._rows.get(k);
+    cur.quantity = roundUnits(cur.quantity + qty);
+    if (!cur.label && label) cur.label = label;
+  };
+
+  // Öğretmeni atanmamış dersler kuruma göre ortaktır; her öğretmen için
+  // yeniden sorgulanmasına gerek yok
+  const unassignedRows = (sessions || []).filter((s) => !s.teacher_id);
+  const unassigned = {
+    count: unassignedRows.length,
+    units: roundUnits(unassignedRows.reduce((a, s) => a + sessionLessonUnits40(s), 0))
+  };
+
+  for (const s of sessions || []) {
+    if (!s.teacher_id) continue;
+    if (ids && !ids.includes(String(s.teacher_id))) continue;
+    const bucket = ensure(s.teacher_id);
+    if (!bucket) continue;
+    const units = sessionLessonUnits40(s);
+    const kind = isGuidanceSubject(s.subject) ? 'guidance' : 'group';
+    bucket.totals[kind] = roundUnits(bucket.totals[kind] + units);
+    addRow(bucket, kind, String(s.class_id || 'sinifsiz'), classNames[String(s.class_id)] || 'Sınıf belirtilmemiş', units, {
+      class_id: s.class_id || null
+    });
   }
 
   for (const p of privates || []) {
+    if (!p.teacher_id) continue;
+    if (ids && !ids.includes(String(p.teacher_id))) continue;
+    const bucket = ensure(p.teacher_id);
+    if (!bucket) continue;
     const units = privateUnits(p);
-    totals.private = roundUnits(totals.private + units);
-    add('private', String(p.student_id || 'ogrencisiz'), studentNames[String(p.student_id)] || 'Öğrenci belirtilmemiş', units, {
+    bucket.totals.private = roundUnits(bucket.totals.private + units);
+    addRow(bucket, 'private', String(p.student_id || 'ogrencisiz'), studentNames[String(p.student_id)] || 'Öğrenci belirtilmemiş', units, {
       student_id: p.student_id || null
     });
   }
 
-  // --- Öğretmeni atanmamış dersler ---
-  // Bu dersler hiçbir öğretmene sayılmıyor; sistem toplamı beyandan düşük
-  // çıkıyor. Sessizce yutmak yerine yöneticiye ayrı uyarı olarak gösterilir.
-  let uq = supabaseAdmin
-    .from('class_sessions')
-    .select('id, start_time, end_time, lesson_date, status, institution_id, teacher_id')
-    .eq('status', 'completed')
-    .is('teacher_id', null)
-    .gte('lesson_date', range.from)
-    .lte('lesson_date', range.to)
-    .limit(5000);
-  if (institutionId) uq = uq.eq('institution_id', institutionId);
-  const { data: orphan } = await uq;
-  const unassigned = {
-    count: (orphan || []).length,
-    units: roundUnits((orphan || []).reduce((a, s) => a + sessionLessonUnits40(s), 0))
-  };
+  // İstenen her öğretmen için kayıt bulunsun; hiç dersi olmayan da listede
+  // sıfırla görünsün
+  for (const id of ids || []) ensure(id);
 
-  return { totals, rows: [...rows.values()], unassigned };
+  for (const bucket of out.values()) {
+    bucket.rows = [...bucket._rows.values()];
+    delete bucket._rows;
+    bucket.unassigned = unassigned;
+  }
+  return out;
+}
+
+/**
+ * Tek öğretmenin dönemdeki sistem kayıtları.
+ * Toplu tarayıcının üstünde durur; iki ayrı sayma kuralı olmasın.
+ */
+export async function loadTeacherSystemWork({ teacherId, period, institutionId = null }) {
+  if (!teacherId) return emptyWork();
+  const map = await loadTeacherSystemWorkBatch({
+    period,
+    teacherIds: [teacherId],
+    institutionId
+  });
+  return map.get(String(teacherId)) || emptyWork();
 }
