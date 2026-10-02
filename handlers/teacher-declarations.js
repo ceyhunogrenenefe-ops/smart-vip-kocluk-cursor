@@ -25,7 +25,6 @@ import {
 } from '../api/_lib/teacher-declaration-system.js';
 import {
   ensureDeclarationsForPeriod,
-  isUuid,
   loadActiveWorkerIds,
   loadDeclarationSettings,
   sendDeclarationMessages
@@ -227,8 +226,10 @@ export default async function handler(req, res) {
      * yönetici özellikle isterse `include_submitted` ile gider.
      */
     if (req.method === 'POST' && op === 'send') {
+      // Beyan kimlikleri uuid; kullanıcı kimlikleri değil. Burada süzülen
+      // beyan kimliğidir, öğretmen kimliği değil
       const ids = Array.isArray(body.ids)
-        ? body.ids.map((x) => String(x || '').trim()).filter((x) => isUuid(x))
+        ? body.ids.map((x) => String(x || '').trim()).filter(Boolean)
         : [];
       if (!ids.length) return res.status(400).json({ error: 'ids_required', message: 'Öğretmen seçilmedi.' });
 

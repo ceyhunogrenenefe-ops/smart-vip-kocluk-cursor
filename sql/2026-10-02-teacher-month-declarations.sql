@@ -5,8 +5,8 @@
 
 create table if not exists public.teacher_month_declarations (
   id uuid primary key default gen_random_uuid(),
-  institution_id uuid,
-  teacher_id uuid not null,
+  institution_id text,
+  teacher_id text not null,
   period_month date not null,
   status text not null default 'pending'
     check (status in ('pending','opened','submitted','reopened')),
@@ -15,7 +15,7 @@ create table if not exists public.teacher_month_declarations (
   opened_at timestamptz,
   submitted_at timestamptz,
   edit_allowed boolean not null default false,
-  edit_allowed_by uuid,
+  edit_allowed_by text,
   edit_allowed_at timestamptz,
   note text,
   created_at timestamptz not null default now(),
@@ -32,7 +32,7 @@ create table if not exists public.teacher_declaration_lines (
   kind text not null
     check (kind in ('group','private','guidance','etut','yazili','telafi','deneme','arama','other')),
   class_id uuid,
-  student_id uuid,
+  student_id text,
   label text,
   quantity numeric(10,2) not null default 0,
   note text,
@@ -60,7 +60,7 @@ create table if not exists public.teacher_declaration_settings (
   reminder_days integer[] not null default '{1,3,5}',
   message_text text,
   form_base_url text,
-  updated_by uuid,
+  updated_by text,
   updated_at timestamptz not null default now(),
   created_at timestamptz not null default now()
 );

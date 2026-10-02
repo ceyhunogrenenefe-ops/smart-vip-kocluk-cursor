@@ -10,7 +10,7 @@ create table if not exists public.teacher_payroll_settings (
   group_unit_price_tl numeric(12,2) not null default 700,
   private_unit_price_tl numeric(12,2) not null default 700,
   guidance_unit_price_tl numeric(12,2) not null default 200,
-  updated_by uuid,
+  updated_by text,
   updated_at timestamptz not null default now(),
   created_at timestamptz not null default now()
 );
