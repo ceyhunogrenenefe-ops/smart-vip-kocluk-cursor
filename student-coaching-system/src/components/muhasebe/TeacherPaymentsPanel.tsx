@@ -19,6 +19,7 @@ import {
   formatPayrollTry,
   payTeacherPayroll,
   saveTeacherPayrollDraft,
+  applyTeacherDeclaration,
   saveTeacherPayrollDefaultRates,
   saveTeacherPayrollRates,
   unpayTeacherPayroll,
@@ -681,6 +682,72 @@ export function TeacherPaymentsPanel({ onTeacherTotalChange }: Props) {
                     )}
                   </div>
                 </div>
+
+                {card.declaration ? (
+                  <div
+                    className={`mt-3 rounded-xl border p-3 ${
+                      card.declaration.mismatch
+                        ? 'border-rose-200 bg-rose-50/60'
+                        : 'border-emerald-200 bg-emerald-50/60'
+                    }`}
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <p className="text-xs font-semibold text-slate-800">
+                          Öğretmen beyanı{' '}
+                          {card.declaration.mismatch ? (
+                            <span className="text-rose-700">· sistemle uyuşmuyor</span>
+                          ) : (
+                            <span className="text-emerald-700">· sistemle uyumlu</span>
+                          )}
+                        </p>
+                        <p className="mt-0.5 text-[11px] text-slate-600">
+                          Grup {card.declaration.declared.group} · Özel {card.declaration.declared.private} ·
+                          Rehberlik {card.declaration.declared.guidance}
+                          {card.declaration.declared.other
+                            ? ` · Diğer çalışma ${card.declaration.declared.other}`
+                            : ''}
+                          {card.declaration.submitted_at
+                            ? ` — ${new Date(card.declaration.submitted_at).toLocaleDateString('tr-TR')}`
+                            : ''}
+                        </p>
+                      </div>
+                      {!locked ? (
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={async () => {
+                            if (
+                              !window.confirm(
+                                'Beyandaki sayılar onaylı sayı olarak yazılacak ve hakediş buna göre hesaplanacak. ' +
+                                  'Sistem sayıları kartta görünmeye devam eder. Devam edilsin mi?'
+                              )
+                            ) {
+                              return;
+                            }
+                            setBusyId(card.teacher_id);
+                            try {
+                              await applyTeacherDeclaration({
+                                teacher_id: card.teacher_id,
+                                from,
+                                to
+                              });
+                              toast.success('Beyan hakedişe aktarıldı');
+                              await reload();
+                            } catch (e) {
+                              toast.error(e instanceof Error ? e.message : 'Aktarılamadı');
+                            } finally {
+                              setBusyId('');
+                            }
+                          }}
+                          className="rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
+                        >
+                          Beyanı hakedişe uygula
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : null}
 
                 <div className="mt-4 grid gap-3 lg:grid-cols-3">
                   {(
