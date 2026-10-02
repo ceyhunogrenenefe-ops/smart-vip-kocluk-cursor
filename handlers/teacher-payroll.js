@@ -19,7 +19,38 @@ import {
 
 const jsonError = (res, status, error, extra) => res.status(status).json({ error, ...extra });
 const YMD = /^\d{4}-\d{2}-\d{2}$/;
+/**
+ * Birim ucret varsayilanlari.
+ *
+ * Ogretmene ozel tarife yoksa bunlar kullanilir. Degerler kodda SABIT DEGIL;
+ * teacher_payroll_settings tablosundan okunur ve panelden degistirilebilir.
+ * Buradaki sayilar yalnizca tablo okunamazsa devreye giren son caredir.
+ */
 const DEFAULT_RATE = 500;
+const FALLBACK_RATES = {
+  group_unit_price_tl: 700,
+  private_unit_price_tl: 700,
+  guidance_unit_price_tl: 200
+};
+
+/** Panelden ayarlanan varsayilan birim ucretler. */
+async function loadDefaultRates() {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('teacher_payroll_settings')
+      .select('group_unit_price_tl, private_unit_price_tl, guidance_unit_price_tl')
+      .eq('id', true)
+      .maybeSingle();
+    if (error || !data) return { ...FALLBACK_RATES };
+    return {
+      group_unit_price_tl: money(data.group_unit_price_tl) || FALLBACK_RATES.group_unit_price_tl,
+      private_unit_price_tl: money(data.private_unit_price_tl) || FALLBACK_RATES.private_unit_price_tl,
+      guidance_unit_price_tl: money(data.guidance_unit_price_tl) || FALLBACK_RATES.guidance_unit_price_tl
+    };
+  } catch {
+    return { ...FALLBACK_RATES };
+  }
+}
 const PAYROLL_NOTE_PREFIX = 'teacher_payroll:';
 
 function schemaMissing(err) {
@@ -104,7 +135,8 @@ async function loadTeacherNames(ids) {
   return map;
 }
 
-async function loadRatesMap(teacherIds) {
+async function loadRatesMap(teacherIds, defaults = null) {
+  const def = defaults || { ...FALLBACK_RATES };
   const uniq = [...new Set((teacherIds || []).map((x) => String(x || '').trim()).filter(Boolean))];
   const map = new Map();
   if (!uniq.length) return map;
@@ -116,9 +148,9 @@ async function loadRatesMap(teacherIds) {
   if (te && !schemaMissing(te)) throw te;
   for (const r of typed || []) {
     map.set(String(r.teacher_id), {
-      group_unit_price_tl: money(r.group_unit_price_tl ?? DEFAULT_RATE) || DEFAULT_RATE,
-      private_unit_price_tl: money(r.private_unit_price_tl ?? DEFAULT_RATE) || DEFAULT_RATE,
-      guidance_unit_price_tl: money(r.guidance_unit_price_tl ?? DEFAULT_RATE) || DEFAULT_RATE
+      group_unit_price_tl: money(r.group_unit_price_tl ?? def.group_unit_price_tl) || def.group_unit_price_tl,
+      private_unit_price_tl: money(r.private_unit_price_tl ?? def.private_unit_price_tl) || def.private_unit_price_tl,
+      guidance_unit_price_tl: money(r.guidance_unit_price_tl ?? def.guidance_unit_price_tl) || def.guidance_unit_price_tl
     });
   }
 
@@ -129,7 +161,7 @@ async function loadRatesMap(teacherIds) {
       .select('teacher_id,unit_price_tl')
       .in('teacher_id', missing);
     for (const r of legacy || []) {
-      const p = money(r.unit_price_tl) || DEFAULT_RATE;
+      const p = money(r.unit_price_tl) || def.group_unit_price_tl;
       map.set(String(r.teacher_id), {
         group_unit_price_tl: p,
         private_unit_price_tl: p,
@@ -287,7 +319,8 @@ async function handleSummary(req, res, actor, roleSet) {
   if (teacherId && !teacherIds.has(teacherId)) teacherIds.add(teacherId);
 
   const names = await loadTeacherNames([...teacherIds]);
-  const ratesMap = await loadRatesMap([...teacherIds]);
+  const defaultRates = await loadDefaultRates();
+  const ratesMap = await loadRatesMap([...teacherIds], defaultRates);
 
   const extrasByTeacher = new Map();
   for (const item of lineItems) {
@@ -317,11 +350,8 @@ async function handleSummary(req, res, actor, roleSet) {
       total_minutes: 0
     };
     const settlement = settlementMap.get(tid) || null;
-    const rates = ratesMap.get(tid) || {
-      group_unit_price_tl: DEFAULT_RATE,
-      private_unit_price_tl: DEFAULT_RATE,
-      guidance_unit_price_tl: DEFAULT_RATE
-    };
+    // Öğretmene özel tarife yoksa panelden ayarlanan varsayılanlar
+    const rates = ratesMap.get(tid) || { ...defaultRates };
 
     const approvedGroup =
       settlement != null
@@ -373,9 +403,9 @@ async function handleSummary(req, res, actor, roleSet) {
         guidance_units: roundUnits(approvedGuidance)
       },
       rates: {
-        group_unit_price_tl: money(groupRate) || DEFAULT_RATE,
-        private_unit_price_tl: money(privateRate) || DEFAULT_RATE,
-        guidance_unit_price_tl: money(guidanceRate) || DEFAULT_RATE
+        group_unit_price_tl: money(groupRate) || defaultRates.group_unit_price_tl,
+        private_unit_price_tl: money(privateRate) || defaultRates.private_unit_price_tl,
+        guidance_unit_price_tl: money(guidanceRate) || defaultRates.guidance_unit_price_tl
       },
       default_rates: rates,
       extras,
@@ -403,6 +433,17 @@ async function handleSummary(req, res, actor, roleSet) {
       acc.total_units = roundUnits(acc.total_units + t.computed.total_units);
       acc.total_hours = roundUnits(acc.total_hours + t.computed.total_hours);
       acc.gross_tl = money(acc.gross_tl + t.computed.lesson_gross_tl);
+      // Ders (grup + özel) ve görüşme (rehberlik) tutarları ayrı izlensin
+      acc.lesson_tl = money(
+        acc.lesson_tl +
+          t.approved.group_units * t.rates.group_unit_price_tl +
+          t.approved.private_units * t.rates.private_unit_price_tl
+      );
+      acc.guidance_tl = money(
+        acc.guidance_tl + t.approved.guidance_units * t.rates.guidance_unit_price_tl
+      );
+      acc.lesson_units = roundUnits(acc.lesson_units + t.approved.group_units + t.approved.private_units);
+      acc.guidance_units = roundUnits(acc.guidance_units + t.approved.guidance_units);
       acc.extras_tl = money(acc.extras_tl + t.computed.extras_tl);
       acc.net_tl = money(acc.net_tl + t.computed.total_tl);
       if (t.settlement?.status === 'paid') acc.paid_tl = money(acc.paid_tl + t.computed.total_tl);
@@ -417,6 +458,10 @@ async function handleSummary(req, res, actor, roleSet) {
       net_tl: 0,
       paid_tl: 0,
       unpaid_tl: 0,
+      lesson_tl: 0,
+      guidance_tl: 0,
+      lesson_units: 0,
+      guidance_units: 0,
       teacher_count: teachers.length
     }
   );
@@ -427,6 +472,7 @@ async function handleSummary(req, res, actor, roleSet) {
     unit_period_minutes: GROUP_LESSON_UNIT_MINUTES,
     teachers,
     overview,
+    default_rates: defaultRates,
     schema_hint:
       settlementsMissing || linesMissing
         ? 'student-coaching-system/sql/2026-09-08-teacher-payroll-hakedis.sql'
@@ -520,6 +566,38 @@ async function findSettlement(teacherId, institutionId, period) {
   if (!data?.length) return null;
   const exact = data.find((r) => String(r.institution_id || '') === String(institutionId || ''));
   return exact || data[0];
+}
+
+/**
+ * Varsayilan birim ucretler.
+ *
+ * Ucret degistiginde GECMIS hakedisler etkilenmez: kesinlesmis settlement
+ * satirlari kullanilan birim ucretleri kendi icinde sakliyor.
+ */
+async function handleSaveDefaultRates(req, res, actor, roleSet) {
+  if (!roleSetHasSuperAdmin(roleSet) && String(actor?.role || '').toLowerCase() !== 'admin') {
+    return res.status(403).json({ error: 'forbidden' });
+  }
+  const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : req.body || {};
+  const pos = (v, fallback) => {
+    const n = money(v);
+    return Number.isFinite(n) && n > 0 ? n : fallback;
+  };
+  const cur = await loadDefaultRates();
+  const patch = {
+    group_unit_price_tl: pos(body.group_unit_price_tl, cur.group_unit_price_tl),
+    private_unit_price_tl: pos(body.private_unit_price_tl, cur.private_unit_price_tl),
+    guidance_unit_price_tl: pos(body.guidance_unit_price_tl, cur.guidance_unit_price_tl),
+    updated_by: actor?.sub || null,
+    updated_at: new Date().toISOString()
+  };
+  const { error } = await supabaseAdmin.from('teacher_payroll_settings').update(patch).eq('id', true);
+  if (error) return res.status(500).json({ error: error.message });
+  return res.status(200).json({
+    ok: true,
+    default_rates: await loadDefaultRates(),
+    message: 'Birim ücretler kaydedildi. Ödenmiş geçmiş aylar değişmez.'
+  });
 }
 
 async function handleSaveRates(req, res, actor, roleSet) {
@@ -626,7 +704,7 @@ async function handleSaveDraft(req, res, actor, roleSet) {
     return jsonError(res, 400, 'invalid_approved_units');
   }
 
-  const ratesMap = await loadRatesMap([teacherId]);
+  const ratesMap = await loadRatesMap([teacherId], await loadDefaultRates());
   const defaults = ratesMap.get(teacherId) || {
     group_unit_price_tl: DEFAULT_RATE,
     private_unit_price_tl: DEFAULT_RATE,
@@ -848,7 +926,7 @@ async function handlePay(req, res, actor, roleSet) {
           ? Number(existing.approved_guidance_units)
           : Number(sys.system_guidance_units)
   };
-  const ratesMap = await loadRatesMap([teacherId]);
+  const ratesMap = await loadRatesMap([teacherId], await loadDefaultRates());
   const defaults = ratesMap.get(teacherId) || {
     group_unit_price_tl: DEFAULT_RATE,
     private_unit_price_tl: DEFAULT_RATE,
@@ -1047,6 +1125,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'POST') {
+      if (op === 'save-settings') return handleSaveDefaultRates(req, res, actor, roleSet);
       if (op === 'save-rates') return handleSaveRates(req, res, actor, roleSet);
       if (op === 'save-draft') return handleSaveDraft(req, res, actor, roleSet);
       if (op === 'add-extra' || op === 'upsert-extra') return handleUpsertExtra(req, res, actor, roleSet);

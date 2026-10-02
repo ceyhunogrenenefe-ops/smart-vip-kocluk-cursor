@@ -65,7 +65,16 @@ export type PayrollSummary = {
     net_tl: number;
     paid_tl: number;
     unpaid_tl: number;
+    lesson_tl: number;
+    guidance_tl: number;
+    lesson_units: number;
+    guidance_units: number;
     teacher_count: number;
+  };
+  default_rates?: {
+    group_unit_price_tl: number;
+    private_unit_price_tl: number;
+    guidance_unit_price_tl: number;
   };
   schema_hint?: string | null;
 };
@@ -94,6 +103,25 @@ export async function fetchTeacherPayrollSummary(opts: {
   const j = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(j.error || j.hint || 'Hakediş özeti yüklenemedi');
   return j as PayrollSummary;
+}
+
+/** Varsayilan birim ucretler — ogretmene ozel tarife yoksa bunlar kullanilir. */
+export async function saveTeacherPayrollDefaultRates(body: {
+  group_unit_price_tl: number;
+  private_unit_price_tl: number;
+  guidance_unit_price_tl: number;
+}) {
+  const res = await apiFetch('/api/teacher-payroll?op=save-settings', {
+    method: 'POST',
+    body: JSON.stringify(body)
+  });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(j.error || 'Birim ücretler kaydedilemedi');
+  return j as {
+    ok: boolean;
+    default_rates: { group_unit_price_tl: number; private_unit_price_tl: number; guidance_unit_price_tl: number };
+    message?: string;
+  };
 }
 
 export async function saveTeacherPayrollRates(body: {
