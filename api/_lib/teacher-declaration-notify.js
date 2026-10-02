@@ -29,6 +29,19 @@ const DEFAULT_MESSAGE =
   '{{link}}\n\n' +
   'Online VIP Dershane';
 
+/**
+ * Kimlik gerçekten UUID mi?
+ *
+ * Eski/deneme kayıtlarında `meetings.coach_user_id` gibi alanlarda
+ * "demo-coach" benzeri UUID olmayan değerler bulunabiliyor. Böyle bir değer
+ * `in(...)` sorgusuna girdiğinde Postgres bütün sorguyu reddediyor ve tek bir
+ * bozuk satır yüzünden hiç kimse listeye eklenemiyor. Bu yüzden kimlikler
+ * sorguya girmeden önce süzülür.
+ */
+export function isUuid(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(value || '').trim());
+}
+
 /** Tahmin edilemez anahtar — 32 bayt, URL'de güvenli. */
 export function newDeclarationToken() {
   return crypto.randomBytes(32).toString('base64url');
@@ -116,9 +129,13 @@ export async function loadActiveWorkerIds({ period, institutionId = null }) {
     mq.then((r) => r.data || []).catch(() => [])
   ]);
 
-  for (const r of cls) ids.add(String(r.teacher_id));
-  for (const r of prv) ids.add(String(r.teacher_id));
-  for (const r of mtg) ids.add(String(r.coach_user_id));
+  const ekle = (v) => {
+    const id = String(v || '').trim();
+    if (isUuid(id)) ids.add(id);
+  };
+  for (const r of cls) ekle(r.teacher_id);
+  for (const r of prv) ekle(r.teacher_id);
+  for (const r of mtg) ekle(r.coach_user_id);
   return ids;
 }
 
@@ -146,7 +163,7 @@ export async function ensureDeclarationsForPeriod({ period, institutionId = null
   // O dönem çalışmış ama rolü teacher/coach olmayanlar da listeye girsin
   const activeIds = await loadActiveWorkerIds({ period: p, institutionId });
   const known = new Set((roleUsers || []).map((u) => String(u.id)));
-  const extraIds = [...activeIds].filter((id) => !known.has(id));
+  const extraIds = [...activeIds].filter((id) => !known.has(id) && isUuid(id));
   let extras = [];
   if (extraIds.length) {
     const { data } = await supabaseAdmin
@@ -184,8 +201,21 @@ export async function ensureDeclarationsForPeriod({ period, institutionId = null
     token_expires_at: expires.toISOString()
   }));
   const { error: insErr } = await supabaseAdmin.from(DECL).insert(rows);
-  if (insErr && !/duplicate key/i.test(insErr.message || '')) throw insErr;
-  return { created: rows.length, total: teachers.length };
+  if (!insErr) return { created: rows.length, total: teachers.length };
+  if (/duplicate key/i.test(insErr.message || '')) return { created: 0, total: teachers.length };
+
+  // Toplu ekleme bir satır yüzünden düştüyse tek tek denenir; bir bozuk kayıt
+  // bütün öğretmen ve koçların listeye girmesini engellemesin
+  console.warn('[declaration-ensure] toplu ekleme basarisiz, tek tek denenecek:', insErr.message);
+  let created = 0;
+  for (const row of rows) {
+    const { error } = await supabaseAdmin.from(DECL).insert(row);
+    if (!error) created += 1;
+    else if (!/duplicate key/i.test(error.message || '')) {
+      console.warn('[declaration-ensure] atlandi', { teacher_id: row.teacher_id, error: error.message });
+    }
+  }
+  return { created, total: teachers.length };
 }
 
 function fillMessage(template, { donem, link, ad }) {
@@ -336,7 +366,7 @@ export async function runTeacherDeclarationNotifyJob(opts = {}) {
   const r = await sendDeclarationMessages({
     period,
     kind: isFirst ? 'initial' : 'reminder',
-    onlyTeacherIds: [...activeIds],
+    onlyTeacherIds: [...activeIds].filter(isUuid),
     dryRun: opts.dryRun === true
   });
   const sent = r.sent;
