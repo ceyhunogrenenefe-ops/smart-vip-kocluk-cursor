@@ -180,18 +180,32 @@
     {
       "path": "/api/cron/teacher-review-invites",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/teacher-declaration-notify",
+      "schedule": "0 9 * * *"
     }
   ],
   "redirects": [
     {
       "source": "/:path*",
-      "has": [{ "type": "host", "value": "dersonlinevipkocluk.com" }],
+      "has": [
+        {
+          "type": "host",
+          "value": "dersonlinevipkocluk.com"
+        }
+      ],
       "destination": "https://www.dersonlinevipkocluk.com/:path*",
       "permanent": true
     },
     {
       "source": "/:path*",
-      "has": [{ "type": "host", "value": "onlinevipdershane.com" }],
+      "has": [
+        {
+          "type": "host",
+          "value": "onlinevipdershane.com"
+        }
+      ],
       "destination": "https://www.onlinevipdershane.com/:path*",
       "permanent": true
     }

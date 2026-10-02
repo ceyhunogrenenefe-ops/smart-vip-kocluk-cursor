@@ -35,6 +35,8 @@ import CoachGuidePage from './pages/CoachGuidePage';
 import CoachReports from './pages/CoachReports';
 import ParentSatisfactionPage from './pages/ParentSatisfactionPage';
 import WhatsAppTemplatesPage from './pages/WhatsAppTemplatesPage';
+import TeacherDeclarationsPage from './pages/TeacherDeclarationsPage';
+import TeacherDeclarationFormPage from './pages/TeacherDeclarationFormPage';
 import AdminPanel from './pages/AdminPanel';
 import BookTracking from './pages/BookTracking';
 import WrittenExamTracking from './components/WrittenExamTracking';
@@ -611,6 +613,15 @@ function App() {
               </ProtectedRoute>
             } />
 
+            {/* Öğretmen aylık çalışma beyanları */}
+            <Route path="/ogretmen-beyanlari" element={
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/ogretmen-beyanlari')}>
+                <Layout>
+                  <TeacherDeclarationsPage />
+                </Layout>
+              </ProtectedRoute>
+            } />
+
             {/* WhatsApp / Meta şablon yöneticisi */}
             <Route path="/crm/sablonlar" element={
               <ProtectedRoute allowedRoles={rolesForProtectedRoute('/crm/sablonlar')}>
@@ -790,6 +801,8 @@ function App() {
             <Route path="/odeme/sonuc" element={<GarantiOdemeSonucPage />} />
             <Route path="/odeme/:token" element={<GarantiOdemePage />} />
             <Route path="/review/public" element={<PublicTeacherReviewPage />} />
+            {/* Öğretmen formu: oturum istemez, bağlantıdaki anahtarla açılır */}
+            <Route path="/ogretmen-calisma" element={<TeacherDeclarationFormPage />} />
             <Route path="/veli-imza/:token" element={<VeliImzaPage />} />
             <Route path="/sign-contract/:token" element={<VeliImzaPage />} />
             <Route path="/veli-kayit-metin/:slug" element={<VeliKayitLegalDocPage />} />
