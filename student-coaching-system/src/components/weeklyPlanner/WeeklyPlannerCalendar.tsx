@@ -537,10 +537,40 @@ export function WeeklyPlannerCalendar({
     };
   }, [reload]);
 
-  const dayDates = useMemo(
-    () => DAY_LABELS.map((_, i) => format(addDays(parseISO(weekStartStr), i), 'yyyy-MM-dd')),
-    [weekStartStr]
-  );
+  /**
+   * Takvimde gösterilecek günler.
+   *
+   * Hedef için başlangıç–bitiş seçildiyse takvim O ARALIĞI gösterir ve ilk
+   * sütun başlangıç günüdür. Hedefi 3 Ekim Cumartesi verildiyse ilk gün
+   * cumartesi olur. Eskiden takvim her zaman Pazartesi–Pazar haftasıydı;
+   * aralık haftayı aşınca kalan günler ekranda hiç yoktu ve bloklar oraya
+   * sürüklenemiyordu.
+   *
+   * Aralık seçilmemişse davranış eskisi gibi: içinde bulunulan hafta.
+   */
+  const gridRange = useMemo(() => {
+    const gs = newGoalStart.trim();
+    const ge = newGoalEnd.trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(gs) && /^\d{4}-\d{2}-\d{2}$/.test(ge) && gs <= ge) {
+      return { from: gs, to: ge };
+    }
+    return { from: weekStartStr, to: weekEndStr };
+  }, [newGoalStart, newGoalEnd, weekStartStr, weekEndStr]);
+
+  const dayDates = useMemo(() => {
+    const start = parseISO(gridRange.from);
+    const out: string[] = [];
+    // Çok uzun aralıkta takvim kullanılamaz hâle gelmesin
+    for (let i = 0; i < 42; i += 1) {
+      const d = format(addDays(start, i), 'yyyy-MM-dd');
+      out.push(d);
+      if (d >= gridRange.to) break;
+    }
+    return out;
+  }, [gridRange]);
+
+  /** Aralık seçili mi — başlık ve sütun sayısı buna göre değişir. */
+  const customRange = gridRange.from !== weekStartStr || gridRange.to !== weekEndStr;
 
   const goalAggregates = useMemo(() => {
     // Aynı dersten birden fazla hedef olabilir: günlük kayıtlar hedeflere TEK KEZ
@@ -1281,8 +1311,10 @@ export function WeeklyPlannerCalendar({
         setNewGoalSubject('');
         setNewGoalTitle('');
         setNewGoalQty(100);
-        setNewGoalStart(weekStartStr);
-        setNewGoalEnd(weekEndStr);
+        // Tarihler KORUNUR. Koç hedefleri girdikten sonra blokları o aralığa
+        // yerleştiriyor; tarihleri haftaya geri almak takvimi tam o anda
+        // aralığın dışına kaydırıyordu. Aynı görüşmede birden fazla hedef
+        // girilirken de aralığı tekrar seçmek gerekmiyor.
         await reload();
       } catch (e) {
         alert(e instanceof Error ? e.message : 'Hedef eklenemedi');
@@ -1434,10 +1466,11 @@ export function WeeklyPlannerCalendar({
   };
 
   const todayYmd = format(new Date(), 'yyyy-MM-dd');
-  const columnMeta = dayDates.map((d, i) => ({
-    isToday: d === todayYmd,
-    isWeekend: i >= 5,
-  }));
+  const columnMeta = dayDates.map((d) => {
+    // Takvim artık pazartesiden başlamayabilir; hafta sonu gerçek güne bakılır
+    const wd = parseISO(d).getDay(); // 0 Pazar, 6 Cumartesi
+    return { isToday: d === todayYmd, isWeekend: wd === 0 || wd === 6 };
+  });
 
   const dayHeaderClass = (i: number) =>
     cn(
@@ -1704,7 +1737,7 @@ export function WeeklyPlannerCalendar({
           <p className="text-xs text-amber-800/90 leading-relaxed max-w-2xl">
             {studentStudyLogUi || selfCoachingMode
               ? 'Ders ve konu seçerek haftalık hedefini oluştur; kartı takvime sürükleyerek plana yerleştir. Tamamladıkça ilerlemen otomatik güncellenir.'
-              : 'Başlangıç ve bitişi istediğiniz takvim günleri olarak seçebilirsiniz (ör. Cumartesi–gelecek hafta Cuma). Takvimde üst şeritte hangi günlerin bu hedefe dahil olduğu işaretlenir; plan bloklarını yalnızca bu aralıktaki günlere sürükleyebilirsiniz.'}
+              : 'Başlangıç ve bitişi istediğiniz takvim günleri olarak seçebilirsiniz (ör. Cumartesi–gelecek hafta Cuma). Seçtiğiniz anda aşağıdaki takvim o aralığa geçer ve ilk sütun başlangıç günü olur; blokları doğrudan oraya sürükleyebilirsiniz.'}
           </p>
           {plannerStudent && classLevel !== undefined && classLevel !== null ? (
             <p className="text-[11px] text-amber-950/80">
@@ -1860,6 +1893,12 @@ export function WeeklyPlannerCalendar({
                     : 'Bloka tıkla → çalışma kaydı · takvim 08:00–01:00'
                   : 'Blokları sürükle · boş saate tıkla · takvim 08:00–01:00'}
             </span>
+            {customRange ? (
+              <span className="inline-flex items-center gap-1 rounded-lg bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-900">
+                Hedef aralığı görünüyor: {format(parseISO(gridRange.from), 'd MMM', { locale: tr })} –{' '}
+                {format(parseISO(gridRange.to), 'd MMM', { locale: tr })} ({dayDates.length} gün)
+              </span>
+            ) : null}
             <div className="flex flex-wrap items-center gap-2 sm:justify-end">
               {canEditPlan ? (
                 <button
@@ -1967,7 +2006,7 @@ export function WeeklyPlannerCalendar({
                       )}
                     >
                       <div className="text-[9px] font-bold uppercase tracking-wide opacity-90">
-                        {DAY_LABELS[i].slice(0, 3)}
+                        {DAY_LABELS[(parseISO(date).getDay() + 6) % 7].slice(0, 3)}
                       </div>
                       <div className="text-base font-bold tabular-nums leading-none">
                         {format(parseISO(date), 'd', { locale: tr })}
@@ -2159,11 +2198,13 @@ export function WeeklyPlannerCalendar({
                     ? 'border-violet-100/90 bg-white/95 ring-1 ring-violet-100/60 dark:border-violet-900/40 dark:bg-slate-900/95 dark:ring-violet-900/25'
                     : 'border-slate-200/90 bg-white dark:border-slate-700 dark:bg-slate-900'
                 )}
-                style={{ gridTemplateColumns: `64px repeat(7, minmax(92px,1fr))` }}
+                style={{ gridTemplateColumns: `64px repeat(${dayDates.length}, minmax(92px,1fr))` }}
               >
                 <div className="sticky left-0 z-20 h-[52px] border-b border-r border-slate-200/95 bg-gradient-to-br from-slate-100 via-slate-50 to-white dark:border-slate-700 dark:from-slate-800 dark:via-slate-900 dark:to-slate-900" />
-                {DAY_LABELS.map((d, i) => (
-                  <div key={d} className={dayHeaderClass(i)}>
+                {dayDates.map((date, i) => {
+                  const d = DAY_LABELS[(parseISO(date).getDay() + 6) % 7];
+                  return (
+                  <div key={date} className={dayHeaderClass(i)}>
                     {columnMeta[i]?.isToday ? (
                       <span className="absolute top-1.5 right-1.5 hidden rounded-full bg-indigo-600 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-white shadow-md sm:inline-flex dark:bg-indigo-500">
                         Bugün
@@ -2172,10 +2213,11 @@ export function WeeklyPlannerCalendar({
                     <span className="hidden text-[13px] font-bold text-slate-800 dark:text-slate-100 sm:inline">{d}</span>
                     <span className="text-[12px] font-bold text-slate-800 dark:text-slate-100 sm:hidden">{d.slice(0, 3)}</span>
                     <span className="mt-0.5 inline-flex items-center rounded-md bg-white/85 px-1.5 py-0 text-[11px] font-semibold tabular-nums text-slate-600 shadow-sm ring-1 ring-slate-200/80 dark:bg-slate-800/90 dark:text-slate-400 dark:ring-slate-600/80">
-                      {format(parseISO(dayDates[i]), 'd MMM', { locale: tr })}
+                      {format(parseISO(date), 'd MMM', { locale: tr })}
                     </span>
                   </div>
-                ))}
+                  );
+                })}
 
                 <div className="sticky left-0 z-10 border-r border-b border-slate-200/90 bg-gradient-to-br from-amber-50 to-amber-100/70 px-2 py-2 text-[10px] font-bold uppercase leading-tight tracking-wide text-amber-900 dark:border-slate-700 dark:from-amber-950/50 dark:to-amber-950/25 dark:text-amber-200/95">
                   Hedef süresi
