@@ -11,7 +11,8 @@ import {
   Download,
   Filter,
   Settings2,
-  GripVertical
+  GripVertical,
+  Phone
 } from 'lucide-react';
 import { toast } from 'sonner';
 import * as XLSX from 'xlsx';
@@ -19,6 +20,7 @@ import {
   rtListLeads,
   rtGetDashboard,
   rtCreateLead,
+  rtCreateTask,
   rtCheckDuplicates,
   rtExport,
   rtImportPreview,
@@ -86,6 +88,7 @@ export default function RegistrationTrackingPanel({ isManager, canAssign, instit
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [drawerId, setDrawerId] = useState<string | null>(params.get('rt_lead'));
   const [showCreate, setShowCreate] = useState(false);
+  const [showInboundCall, setShowInboundCall] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [search, setSearch] = useState(params.get('rt_search') || '');
   const debouncedSearch = useDebouncedValue(search);
@@ -516,6 +519,14 @@ export default function RegistrationTrackingPanel({ isManager, canAssign, instit
             >
               <Plus className="h-4 w-4" /> Yeni aday
             </button>
+            <button
+              type="button"
+              onClick={() => setShowInboundCall(true)}
+              title="Bizi doğrudan arayan kişiyi kaydet"
+              className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white"
+            >
+              <Phone className="h-4 w-4" /> Arayan kişi
+            </button>
             <button type="button" onClick={() => setShowImport(true)} className="inline-flex items-center gap-1 rounded-lg border px-3 py-2 text-sm">
               <Upload className="h-4 w-4" /> Excel'den Aktar
             </button>
@@ -608,6 +619,18 @@ export default function RegistrationTrackingPanel({ isManager, canAssign, instit
           onClose={() => setShowCreate(false)}
           onCreated={() => {
             setShowCreate(false);
+            reload();
+          }}
+        />
+      )}
+
+      {showInboundCall && (
+        <CreateLeadModal
+          inboundCall
+          coaches={coaches}
+          onClose={() => setShowInboundCall(false)}
+          onCreated={() => {
+            setShowInboundCall(false);
             reload();
           }}
         />
@@ -838,11 +861,14 @@ function ListView({
 function CreateLeadModal({
   coaches,
   onClose,
-  onCreated
+  onCreated,
+  inboundCall = false
 }: {
   coaches: RegCoach[];
   onClose: () => void;
   onCreated: () => void;
+  /** Bizi doğrudan arayan kişi: kaynak ve durum önceden dolu gelir */
+  inboundCall?: boolean;
 }) {
   const [form, setForm] = useState({
     full_name: '',
@@ -850,11 +876,13 @@ function CreateLeadModal({
     phone: '',
     grade_program: 'lgs',
     temperature: 'warm',
-    source: '',
+    source: inboundCall ? 'telefon_arayan' : '',
     notes: '',
-    primary_status: '' as '' | 'tracking' | 'confirmed',
+    primary_status: (inboundCall ? 'tracking' : '') as '' | 'tracking' | 'confirmed',
     assigned_user_id: ''
   });
+  // Takip araması: kart açılırken hemen planlanabilsin
+  const [followUpAt, setFollowUpAt] = useState('');
   const [dupes, setDupes] = useState<RegLead[]>([]);
   const [busy, setBusy] = useState(false);
   const [coachHint, setCoachHint] = useState('');
@@ -878,13 +906,13 @@ function CreateLeadModal({
     try {
       const { data } = await rtLookupPhone(phone);
       if (data?.coach?.id) {
+        // Temsilci OTOMATİK atanmaz; yalnız öneri olarak gösterilir.
+        // Kartın kime ait olduğu bilinçli seçilsin.
         setForm((f) => ({
           ...f,
-          assigned_user_id: data.coach!.id,
           parent_full_name: f.parent_full_name || data.parent_full_name || ''
         }));
-        setCoachHint(`Sistemde kayıtlı koç: ${data.coach.name}`);
-        toast.success(`Koç bulundu: ${data.coach.name}`);
+        setCoachHint(`Bu telefon sistemde kayıtlı — ilgili koç: ${data.coach.name}`);
       } else {
         setCoachHint('Bu telefonla eşleşen koç bulunamadı');
       }
@@ -903,18 +931,47 @@ function CreateLeadModal({
       toast.error('Kesin kayıt mı takip mi seçin');
       return;
     }
+    if (!form.assigned_user_id) {
+      toast.error('Sorumlu temsilci seçin');
+      return;
+    }
     if (dupes.length && !force) {
       toast.error('Mükerrer kayıt uyarısı — "Yine de oluştur" ile devam edin');
       return;
     }
     setBusy(true);
     try {
-      await rtCreateLead({
+      const created = await rtCreateLead({
         ...form,
         full_name: form.full_name,
-        assigned_user_id: form.assigned_user_id || null
+        assigned_user_id: form.assigned_user_id
       });
-      toast.success(form.primary_status === 'confirmed' ? 'Kesin kayıt eklendi' : 'Takip adayı oluşturuldu');
+
+      // Takip araması istendiyse kart ile birlikte görev de açılır; ayrı ekrana
+      // gitmek gerekmesin diye burada yapılır
+      const leadId = (created?.data as { id?: string } | undefined)?.id;
+      if (followUpAt && leadId) {
+        try {
+          await rtCreateTask({
+            lead_id: leadId,
+            assigned_to: form.assigned_user_id,
+            title: `Takip araması — ${form.full_name.trim()}`,
+            description: form.notes || null,
+            task_type: 'call',
+            due_at: new Date(followUpAt).toISOString()
+          });
+        } catch {
+          toast.warning('Kart açıldı ama takip araması kurulamadı');
+        }
+      }
+
+      toast.success(
+        form.primary_status === 'confirmed'
+          ? 'Kesin kayıt eklendi'
+          : inboundCall
+            ? 'Arayan kişi kaydedildi'
+            : 'Takip adayı oluşturuldu'
+      );
       onCreated();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Oluşturulamadı');
@@ -926,7 +983,15 @@ function CreateLeadModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
       <div className="w-full max-w-md rounded-xl bg-white p-5 dark:bg-slate-900">
-        <h3 className="text-lg font-semibold">Yeni Kayıt Adayı</h3>
+        <h3 className="text-lg font-semibold">
+          {inboundCall ? '📞 Bizi Arayan Kişiyi Kaydet' : 'Yeni Kayıt Adayı'}
+        </h3>
+        {inboundCall ? (
+          <p className="mt-0.5 text-xs text-slate-500">
+            Web sitesinden numaramızı bulup arayan kişiyi buradan kaydedin; notu ve takip aramasını
+            aynı ekranda bırakabilirsiniz.
+          </p>
+        ) : null}
         <div className="mt-3 space-y-2 text-sm">
           <div>
             <p className="mb-1 text-xs font-medium text-slate-600">Kayıt türü *</p>
@@ -976,18 +1041,26 @@ function CreateLeadModal({
             onBlur={lookupPhone}
           />
           {coachHint && <p className="text-xs text-indigo-700 dark:text-indigo-300">{coachHint}</p>}
-          <select
-            className="w-full rounded border px-2 py-1.5 dark:border-slate-600 dark:bg-slate-800"
-            value={form.assigned_user_id}
-            onChange={(e) => setForm({ ...form, assigned_user_id: e.target.value })}
-          >
-            <option value="">Koç seçin (opsiyonel)</option>
-            {coaches.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
+          <div>
+            <p className="mb-1 text-xs font-medium text-slate-600">Sorumlu temsilci *</p>
+            <select
+              className={`w-full rounded border px-2 py-1.5 dark:border-slate-600 dark:bg-slate-800 ${
+                form.assigned_user_id ? '' : 'border-amber-400 bg-amber-50 dark:bg-amber-950/20'
+              }`}
+              value={form.assigned_user_id}
+              onChange={(e) => setForm({ ...form, assigned_user_id: e.target.value })}
+            >
+              <option value="">Temsilci seçin (zorunlu)</option>
+              {coaches.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+            <p className="mt-0.5 text-[11px] text-slate-500">
+              Kartın kime ait olduğu baştan belli olsun diye zorunludur; otomatik atanmaz.
+            </p>
+          </div>
           <select
             className="w-full rounded border px-2 py-1.5 dark:border-slate-600 dark:bg-slate-800"
             value={form.grade_program}
@@ -999,6 +1072,34 @@ function CreateLeadModal({
               </option>
             ))}
           </select>
+          <div>
+            <p className="mb-1 text-xs font-medium text-slate-600">
+              {inboundCall ? 'Görüşme notu' : 'Not'}
+            </p>
+            <textarea
+              rows={3}
+              className="w-full rounded border px-2 py-1.5 dark:border-slate-600 dark:bg-slate-800"
+              placeholder={
+                inboundCall
+                  ? 'Ne sordu, ne konuşuldu, nereden ulaştı…'
+                  : 'İsteğe bağlı'
+              }
+              value={form.notes}
+              onChange={(e) => setForm({ ...form, notes: e.target.value })}
+            />
+          </div>
+          <div>
+            <p className="mb-1 text-xs font-medium text-slate-600">Takip araması (isteğe bağlı)</p>
+            <input
+              type="datetime-local"
+              className="w-full rounded border px-2 py-1.5 dark:border-slate-600 dark:bg-slate-800"
+              value={followUpAt}
+              onChange={(e) => setFollowUpAt(e.target.value)}
+            />
+            <p className="mt-0.5 text-[11px] text-slate-500">
+              Tarih seçerseniz seçilen temsilciye bu kart için arama görevi açılır.
+            </p>
+          </div>
         </div>
         {dupes.length > 0 && (
           <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs dark:bg-amber-950/30">
