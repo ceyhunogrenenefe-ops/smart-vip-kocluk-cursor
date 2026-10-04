@@ -573,14 +573,27 @@ async function handleCreateLead(body, institutionId, actor) {
     throw new Error('Öğrenci adı ve sınıf/program zorunludur');
   }
 
+  /**
+   * Sorumlu temsilci ZORUNLU.
+   *
+   * Önceden telefondan koç bulunursa sessizce atanıyor, bulunamazsa kart
+   * sahipsiz açılıyordu. Kimin takip ettiği belli olmayan kart kimsede
+   * görünmüyor ve arama yapılmadan kalıyor. Artık kartı açan kişi kime
+   * atandığını açıkça seçer.
+   */
+  const assignedUserId = String(body.assigned_user_id || '').trim();
+  if (!assignedUserId) {
+    throw new Error('Sorumlu temsilci seçilmelidir');
+  }
+
   const isConfirmed = body.primary_status === 'confirmed';
-  let assignedUserId = body.assigned_user_id || null;
   let parentName = body.parent_full_name || null;
   let linkedStudentId = body.linked_student_id || null;
 
-  if (phone && !assignedUserId) {
+  // Telefon eşleşmesi yine okunur: veli adı ve bağlı öğrenci otomatik dolsun.
+  // Temsilci ataması buradan YAPILMAZ.
+  if (phone) {
     const looked = await lookupCoachByParentPhone(institutionId, phone);
-    if (looked.coach?.id) assignedUserId = looked.coach.id;
     if (!parentName && looked.parent_full_name) parentName = looked.parent_full_name;
     if (!linkedStudentId && looked.linked_student_id) linkedStudentId = looked.linked_student_id;
   }
