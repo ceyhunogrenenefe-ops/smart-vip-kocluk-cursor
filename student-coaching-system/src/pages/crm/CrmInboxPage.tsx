@@ -49,6 +49,7 @@ import {
 } from '../../lib/crmInboxApi';
 import { contactInitials, contactSubtitle, contactTitle } from '../../lib/crmContactDisplay';
 import { playCrmLeadChime } from '../../lib/crmLiveSound';
+import { rtGetLead } from '../../lib/registrationTrackingApi';
 import { CrmTemplateSendPreviewModal } from './CrmTemplateModals';
 
 /** Profil fotoğrafı varsa o, yoksa baş harfler */
@@ -201,8 +202,17 @@ export default function CrmInboxPage() {
   const [slashHighlight, setSlashHighlight] = useState(0);
   const [pendingTpl, setPendingTpl] = useState<CrmMetaTemplate | null>(null);
   const [tplParams, setTplParams] = useState<string[]>([]);
-  const [notes, setNotes] = useState<Array<{ id: string; body: string; created_at: string }>>([]);
+  const [notes, setNotes] = useState<
+    Array<{ id: string; body: string; created_at: string; source?: string; interaction_type?: string | null }>
+  >([]);
   const [noteDraft, setNoteDraft] = useState('');
+  /**
+   * Pipeline kartının alanları gelen kutusunda da görünsün.
+   *
+   * Temsilci, konuşurken kişinin hangi aşamada olduğunu, sıcaklığını ve
+   * sonraki aksiyonunu görmek için başka ekrana gitmek zorunda kalmasın.
+   */
+  const [leadOzet, setLeadOzet] = useState<Record<string, unknown> | null>(null);
   const [tagDraft, setTagDraft] = useState('');
   const pollSinceRef = useRef(new Date().toISOString());
   const bottomRef = useRef<HTMLDivElement | null>(null);
@@ -349,6 +359,26 @@ export default function CrmInboxPage() {
   useEffect(() => {
     if (selectedId) void loadMessages(selectedId);
   }, [selectedId, loadMessages]);
+
+  // Konuşma bir kayda bağlıysa pipeline kartının alanlarını getir
+  useEffect(() => {
+    const leadId = selected?.lead_id;
+    if (!leadId) {
+      setLeadOzet(null);
+      return;
+    }
+    let iptal = false;
+    void rtGetLead(String(leadId))
+      .then((res) => {
+        if (!iptal) setLeadOzet((res.data?.lead as Record<string, unknown>) || null);
+      })
+      .catch(() => {
+        if (!iptal) setLeadOzet(null);
+      });
+    return () => {
+      iptal = true;
+    };
+  }, [selected?.lead_id]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -1295,9 +1325,20 @@ export default function CrmInboxPage() {
               <div className="mb-2 max-h-36 space-y-1 overflow-y-auto">
                 {notes.length ? (
                   notes.map((n) => (
-                    <p key={n.id} className="rounded-md bg-white px-2 py-1 text-[11px] text-slate-700 ring-1 ring-slate-100">
+                    <p
+                      key={n.id}
+                      className={`rounded-md px-2 py-1 text-[11px] text-slate-700 ring-1 ${
+                        n.source === 'pipeline'
+                          ? 'bg-indigo-50/70 ring-indigo-100'
+                          : 'bg-white ring-slate-100'
+                      }`}
+                    >
                       {n.body}
-                      <span className="mt-0.5 block text-[10px] text-slate-400">{formatTime(n.created_at)}</span>
+                      <span className="mt-0.5 block text-[10px] text-slate-400">
+                        {formatTime(n.created_at)}
+                        {/* Notun nerede alındığı belli olsun: iki ekran aynı listeyi gösteriyor */}
+                        {n.source === 'pipeline' ? ' · Pipeline görüşmesi' : ''}
+                      </span>
                     </p>
                   ))
                 ) : (
@@ -1388,6 +1429,41 @@ export default function CrmInboxPage() {
                 />
               </div>
             </div>
+
+            {leadOzet ? (
+              <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-2.5">
+                <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                  Kayıt kartı
+                </p>
+                <dl className="grid grid-cols-2 gap-x-2 gap-y-1 text-[11px]">
+                  {[
+                    ['Aşama', String(leadOzet.stage || '—')],
+                    ['Durum', String(leadOzet.primary_status || '—')],
+                    ['Sınıf / Program', String(leadOzet.grade_program || '—')],
+                    [
+                      'Sıcaklık',
+                      leadOzet.temperature === 'hot'
+                        ? '🔥 Sıcak'
+                        : leadOzet.temperature === 'cold'
+                          ? '🧊 Soğuk'
+                          : '🌤️ Ilık'
+                    ],
+                    ['Veli', String(leadOzet.parent_full_name || '—')],
+                    [
+                      'Sonraki aksiyon',
+                      leadOzet.next_action_at
+                        ? new Date(String(leadOzet.next_action_at)).toLocaleString('tr-TR')
+                        : '—'
+                    ]
+                  ].map(([k, v]) => (
+                    <div key={k}>
+                      <dt className="text-slate-400">{k}</dt>
+                      <dd className="font-medium text-slate-800">{v}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </div>
+            ) : null}
 
             {selected.lead_id && (
               <p className="text-xs text-slate-500">

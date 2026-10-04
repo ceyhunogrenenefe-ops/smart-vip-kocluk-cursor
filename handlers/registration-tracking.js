@@ -7,7 +7,11 @@ import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { errorMessage } from '../api/_lib/error-msg.js';
 import { isMissingTableError } from '../api/_lib/supabase-schema.js';
 import { isUuid } from '../api/_lib/uuid.js';
-import { loadCrmInboxMessagesForLead, mergeLeadChannelMessages } from '../api/_lib/crm-lead-messages.js';
+import {
+  loadCrmInboxMessagesForLead,
+  loadCrmInboxNotesForLead,
+  mergeLeadChannelMessages
+} from '../api/_lib/crm-lead-messages.js';
 import { isContactUpdate, markLeadContacted } from '../api/_lib/registration-lead-contact.js';
 import {
   normalizeTrPhone,
@@ -450,9 +454,24 @@ async function handleGetLead(leadId, institutionId, tags) {
     channelMessages = mergeLeadChannelMessages(channelMessages, []);
   }
 
+  // Gelen kutusunda alınan notlar da kart zaman çizelgesinde görünsün
+  let tumGorusmeler = interactions.data || [];
+  try {
+    const inboxNotes = await loadCrmInboxNotesForLead(lead);
+    if (inboxNotes.length) {
+      tumGorusmeler = [...tumGorusmeler, ...inboxNotes].sort((a, b) =>
+        String(b.interaction_at || b.created_at || '').localeCompare(
+          String(a.interaction_at || a.created_at || '')
+        )
+      );
+    }
+  } catch (e) {
+    console.warn('[registration-tracking] gelen kutusu notlari:', e instanceof Error ? e.message : e);
+  }
+
   return {
     lead: sanitizeLeadForActor(lead, tags),
-    interactions: interactions.data || [],
+    interactions: tumGorusmeler,
     tasks: tasks.data || [],
     meeting_links: meetingLinks.data || [],
     audit_logs: audit.data || [],
