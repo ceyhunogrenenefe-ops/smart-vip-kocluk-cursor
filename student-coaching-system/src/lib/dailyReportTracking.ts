@@ -36,6 +36,7 @@ export type DailyReportEntrySlice = Pick<
   | 'readingMinutes'
   | 'pagesRead'
   | 'screenTimeMinutes'
+  | 'studyMinutes'
   | 'bookTitle'
   | 'bookId'
   | 'subject'
@@ -88,6 +89,8 @@ export type DailyReportStudentStatus = {
   entryCount: number;
   breakdownTotal: number;
   solvedTotal: number;
+  /** Süre bazlı hedeflerde girilen çalışma dakikası */
+  studyMinutesTotal: number;
 };
 
 export type DailyReportDaySummary = {
@@ -114,8 +117,20 @@ export function studentHasDailyReportFilled(
   const solved = rows.reduce((sum, e) => sum + (e.solvedQuestions || 0), 0);
   if (solved > 0) return true;
 
+  /**
+   * Süre bazlı çalışma da rapordur.
+   *
+   * Koç "40 dakika" gibi süre hedefi verdiğinde öğrenci soru sayısı değil
+   * çalışma süresi giriyor. `studyMinutes` burada sayılmadığı için o gün
+   * koç panelinde "rapor doldurmadı" görünüyordu.
+   */
   const extra = rows.reduce(
-    (sum, e) => sum + (e.readingMinutes || 0) + (e.pagesRead || 0) + (e.screenTimeMinutes || 0),
+    (sum, e) =>
+      sum +
+      (e.readingMinutes || 0) +
+      (e.pagesRead || 0) +
+      (e.screenTimeMinutes || 0) +
+      (e.studyMinutes || 0),
     0
   );
   return extra > 0;
@@ -135,12 +150,14 @@ export function buildDailyReportStatuses(
       0
     );
     const solvedTotal = rows.reduce((sum, e) => sum + (e.solvedQuestions || 0), 0);
+    const studyMinutesTotal = rows.reduce((sum, e) => sum + (e.studyMinutes || 0), 0);
     return {
       studentId: student.id,
       filled: studentHasDailyReportFilled(student.id, entriesForDate),
       entryCount: rows.length,
       breakdownTotal,
-      solvedTotal
+      solvedTotal,
+      studyMinutesTotal
     };
   });
 }
