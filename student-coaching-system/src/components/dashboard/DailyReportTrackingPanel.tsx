@@ -106,7 +106,8 @@ export function DailyReportTrackingPanel({
           filled: false,
           entryCount: 0,
           breakdownTotal: 0,
-          solvedTotal: 0
+          solvedTotal: 0,
+          studyMinutesTotal: 0
         }
       }))
       .filter(({ student, status }) => {
@@ -333,6 +334,12 @@ export function DailyReportTrackingPanel({
                         {status.breakdownTotal > 0 && (
                           <span className="block text-xs text-gray-400">
                             D/Y/B: {status.breakdownTotal}
+                          </span>
+                        )}
+                        {/* Süre hedefinde soru sayısı olmaz; yapılan çalışma süre olarak yazılır */}
+                        {status.studyMinutesTotal > 0 && (
+                          <span className="block text-xs text-teal-600">
+                            {status.studyMinutesTotal} dk çalışma
                           </span>
                         )}
                       </>

@@ -343,7 +343,24 @@ export default function Analytics() {
     }
     const realizationRate = totalTarget > 0 ? Math.round((totalSolved / totalTarget) * 100) : 0;
     const successRate = totalSolved > 0 ? Math.round((totalCorrect / totalSolved) * 100) : 0;
-    return { totalTarget, totalSolved, totalCorrect, totalWrong, totalBlank, realizationRate, successRate };
+    /**
+     * Süre bazlı çalışma.
+     *
+     * Koç "40 dakika" gibi süre hedefi verdiğinde öğrenci soru sayısı değil
+     * çalışma süresi giriyor. Analiz yalnız soru sayısına baktığı için böyle
+     * günler analizde hiç görünmüyordu.
+     */
+    const totalStudyMinutes = entries.reduce((sum, e) => sum + (e.studyMinutes || 0), 0);
+    return {
+      totalTarget,
+      totalSolved,
+      totalCorrect,
+      totalWrong,
+      totalBlank,
+      realizationRate,
+      successRate,
+      totalStudyMinutes
+    };
   };
 
   const coachRangeYmd = useMemo(() => {
@@ -598,6 +615,7 @@ export default function Analytics() {
       doğru: dayEntries.reduce((sum, e) => sum + e.correctAnswers, 0),
       yanlış: dayEntries.reduce((sum, e) => sum + e.wrongAnswers, 0),
       boş: dayEntries.reduce((sum, e) => sum + e.blankAnswers, 0),
+      çalışmaDakika: dayEntries.reduce((sum, e) => sum + (e.studyMinutes || 0), 0),
       başarı: dayEntries.reduce((sum, e) => sum + e.solvedQuestions, 0) > 0
         ? Math.round(
             (dayEntries.reduce((sum, e) => sum + e.correctAnswers, 0) /
@@ -1369,6 +1387,22 @@ export default function Analytics() {
                 {scopedEntries.reduce((sum, e) => sum + e.solvedQuestions, 0)}
               </p>
             </div>
+            {/* Süre bazlı hedeflerde soru sayısı olmaz; yapılan çalışma süre olarak görünür */}
+            {scopedEntries.reduce((sum, e) => sum + (e.studyMinutes || 0), 0) > 0 ? (
+              <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <BarChart3 className="w-5 h-5 text-teal-600" />
+                  <span className="text-sm text-gray-500">Çalışma Süresi ({rangeLabel})</span>
+                </div>
+                <p className="text-2xl font-bold text-slate-800">
+                  {(() => {
+                    const dk = scopedEntries.reduce((sum, e) => sum + (e.studyMinutes || 0), 0);
+                    const sa = Math.floor(dk / 60);
+                    return sa > 0 ? `${sa} sa ${dk % 60} dk` : `${dk} dk`;
+                  })()}
+                </p>
+              </div>
+            ) : null}
             <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
               <div className="flex items-center gap-2 mb-2">
                 <TrendingUp className="w-5 h-5 text-purple-600" />
