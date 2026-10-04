@@ -88,3 +88,63 @@ export function mergeLeadChannelMessages(regMsgs, crmMsgs) {
   out.sort((a, b) => new Date(a.occurred_at || a.created_at || 0) - new Date(b.occurred_at || b.created_at || 0));
   return out.slice(-200);
 }
+
+/**
+ * Lead'e bağlı CRM konuşmalarında alınan notlar.
+ *
+ * Gelen kutusunda alınan not `crm_conversation_notes`'ta, pipeline'da alınan
+ * görüşme kaydı `registration_interactions`'ta duruyor. Veri taşımak yerine
+ * iki taraf da birleşik listeyi okur: not nerede alınırsa alınsın diğer
+ * ekranda da görünür.
+ *
+ * @returns {Promise<Array>} registration_interactions biçiminde satırlar
+ */
+export async function loadCrmInboxNotesForLead(lead) {
+  try {
+    const convIds = new Map();
+    const { data: byLead } = await supabaseAdmin
+      .from('crm_conversations')
+      .select('id, channel')
+      .eq('lead_id', lead.id)
+      .limit(20);
+    for (const c of byLead || []) convIds.set(c.id, c);
+
+    const phones = leadPhoneVariants(lead);
+    if (phones.length) {
+      let q = supabaseAdmin
+        .from('crm_conversations')
+        .select('id, channel')
+        .eq('channel', 'whatsapp')
+        .in('contact_identifier', phones)
+        .limit(20);
+      if (lead.institution_id) q = q.eq('institution_id', lead.institution_id);
+      const { data: byPhone } = await q;
+      for (const c of byPhone || []) convIds.set(c.id, c);
+    }
+    if (!convIds.size) return [];
+
+    const { data, error } = await supabaseAdmin
+      .from('crm_conversation_notes')
+      .select('id, conversation_id, author_user_id, body, created_at')
+      .in('conversation_id', [...convIds.keys()])
+      .order('created_at', { ascending: false })
+      .limit(100);
+    // Tablo yoksa kart yine açılsın
+    if (error) return [];
+
+    return (data || []).map((n) => ({
+      id: `crmnote:${n.id}`,
+      lead_id: lead.id,
+      interaction_type: 'note',
+      interaction_at: n.created_at,
+      title: 'Gelen kutusu notu',
+      description: n.body,
+      result: null,
+      created_by: n.author_user_id || null,
+      created_at: n.created_at,
+      source: 'inbox'
+    }));
+  } catch {
+    return [];
+  }
+}

@@ -800,11 +800,49 @@ export default async function handler(req, res) {
         .eq('conversation_id', conversationId)
         .order('created_at', { ascending: false })
         .limit(80);
-      if (error && /crm_conversation_notes|does not exist/i.test(error.message || '')) {
-        return res.status(200).json({ data: [] });
+      const notlar =
+        error && /crm_conversation_notes|does not exist/i.test(error.message || '')
+          ? []
+          : error
+            ? (() => {
+                throw error;
+              })()
+            : data || [];
+
+      /**
+       * Pipeline'daki görüşme kayıtları da burada görünür.
+       *
+       * Aynı kişi için iki ayrı not listesi tutulmasın: gelen kutusunda
+       * alınan not `crm_conversation_notes`'ta, pipeline'da alınan görüşme
+       * kaydı `registration_interactions`'ta duruyor. Veri taşımadan iki
+       * taraf da birleşik listeyi okur; böylece not nerede alınırsa alınsın
+       * diğer ekranda da görünür.
+       */
+      let pipelineNotlari = [];
+      if (conv?.lead_id) {
+        const { data: ints } = await supabaseAdmin
+          .from('registration_interactions')
+          .select('id, lead_id, interaction_type, title, description, result, interaction_at, created_by, created_at')
+          .eq('lead_id', conv.lead_id)
+          .order('interaction_at', { ascending: false })
+          .limit(80);
+        pipelineNotlari = (ints || [])
+          .map((i) => ({
+            id: `lead:${i.id}`,
+            conversation_id: conversationId,
+            author_user_id: i.created_by || null,
+            body: [i.title, i.description, i.result].filter(Boolean).join(' — '),
+            created_at: i.interaction_at || i.created_at,
+            source: 'pipeline',
+            interaction_type: i.interaction_type || null
+          }))
+          .filter((i) => String(i.body || '').trim());
       }
-      if (error) throw error;
-      return res.status(200).json({ data: data || [] });
+
+      const birlesik = [...notlar.map((n) => ({ ...n, source: 'inbox' })), ...pipelineNotlari].sort(
+        (a, b) => String(b.created_at || '').localeCompare(String(a.created_at || ''))
+      );
+      return res.status(200).json({ data: birlesik.slice(0, 120) });
     }
 
     if (op === 'add_note' && req.method === 'POST') {
