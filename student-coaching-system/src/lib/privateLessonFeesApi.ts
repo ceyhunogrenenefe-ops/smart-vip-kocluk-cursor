@@ -25,6 +25,10 @@ export type PrivateLessonFeeRow = {
   student_name: string;
   teachers: PrivateLessonFeeTeacher[];
   system_hours: number;
+  /** Öğretmenin aylık beyanında bildirdiği özel ders (saate çevrilmiş) */
+  declared_hours?: number;
+  /** Saat nereden geldi: elle girilen / ders kaydı / beyan */
+  hours_source?: 'manual' | 'system' | 'declaration' | 'none';
   hours_override: number | null;
   hours: number;
   unit_price_tl: number;

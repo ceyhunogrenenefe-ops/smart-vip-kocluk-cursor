@@ -536,7 +536,29 @@ export default function PrivateLessonFeesPanel() {
                       className={fieldCls}
                     />
                     <span className="mt-0.5 block text-[10px] font-normal text-slate-400">
-                      Otomatik: {formatTryAmount(row.system_hours)}
+                      Ders kaydı: {formatTryAmount(row.system_hours)}
+                      {row.declared_hours ? (
+                        <>
+                          {' · '}
+                          {/* Beyan: öğretmenin aylık formunda bildirdiği özel ders */}
+                          <span
+                            className={
+                              row.hours_source === 'declaration'
+                                ? 'font-semibold text-emerald-700'
+                                : Math.abs(Number(row.declared_hours) - Number(row.system_hours)) > 0.01
+                                  ? 'font-semibold text-amber-700'
+                                  : ''
+                            }
+                            title={
+                              row.hours_source === 'declaration'
+                                ? 'Ders kaydı yok, saat öğretmen beyanından alındı'
+                                : 'Öğretmenin aylık beyanında bildirdiği özel ders'
+                            }
+                          >
+                            Beyan: {formatTryAmount(row.declared_hours)}
+                          </span>
+                        </>
+                      ) : null}
                     </span>
                   </label>
                   <label className="text-[11px] font-medium text-slate-500">
