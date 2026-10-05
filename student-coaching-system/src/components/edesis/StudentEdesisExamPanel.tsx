@@ -217,17 +217,33 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
     void load();
   }, [load]);
 
+  /**
+   * Öğrencinin kitapçık seçimi ARTIK SESSİZCE DEĞİŞTİRİLMEZ.
+   *
+   * Eskiden seçilen harf Edesis'in döndürdüğü kitapçık listesinde yoksa
+   * sessizce listenin ilk harfine (A) çekiliyordu. Öğrenci B kodladığı hâlde
+   * cevaplar A anahtarıyla değerlendiriliyor, netler yanlış çıkıyordu.
+   *
+   * Seçim geçersizse sunucu zaten anlaşılır bir hata döndürüyor; yanlış
+   * puanlamaktansa uyarmak doğrudur. Burada yalnız BOŞ değer doldurulur.
+   */
   useEffect(() => {
-    if (!booklets.length || !kitapcik) return;
+    if (!booklets.length) return;
     const codes = booklets.map((b) => String(b.kitapcikTuru || '').trim().toUpperCase()).filter(Boolean);
     if (!codes.length) return;
-    const current = String(kitapcik || '').trim().toUpperCase();
-    if (!codes.includes(current)) {
-      setKitapcik(codes[0]);
-      if (kitapcikSayisal && !codes.includes(String(kitapcikSayisal).trim().toUpperCase())) {
-        setKitapcikSayisal(codes[0]);
-      }
-    }
+    if (!String(kitapcik || '').trim()) setKitapcik(codes[0]);
+    if (!String(kitapcikSayisal || '').trim()) setKitapcikSayisal(codes[0]);
+  }, [booklets, kitapcik, kitapcikSayisal]);
+
+  /** Seçilen kitapçık bu denemede tanımlı mı — değilse açıkça uyarılır. */
+  const kitapcikTanimsiz = useMemo(() => {
+    const codes = booklets.map((b) => String(b.kitapcikTuru || '').trim().toUpperCase()).filter(Boolean);
+    if (!codes.length) return '';
+    const secili = String(kitapcik || '').trim().toUpperCase();
+    if (secili && !codes.includes(secili)) return secili;
+    const say = String(kitapcikSayisal || '').trim().toUpperCase();
+    if (say && !codes.includes(say)) return say;
+    return '';
   }, [booklets, kitapcik, kitapcikSayisal]);
 
   useEffect(() => {
@@ -623,7 +639,20 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
             <ArrowLeft className="h-4 w-4" /> Liste
           </button>
           <div className="min-w-0 flex-1 truncate text-sm font-semibold tracking-tight">{activeExam.name}</div>
+          {/* Hangi kitapçığın gönderileceği her zaman görünür olsun */}
+          <span className="shrink-0 rounded-md bg-slate-800 px-2 py-1 text-[11px] font-bold text-white">
+            {String(kitapcik || '—').toUpperCase()} kitapçığı
+            {kitapcikSayisal && kitapcikSayisal !== kitapcik
+              ? ` · sayısal ${String(kitapcikSayisal).toUpperCase()}`
+              : ''}
+          </span>
         </div>
+        {kitapcikTanimsiz ? (
+          <p className="bg-amber-100 px-3 py-1.5 text-[11px] font-medium text-amber-900">
+            {kitapcikTanimsiz} kitapçığı bu denemede tanımlı görünmüyor. Seçiminiz değiştirilmedi;
+            gönderdiğinizde Edesis kabul etmezse uyarı alırsınız. Yanlış kodladıysanız düzeltin.
+          </p>
+        ) : null}
         <div className="flex min-h-0 flex-1 flex-col">
           <EdesisOpticalSheet
             studio
