@@ -32,6 +32,20 @@ export type InstitutionExpenseItem = {
   title: string;
   amount_tl: number;
   note?: string | null;
+  /** Hangi hesaptan ödendi */
+  payment_account_id?: string | null;
+  payment_account_label?: string | null;
+  /** Ödemeyi yapan kişi */
+  paid_by?: string | null;
+};
+
+/** Gider toplamının hesap bazlı kırılımı */
+export type ExpenseAccountBreakdown = {
+  account_id: string | null;
+  label: string;
+  bank_name?: string | null;
+  amount_tl: number;
+  count: number;
 };
 
 export type PaidTeacherExpense = {
@@ -64,6 +78,8 @@ export type MuhasebePnL = {
     ogretmen: number;
     diger: number;
     toplam: number;
+    /** Hangi hesaptan ne kadar ödendi */
+    hesaplar?: ExpenseAccountBreakdown[];
   };
   /** Seçili ayda ödenen hakediş satırları (tahakkuk yok) */
   paid_teachers?: PaidTeacherExpense[];
@@ -128,6 +144,10 @@ export async function createInstitutionExpense(body: {
   category?: ExpenseCategory;
   note?: string | null;
   institution_id?: string | null;
+  /** Hangi hesaptan ödendi */
+  payment_account_id?: string | null;
+  /** Ödemeyi yapan kişi */
+  paid_by?: string | null;
 }) {
   const res = await apiFetch('/api/muhasebe-ledger', {
     method: 'POST',

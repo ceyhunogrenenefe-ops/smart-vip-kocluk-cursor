@@ -89,7 +89,7 @@ async function loadPaidPayrollSettlements(from, to) {
   const { data, error } = await supabaseAdmin
     .from('teacher_payroll_settlements')
     .select(
-      'id, teacher_id, period_from, period_to, total_tl, lesson_gross_tl, extras_tl, status, expense_item_id, paid_at'
+      'id, teacher_id, period_from, period_to, total_tl, lesson_gross_tl, extras_tl, status, expense_item_id, paid_at, paid_by, payment_account_id'
     )
     .eq('status', 'paid')
     .lte('period_from', to)
@@ -192,6 +192,27 @@ async function loadStudentIncome(inst, from, to) {
   };
 }
 
+/** Ödeme hesaplarının adları — gider satırında ve kırılımda gösterilir. */
+async function loadPaymentAccounts(inst) {
+  try {
+    let q = supabaseAdmin
+      .from('payment_accounts')
+      .select('id, label, bank_name, account_type, active')
+      .limit(100);
+    if (inst) q = q.or(`institution_id.eq.${inst},institution_id.is.null`);
+    const { data, error } = await q;
+    if (error) return new Map();
+    return new Map(
+      (data || []).map((a) => [
+        String(a.id),
+        { id: String(a.id), label: a.label || a.bank_name || 'Hesap', bank_name: a.bank_name || null }
+      ])
+    );
+  } catch {
+    return new Map();
+  }
+}
+
 async function loadOtherExpenses(inst, from, to, excludeIds) {
   let q = supabaseAdmin
     .from('institution_expense_items')
@@ -243,6 +264,32 @@ async function handleGetSummary(req, res, actor, roleSet) {
   const giderToplam = Math.round((giderOgretmen + giderDiger) * 100) / 100;
   const kar = Math.round((gelirToplam - giderToplam) * 100) / 100;
 
+  /**
+   * Gider hesap kırılımı.
+   *
+   * Kurumda birden çok ödeme hesabı var; "ne kadar ödedik" kadar "hangi
+   * hesaptan ödedik" de takip edilmek isteniyor. Hesabı yazılmamış eski
+   * kayıtlar "Belirtilmemiş" altında toplanır, toplam bozulmaz.
+   */
+  const hesaplar = await loadPaymentAccounts(inst);
+  const hesapKirilim = new Map();
+  const hesapEkle = (accountId, tutar) => {
+    const key = String(accountId || '') || '_belirtilmemis';
+    const cur = hesapKirilim.get(key) || {
+      account_id: key === '_belirtilmemis' ? null : key,
+      label: hesaplar.get(key)?.label || (key === '_belirtilmemis' ? 'Belirtilmemiş' : 'Hesap'),
+      bank_name: hesaplar.get(key)?.bank_name || null,
+      amount_tl: 0,
+      count: 0
+    };
+    cur.amount_tl = Math.round((cur.amount_tl + (Number(tutar) || 0)) * 100) / 100;
+    cur.count += 1;
+    hesapKirilim.set(key, cur);
+  };
+  for (const row of otherExp.items || []) hesapEkle(row.payment_account_id, row.amount_tl);
+  for (const row of teacher.paid_rows || []) hesapEkle(row.payment_account_id, row.total_tl);
+  const giderHesaplari = [...hesapKirilim.values()].sort((a, b) => b.amount_tl - a.amount_tl);
+
   const paidRows = teacher.paid_rows || [];
   const teacherIds = [...new Set(paidRows.map((r) => String(r.teacher_id || '')).filter(Boolean))];
   const nameMap = new Map();
@@ -282,11 +329,18 @@ async function handleGetSummary(req, res, actor, roleSet) {
       ogretmen_ekstra: teacher.extra_sum,
       ogretmen: giderOgretmen,
       diger: giderDiger,
-      toplam: giderToplam
+      toplam: giderToplam,
+      hesaplar: giderHesaplari
     },
     paid_teachers: paidTeachers,
     kar,
-    expenses: otherExp.items,
+    expenses: (otherExp.items || []).map((r) => ({
+      ...r,
+      payment_account_label: r.payment_account_id
+        ? hesaplar.get(String(r.payment_account_id))?.label || 'Hesap'
+        : null
+    })),
+    payment_accounts: [...hesaplar.values()],
     hint: otherExp.hint || null
   });
 }
@@ -327,6 +381,10 @@ async function handleCreateExpense(req, res, actor, roleSet) {
     title,
     amount_tl: amount,
     note: body.note ? String(body.note).trim() : null,
+    // Hangi hesaptan ödendiği ve kimin ödediği: kurumda birden çok hesap var,
+    // sonradan "bu para nereden çıktı" sorusuna cevap verebilmek gerekiyor
+    payment_account_id: String(body.payment_account_id || '').trim() || null,
+    paid_by: String(body.paid_by || actor.name || '').trim() || null,
     created_by: actor.sub || null,
     updated_at: new Date().toISOString()
   };

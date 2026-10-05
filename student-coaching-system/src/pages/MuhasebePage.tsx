@@ -1,12 +1,13 @@
 import React, { useCallback, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { ClipboardList, GraduationCap, LayoutDashboard, School, Users, Wallet } from 'lucide-react';
+import { ClipboardCheck, ClipboardList, GraduationCap, LayoutDashboard, School, Users, Wallet } from 'lucide-react';
 import TahsilatTaksitPanel from '../components/muhasebe/TahsilatTaksitPanel';
 import TeacherPaymentsPanel from '../components/muhasebe/TeacherPaymentsPanel';
 import StudentPaymentTrackerPanel from '../components/muhasebe/StudentPaymentTrackerPanel';
 import MuhasebeOverviewPanel from '../components/muhasebe/MuhasebeOverviewPanel';
 import MuhasebeClassReportPanel from '../components/muhasebe/MuhasebeClassReportPanel';
 import PrivateLessonFeesPanel from '../components/muhasebe/PrivateLessonFeesPanel';
+import TeacherDeclarationsPage from './TeacherDeclarationsPage';
 
 type MuhasebeTab =
   | 'ozet'
@@ -14,7 +15,8 @@ type MuhasebeTab =
   | 'ogrenci-odeme'
   | 'ogretmen'
   | 'sinif-rapor'
-  | 'ozel-ders-ucret';
+  | 'ozel-ders-ucret'
+  | 'ogretmen-beyan';
 
 const TAB_ITEMS: { id: MuhasebeTab; label: string; icon: typeof Wallet }[] = [
   { id: 'ozet', label: 'Genel bakış', icon: LayoutDashboard },
@@ -22,7 +24,9 @@ const TAB_ITEMS: { id: MuhasebeTab; label: string; icon: typeof Wallet }[] = [
   { id: 'tahsilat', label: 'Tahsilat & taksit', icon: Wallet },
   { id: 'ogrenci-odeme', label: 'Öğrenci ödemeleri', icon: ClipboardList },
   { id: 'ozel-ders-ucret', label: 'Özel ders ücretleri', icon: GraduationCap },
-  { id: 'ogretmen', label: 'Öğretmen ödemeleri', icon: Users }
+  { id: 'ogretmen', label: 'Öğretmen ödemeleri', icon: Users },
+  // Beyan ile ödeme yan yana dursun: ödemeyi yapan kişi beyanı da burada görür
+  { id: 'ogretmen-beyan', label: 'Öğretmen çalışma beyanları', icon: ClipboardCheck }
 ];
 
 function parseTab(raw: string | null): MuhasebeTab {
@@ -32,7 +36,8 @@ function parseTab(raw: string | null): MuhasebeTab {
     raw === 'ozet' ||
     raw === 'ogrenci-odeme' ||
     raw === 'sinif-rapor' ||
-    raw === 'ozel-ders-ucret'
+    raw === 'ozel-ders-ucret' ||
+    raw === 'ogretmen-beyan'
   ) {
     return raw;
   }
@@ -105,6 +110,7 @@ export default function MuhasebePage() {
       {tab === 'ozel-ders-ucret' ? <PrivateLessonFeesPanel /> : null}
 
       {tab === 'ogretmen' ? <TeacherPaymentsPanel onTeacherTotalChange={setTeacherPayableTry} /> : null}
+      {tab === 'ogretmen-beyan' ? <TeacherDeclarationsPage /> : null}
     </div>
   );
 }
