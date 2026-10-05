@@ -64,9 +64,18 @@ export async function scanPrivateLessonHoursByStudent({ supabase, from, to, inst
     const units = privateLessonUnitsFromRow(row);
     const hours = unitsToHours(units);
     if (!byStudent.has(sid)) {
-      byStudent.set(sid, { system_hours: 0, teachers: new Map() });
+      // `lessons`: satır satır döküm — öğrenciye tıklayınca hangi derslerin
+      // sayıldığı görülebilsin
+      byStudent.set(sid, { system_hours: 0, teachers: new Map(), lessons: [] });
     }
     const cur = byStudent.get(sid);
+    cur.lessons.push({
+      id: row.id,
+      teacher_id: tid || null,
+      lesson_date: row.lesson_date || null,
+      duration_minutes: row.duration_minutes ?? null,
+      hours
+    });
     cur.system_hours = roundUnits(cur.system_hours + hours);
     if (tid) {
       const t = cur.teachers.get(tid) || { teacher_id: tid, hours: 0 };
@@ -117,7 +126,7 @@ export async function scanDeclaredPrivateHoursByStudent({ supabase, from, to, in
     const byDecl = new Map((decls || []).map((d) => [String(d.id), d]));
     const { data: lines } = await supabase
       .from('teacher_declaration_lines')
-      .select('declaration_id, kind, student_id, quantity')
+      .select('declaration_id, kind, student_id, quantity, note')
       .in('declaration_id', [...byDecl.keys()])
       .eq('kind', 'private')
       .limit(5000);
@@ -130,8 +139,15 @@ export async function scanDeclaredPrivateHoursByStudent({ supabase, from, to, in
       const hours = unitsToHours(adet);
       const tid = String(byDecl.get(String(l.declaration_id))?.teacher_id || '').trim();
 
-      if (!out.has(sid)) out.set(sid, { declared_hours: 0, teachers: new Map() });
+      if (!out.has(sid)) out.set(sid, { declared_hours: 0, teachers: new Map(), lines: [] });
       const cur = out.get(sid);
+      cur.lines.push({
+        teacher_id: tid || null,
+        period_month: byDecl.get(String(l.declaration_id))?.period_month || null,
+        quantity: adet,
+        hours,
+        note: l.note || null
+      });
       cur.declared_hours = roundUnits(cur.declared_hours + hours);
       if (tid) {
         const t = cur.teachers.get(tid) || { teacher_id: tid, hours: 0 };

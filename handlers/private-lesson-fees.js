@@ -204,6 +204,15 @@ function buildRow({
     teachers,
     system_hours: systemHours,
     declared_hours: declaredHours,
+    // Satır satır döküm: hangi ders ne zaman, hangi öğretmen, kaç saat
+    lessons: (hoursInfo?.lessons || []).map((l) => ({
+      ...l,
+      teacher_name: l.teacher_id ? teacherMap.get(String(l.teacher_id)) || l.teacher_id : null
+    })),
+    declared_lines: (declaredInfo?.lines || []).map((l) => ({
+      ...l,
+      teacher_name: l.teacher_id ? teacherMap.get(String(l.teacher_id)) || l.teacher_id : null
+    })),
     // Kaynak: saat nereden geldi — ekranda açıkça yazılsın
     hours_source: hoursOverride != null ? 'manual' : systemHours > 0 ? 'system' : declaredHours > 0 ? 'declaration' : 'none',
     hours_override: hoursOverride,
@@ -305,8 +314,8 @@ async function handleList(req, res, actor, roleSet) {
       studentId: sid,
       externalName: null,
       isExternal: false,
-      hoursInfo: hoursMap.get(sid) || { system_hours: 0, teachers: new Map() },
-      declaredInfo: declaredMap.get(sid) || { declared_hours: 0, teachers: new Map() },
+      hoursInfo: hoursMap.get(sid) || { system_hours: 0, teachers: new Map(), lessons: [] },
+      declaredInfo: declaredMap.get(sid) || { declared_hours: 0, teachers: new Map(), lines: [] },
       fee: feeByKey.get(key) || null,
       assignedTeacherIds: assignedTeachersByStudent.get(sid) || [],
       studentMap,
@@ -332,8 +341,8 @@ async function handleList(req, res, actor, roleSet) {
       studentId: isExternal ? null : String(fee.student_id),
       externalName: fee.external_student_name || null,
       isExternal,
-      hoursInfo: { system_hours: 0, teachers: new Map() },
-      declaredInfo: { declared_hours: 0, teachers: new Map() },
+      hoursInfo: { system_hours: 0, teachers: new Map(), lessons: [] },
+      declaredInfo: { declared_hours: 0, teachers: new Map(), lines: [] },
       fee,
       assignedTeacherIds: [],
       studentMap,

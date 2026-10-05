@@ -6,6 +6,28 @@ export type PrivateLessonFeeTeacher = {
   teacher_id: string;
   teacher_name: string;
   hours: number;
+  /** Öğretmenin aylık beyanında bildirdiği saat */
+  declared_hours?: number;
+};
+
+/** Sisteme girilmiş tek ders kaydı */
+export type PrivateLessonFeeLesson = {
+  id: string;
+  teacher_id?: string | null;
+  teacher_name?: string | null;
+  lesson_date?: string | null;
+  duration_minutes?: number | null;
+  hours: number;
+};
+
+/** Öğretmen beyanındaki tek özel ders satırı */
+export type PrivateLessonFeeDeclaredLine = {
+  teacher_id?: string | null;
+  teacher_name?: string | null;
+  period_month?: string | null;
+  quantity: number;
+  hours: number;
+  note?: string | null;
 };
 
 export type PrivateLessonFeePaymentAccount = {
@@ -27,6 +49,9 @@ export type PrivateLessonFeeRow = {
   system_hours: number;
   /** Öğretmenin aylık beyanında bildirdiği özel ders (saate çevrilmiş) */
   declared_hours?: number;
+  /** Satır satır döküm */
+  lessons?: PrivateLessonFeeLesson[];
+  declared_lines?: PrivateLessonFeeDeclaredLine[];
   /** Saat nereden geldi: elle girilen / ders kaydı / beyan */
   hours_source?: 'manual' | 'system' | 'declaration' | 'none';
   hours_override: number | null;
