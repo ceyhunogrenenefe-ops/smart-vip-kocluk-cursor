@@ -921,7 +921,15 @@ async function handleDeleteExtra(req, res, actor, roleSet) {
   return res.status(200).json({ ok: true });
 }
 
-async function createPayrollExpense({ actor, institutionId, teacherName, period, totalTl, settlementId }) {
+async function createPayrollExpense({
+  actor,
+  institutionId,
+  teacherName,
+  period,
+  totalTl,
+  settlementId,
+  paymentAccountId = null
+}) {
   // Gider tarihi ödeme günü değil hakediş dönemi olmalı (Ağustos dönemi Eylül'de ödense bile Ağustos).
   const periodStart = String(period?.from || '').slice(0, 10);
   const itemDate = /^\d{4}-\d{2}-\d{2}$/.test(periodStart)
@@ -938,6 +946,8 @@ async function createPayrollExpense({ actor, institutionId, teacherName, period,
     title,
     amount_tl: money(totalTl),
     note: `${PAYROLL_NOTE_PREFIX}${settlementId}`,
+    payment_account_id: paymentAccountId || null,
+    paid_by: String(actor.name || '').trim() || null,
     created_by: String(actor.sub || actor.id || '') || null,
     updated_at: new Date().toISOString()
   };
@@ -1070,7 +1080,8 @@ async function handlePay(req, res, actor, roleSet) {
       teacherName,
       period,
       totalTl: computed.total_tl,
-      settlementId: settlement.id
+      settlementId: settlement.id,
+      paymentAccountId: String(body.payment_account_id || '').trim() || null
     });
   } catch (e) {
     if (/institution_expense_items|does not exist|schema cache|PGRST205/i.test(errorMessage(e))) {
@@ -1090,6 +1101,9 @@ async function handlePay(req, res, actor, roleSet) {
       locked: true,
       paid_at: paidAt,
       paid_by: paidBy,
+      // Hangi hesaptan ödendiği hakedişte de dursun: muhasebe genel bakışta
+      // hesap kırılımı buradan hesaplanıyor
+      payment_account_id: String(body.payment_account_id || '').trim() || null,
       expense_item_id: expense?.id || null,
       lesson_gross_tl: computed.lesson_gross_tl,
       extras_tl: computed.extras_tl,

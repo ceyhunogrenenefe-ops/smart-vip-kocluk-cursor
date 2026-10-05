@@ -11,6 +11,7 @@ import {
   Wallet
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { listPaymentAccounts, type PaymentAccount } from '../../lib/studentPaymentTrackerApi';
 import { useAuth } from '../../context/AuthContext';
 import { useApp } from '../../context/AppContext';
 import { formatTryAmount } from '../../lib/groupLessonPaymentUnits';
@@ -58,8 +59,12 @@ export default function MuhasebeOverviewPanel({ onGoTab }: Props) {
     amount_tl: '',
     item_date: todayYmdLocal(),
     category: 'diger' as ExpenseCategory,
-    note: ''
+    note: '',
+    // Hangi hesaptan ödendiği ve kimin ödediği gider satırında görünsün
+    payment_account_id: '',
+    paid_by: ''
   });
+  const [hesaplar, setHesaplar] = useState<PaymentAccount[]>([]);
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -87,6 +92,12 @@ export default function MuhasebeOverviewPanel({ onGoTab }: Props) {
     void reload();
   }, [reload]);
 
+  useEffect(() => {
+    void listPaymentAccounts()
+      .then((r) => setHesaplar((r.data || []).filter((a) => a.active !== false)))
+      .catch(() => setHesaplar([]));
+  }, []);
+
   const submitExpense = async () => {
     if (!form.title.trim()) {
       toast.error('Gider başlığı gerekli');
@@ -105,6 +116,8 @@ export default function MuhasebeOverviewPanel({ onGoTab }: Props) {
         item_date: form.item_date || todayYmdLocal(),
         category: form.category,
         note: form.note || null,
+        payment_account_id: form.payment_account_id || null,
+        paid_by: form.paid_by.trim() || null,
         institution_id: institutionId || null
       });
       toast.success('Ekstra gider eklendi');
@@ -247,6 +260,49 @@ export default function MuhasebeOverviewPanel({ onGoTab }: Props) {
               </p>
             </button>
           </div>
+
+          {/* Hangi hesaptan ne kadar ödendi — kurumda birden çok hesap var */}
+          {(pnl?.gider?.hesaplar || []).length ? (
+            <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
+              <p className="text-sm font-semibold text-slate-900 dark:text-white">
+                Ödeme hesaplarına göre gider
+              </p>
+              <p className="mt-0.5 text-xs text-slate-500">
+                Seçili dönemde toplam {formatTryAmount(Number(pnl?.gider?.toplam) || 0)} ₺ giderin
+                hesap kırılımı.
+              </p>
+              <div className="mt-3 space-y-2">
+                {(pnl?.gider?.hesaplar || []).map((h) => {
+                  const toplam = Number(pnl?.gider?.toplam) || 0;
+                  const oran = toplam > 0 ? Math.round((h.amount_tl / toplam) * 100) : 0;
+                  return (
+                    <div key={h.account_id || 'belirtilmemis'} className="flex items-center gap-3">
+                      <span className="w-44 shrink-0 truncate text-xs font-medium text-slate-700 dark:text-slate-200">
+                        {h.label}
+                        {h.bank_name ? (
+                          <span className="block text-[10px] text-slate-400">{h.bank_name}</span>
+                        ) : null}
+                      </span>
+                      <span className="h-2 flex-1 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
+                        <span
+                          className={`block h-full rounded-full ${
+                            h.account_id ? 'bg-rose-500' : 'bg-slate-400'
+                          }`}
+                          style={{ width: `${oran}%` }}
+                        />
+                      </span>
+                      <span className="w-40 shrink-0 text-right text-xs tabular-nums text-slate-700 dark:text-slate-200">
+                        {formatTryAmount(h.amount_tl)} ₺
+                        <span className="ml-1 text-[10px] text-slate-400">
+                          %{oran} · {h.count} kayıt
+                        </span>
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
 
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-4 dark:border-emerald-900 dark:bg-emerald-950/30">
@@ -475,6 +531,30 @@ export default function MuhasebeOverviewPanel({ onGoTab }: Props) {
               </label>
             </div>
             <div className="flex flex-wrap items-end gap-2">
+              <label className="text-xs text-slate-500 min-w-[170px]">
+                Ödeme hesabı
+                <select
+                  value={form.payment_account_id}
+                  onChange={(e) => setForm((f) => ({ ...f, payment_account_id: e.target.value }))}
+                  className="mt-1 w-full rounded-lg border border-slate-200 px-2.5 py-2 text-sm dark:border-slate-600 dark:bg-slate-950"
+                >
+                  <option value="">Seçilmedi</option>
+                  {hesaplar.map((h) => (
+                    <option key={h.id} value={h.id}>
+                      {h.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="text-xs text-slate-500 min-w-[150px]">
+                Ödemeyi yapan
+                <input
+                  value={form.paid_by}
+                  onChange={(e) => setForm((f) => ({ ...f, paid_by: e.target.value }))}
+                  placeholder="Ad soyad"
+                  className="mt-1 w-full rounded-lg border border-slate-200 px-2.5 py-2 text-sm dark:border-slate-600 dark:bg-slate-950"
+                />
+              </label>
               <label className="text-xs text-slate-500 flex-1 min-w-[160px]">
                 Not (opsiyonel)
                 <input
@@ -503,6 +583,7 @@ export default function MuhasebeOverviewPanel({ onGoTab }: Props) {
                       <th className="px-3 py-2 text-left">Tarih</th>
                       <th className="px-3 py-2 text-left">Kategori</th>
                       <th className="px-3 py-2 text-left">Başlık</th>
+                      <th className="px-3 py-2 text-left">Hesap / Ödeyen</th>
                       <th className="px-3 py-2 text-right">Tutar</th>
                       <th className="px-3 py-2 text-right">İşlem</th>
                     </tr>
@@ -517,6 +598,19 @@ export default function MuhasebeOverviewPanel({ onGoTab }: Props) {
                         <td className="px-3 py-2">
                           <div>{ex.title}</div>
                           {ex.note ? <div className="text-[11px] text-slate-500">{ex.note}</div> : null}
+                        </td>
+                        <td className="px-3 py-2">
+                          {/* Para hangi hesaptan çıktı ve kim ödedi */}
+                          {ex.payment_account_label ? (
+                            <span className="inline-flex items-center rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                              {ex.payment_account_label}
+                            </span>
+                          ) : (
+                            <span className="text-[11px] text-slate-400">Hesap belirtilmemiş</span>
+                          )}
+                          {ex.paid_by ? (
+                            <span className="mt-0.5 block text-[11px] text-slate-500">{ex.paid_by}</span>
+                          ) : null}
                         </td>
                         <td className="px-3 py-2 text-right tabular-nums font-semibold">
                           {formatTryAmount(Number(ex.amount_tl))} ₺

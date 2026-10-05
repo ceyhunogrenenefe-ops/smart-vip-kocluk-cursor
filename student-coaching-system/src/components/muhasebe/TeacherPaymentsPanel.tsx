@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { toast } from 'sonner';
+import { listPaymentAccounts, type PaymentAccount } from '../../lib/studentPaymentTrackerApi';
 import {
   CheckCircle2,
   Lock,
@@ -55,9 +56,11 @@ function draftFromCard(card: PayrollTeacherCard): DraftState {
     group_units: String(card.approved.group_units ?? 0),
     private_units: String(card.approved.private_units ?? 0),
     guidance_units: String(card.approved.guidance_units ?? 0),
-    group_rate: String(card.rates.group_unit_price_tl ?? 500),
-    private_rate: String(card.rates.private_unit_price_tl ?? 500),
-    guidance_rate: String(card.rates.guidance_unit_price_tl ?? 500),
+    // Varsayılanlar panelden ayarlanıyor (Birim Ücret Ayarları); buradaki
+    // sayılar yalnız sunucudan değer gelmezse devreye girer
+    group_rate: String(card.rates.group_unit_price_tl ?? 700),
+    private_rate: String(card.rates.private_unit_price_tl ?? 700),
+    guidance_rate: String(card.rates.guidance_unit_price_tl ?? 200),
     extra_label: '',
     extra_amount: ''
   };
@@ -86,6 +89,15 @@ type Props = {
 export function TeacherPaymentsPanel({ onTeacherTotalChange }: Props) {
   const [teachers, setTeachers] = useState<TeacherOption[]>([]);
   const [odemeFiltre, setOdemeFiltre] = useState<'all' | 'paid' | 'unpaid'>('all');
+  /**
+   * Ödeme hesapları.
+   *
+   * Kurumda birden çok hesap var; "ne kadar ödedik" kadar "hangi hesaptan
+   * ödedik" de takip ediliyor. Ödeme işaretlenirken hesap seçilir ve hem
+   * hakediş kaydına hem muhasebe giderine yazılır.
+   */
+  const [hesaplar, setHesaplar] = useState<PaymentAccount[]>([]);
+  const [seciliHesap, setSeciliHesap] = useState('');
   const [varsayilan, setVarsayilan] = useState<{ ders: string; gorusme: string } | null>(null);
   const [varsayilanKaydet, setVarsayilanKaydet] = useState(false);
   const [from, setFrom] = useState(monthStartIso);
@@ -177,6 +189,12 @@ export function TeacherPaymentsPanel({ onTeacherTotalChange }: Props) {
     void reload();
   }, [reload]);
 
+  useEffect(() => {
+    void listPaymentAccounts()
+      .then((r) => setHesaplar((r.data || []).filter((a) => a.active !== false)))
+      .catch(() => setHesaplar([]));
+  }, []);
+
   const patchDraft = (tid: string, patch: Partial<DraftState>) => {
     setDrafts((prev) => {
       const card = cards.find((c) => c.teacher_id === tid);
@@ -188,9 +206,9 @@ export function TeacherPaymentsPanel({ onTeacherTotalChange }: Props) {
               group_units: '0',
               private_units: '0',
               guidance_units: '0',
-              group_rate: '500',
-              private_rate: '500',
-              guidance_rate: '500',
+              group_rate: '700',
+              private_rate: '700',
+              guidance_rate: '200',
               extra_label: '',
               extra_amount: ''
             });
@@ -209,7 +227,8 @@ export function TeacherPaymentsPanel({ onTeacherTotalChange }: Props) {
       approved_guidance_units: Number(d.guidance_units) || 0,
       group_unit_price_tl: Number(d.group_rate) || 0,
       private_unit_price_tl: Number(d.private_rate) || 0,
-      guidance_unit_price_tl: Number(d.guidance_rate) || 0
+      guidance_unit_price_tl: Number(d.guidance_rate) || 0,
+      payment_account_id: seciliHesap || null
     };
   };
 
@@ -280,9 +299,17 @@ export function TeacherPaymentsPanel({ onTeacherTotalChange }: Props) {
   };
 
   const onPay = async (card: PayrollTeacherCard) => {
+    if (hesaplar.length && !seciliHesap) {
+      toast.error('Önce ödemenin yapıldığı hesabı seçin');
+      return;
+    }
+    const hesapAdi = hesaplar.find((h) => h.id === seciliHesap)?.label || '';
     if (
       !window.confirm(
-        `${card.teacher_name} için hakediş ödendi işaretlensin, kart kilitlensin ve muhasebeye Personel Gideri yazılsın mı?`
+        `${card.teacher_name} için hakediş ödendi işaretlensin, kart kilitlensin ve muhasebeye Personel Gideri yazılsın mı?` +
+          (hesapAdi ? `
+
+Ödeme hesabı: ${hesapAdi}` : '')
       )
     ) {
       return;
@@ -495,6 +522,24 @@ export function TeacherPaymentsPanel({ onTeacherTotalChange }: Props) {
                 onChange={(e) => setVarsayilan({ ...varsayilan, gorusme: e.target.value })}
                 className="w-32 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-800"
               />
+            </label>
+            <label className="block text-sm">
+              <span className="mb-1 block font-medium text-slate-700 dark:text-slate-200">
+                Ödeme hesabı
+              </span>
+              <select
+                value={seciliHesap}
+                onChange={(e) => setSeciliHesap(e.target.value)}
+                className="w-56 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-800"
+              >
+                <option value="">Hesap seçin</option>
+                {hesaplar.map((h) => (
+                  <option key={h.id} value={h.id}>
+                    {h.label}
+                    {h.bank_name ? ` · ${h.bank_name}` : ''}
+                  </option>
+                ))}
+              </select>
             </label>
             <button
               type="button"
