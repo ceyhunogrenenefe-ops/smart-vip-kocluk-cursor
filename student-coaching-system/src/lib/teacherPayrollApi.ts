@@ -58,6 +58,8 @@ export type PayrollTeacherCard = {
     paid_at?: string | null;
     paid_by?: string | null;
     expense_item_id?: string | null;
+    /** Ödemenin yapıldığı hesap — her öğretmen aynı hesaptan ödenmiyor */
+    payment_account_id?: string | null;
     total_tl?: number;
   } | null;
 };

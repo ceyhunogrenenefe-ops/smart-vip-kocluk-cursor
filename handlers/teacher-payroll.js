@@ -443,6 +443,7 @@ async function handleSummary(req, res, actor, roleSet) {
             locked: Boolean(settlement.locked) || settlement.status === 'paid',
             paid_at: settlement.paid_at,
             paid_by: settlement.paid_by,
+            payment_account_id: settlement.payment_account_id || null,
             expense_item_id: settlement.expense_item_id,
             total_tl: money(settlement.total_tl)
           }
