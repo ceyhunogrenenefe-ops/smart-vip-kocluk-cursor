@@ -184,24 +184,31 @@ function KitapcikCircles({
   value,
   onChange,
   codes,
+  declared,
   studio = false
 }: {
   value: string;
   onChange?: (code: string) => void;
   codes: string[];
+  /** Edesis'te tanımlı kitapçıklar; buradakiler dışı kesik çerçeveyle gösterilir */
+  declared?: string[];
   studio?: boolean;
 }) {
   return (
     <div className="flex items-center gap-1.5">
       {codes.map((code) => {
         const on = value === code;
+        const tanimli = !declared || !declared.length || declared.includes(code);
         return (
           <button
             key={code}
             type="button"
             onClick={() => onChange?.(code)}
             aria-pressed={on}
+            title={tanimli ? `Kitapçık ${code}` : `Kitapçık ${code} — bu denemede tanımlı görünmüyor`}
             className={`h-9 w-9 rounded-full border-2 text-sm font-bold shadow-sm ${
+              !tanimli && !on ? 'border-dashed opacity-70 ' : ''
+            }${
               on
                 ? 'border-blue-700 bg-blue-600 text-white ring-2 ring-blue-300 ring-offset-2 ring-offset-slate-900'
                 : studio
@@ -310,10 +317,30 @@ export default function EdesisOpticalSheet({
       .map((b) => String(b.kitapcikTuru || '').trim().toUpperCase())
       .filter((c) => KITAPCIK_ORDER.includes(c));
 
-    const hepsi = [...new Set([...fromApi, ...fromBooklets, ...seciliGecerli, ...sayisalGecerli])];
-    if (hepsi.length) return hepsi.sort();
-    return ['A'];
+    const bildirilen = [...new Set([...fromApi, ...fromBooklets])];
+
+    /**
+     * Edesis bazı denemelerde yalnız A kitapçığını bildiriyor; oysa öğrencinin
+     * elindeki kitapçık B olabiliyor. Liste A ile sınırlıyken öğrenci B'yi
+     * seçemiyor, cevaplar A anahtarıyla değerlendiriliyor ve netler yanlış
+     * çıkıyordu. Bu yüzden A–D her zaman seçilebilir; hangilerinin Edesis'te
+     * tanımlı olduğu ayrıca gösterilir. Geçersiz seçimde sunucu anlaşılır bir
+     * hata döndürür — sessizce yanlış puanlamaktansa doğrusu budur.
+     */
+    const hepsi = [...new Set([...bildirilen, ...seciliGecerli, ...sayisalGecerli, ...KITAPCIK_ORDER])];
+    return hepsi.sort();
   }, [availableBookletCodes, booklets, kitapcik, kitapcikSayisal]);
+
+  /** Edesis'in bu deneme için gerçekten bildirdiği kitapçıklar. */
+  const bildirilenKodlar = useMemo(() => {
+    const fromApi = (availableBookletCodes || [])
+      .map((c) => String(c || '').trim().toUpperCase())
+      .filter((c) => KITAPCIK_ORDER.includes(c));
+    const fromBooklets = (booklets || [])
+      .map((b) => String(b.kitapcikTuru || '').trim().toUpperCase())
+      .filter((c) => KITAPCIK_ORDER.includes(c));
+    return [...new Set([...fromApi, ...fromBooklets])];
+  }, [availableBookletCodes, booklets]);
   const kitapcikValueEarly = (() => {
     const raw = String(kitapcik || '').trim().toUpperCase();
     const codes = bookletCodes;
@@ -547,7 +574,13 @@ export default function EdesisOpticalSheet({
           <div className="flex flex-wrap items-center gap-4">
             <div className="flex flex-wrap items-center gap-1.5">
               <span className={`text-xs font-semibold ${studio ? 'text-slate-300' : 'text-slate-600'}`}>Sözel:</span>
-              <KitapcikCircles studio={studio} value={kitapcikValue} onChange={onKitapcikChange} codes={bookletCodes} />
+              <KitapcikCircles
+                studio={studio}
+                value={kitapcikValue}
+                onChange={onKitapcikChange}
+                codes={bookletCodes}
+                declared={bildirilenKodlar}
+              />
             </div>
             <div className="flex flex-wrap items-center gap-1.5">
               <span className={`text-xs font-semibold ${studio ? 'text-slate-300' : 'text-slate-600'}`}>Sayısal:</span>
@@ -556,6 +589,7 @@ export default function EdesisOpticalSheet({
                 value={sayisalValue}
                 onChange={onKitapcikSayisalChange}
                 codes={bookletCodes}
+                declared={bildirilenKodlar}
               />
             </div>
           </div>
@@ -564,7 +598,13 @@ export default function EdesisOpticalSheet({
             <span className={`text-xs font-semibold ${studio ? 'text-slate-300' : 'text-slate-600'}`}>
               Kitapçık Türü:
             </span>
-            <KitapcikCircles studio={studio} value={kitapcikValue} onChange={onKitapcikChange} codes={bookletCodes} />
+            <KitapcikCircles
+                studio={studio}
+                value={kitapcikValue}
+                onChange={onKitapcikChange}
+                codes={bookletCodes}
+                declared={bildirilenKodlar}
+              />
           </div>
         )}
         <div className="ml-auto flex flex-wrap items-center gap-2">
