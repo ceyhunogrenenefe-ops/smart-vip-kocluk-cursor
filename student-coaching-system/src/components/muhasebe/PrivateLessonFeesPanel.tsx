@@ -73,6 +73,8 @@ export default function PrivateLessonFeesPanel() {
   const [summary, setSummary] = useState<PrivateLessonFeeSummary | null>(null);
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [accounts, setAccounts] = useState<PaymentAccount[]>([]);
+  /** Açık ders dökümü — öğrenciye tıklayınca hangi derslerin sayıldığı görünür */
+  const [acikDetay, setAcikDetay] = useState('');
   const [loading, setLoading] = useState(true);
   const [schemaHint, setSchemaHint] = useState<string | null>(null);
   const [savingId, setSavingId] = useState<string | null>(null);
@@ -481,14 +483,22 @@ export default function PrivateLessonFeesPanel() {
               >
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div className="min-w-0">
-                    <p className="font-semibold text-slate-900 dark:text-slate-100">
+                    <button
+                      type="button"
+                      onClick={() => setAcikDetay((prev) => (prev === key ? '' : key))}
+                      title="Ders dökümünü aç"
+                      className="text-left font-semibold text-slate-900 hover:text-indigo-700 hover:underline dark:text-slate-100"
+                    >
                       {row.student_name}
                       {row.is_external ? (
                         <span className="ml-1.5 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800 dark:bg-amber-950 dark:text-amber-200">
                           Dış
                         </span>
                       ) : null}
-                    </p>
+                      <span className="ml-1 text-[11px] font-normal text-slate-400">
+                        {acikDetay === key ? '▲' : '▼'}
+                      </span>
+                    </button>
                     <p className="mt-0.5 truncate text-xs text-slate-500" title={teachers}>
                       {teachers}
                     </p>
@@ -626,6 +636,113 @@ export default function PrivateLessonFeesPanel() {
                     </select>
                   </label>
                 </div>
+
+                {/* Ders dökümü: hangi ders ne zaman, hangi öğretmen, kaç saat */}
+                {acikDetay === key ? (
+                  <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50/70 p-3 dark:border-slate-700 dark:bg-slate-950/40">
+                    <div className="grid gap-4 lg:grid-cols-2">
+                      <div>
+                        <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                          Sistem ders kayıtları ({formatTryAmount(row.system_hours)} saat)
+                        </p>
+                        {(row.lessons || []).length ? (
+                          <table className="w-full text-left text-[11px]">
+                            <thead className="text-slate-400">
+                              <tr>
+                                <th className="py-0.5 font-medium">Tarih</th>
+                                <th className="py-0.5 font-medium">Öğretmen</th>
+                                <th className="py-0.5 text-right font-medium">Süre</th>
+                                <th className="py-0.5 text-right font-medium">Saat</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {(row.lessons || []).map((l) => (
+                                <tr key={l.id} className="border-t border-slate-200/70">
+                                  <td className="py-0.5 tabular-nums">{l.lesson_date || '—'}</td>
+                                  <td className="py-0.5">{l.teacher_name || '—'}</td>
+                                  <td className="py-0.5 text-right tabular-nums text-slate-500">
+                                    {l.duration_minutes ? `${l.duration_minutes} dk` : '—'}
+                                  </td>
+                                  <td className="py-0.5 text-right tabular-nums">
+                                    {formatTryAmount(l.hours)}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        ) : (
+                          <p className="text-[11px] text-slate-400">Bu ay sisteme girilmiş ders kaydı yok.</p>
+                        )}
+                      </div>
+
+                      <div>
+                        <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                          Öğretmen beyanı ({formatTryAmount(row.declared_hours || 0)} saat)
+                        </p>
+                        {(row.declared_lines || []).length ? (
+                          <table className="w-full text-left text-[11px]">
+                            <thead className="text-slate-400">
+                              <tr>
+                                <th className="py-0.5 font-medium">Dönem</th>
+                                <th className="py-0.5 font-medium">Öğretmen</th>
+                                <th className="py-0.5 text-right font-medium">Ders</th>
+                                <th className="py-0.5 text-right font-medium">Saat</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {(row.declared_lines || []).map((l, i) => (
+                                <tr key={i} className="border-t border-slate-200/70">
+                                  <td className="py-0.5 tabular-nums">
+                                    {l.period_month ? String(l.period_month).slice(0, 7) : '—'}
+                                  </td>
+                                  <td className="py-0.5">
+                                    {l.teacher_name || '—'}
+                                    {l.note ? (
+                                      <span className="block text-[10px] text-slate-400">{l.note}</span>
+                                    ) : null}
+                                  </td>
+                                  <td className="py-0.5 text-right tabular-nums text-slate-500">
+                                    {formatTryAmount(l.quantity)}
+                                  </td>
+                                  <td className="py-0.5 text-right tabular-nums">
+                                    {formatTryAmount(l.hours)}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        ) : (
+                          <p className="text-[11px] text-slate-400">Bu ay için gönderilmiş beyan yok.</p>
+                        )}
+                      </div>
+                    </div>
+
+                    {(row.teachers || []).length ? (
+                      <div className="mt-3 border-t border-slate-200 pt-2">
+                        <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                          Öğretmen özeti
+                        </p>
+                        <div className="flex flex-wrap gap-2">
+                          {(row.teachers || []).map((t) => {
+                            const fark =
+                              Math.abs(Number(t.declared_hours || 0) - Number(t.hours || 0)) > 0.01;
+                            return (
+                              <span
+                                key={t.teacher_id}
+                                className={`rounded-lg px-2 py-1 text-[11px] ${
+                                  fark ? 'bg-amber-100 text-amber-900' : 'bg-white text-slate-700 ring-1 ring-slate-200'
+                                }`}
+                              >
+                                {t.teacher_name}: kayıt {formatTryAmount(t.hours)} · beyan{' '}
+                                {formatTryAmount(t.declared_hours || 0)}
+                              </span>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
             );
           })}
