@@ -15,6 +15,7 @@ import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { roundUnits } from '../api/_lib/class-lesson-payment-units.js';
 import {
   monthBoundsYm,
+  scanDeclaredPrivateHoursByStudent,
   scanPrivateLessonHoursByStudent
 } from '../api/_lib/private-lesson-fee-hours.js';
 
@@ -144,6 +145,7 @@ function buildRow({
   externalName,
   isExternal,
   hoursInfo,
+  declaredInfo,
   fee,
   assignedTeacherIds,
   studentMap,
@@ -151,11 +153,19 @@ function buildRow({
   accountMap
 }) {
   const systemHours = roundUnits(hoursInfo?.system_hours || 0);
+  const declaredHours = roundUnits(declaredInfo?.declared_hours || 0);
   const hoursOverride =
     fee?.hours_override != null && Number.isFinite(Number(fee.hours_override))
       ? money(fee.hours_override)
       : null;
-  const hours = hoursOverride != null ? hoursOverride : systemHours;
+  /**
+   * Saat önceliği: elle girilen > sistem ders kaydı > öğretmen beyanı.
+   *
+   * Ders kaydı sisteme girilmemiş olabiliyor; o durumda öğretmenin aylık
+   * beyanındaki özel ders adedi kullanılır. Böylece veli ücreti hesaplanabilir.
+   * İkisi de varsa sistem kaydı esastır ve fark ekranda görünür.
+   */
+  const hours = hoursOverride != null ? hoursOverride : systemHours > 0 ? systemHours : declaredHours;
   const unitPrice = fee ? money(fee.unit_price_tl) : 0;
   const total = money(hours * unitPrice);
   const collected = fee ? money(fee.amount_collected_tl) : 0;
@@ -169,13 +179,15 @@ function buildRow({
 
   const teacherIdSet = new Set([
     ...(hoursInfo?.teachers ? hoursInfo.teachers.keys() : []),
+    ...(declaredInfo?.teachers ? declaredInfo.teachers.keys() : []),
     ...(assignedTeacherIds || [])
   ]);
   const teachers = [...teacherIdSet]
     .map((tid) => ({
       teacher_id: tid,
       teacher_name: teacherMap.get(tid) || tid,
-      hours: roundUnits(hoursInfo?.teachers?.get(tid)?.hours || 0)
+      hours: roundUnits(hoursInfo?.teachers?.get(tid)?.hours || 0),
+      declared_hours: roundUnits(declaredInfo?.teachers?.get(tid)?.hours || 0)
     }))
     .sort((a, b) => a.teacher_name.localeCompare(b.teacher_name, 'tr'));
 
@@ -191,6 +203,9 @@ function buildRow({
     student_name: displayName,
     teachers,
     system_hours: systemHours,
+    declared_hours: declaredHours,
+    // Kaynak: saat nereden geldi — ekranda açıkça yazılsın
+    hours_source: hoursOverride != null ? 'manual' : systemHours > 0 ? 'system' : declaredHours > 0 ? 'declaration' : 'none',
     hours_override: hoursOverride,
     hours,
     unit_price_tl: unitPrice,
@@ -218,8 +233,15 @@ async function handleList(req, res, actor, roleSet) {
   const bounds = monthBoundsYm(periodYm);
   if (!bounds) return jsonError(res, 400, 'invalid_month');
 
-  const [hoursMap, assignments, feePack] = await Promise.all([
+  const [hoursMap, declaredMap, assignments, feePack] = await Promise.all([
     scanPrivateLessonHoursByStudent({
+      supabase: supabaseAdmin,
+      from: bounds.from,
+      to: bounds.to,
+      institutionId: inst
+    }),
+    // Ders kaydı girilmemişse öğretmen beyanındaki özel ders adedi kullanılır
+    scanDeclaredPrivateHoursByStudent({
       supabase: supabaseAdmin,
       from: bounds.from,
       to: bounds.to,
@@ -246,6 +268,7 @@ async function handleList(req, res, actor, roleSet) {
 
   const systemStudentIds = new Set([
     ...hoursMap.keys(),
+    ...declaredMap.keys(),
     ...assignedTeachersByStudent.keys(),
     ...feePack.rows.map((r) => String(r.student_id || '').trim()).filter(Boolean)
   ]);
@@ -254,6 +277,8 @@ async function handleList(req, res, actor, roleSet) {
   for (const sid of systemStudentIds) {
     const h = hoursMap.get(sid);
     if (h) for (const tid of h.teachers.keys()) teacherIds.add(tid);
+    const d = declaredMap.get(sid);
+    if (d) for (const tid of d.teachers.keys()) teacherIds.add(tid);
     const assigned = assignedTeachersByStudent.get(sid);
     if (assigned) for (const tid of assigned) teacherIds.add(tid);
   }
@@ -281,6 +306,7 @@ async function handleList(req, res, actor, roleSet) {
       externalName: null,
       isExternal: false,
       hoursInfo: hoursMap.get(sid) || { system_hours: 0, teachers: new Map() },
+      declaredInfo: declaredMap.get(sid) || { declared_hours: 0, teachers: new Map() },
       fee: feeByKey.get(key) || null,
       assignedTeacherIds: assignedTeachersByStudent.get(sid) || [],
       studentMap,
@@ -307,6 +333,7 @@ async function handleList(req, res, actor, roleSet) {
       externalName: fee.external_student_name || null,
       isExternal,
       hoursInfo: { system_hours: 0, teachers: new Map() },
+      declaredInfo: { declared_hours: 0, teachers: new Map() },
       fee,
       assignedTeacherIds: [],
       studentMap,

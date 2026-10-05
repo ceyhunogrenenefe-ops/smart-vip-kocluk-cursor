@@ -76,3 +76,72 @@ export async function scanPrivateLessonHoursByStudent({ supabase, from, to, inst
   }
   return byStudent;
 }
+
+/**
+ * Öğretmen beyanlarından özel ders saatleri.
+ *
+ * Öğretmen aylık formunda "Öykü – 4 ders" diye öğrenci bazında özel ders
+ * bildiriyor. Ders kaydı sisteme girilmemiş olsa bile veliden alınacak ücret
+ * bu beyandan hesaplanabilsin diye okunur.
+ *
+ * Beyan ders ADEDİ olarak girilir; ücretlendirme saat üzerinden yapıldığı
+ * için 40 dakikalık ders birimi saate çevrilir — hakediş ve beyan ekranıyla
+ * aynı kural.
+ *
+ * Yalnız GÖNDERİLMİŞ beyanlar sayılır; yarım kalan form ücreti etkilemesin.
+ *
+ * @returns {Promise<Map<string, { declared_hours: number, teachers: Map<string, {teacher_id:string, hours:number}> }>>}
+ */
+export async function scanDeclaredPrivateHoursByStudent({ supabase, from, to, institutionId }) {
+  const out = new Map();
+  try {
+    // Dönem ayları: 'YYYY-MM-01' listesi
+    const aylar = new Set();
+    const ilk = new Date(`${String(from).slice(0, 7)}-01T00:00:00Z`);
+    const son = new Date(`${String(to).slice(0, 7)}-01T00:00:00Z`);
+    for (let d = new Date(ilk); d <= son; d.setUTCMonth(d.getUTCMonth() + 1)) {
+      aylar.add(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-01`);
+    }
+    if (!aylar.size) return out;
+
+    let dq = supabase
+      .from('teacher_month_declarations')
+      .select('id, teacher_id, period_month, status, institution_id')
+      .in('period_month', [...aylar])
+      .in('status', ['submitted', 'reopened'])
+      .limit(1000);
+    if (institutionId) dq = dq.eq('institution_id', institutionId);
+    const { data: decls, error } = await dq;
+    if (error || !decls?.length) return out;
+
+    const byDecl = new Map((decls || []).map((d) => [String(d.id), d]));
+    const { data: lines } = await supabase
+      .from('teacher_declaration_lines')
+      .select('declaration_id, kind, student_id, quantity')
+      .in('declaration_id', [...byDecl.keys()])
+      .eq('kind', 'private')
+      .limit(5000);
+
+    for (const l of lines || []) {
+      const sid = String(l.student_id || '').trim();
+      if (!sid) continue;
+      const adet = Number(l.quantity);
+      if (!Number.isFinite(adet) || adet <= 0) continue;
+      const hours = unitsToHours(adet);
+      const tid = String(byDecl.get(String(l.declaration_id))?.teacher_id || '').trim();
+
+      if (!out.has(sid)) out.set(sid, { declared_hours: 0, teachers: new Map() });
+      const cur = out.get(sid);
+      cur.declared_hours = roundUnits(cur.declared_hours + hours);
+      if (tid) {
+        const t = cur.teachers.get(tid) || { teacher_id: tid, hours: 0 };
+        t.hours = roundUnits(t.hours + hours);
+        cur.teachers.set(tid, t);
+      }
+    }
+  } catch (e) {
+    // Beyan modülü yoksa ücret ekranı eskisi gibi çalışsın
+    console.warn('[private-lesson-fees] beyan saatleri:', errorMessage(e));
+  }
+  return out;
+}
