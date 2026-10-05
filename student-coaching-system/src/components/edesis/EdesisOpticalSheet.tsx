@@ -290,18 +290,30 @@ export default function EdesisOpticalSheet({
   const family = detectFamily(examTitle, examType, examFamily);
   const dual = bookletMode === 'dual-sozel-sayisal' || family === 'lgs';
   const choices = useMemo(() => opticalChoices(family, choiceCount), [family, choiceCount]);
+  /**
+   * Gösterilecek kitapçık harfleri.
+   *
+   * Öğrencinin SEÇTİĞİ harf her zaman listede olur. Aksi halde Edesis o
+   * kitapçığı tanımlamamışsa seçim sessizce A'ya düşüyor, öğrenci B kodladığı
+   * hâlde cevaplar A anahtarıyla değerlendiriliyor ve netler yanlış çıkıyordu.
+   */
   const bookletCodes = useMemo(() => {
+    const secili = String(kitapcik || '').trim().toUpperCase();
+    const seciliGecerli = KITAPCIK_ORDER.includes(secili) ? [secili] : [];
+    const sayisalSecili = String(kitapcikSayisal || '').trim().toUpperCase();
+    const sayisalGecerli = KITAPCIK_ORDER.includes(sayisalSecili) ? [sayisalSecili] : [];
+
     const fromApi = (availableBookletCodes || [])
       .map((c) => String(c || '').trim().toUpperCase())
       .filter((c) => KITAPCIK_ORDER.includes(c));
-    if (fromApi.length) return [...new Set(fromApi)].sort();
     const fromBooklets = (booklets || [])
       .map((b) => String(b.kitapcikTuru || '').trim().toUpperCase())
       .filter((c) => KITAPCIK_ORDER.includes(c));
-    const unique = [...new Set(fromBooklets)];
-    if (unique.length) return unique.sort();
+
+    const hepsi = [...new Set([...fromApi, ...fromBooklets, ...seciliGecerli, ...sayisalGecerli])];
+    if (hepsi.length) return hepsi.sort();
     return ['A'];
-  }, [availableBookletCodes, booklets]);
+  }, [availableBookletCodes, booklets, kitapcik, kitapcikSayisal]);
   const kitapcikValueEarly = (() => {
     const raw = String(kitapcik || '').trim().toUpperCase();
     const codes = bookletCodes;
@@ -422,6 +434,8 @@ export default function EdesisOpticalSheet({
 
   const kitapcikValue = (() => {
     const raw = String(kitapcik || '').trim().toUpperCase();
+    // Seçilen harf bookletCodes'a eklendiği için burada artık harf değişmez;
+    // yalnız boş/geçersiz değerde ilk koda düşülür
     return bookletCodes.includes(raw) ? raw : bookletCodes[0] || 'A';
   })();
   const sayisalValue = (() => {
