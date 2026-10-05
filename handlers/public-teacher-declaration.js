@@ -15,6 +15,7 @@ import {
   periodLabel,
   periodRange
 } from '../api/_lib/teacher-declaration-core.js';
+import { resolveCoachIdByUserSub } from '../api/_lib/enrich-student-actor.js';
 
 const DECL = 'teacher_month_declarations';
 const LINES = 'teacher_declaration_lines';
@@ -39,7 +40,7 @@ async function loadByToken(token) {
 /** Formda seçilecek sınıf ve öğrenciler — öğretmenin kendi kayıtlarından. */
 async function loadPickLists(teacherId, period, institutionId) {
   const range = periodRange(period);
-  const out = { classes: [], students: [] };
+  const out = { classes: [], students: [], guidance_students: [] };
   if (!range) return out;
 
   const { data: sessions } = await supabaseAdmin
@@ -72,13 +73,36 @@ async function loadPickLists(teacherId, period, institutionId) {
 
   let sq = supabaseAdmin
     .from('students')
-    .select('id, name, class_level')
+    .select('id, name, class_level, coach_id')
     .is('deleted_at', null)
     .order('name')
     .limit(2000);
   if (institutionId) sq = sq.eq('institution_id', institutionId);
   const { data: students } = await sq;
-  out.students = (students || []).map((s) => ({ id: s.id, name: s.name || '', class_level: s.class_level || '' }));
+  out.students = (students || []).map((s) => ({
+    id: s.id,
+    name: s.name || '',
+    class_level: s.class_level || ''
+  }));
+
+  /**
+   * Rehberlik listesi ayrı: görüşmeyi yalnız koçlar yapıyor ve yalnız kendi
+   * öğrencileriyle. Tüm kurum öğrencilerini göstermek, öğretmenin kendi
+   * öğrencisi olmayan birini seçmesine yol açıyordu.
+   *
+   * Koç kaydı bulunamazsa liste boş döner; form "size tanımlı öğrenci yok"
+   * der, yanlış öğrenci seçilmesindense boş kalması doğrudur.
+   */
+  try {
+    const coachId = await resolveCoachIdByUserSub(teacherId);
+    out.guidance_students = coachId
+      ? (students || [])
+          .filter((s) => String(s.coach_id || '') === String(coachId))
+          .map((s) => ({ id: s.id, name: s.name || '', class_level: s.class_level || '' }))
+      : [];
+  } catch {
+    out.guidance_students = [];
+  }
   return out;
 }
 
@@ -125,7 +149,13 @@ export default async function handler(req, res) {
         lines: lines || [],
         kinds: DECLARATION_KINDS,
         classes: picks.classes,
-        students: picks.students
+        students: picks.students,
+        guidance_students: picks.guidance_students,
+        // Takvim bu ayın günlerini gösterir
+        period_days: (() => {
+          const r = periodRange(decl.period_month);
+          return r ? { from: r.from, to: r.to } : null;
+        })()
       });
     }
 
@@ -148,6 +178,8 @@ export default async function handler(req, res) {
           student_id: l?.student_id || null,
           label: String(l?.label || '').trim().slice(0, 200) || null,
           quantity: Math.max(0, Math.min(9999, Number(l?.quantity) || 0)),
+          // Gün gün işaretleme: { 'YYYY-MM-DD': dersSayısı }
+          days: l?.days && typeof l.days === 'object' && !Array.isArray(l.days) ? l.days : null,
           note: String(l?.note || '').trim().slice(0, 500) || null
         }))
         .filter((l) => validKinds.has(l.kind) && l.quantity > 0);

@@ -10,6 +10,8 @@ type Line = {
   label: string;
   quantity: number | string;
   note: string;
+  /** Grup dersinde gün gün işaretleme: { 'YYYY-MM-DD': dersSayısı } */
+  days?: Record<string, number>;
 };
 type Form = {
   teacher_name: string;
@@ -21,6 +23,9 @@ type Form = {
   kinds: Kind[];
   classes: Array<{ id: string; name: string; mine: boolean }>;
   students: Array<{ id: string; name: string; class_level: string }>;
+  /** Rehberlikte yalnız koça tanımlı öğrenciler */
+  guidance_students: Array<{ id: string; name: string; class_level: string }>;
+  period_days: { from: string; to: string } | null;
 };
 
 const bosSatir = (kind: string): Line => ({
@@ -29,8 +34,92 @@ const bosSatir = (kind: string): Line => ({
   student_id: null,
   label: '',
   quantity: '',
-  note: ''
+  note: '',
+  days: {}
 });
+
+const GUN_ADI = ['Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt', 'Paz'];
+
+/**
+ * Ay takvimi — öğretmen ders yaptığı günleri işaretler, her gün için ders
+ * sayısını ayarlar. Toplam otomatik hesaplanır.
+ *
+ * "8A 12 ders" demek yerine hangi günler ders yapıldığı da kaydedilir;
+ * beyan ile sistem kaydı gün bazında karşılaştırılabilir hale gelir.
+ */
+function GunTakvimi({
+  from,
+  to,
+  days,
+  onChange
+}: {
+  from: string;
+  to: string;
+  days: Record<string, number>;
+  onChange: (next: Record<string, number>) => void;
+}) {
+  const hucreler: Array<string | null> = [];
+  const ilk = new Date(`${from}T12:00:00`);
+  const sonGun = Number(to.slice(8, 10));
+  // Pazartesi ilk sütun olacak şekilde baştaki boşluklar
+  const bosluk = (ilk.getDay() + 6) % 7;
+  for (let i = 0; i < bosluk; i += 1) hucreler.push(null);
+  for (let g = 1; g <= sonGun; g += 1) {
+    hucreler.push(`${from.slice(0, 8)}${String(g).padStart(2, '0')}`);
+  }
+
+  const topla = (d: Record<string, number>) =>
+    Object.values(d).reduce((a, b) => a + (Number(b) || 0), 0);
+
+  const degistir = (tarih: string, delta: number) => {
+    const next = { ...days };
+    const cur = Number(next[tarih] || 0) + delta;
+    if (cur <= 0) delete next[tarih];
+    else next[tarih] = Math.min(20, cur);
+    onChange(next);
+  };
+
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-2">
+      <div className="mb-1 grid grid-cols-7 gap-1 text-center text-[10px] font-semibold text-slate-400">
+        {GUN_ADI.map((g) => (
+          <span key={g}>{g}</span>
+        ))}
+      </div>
+      <div className="grid grid-cols-7 gap-1">
+        {hucreler.map((tarih, i) => {
+          if (!tarih) return <span key={`b${i}`} />;
+          const adet = Number(days[tarih] || 0);
+          const gun = Number(tarih.slice(8, 10));
+          return (
+            <button
+              key={tarih}
+              type="button"
+              onClick={() => degistir(tarih, 1)}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                degistir(tarih, -1);
+              }}
+              title={adet ? `${gun}. gün · ${adet} ders (azaltmak için sağ tık)` : `${gun}. gün`}
+              className={`rounded-md py-1.5 text-[11px] font-semibold transition ${
+                adet
+                  ? 'bg-emerald-600 text-white'
+                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+              }`}
+            >
+              {gun}
+              {adet ? <span className="block text-[9px] font-normal">{adet} ders</span> : null}
+            </button>
+          );
+        })}
+      </div>
+      <div className="mt-2 flex items-center justify-between text-[11px]">
+        <span className="text-slate-500">Güne tıkla ekle · sağ tık azalt</span>
+        <span className="font-semibold text-emerald-700">Toplam {topla(days)} ders</span>
+      </div>
+    </div>
+  );
+}
 
 /** Öğretmenin oturum açmadan dolduracağı aylık çalışma formu. */
 export default function TeacherDeclarationFormPage() {
@@ -58,7 +147,8 @@ export default function TeacherDeclarationFormPage() {
           student_id: (l.student_id as string) || null,
           label: String(l.label || ''),
           quantity: Number(l.quantity) || '',
-          note: String(l.note || '')
+          note: String(l.note || ''),
+          days: (l.days as Record<string, number>) || {}
         }))
       );
       if (j.status === 'submitted' && !j.editable) setGonderildi(true);
@@ -209,11 +299,14 @@ export default function TeacherDeclarationFormPage() {
                           className={input}
                         >
                           <option value="">Öğrenci seçin…</option>
-                          {(form?.students || []).map((s) => (
-                            <option key={s.id} value={s.id}>
-                              {s.name}
-                            </option>
-                          ))}
+                          {/* Rehberlikte yalnız size tanımlı öğrenciler listelenir */}
+                          {(k.id === 'guidance' ? form?.guidance_students || [] : form?.students || []).map(
+                            (st) => (
+                              <option key={st.id} value={st.id}>
+                                {st.name}
+                              </option>
+                            )
+                          )}
                         </select>
                       ) : (
                         <input
@@ -230,7 +323,11 @@ export default function TeacherDeclarationFormPage() {
                         value={l.quantity}
                         onChange={(e) => setLine(i, { quantity: e.target.value })}
                         placeholder={k.unit}
-                        className="w-24 shrink-0 rounded-lg border border-slate-200 px-2 py-2 text-sm"
+                        readOnly={sinifSec}
+                        title={sinifSec ? 'Takvimden işaretlediğiniz günlerden hesaplanır' : undefined}
+                        className={`w-24 shrink-0 rounded-lg border border-slate-200 px-2 py-2 text-sm ${
+                          sinifSec ? 'bg-slate-100 text-slate-700' : ''
+                        }`}
                       />
                       <button
                         type="button"
@@ -248,6 +345,23 @@ export default function TeacherDeclarationFormPage() {
                         placeholder="Listede yoksa adını yazın"
                         className={`${input} mt-2`}
                       />
+                    ) : null}
+                    {/* Grup dersinde gün gün işaretleme; toplam buradan gelir */}
+                    {sinifSec && form?.period_days ? (
+                      <div className="mt-2">
+                        <GunTakvimi
+                          from={form.period_days.from}
+                          to={form.period_days.to}
+                          days={l.days || {}}
+                          onChange={(next) => {
+                            const toplam = Object.values(next).reduce(
+                              (a, b) => a + (Number(b) || 0),
+                              0
+                            );
+                            setLine(i, { days: next, quantity: toplam || '' });
+                          }}
+                        />
+                      </div>
                     ) : null}
                     <input
                       value={l.note}
