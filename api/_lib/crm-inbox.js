@@ -690,6 +690,42 @@ export async function syncInstagramMessagingToCrm(events, { institutionId, chann
     if (r?.conversation_id && profile) {
       await applyConversationProfile(r.conversation_id, profile).catch(() => null);
     }
+
+    /**
+     * Pipeline kaydı.
+     *
+     * WhatsApp'ta gelen mesaj için kayıt adayı açılıyordu ama Instagram ve
+     * Facebook'ta açılmıyordu: konuşma gelen kutusuna düşüyor, pipeline'da hiç
+     * görünmüyordu. Kurum dışı gelen her mesaj için aday açılır ve konuşma o
+     * kayda bağlanır.
+     *
+     * Hata olursa mesaj yine de gelen kutusuna düşer; webhook asla düşmez.
+     */
+    if (r?.conversation_id && !r?.skipped) {
+      try {
+        const { ingestRegistrationChannelMessage } = await import('./registration-channel-ingest.js');
+        const ing = await ingestRegistrationChannelMessage({
+          channel: ch,
+          direction: 'inbound',
+          body,
+          externalMessageId: norm.messageId || null,
+          externalContactId: norm.senderId,
+          contactName,
+          timestamp: ev?.timestamp,
+          institutionId
+        });
+        const leadId = ing?.lead_id || ing?.lead?.id || null;
+        if (leadId) {
+          await supabaseAdmin
+            .from('crm_conversations')
+            .update({ lead_id: leadId })
+            .eq('id', r.conversation_id)
+            .is('lead_id', null);
+        }
+      } catch (e) {
+        console.warn('[crm-inbox] ig/fb lead olusturulamadi:', e instanceof Error ? e.message : e);
+      }
+    }
     if (r?.skipped) {
       skipped += 1;
       const reason = String(r.reason || 'skipped');
