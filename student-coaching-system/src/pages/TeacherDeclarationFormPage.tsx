@@ -264,6 +264,8 @@ export default function TeacherDeclarationFormPage() {
           const kendi = lines.map((l, i) => ({ l, i })).filter((x) => x.l.kind === k.id);
           const ogrenciSec = k.id === 'private' || k.id === 'guidance';
           const sinifSec = k.id === 'group';
+          // Grup dersi gibi özel ders de gün gün işaretlenir; toplam takvimden gelir
+          const takvimli = k.id === 'group' || k.id === 'private';
           return (
             <section key={k.id} className="rounded-2xl border border-slate-200 bg-white p-4">
               <div className="flex items-baseline justify-between gap-2">
@@ -323,10 +325,10 @@ export default function TeacherDeclarationFormPage() {
                         value={l.quantity}
                         onChange={(e) => setLine(i, { quantity: e.target.value })}
                         placeholder={k.unit}
-                        readOnly={sinifSec}
-                        title={sinifSec ? 'Takvimden işaretlediğiniz günlerden hesaplanır' : undefined}
+                        readOnly={takvimli}
+                        title={takvimli ? 'Takvimden işaretlediğiniz günlerden hesaplanır' : undefined}
                         className={`w-24 shrink-0 rounded-lg border border-slate-200 px-2 py-2 text-sm ${
-                          sinifSec ? 'bg-slate-100 text-slate-700' : ''
+                          takvimli ? 'bg-slate-100 text-slate-700' : ''
                         }`}
                       />
                       <button
@@ -346,8 +348,8 @@ export default function TeacherDeclarationFormPage() {
                         className={`${input} mt-2`}
                       />
                     ) : null}
-                    {/* Grup dersinde gün gün işaretleme; toplam buradan gelir */}
-                    {sinifSec && form?.period_days ? (
+                    {/* Grup ve özel derste gün gün işaretleme; toplam buradan gelir */}
+                    {takvimli && form?.period_days ? (
                       <div className="mt-2">
                         <GunTakvimi
                           from={form.period_days.from}
