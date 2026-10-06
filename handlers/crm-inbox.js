@@ -6,7 +6,6 @@ import { loadMetaWhatsAppSecretsFromDb } from '../api/_lib/meta-whatsapp.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { actorRoleSet, actorIsAdminLike } from '../api/_lib/actor-roles.js';
 import {
-  getCrmAgentAssignment,
   getCrmInboundInstitutionId,
   sendCrmInstagramDm,
   sendCrmWhatsAppTemplate,
@@ -98,25 +97,24 @@ async function resolveInstitutionId(actor, roleSet, queryInst) {
   }
 }
 
-function applyAgentScope(query, actor, assignment, isAdmin) {
-  if (isAdmin) return query;
-  const canPool = !assignment || assignment.can_access_unassigned_pool !== false;
-  if (canPool) {
-    return query.or(`assigned_user_id.eq.${actor.sub},assigned_user_id.is.null`);
-  }
-  return query.eq('assigned_user_id', actor.sub);
+/**
+ * Gelen kutusu paylaşılan bir kutudur: temsilci de koç da kurumdaki bütün
+ * sohbetleri görür. Önce yalnız "bana atanmış + atanmamış" gösteriliyordu;
+ * sohbetler o an vardiyada olan temsilciye dağıtıldığı için liste kişinin
+ * vardiya saatinde kesiliyor, gece ve sabah gelen mesajlar hiç görünmüyordu.
+ * Kartta kime kayıtlı olduğu yazdığı ve "Benimkiler / Atanmamış" süzgeçleri
+ * durduğu için daraltmak isteyen yine daraltabilir.
+ */
+function applyAgentScope(query) {
+  return query;
 }
 
-async function assertConversationAccess(conversation, actor, roleSet, assignment) {
+async function assertConversationAccess(conversation, actor, roleSet, institutionId) {
   if (!conversation) return false;
   if (actorIsAdminLike(actor, roleSet)) return true;
-  if (conversation.assigned_user_id && String(conversation.assigned_user_id) === String(actor.sub)) {
-    return true;
-  }
-  if (!conversation.assigned_user_id && (!assignment || assignment.can_access_unassigned_pool !== false)) {
-    return true;
-  }
-  return false;
+  // Tek sınır kurumdur: başka kurumun sohbeti id ile açılamaz
+  if (!institutionId) return true;
+  return String(conversation.institution_id || '') === String(institutionId);
 }
 
 export default async function handler(req, res) {
@@ -141,7 +139,6 @@ export default async function handler(req, res) {
     roleSet,
     req.query?.institution_id || body.institution_id
   );
-  const assignment = agentOnly ? await getCrmAgentAssignment(actor.sub, institutionId) : null;
 
   try {
     if (op === 'list_conversations') {
@@ -183,7 +180,7 @@ export default async function handler(req, res) {
           `contact_name.ilike.%${q}%,contact_identifier.ilike.%${q}%,last_message_preview.ilike.%${q}%`
         );
       }
-      query = applyAgentScope(query, actor, assignment, isAdmin);
+      query = applyAgentScope(query);
 
       const { data, error } = await query;
       if (error) {
@@ -520,7 +517,7 @@ export default async function handler(req, res) {
         .eq('id', conversationId)
         .maybeSingle();
       if (!conv) return res.status(404).json({ error: 'conversation_not_found' });
-      if (!(await assertConversationAccess(conv, actor, roleSet, assignment))) {
+      if (!(await assertConversationAccess(conv, actor, roleSet, institutionId))) {
         return res.status(403).json({ error: 'forbidden' });
       }
 
@@ -625,7 +622,7 @@ export default async function handler(req, res) {
         .select('*')
         .eq('id', conversationId)
         .maybeSingle();
-      if (!(await assertConversationAccess(conv, actor, roleSet, assignment))) {
+      if (!(await assertConversationAccess(conv, actor, roleSet, institutionId))) {
         return res.status(403).json({ error: 'forbidden' });
       }
       const { resumeAutoFlow } = await import('../api/_lib/crm-auto-greeting.js');
@@ -791,7 +788,7 @@ export default async function handler(req, res) {
       const conversationId = String(req.query?.conversation_id || body.conversation_id || '').trim();
       if (!conversationId) return res.status(400).json({ error: 'conversation_id_required' });
       const { data: conv } = await supabaseAdmin.from('crm_conversations').select('*').eq('id', conversationId).maybeSingle();
-      if (!(await assertConversationAccess(conv, actor, roleSet, assignment))) {
+      if (!(await assertConversationAccess(conv, actor, roleSet, institutionId))) {
         return res.status(403).json({ error: 'forbidden' });
       }
       const { data, error } = await supabaseAdmin
@@ -850,7 +847,7 @@ export default async function handler(req, res) {
       const noteBody = String(body.body || body.note || '').trim();
       if (!conversationId || !noteBody) return res.status(400).json({ error: 'conversation_id_and_body_required' });
       const { data: conv } = await supabaseAdmin.from('crm_conversations').select('*').eq('id', conversationId).maybeSingle();
-      if (!(await assertConversationAccess(conv, actor, roleSet, assignment))) {
+      if (!(await assertConversationAccess(conv, actor, roleSet, institutionId))) {
         return res.status(403).json({ error: 'forbidden' });
       }
       const { data, error } = await supabaseAdmin
@@ -1045,7 +1042,7 @@ export default async function handler(req, res) {
       if (!id) return res.status(400).json({ error: 'id_required' });
       const { data: conv, error } = await supabaseAdmin.from('crm_conversations').select('*').eq('id', id).maybeSingle();
       if (error) throw error;
-      if (!(await assertConversationAccess(conv, actor, roleSet, assignment))) {
+      if (!(await assertConversationAccess(conv, actor, roleSet, institutionId))) {
         return res.status(403).json({ error: 'forbidden' });
       }
       return res.status(200).json({ data: conv });
@@ -1059,20 +1056,22 @@ export default async function handler(req, res) {
         .select('*')
         .eq('id', conversationId)
         .maybeSingle();
-      if (!(await assertConversationAccess(conv, actor, roleSet, assignment))) {
+      if (!(await assertConversationAccess(conv, actor, roleSet, institutionId))) {
         return res.status(403).json({ error: 'forbidden' });
       }
       const since = String(req.query?.since || body.since || '').trim();
-      let mq = supabaseAdmin
-        .from('crm_messages')
-        .select('*')
-        .eq('conversation_id', conversationId)
-        .order('created_at', { ascending: true })
-        .limit(500);
-      if (since) mq = mq.gt('created_at', since);
+      let mq = supabaseAdmin.from('crm_messages').select('*').eq('conversation_id', conversationId);
+      if (since) {
+        // Canlı yoklama: o andan sonra eklenenler sırayla
+        mq = mq.gt('created_at', since).order('created_at', { ascending: true }).limit(500);
+      } else {
+        // 500'ü aşan sohbette eskiler değil EN YENİ mesajlar gelmeli
+        mq = mq.order('created_at', { ascending: false }).limit(500);
+      }
       const { data, error } = await mq;
       if (error) throw error;
-      return res.status(200).json({ data: data || [], conversation: conv });
+      const rows = since ? data || [] : [...(data || [])].reverse();
+      return res.status(200).json({ data: rows, conversation: conv });
     }
 
     if (op === 'mark_read' && req.method === 'POST') {
@@ -1083,7 +1082,7 @@ export default async function handler(req, res) {
         .select('*')
         .eq('id', conversationId)
         .maybeSingle();
-      if (!(await assertConversationAccess(conv, actor, roleSet, assignment))) {
+      if (!(await assertConversationAccess(conv, actor, roleSet, institutionId))) {
         return res.status(403).json({ error: 'forbidden' });
       }
       await supabaseAdmin
@@ -1118,7 +1117,7 @@ export default async function handler(req, res) {
         .select('*')
         .eq('id', conversationId)
         .maybeSingle();
-      if (!(await assertConversationAccess(conv, actor, roleSet, assignment))) {
+      if (!(await assertConversationAccess(conv, actor, roleSet, institutionId))) {
         return res.status(403).json({ error: 'forbidden' });
       }
 
@@ -1255,7 +1254,7 @@ export default async function handler(req, res) {
         .select('*')
         .eq('id', conversationId)
         .maybeSingle();
-      if (!(await assertConversationAccess(conv, actor, roleSet, assignment))) {
+      if (!(await assertConversationAccess(conv, actor, roleSet, institutionId))) {
         return res.status(403).json({ error: 'forbidden' });
       }
       const { data, error } = await supabaseAdmin
@@ -1290,7 +1289,7 @@ export default async function handler(req, res) {
         .select('*')
         .eq('id', conversationId)
         .maybeSingle();
-      if (!(await assertConversationAccess(conv, actor, roleSet, assignment))) {
+      if (!(await assertConversationAccess(conv, actor, roleSet, institutionId))) {
         return res.status(403).json({ error: 'forbidden' });
       }
       const prevMeta = conv.metadata && typeof conv.metadata === 'object' ? conv.metadata : {};
@@ -1394,7 +1393,7 @@ export default async function handler(req, res) {
         .select('*')
         .eq('id', conversationId)
         .maybeSingle();
-      if (!(await assertConversationAccess(conv, actor, roleSet, assignment))) {
+      if (!(await assertConversationAccess(conv, actor, roleSet, institutionId))) {
         return res.status(403).json({ error: 'forbidden' });
       }
       const { setConversationInternal } = await import('../api/_lib/crm-internal-contacts.js');
@@ -1414,7 +1413,7 @@ export default async function handler(req, res) {
         .select('*')
         .eq('id', conversationId)
         .maybeSingle();
-      if (!(await assertConversationAccess(conv, actor, roleSet, assignment))) {
+      if (!(await assertConversationAccess(conv, actor, roleSet, institutionId))) {
         return res.status(403).json({ error: 'forbidden' });
       }
       const { data, error } = await supabaseAdmin
@@ -1497,7 +1496,7 @@ export default async function handler(req, res) {
        * veya havuzdaki). Mesaj silmede zaten aynı kural vardı; sohbet silme
        * yöneticide kalıyordu ve temsilci yanlış düşen konuşmayı temizleyemiyordu.
        */
-      if (!(await assertConversationAccess(conv, actor, roleSet, assignment))) {
+      if (!(await assertConversationAccess(conv, actor, roleSet, institutionId))) {
         return res.status(403).json({ error: 'forbidden', hint: 'Bu sohbete erişiminiz yok.' });
       }
       if (institutionId && conv.institution_id && String(conv.institution_id) !== String(institutionId)) {
@@ -1527,7 +1526,7 @@ export default async function handler(req, res) {
         .select('*')
         .eq('id', msg.conversation_id)
         .maybeSingle();
-      if (!(await assertConversationAccess(conv, actor, roleSet, assignment))) {
+      if (!(await assertConversationAccess(conv, actor, roleSet, institutionId))) {
         return res.status(403).json({ error: 'forbidden' });
       }
       // Silinen mesaj günlük rapora da girmesin
@@ -1569,7 +1568,7 @@ export default async function handler(req, res) {
           .select('*')
           .eq('id', conversationId)
           .maybeSingle();
-        if (!(await assertConversationAccess(conv, actor, roleSet, assignment))) {
+        if (!(await assertConversationAccess(conv, actor, roleSet, institutionId))) {
           return res.status(403).json({ error: 'forbidden' });
         }
         const { data: messages } = await supabaseAdmin
@@ -1593,7 +1592,7 @@ export default async function handler(req, res) {
         .order('updated_at', { ascending: false })
         .limit(50);
       if (institutionId) cq = cq.eq('institution_id', institutionId);
-      cq = applyAgentScope(cq, actor, assignment, isAdmin);
+      cq = applyAgentScope(cq);
       const { data: conversations } = await cq;
       return res.status(200).json({
         data: { conversations: conversations || [], server_time: new Date().toISOString() }
