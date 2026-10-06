@@ -49,7 +49,8 @@ import {
 } from '../../lib/crmInboxApi';
 import { contactInitials, contactSubtitle, contactTitle } from '../../lib/crmContactDisplay';
 import { playCrmLeadChime } from '../../lib/crmLiveSound';
-import { rtGetLead } from '../../lib/registrationTrackingApi';
+import { rtCreateTask, rtGetLead, rtUpdateLead } from '../../lib/registrationTrackingApi';
+import { STAGE_LABELS } from '../../lib/registrationTrackingConfig';
 import { CrmTemplateSendPreviewModal } from './CrmTemplateModals';
 
 /** Profil fotoğrafı varsa o, yoksa baş harfler */
@@ -213,6 +214,9 @@ export default function CrmInboxPage() {
    * sonraki aksiyonunu görmek için başka ekrana gitmek zorunda kalmasın.
    */
   const [leadOzet, setLeadOzet] = useState<Record<string, unknown> | null>(null);
+  /** Pipeline işlemleri gelen kutusundan da yapılsın: aşama, alarm, not. */
+  const [alarmAt, setAlarmAt] = useState('');
+  const [leadBusy, setLeadBusy] = useState(false);
   const [tagDraft, setTagDraft] = useState('');
   const pollSinceRef = useRef(new Date().toISOString());
   const bottomRef = useRef<HTMLDivElement | null>(null);
@@ -379,6 +383,54 @@ export default function CrmInboxPage() {
       iptal = true;
     };
   }, [selected?.lead_id]);
+
+  /** Kayıt kartının aşamasını gelen kutusundan değiştir. */
+  const asamaDegistir = async (stage: string) => {
+    const leadId = selected?.lead_id;
+    if (!leadId || !stage) return;
+    setLeadBusy(true);
+    try {
+      await rtUpdateLead(String(leadId), { stage });
+      setLeadOzet((p) => (p ? { ...p, stage } : p));
+      toast.success(`Aşama: ${STAGE_LABELS[stage] || stage}`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Aşama değiştirilemedi');
+    } finally {
+      setLeadBusy(false);
+    }
+  };
+
+  /**
+   * Bu kişi için arama alarmı kur.
+   *
+   * Pipeline görevi olarak açılır ve kartın "sonraki aksiyon" alanı da
+   * güncellenir; böylece alarm hem görev listesinde hem pipeline kartında
+   * görünür, iki yer ayrışmaz.
+   */
+  const alarmKur = async () => {
+    const leadId = selected?.lead_id;
+    if (!leadId || !alarmAt) return;
+    setLeadBusy(true);
+    try {
+      const iso = new Date(alarmAt).toISOString();
+      await rtCreateTask({
+        lead_id: String(leadId),
+        title: `Arama — ${selected?.contact_name || 'kişi'}`,
+        task_type: 'call',
+        due_at: iso
+      });
+      await rtUpdateLead(String(leadId), { next_action_at: iso, next_action_type: 'call' }).catch(
+        () => null
+      );
+      setLeadOzet((p) => (p ? { ...p, next_action_at: iso } : p));
+      setAlarmAt('');
+      toast.success('Alarm kuruldu');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Alarm kurulamadı');
+    } finally {
+      setLeadBusy(false);
+    }
+  };
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -1462,6 +1514,52 @@ export default function CrmInboxPage() {
                     </div>
                   ))}
                 </dl>
+              </div>
+            ) : null}
+
+            {/* Pipeline işlemleri: aşama ve alarm — kişiyle konuşurken buradan */}
+            {selected.lead_id && leadOzet ? (
+              <div className="space-y-2 rounded-xl border border-indigo-100 bg-indigo-50/40 p-2.5">
+                <label className="block text-[11px] font-medium text-slate-600">
+                  Aşama
+                  <select
+                    disabled={leadBusy}
+                    value={String(leadOzet.stage || '')}
+                    onChange={(e) => void asamaDegistir(e.target.value)}
+                    className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs disabled:opacity-60"
+                  >
+                    {Object.entries(STAGE_LABELS).map(([id, label]) => (
+                      <option key={id} value={id}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <div>
+                  <p className="mb-1 text-[11px] font-medium text-slate-600">Alarm kur</p>
+                  <div className="flex gap-1">
+                    <input
+                      type="datetime-local"
+                      value={alarmAt}
+                      onChange={(e) => setAlarmAt(e.target.value)}
+                      className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs"
+                    />
+                    <button
+                      type="button"
+                      disabled={!alarmAt || leadBusy}
+                      onClick={() => void alarmKur()}
+                      className="shrink-0 rounded-lg bg-indigo-600 px-2.5 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+                    >
+                      Kur
+                    </button>
+                  </div>
+                  {leadOzet.next_action_at ? (
+                    <p className="mt-0.5 text-[11px] text-slate-500">
+                      Sıradaki: {new Date(String(leadOzet.next_action_at)).toLocaleString('tr-TR')}
+                    </p>
+                  ) : null}
+                </div>
               </div>
             ) : null}
 
