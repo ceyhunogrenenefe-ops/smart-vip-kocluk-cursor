@@ -1175,7 +1175,9 @@ export default function CrmInboxPage() {
         )}
       </section>
 
-      <aside className="hidden w-72 flex-col border-l border-slate-200 bg-slate-50/60 lg:flex">
+      {/* Sağ panel genişletildi: not alma ve pipeline işlemleri daralmasın — mesaj
+          sütunu flex-1 olduğu için kendiliğinden küçülür */}
+      <aside className="hidden w-80 shrink-0 flex-col border-l border-slate-200 bg-slate-50/60 lg:flex xl:w-96">
         <div className="border-b border-slate-200 p-4">
           <div className="mb-1 flex items-center justify-between gap-2">
             <h3 className="flex items-center gap-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -1374,7 +1376,7 @@ export default function CrmInboxPage() {
               <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
                 İç not (ekip)
               </h3>
-              <div className="mb-2 max-h-36 space-y-1 overflow-y-auto">
+              <div className="mb-2 max-h-56 space-y-1 overflow-y-auto">
                 {notes.length ? (
                   notes.map((n) => (
                     <p
@@ -1397,12 +1399,14 @@ export default function CrmInboxPage() {
                   <p className="text-[11px] text-slate-400">Not yok</p>
                 )}
               </div>
-              <div className="flex gap-1">
-                <input
+              <div className="flex items-end gap-1">
+                {/* Çok satırlı: görüşme notu tek satıra sıkışmasın */}
+                <textarea
+                  rows={2}
                   value={noteDraft}
                   onChange={(e) => setNoteDraft(e.target.value)}
                   placeholder="Not ekle…"
-                  className="min-w-0 flex-1 rounded-lg border border-slate-200 px-2 py-1 text-xs"
+                  className="min-w-0 flex-1 resize-none rounded-lg border border-slate-200 px-2 py-1 text-xs"
                 />
                 <button
                   type="button"
