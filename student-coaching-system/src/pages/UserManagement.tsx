@@ -55,7 +55,9 @@ import {
   CopyableLoginCredentialsModal,
   type LoginCredentialsData
 } from '../components/auth/CopyableLoginCredentials';
-import { studentRowToStudent, coachRowToCoach } from '../lib/mapStudentRow';
+// studentRowToStudent yukarıda zaten alınıyor; iki kez bildirilince dev
+// sunucusu (babel) "already been declared" diye reddediyordu
+import { coachRowToCoach } from '../lib/mapStudentRow';
 import {
   downloadUserImportTemplateXlsx,
   parseUserImportGridWithMapping,
