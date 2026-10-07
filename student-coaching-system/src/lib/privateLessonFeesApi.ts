@@ -30,6 +30,37 @@ export type PrivateLessonFeeDeclaredLine = {
   note?: string | null;
 };
 
+/** Ders dışı ücret kalemi — rehberlik, deneme, kaynak vb. */
+export type PrivateLessonFeeExtraItem = {
+  id: string;
+  kind: string;
+  label: string;
+  quantity: number;
+  unit_price_tl: number;
+  amount_tl: number;
+  note?: string | null;
+};
+
+export type PrivateLessonFeeExtraKind = {
+  id: string;
+  label: string;
+  unit: string;
+};
+
+/**
+ * Hazır kalem listesi. Sunucu da aynı listeyi döner (`extra_item_kinds`);
+ * burası eski bir dağıtımda liste gelmezse kullanılan yedek.
+ */
+export const PRIVATE_LESSON_FEE_EXTRA_KINDS: PrivateLessonFeeExtraKind[] = [
+  { id: 'rehberlik', label: 'Rehberlik', unit: 'görüşme' },
+  { id: 'deneme', label: 'Deneme Sınavı', unit: 'adet' },
+  { id: 'kaynak', label: 'Kitap / Kaynak', unit: 'adet' },
+  { id: 'etut', label: 'Etüt', unit: 'saat' },
+  { id: 'yazili', label: 'Yazılıya Hazırlık', unit: 'saat' },
+  { id: 'kayit', label: 'Kayıt / Hizmet Bedeli', unit: 'adet' },
+  { id: 'other', label: 'Diğer', unit: 'adet' }
+];
+
 export type PrivateLessonFeePaymentAccount = {
   id: string;
   label: string;
@@ -57,6 +88,12 @@ export type PrivateLessonFeeRow = {
   hours_override: number | null;
   hours: number;
   unit_price_tl: number;
+  /** Yalnız ders tutarı (saat × birim ücret) */
+  lesson_total_tl?: number;
+  /** Ders dışı kalemler ve toplamı */
+  extra_items?: PrivateLessonFeeExtraItem[];
+  extras_total_tl?: number;
+  /** Ders tutarı + ek kalemler */
   total_tl: number;
   amount_collected_tl: number;
   remaining_tl: number;
@@ -72,6 +109,8 @@ export type PrivateLessonFeeSummary = {
   system_hours: number;
   hours: number;
   total_tl: number;
+  /** Ders dışı kalemlerin ay toplamı */
+  extras_tl?: number;
   collected_tl: number;
   remaining_tl: number;
 };
@@ -82,6 +121,7 @@ export type PrivateLessonFeesResponse = {
   to: string;
   rows: PrivateLessonFeeRow[];
   summary: PrivateLessonFeeSummary;
+  extraKinds: PrivateLessonFeeExtraKind[];
   hint?: string | null;
 };
 
@@ -137,7 +177,8 @@ export async function fetchPrivateLessonFees(params: {
       ...r,
       row_key: privateLessonFeeRowKey(r),
       student_id: r.student_id ? String(r.student_id) : null,
-      is_external: Boolean(r.is_external || (!r.student_id && r.external_student_name))
+      is_external: Boolean(r.is_external || (!r.student_id && r.external_student_name)),
+      extra_items: Array.isArray(r.extra_items) ? r.extra_items : []
     })),
     summary: (j.summary || {
       student_count: 0,
@@ -147,6 +188,9 @@ export async function fetchPrivateLessonFees(params: {
       collected_tl: 0,
       remaining_tl: 0
     }) as PrivateLessonFeeSummary,
+    extraKinds: Array.isArray(j.extra_item_kinds) && j.extra_item_kinds.length
+      ? (j.extra_item_kinds as PrivateLessonFeeExtraKind[])
+      : PRIVATE_LESSON_FEE_EXTRA_KINDS,
     hint: (j.hint as string | null | undefined) || null
   };
 }
@@ -164,6 +208,15 @@ export async function upsertPrivateLessonFee(body: {
   collection_status?: PrivateLessonFeeStatus | string;
   payment_account_id?: string | null;
   notes?: string | null;
+  /** Ders dışı kalemler — gönderilirse satırın tamamı bununla değişir */
+  extra_items?: Array<{
+    id?: string;
+    kind: string;
+    label?: string;
+    quantity: number;
+    unit_price_tl: number;
+    note?: string | null;
+  }>;
 }) {
   const res = await apiFetch('/api/private-lesson-fees', {
     method: 'POST',

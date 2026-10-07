@@ -18,11 +18,23 @@ import {
   scanDeclaredPrivateHoursByStudent,
   scanPrivateLessonHoursByStudent
 } from '../api/_lib/private-lesson-fee-hours.js';
+import {
+  EXTRA_ITEM_KINDS,
+  extraItemsTotal,
+  normalizeExtraItems,
+  readExtraItems
+} from '../api/_lib/private-lesson-fee-extras.js';
 
 const jsonError = (res, status, error, extra) => res.status(status).json({ error, ...extra });
 const YM_RE = /^\d{4}-\d{2}$/;
 const STATUSES = new Set(['unpaid', 'partial', 'paid']);
 const SQL_HINT = 'sql/2026-09-11-private-lesson-fees-external-bank.sql';
+const EXTRAS_SQL_HINT = 'sql/2026-10-07-private-lesson-fee-extra-items.sql';
+
+/** extra_items kolonu henüz eklenmemiş mi? Ayrı migration istenir. */
+function extrasColumnMissing(err) {
+  return /extra_items/i.test(errorMessage(err));
+}
 
 function feesSchemaMissing(err) {
   return /private_lesson_monthly_fees|does not exist|schema cache|PGRST205|relation .* does not exist/i.test(
@@ -167,7 +179,14 @@ function buildRow({
    */
   const hours = hoursOverride != null ? hoursOverride : systemHours > 0 ? systemHours : declaredHours;
   const unitPrice = fee ? money(fee.unit_price_tl) : 0;
-  const total = money(hours * unitPrice);
+  const lessonTotal = money(hours * unitPrice);
+  /**
+   * Ders dışı kalemler (rehberlik, deneme, kaynak…) ayrı tutulur ama aynı
+   * veli hesabına girer; satır toplamı ikisinin toplamıdır.
+   */
+  const extras = readExtraItems(fee?.extra_items);
+  const extrasTotal = extraItemsTotal(extras);
+  const total = money(lessonTotal + extrasTotal);
   const collected = fee ? money(fee.amount_collected_tl) : 0;
   const status =
     fee?.collection_status && STATUSES.has(String(fee.collection_status))
@@ -218,6 +237,9 @@ function buildRow({
     hours_override: hoursOverride,
     hours,
     unit_price_tl: unitPrice,
+    lesson_total_tl: lessonTotal,
+    extra_items: extras,
+    extras_total_tl: extrasTotal,
     total_tl: total,
     amount_collected_tl: collected,
     remaining_tl: remaining,
@@ -302,6 +324,7 @@ async function handleList(req, res, actor, roleSet) {
   let sumSystemHours = 0;
   let sumHours = 0;
   let sumTotal = 0;
+  let sumExtras = 0;
   let sumCollected = 0;
   let sumRemaining = 0;
   const seenKeys = new Set();
@@ -325,6 +348,7 @@ async function handleList(req, res, actor, roleSet) {
     sumSystemHours = roundUnits(sumSystemHours + built.system_hours);
     sumHours = roundUnits(sumHours + built.hours);
     sumTotal = money(sumTotal + built.total_tl);
+    sumExtras = money(sumExtras + built.extras_total_tl);
     sumCollected = money(sumCollected + built.amount_collected_tl);
     sumRemaining = money(sumRemaining + built.remaining_tl);
     rows.push(built);
@@ -352,6 +376,7 @@ async function handleList(req, res, actor, roleSet) {
     sumSystemHours = roundUnits(sumSystemHours + built.system_hours);
     sumHours = roundUnits(sumHours + built.hours);
     sumTotal = money(sumTotal + built.total_tl);
+    sumExtras = money(sumExtras + built.extras_total_tl);
     sumCollected = money(sumCollected + built.amount_collected_tl);
     sumRemaining = money(sumRemaining + built.remaining_tl);
     rows.push(built);
@@ -369,9 +394,11 @@ async function handleList(req, res, actor, roleSet) {
       system_hours: sumSystemHours,
       hours: sumHours,
       total_tl: sumTotal,
+      extras_tl: sumExtras,
       collected_tl: sumCollected,
       remaining_tl: sumRemaining
     },
+    extra_item_kinds: EXTRA_ITEM_KINDS,
     hint: feePack.tableMissing ? SQL_HINT : null
   });
 }
@@ -475,6 +502,11 @@ async function handleUpsert(req, res, actor, roleSet) {
     patch.notes = body.notes == null ? null : String(body.notes).slice(0, 2000);
   }
 
+  // Ders dışı kalemler: tutar adet × birim ücretten sunucuda yeniden hesaplanır
+  if (Object.prototype.hasOwnProperty.call(body, 'extra_items')) {
+    patch.extra_items = normalizeExtraItems(body.extra_items);
+  }
+
   let existing;
   try {
     existing = await findExistingFee({
@@ -520,7 +552,10 @@ async function handleUpsert(req, res, actor, roleSet) {
       : existing
         ? money(existing.unit_price_tl)
         : 0;
-  const total = money(hours * unitPrice);
+  // Tahsilat durumu ders tutarı + ek kalemler üzerinden belirlenir
+  const extras =
+    patch.extra_items !== undefined ? patch.extra_items : readExtraItems(existing?.extra_items);
+  const total = money(money(hours * unitPrice) + extraItemsTotal(extras));
   const collected =
     patch.amount_collected_tl !== undefined
       ? patch.amount_collected_tl
@@ -547,6 +582,9 @@ async function handleUpsert(req, res, actor, roleSet) {
       .select('*')
       .single();
     if (error) {
+      if (extrasColumnMissing(error)) {
+        return jsonError(res, 400, 'schema_missing', { hint: EXTRAS_SQL_HINT });
+      }
       if (
         feesSchemaMissing(error) ||
         /external_student_name|payment_account_id|schema cache/i.test(errorMessage(error))
@@ -565,6 +603,9 @@ async function handleUpsert(req, res, actor, roleSet) {
     .select('*')
     .single();
   if (error) {
+    if (extrasColumnMissing(error)) {
+      return jsonError(res, 400, 'schema_missing', { hint: EXTRAS_SQL_HINT });
+    }
     if (/external_student_name|payment_account_id|schema cache/i.test(errorMessage(error))) {
       return jsonError(res, 400, 'schema_missing', { hint: SQL_HINT });
     }
