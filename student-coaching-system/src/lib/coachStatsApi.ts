@@ -125,6 +125,8 @@ export type CoachStatsResponse = {
     avg_composite_score: number | null;
     avg_camera_rate?: number | null;
     avg_goal_assigned_rate?: number | null;
+    /** Etüt yoklaması — koç ortalaması */
+    avg_etut_attendance_rate?: number | null;
   };
   /** CRM deneme dersi hunisi (koç rolüne null) */
   trial_lessons?: TrialFunnel | null;

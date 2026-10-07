@@ -959,7 +959,9 @@ export default async function handler(req, res) {
         avg_meeting_completion_rate: avgOf('meeting_completion_rate'),
         avg_composite_score: avgOf('composite_score'),
         avg_camera_rate: avgOf('camera_rate'),
-        avg_goal_assigned_rate: avgOf('goal_assigned_rate')
+        avg_goal_assigned_rate: avgOf('goal_assigned_rate'),
+        // Etüt devamı alt tabloda vardı; üst özette de görünsün
+        avg_etut_attendance_rate: avgOf('etut_attendance_rate')
       },
       exam_days: examDays,
       coaches: coachesOut,

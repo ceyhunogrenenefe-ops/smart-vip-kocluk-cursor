@@ -121,7 +121,7 @@ export const STUDENT_LESSON_NAV_ITEMS: FlatNavItem[] = [
   { path: '/edu-derslerim', icon: Presentation, label: EDU_HOMEWORK_ANIMATIONS_LABEL },
   { path: '/ai-agents', icon: Bot, label: 'AI Koçlarım' },
   { path: '/exams', icon: ClipboardList, label: 'AI Denemelerim' },
-  { path: '/class-schedule', icon: Calendar, label: 'Canlı derslerim' },
+  { path: '/class-schedule', icon: Calendar, label: 'Canlı Grup Dersleri' },
   { path: '/canli-ozel-ders', icon: Radio, label: 'Canlı özel derslerim' },
   { path: '/student-meetings', icon: Video, label: 'Görüşmelerim' }
 ];
@@ -196,7 +196,8 @@ export const MOBILE_ACADEMIC_MATCH_PATHS = [
   '/student-dashboard',
   '/student-analytics',
   '/exam-tracking',
-  '/deneme-takvimi'
+  '/deneme-takvimi',
+  '/ai-coach'
 ] as const;
 
 const ACADEMIC_CENTER_PATH = '/academic-center';
@@ -216,7 +217,8 @@ const ACADEMIC_PATHS = new Set([
   '/class-lesson-topic-progress',
   '/soru-sor',
   '/soru-havuzu',
-  '/soru-analitik'
+  '/soru-analitik',
+  '/ai-coach'
 ]);
 
 /** Öğrenci, öğretmen ve koçlar — tek alt menü */
@@ -234,7 +236,10 @@ const ORG_SYSTEM_PATHS = new Set([
   '/notifications',
   '/system-management',
   '/veli-onay',
-  '/muhasebe'
+  '/muhasebe',
+  // Ayarlar ayri bir grup degil; Kurum & Sistem'in altinda duruyor
+  '/settings',
+  '/webhooks'
 ]);
 const ORG_SYSTEM_ORDER = [
   '/super-admin',
@@ -242,7 +247,9 @@ const ORG_SYSTEM_ORDER = [
   '/notifications',
   '/system-management',
   '/veli-onay',
-  '/muhasebe'
+  '/muhasebe',
+  '/settings',
+  '/webhooks'
 ] as const;
 
 /** CRM — tek açılır grup; sıra: günlük kullanım önce */
@@ -254,8 +261,7 @@ const CRM_ORDER = [
   '/crm/dashboard',
   '/crm/gunluk-rapor',
   '/crm/widgetler',
-  '/crm/sablonlar',
-  '/ogretmen-beyanlari'
+  '/crm/sablonlar'
 ] as const;
 const CRM_PATHS = new Set<string>(CRM_ORDER);
 /** Grup başlığı "CRM" olduğu için alt öğelerde tekrar edilmez */
@@ -269,12 +275,14 @@ const CRM_LABELS: Record<string, string> = {
   '/veli-memnuniyet': 'Veli Memnuniyet ve Takip',
   '/crm/gunluk-rapor': 'Günlük Rapor',
   '/crm/widgetler': 'Widgetler',
-  '/crm/sablonlar': 'WhatsApp Şablonları',
-  '/ogretmen-beyanlari': 'Öğretmen Çalışma Beyanları'
+  '/crm/sablonlar': 'WhatsApp Şablonları'
 };
 
+/**
+ * Ayarlar artik kendi grubu degil (Kurum & Sistem altinda). Bu kume yalnizca
+ * "koc panelinde ayarlar gorunmesin" suzgeci icin duruyor.
+ */
 const SETTINGS_PATHS = new Set(['/settings', '/webhooks']);
-const SETTINGS_ORDER = ['/settings', '/webhooks'] as const;
 
 const LESSON_LABELS: Record<string, string> = {
   '/class-live-lessons': 'Canlı Grup Dersleri',
@@ -283,7 +291,7 @@ const LESSON_LABELS: Record<string, string> = {
   '/canli-ozel-ders': 'Canlı Özel Ders',
   '/live-lessons': 'Canlı Özel Dersler',
   '/meetings': 'Online Görüşmeler',
-  '/class-schedule': 'Canlı derslerim',
+  '/class-schedule': 'Canlı Grup Dersleri',
   '/student-meetings': 'Online Görüşmeler',
   '/edu-panel': EDU_HOMEWORK_ANIMATIONS_LABEL,
   '/edu-derslerim': EDU_HOMEWORK_ANIMATIONS_LABEL,
@@ -308,7 +316,8 @@ const ACADEMIC_LABELS: Record<string, string> = {
   '/class-lesson-topic-progress': 'Grup dersi konu ilerlemesi',
   '/soru-sor': 'Soru Sor',
   '/soru-havuzu': 'Soru Havuzu',
-  '/soru-analitik': 'Soru Analitiği'
+  '/soru-analitik': 'Soru Analitiği',
+  '/ai-coach': 'AI Koç'
 };
 
 function withProfileNav(items: FlatNavItem[]): FlatNavItem[] {
@@ -357,20 +366,17 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
       { path: '/dashboard', icon: LayoutDashboard, label: 'Ana Panel' },
       { path: '/weekly-planner', icon: Calendar, label: 'Haftalık plan' },
       { path: '/attendance-report', icon: ClipboardList, label: 'Yoklama raporu' },
-    { path: '/class-lesson-topic-progress', icon: MapPin, label: 'Grup dersi konu ilerlemesi' },
       { path: '/class-lesson-topic-progress', icon: MapPin, label: 'Grup dersi konu ilerlemesi' },
       { path: '/coach-stats', icon: BarChart3, label: 'Koç İstatistikleri' },
       { path: '/academic-center', icon: Sparkles, label: 'Akademik Merkez' },
       { path: '/deneme-takvimi', icon: CalendarDays, label: 'Deneme Sınav Takvimi' },
       ...privateLiveNavForRoles(['super_admin']),
-      { path: '/private-lesson-assignments', icon: UserCheck, label: 'Özel ders atamaları' },
       { path: '/class-live-lessons', icon: Calendar, label: 'Canlı Grup Dersi' },
       { path: '/misafir-ogrenciler', icon: Users, label: 'Misafir Öğrenciler' },
       { path: '/ders-saatleri-yeni-donem', icon: CalendarDays, label: 'Ders Programı Planlayıcısı' },
       { path: '/meetings', icon: Video, label: 'Online görüşmeler' },
       { path: '/edu-panel', icon: Presentation, label: EDU_HOMEWORK_ANIMATIONS_LABEL },
       STAFF_NAV_YARDIM,
-      { path: '/ai-agents-admin', icon: Bot, label: 'AI Ders Ajanları' },
       { path: '/students', icon: GraduationCap, label: 'Öğrenciler' },
       { path: '/veli-memnuniyet', icon: PhoneCall, label: 'Veli Memnuniyet ve Takip' },
       { path: '/teachers', icon: GraduationCap, label: 'Öğretmenler' },
@@ -379,7 +385,6 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
       { path: '/user-management', icon: UserCog, label: 'Kullanıcı Yönetimi' },
       { path: '/notifications', icon: Bell, label: 'Bildirimler' },
       { path: '/events', icon: CalendarDays, label: 'Etkinlikler' },
-      { path: '/toplanti-takip', icon: ClipboardCheck, label: 'Toplantı ve Gündem Takibi' },
       { path: '/crm/dashboard', icon: BarChart3, label: 'CRM Dashboard' },
       { path: '/crm/gorevler', icon: ClipboardCheck, label: 'CRM Görevler' },
       { path: '/crm/toplu-mesaj', icon: MessageCircle, label: 'CRM Toplu mesaj' },
@@ -387,7 +392,6 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
       { path: '/crm/inbox', icon: ClipboardList, label: 'CRM Inbox' },
       { path: '/crm/widgetler', icon: Puzzle, label: 'CRM Widgetler' },
       { path: '/crm/sablonlar', icon: FileText, label: 'WhatsApp Şablonları' },
-      { path: '/ogretmen-beyanlari', icon: ClipboardCheck, label: 'Öğretmen Çalışma Beyanları' },
       { path: '/crm', icon: ClipboardList, label: 'CRM Pipeline' },
       NAV_OZEL_DERS_TALEPLERI,
       NAV_TEACHER_PROFILE_APPROVALS,
@@ -484,7 +488,6 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
     { path: '/user-management', icon: UserCog, label: 'Kullanıcı Yönetimi' },
     { path: '/notifications', icon: Bell, label: 'Bildirimler' },
     { path: '/events', icon: CalendarDays, label: 'Etkinlikler' },
-    { path: '/toplanti-takip', icon: ClipboardCheck, label: 'Toplantı ve Gündem Takibi' },
     { path: '/crm/dashboard', icon: BarChart3, label: 'CRM Dashboard' },
     { path: '/crm/gorevler', icon: ClipboardCheck, label: 'CRM Görevler' },
     { path: '/crm/toplu-mesaj', icon: MessageCircle, label: 'CRM Toplu mesaj' },
@@ -492,7 +495,6 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
     { path: '/crm/inbox', icon: ClipboardList, label: 'CRM Inbox' },
     { path: '/crm/widgetler', icon: Puzzle, label: 'CRM Widgetler' },
     { path: '/crm/sablonlar', icon: FileText, label: 'WhatsApp Şablonları' },
-    { path: '/ogretmen-beyanlari', icon: ClipboardCheck, label: 'Öğretmen Çalışma Beyanları' },
     { path: '/crm', icon: ClipboardList, label: 'CRM Pipeline' },
     { path: '/kitap-pazaryeri', icon: ShoppingBag, label: 'Kitap Pazaryeri' },
     { path: '/kitap-magazasi', icon: ShoppingBag, label: 'Kitap Mağazası' },
@@ -686,12 +688,6 @@ export function structureNavFromFlat(flat: FlatNavItem[]): StructuredNav {
   };
   orgSystem.sort((a, b) => orgRank(a.path) - orgRank(b.path));
 
-  const settingsRank = (p: string) => {
-    const i = (SETTINGS_ORDER as readonly string[]).indexOf(p);
-    return i === -1 ? 99 : i;
-  };
-  settings.sort((a, b) => settingsRank(a.path) - settingsRank(b.path));
-
   const teamRank = (p: string) => {
     const i = (TEAM_ORDER as readonly string[]).indexOf(p);
     return i === -1 ? 99 : i;
@@ -720,7 +716,8 @@ export function structureNavFromFlat(flat: FlatNavItem[]): StructuredNav {
     '/topic-tracking',
     '/written-exam',
     '/attendance-report',
-    '/class-lesson-topic-progress'
+    '/class-lesson-topic-progress',
+    '/ai-coach'
   ] as const;
   const acRank = (p: string) => {
     const i = (academicOrder as readonly string[]).indexOf(p);

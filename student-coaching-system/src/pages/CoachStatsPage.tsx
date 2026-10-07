@@ -243,6 +243,8 @@ export default function CoachStatsPage() {
       absentStudents: sum((c) => c.absent_students ?? 0),
       cameraOn: sum((c) => c.camera_on ?? 0),
       cameraTotal: sum((c) => c.camera_total ?? 0),
+      etutPresent: sum((c) => c.etut_attendance_present ?? 0),
+      etutTotal: sum((c) => c.etut_attendance_total ?? 0),
       goalAssigned: sum((c) => c.goal_assigned_students ?? 0)
     };
   }, [data]);
@@ -463,6 +465,17 @@ export default function CoachStatsPage() {
               value={fmtPct(data.summary.avg_attendance_rate)}
               hint={`Devamsızlık ${fmtPct(data.summary.avg_absence_rate)} · ${totals.absentStudents} öğrenci devamsız`}
               title="Grup canlı ders yoklaması: katıldı (geç dahil) / işaretlenen"
+              icon={<Users className="h-5 w-5" />}
+            />
+            <KpiCard
+              label="Etüt devamı"
+              value={fmtPct(data.summary.avg_etut_attendance_rate)}
+              hint={
+                totals.etutTotal
+                  ? `${totals.etutPresent}/${totals.etutTotal} yoklama`
+                  : 'Etüt yoklaması işaretlenmedi'
+              }
+              title="Etüt oturumları: katıldı / işaretlenen"
               icon={<Users className="h-5 w-5" />}
             />
             <KpiCard
