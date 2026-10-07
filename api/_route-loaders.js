@@ -81,6 +81,7 @@ export const routeLoaders = {
   'teacher-lessons': () => import('../handlers/teacher-lessons.js'),
   'student-teacher-lesson-quota': () => import('../handlers/student-teacher-lesson-quota.js'),
   'class-live-lessons': () => import('../handlers/class-live-lessons.js'),
+  'class-session-guests': () => import('../handlers/class-session-guests.js'),
   'class-lesson-topic-checkpoints': () => import('../handlers/class-lesson-topic-checkpoints.js'),
   'teacher-scope': () => import('../handlers/teacher-scope.js'),
   'teacher-private-lesson-assignments': () => import('../handlers/teacher-private-lesson-assignments.js'),

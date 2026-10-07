@@ -75,6 +75,7 @@ export const ROUTE_ALLOWED_ROLES = {
   '/veli-onay': ['super_admin', 'admin', 'coach'],
   '/tahsilat-muhasebe': ['super_admin', 'admin'],
   '/muhasebe': ['super_admin', 'admin'],
+  '/misafir-ogrenciler': ['super_admin', 'admin', 'coach'],
   '/soru-sor': ['student'],
   '/yardim': ['student', 'teacher', 'coach', 'admin', 'super_admin'],
   '/soru-havuzu': ['super_admin', 'admin', 'teacher', 'coach'],

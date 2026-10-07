@@ -87,6 +87,7 @@ export default function TopBar({ onMenuClick, drawerOpen = false, hideMenuButton
       '/veli-onay': 'Veli onayı & e-imza',
       '/tahsilat-muhasebe': 'Muhasebe',
       '/muhasebe': 'Muhasebe',
+      '/misafir-ogrenciler': 'Misafir Öğrenciler',
       '/kitap-pazaryeri': 'Kitap Pazaryeri',
       '/kitap-siparisleri': 'Kitap Pazaryeri',
       '/ozel-ders-talepleri': 'Özel ders talepleri',

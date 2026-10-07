@@ -126,6 +126,7 @@ import StudentAgentChatPage from './pages/aiAgents/StudentAgentChatPage';
 import MyExamsPage from './pages/aiAgents/student/MyExamsPage';
 import TakeExamPage from './pages/aiAgents/student/TakeExamPage';
 import ExamResultPage from './pages/aiAgents/student/ExamResultPage';
+import GuestStudentsPage from './pages/GuestStudentsPage';
 import { rolesForProtectedRoute, userRoleTags } from './config/rolePermissions';
 import { Toaster } from 'sonner';
 
@@ -822,6 +823,14 @@ function App() {
               <ProtectedRoute allowedRoles={rolesForProtectedRoute('/muhasebe')}>
                 <Layout>
                   <TahsilatMuhasebePage />
+                </Layout>
+              </ProtectedRoute>
+            } />
+
+            <Route path="/misafir-ogrenciler" element={
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/misafir-ogrenciler')}>
+                <Layout>
+                  <GuestStudentsPage />
                 </Layout>
               </ProtectedRoute>
             } />

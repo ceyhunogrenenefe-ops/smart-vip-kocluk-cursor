@@ -7,6 +7,12 @@ import { useAuth } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
 import { apiFetch } from '../lib/session';
 import { resolveStudentRecordId } from '../lib/coachResolve';
+import {
+  guestSourceLabel,
+  markGuest,
+  unmarkGuest,
+  type SessionGuest
+} from '../lib/classSessionGuestsApi';
 import StudentLiveLessonsPanel from '../components/liveLessons/StudentLiveLessonsPanel';
 import TeacherReviewModal from '../components/teacher/TeacherReviewModal';
 import { WeeklyLiveGridShell } from '../components/liveLessons/WeeklyLiveGridShell';
@@ -543,6 +549,11 @@ export default function ClassLiveLessons() {
   const [attendanceModalLoading, setAttendanceModalLoading] = useState(false);
   const [attendanceSaving, setAttendanceSaving] = useState(false);
   const [attendanceCameraWarn, setAttendanceCameraWarn] = useState<string | null>(null);
+  /** Misafir öğrenciler — yalnız öğretmen/yönetici ekranında görünür */
+  const [sessionGuests, setSessionGuests] = useState<SessionGuest[]>([]);
+  const [guestBusyId, setGuestBusyId] = useState('');
+  const [guestNameDraft, setGuestNameDraft] = useState('');
+  const [guestAdding, setGuestAdding] = useState(false);
 
   const [editingSession, setEditingSession] = useState<SessionRow | null>(null);
   const [editingSlotRow, setEditingSlotRow] = useState<SlotRow | null>(null);
@@ -1407,6 +1418,8 @@ export default function ClassLiveLessons() {
     setAttendanceDraft([]);
     setAttendanceCameraWarn(null);
     setAttendanceModalLoading(false);
+    setSessionGuests([]);
+    setGuestNameDraft('');
   };
 
   const openAttendanceForSession = useCallback(async (s: SessionRow) => {
@@ -1420,6 +1433,8 @@ export default function ClassLiveLessons() {
       const j = await res.json().catch(() => ({}));
       const existing = Array.isArray(j.data) ? j.data : [];
       const roster = Array.isArray(j.roster) ? j.roster : [];
+      // Misafirler yoklamayla aynı yanıtta gelir; tespit sunucuda tazelenir
+      setSessionGuests(Array.isArray(j.guests) ? (j.guests as SessionGuest[]) : []);
       const statusById = new Map<string, string>(
         existing.map((row: { student_id?: string; status?: string }) => [
           String(row.student_id || '').trim(),
@@ -1496,6 +1511,76 @@ export default function ClassLiveLessons() {
       setAttendanceModalLoading(false);
     }
   }, [classes, safeStudents]);
+
+  /**
+   * Misafir işlemleri. Kayıt silinmez: "misafir değil" denilince satır
+   * dismissed olur, böylece otomatik tespit aynı adı tekrar misafir yapmaz.
+   */
+  const guestAfterSave = (saved: unknown) => {
+    const row = (saved as { data?: SessionGuest })?.data;
+    if (!row?.id) return;
+    setSessionGuests((prev) => prev.map((g) => (g.id === row.id ? { ...g, ...row } : g)));
+  };
+
+  const onayla = async (guest: SessionGuest) => {
+    setGuestBusyId(guest.id);
+    try {
+      guestAfterSave(await markGuest({ guest_id: guest.id, source: 'teacher' }));
+      toast.success(`${guest.display_name} misafir olarak işaretlendi`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'İşaretlenemedi');
+    } finally {
+      setGuestBusyId('');
+    }
+  };
+
+  const isaretiKaldir = async (guest: SessionGuest) => {
+    setGuestBusyId(guest.id);
+    try {
+      guestAfterSave(await unmarkGuest(guest.id));
+      toast.success(`${guest.display_name} için misafir işareti kaldırıldı`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'İşaret kaldırılamadı');
+    } finally {
+      setGuestBusyId('');
+    }
+  };
+
+  const misafirEkle = async () => {
+    const ad = guestNameDraft.trim();
+    if (!ad || !attendanceSession) return;
+    setGuestAdding(true);
+    try {
+      const saved = (await markGuest({
+        session_id: attendanceSession.id,
+        display_name: ad,
+        source: 'teacher'
+      })) as { data?: SessionGuest };
+      if (saved?.data?.id) {
+        setSessionGuests((prev) => {
+          const without = prev.filter((g) => g.id !== saved.data!.id);
+          return [...without, saved.data!];
+        });
+      }
+      setGuestNameDraft('');
+      toast.success('Misafir eklendi');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Misafir eklenemedi');
+    } finally {
+      setGuestAdding(false);
+    }
+  };
+
+  /** Kayıtlı öğrencinin adı onaylı bir misafir kaydıyla eşleşiyor mu? */
+  const confirmedGuestNames = useMemo(() => {
+    const set = new Set<string>();
+    for (const g of sessionGuests) {
+      if (String(g.status) !== 'confirmed') continue;
+      const key = String(g.display_name || '').trim().toLocaleLowerCase('tr');
+      if (key) set.add(key);
+    }
+    return set;
+  }, [sessionGuests]);
 
   const attendanceSummary = useMemo(() => {
     let present = 0;
@@ -3254,7 +3339,17 @@ export default function ClassLiveLessons() {
                       key={row.student_id}
                       className="border border-slate-100 rounded-xl px-3 py-2.5 space-y-2"
                     >
-                      <div className="text-sm font-medium text-slate-800 truncate">{displayName}</div>
+                      <div className="flex items-center gap-1.5 text-sm font-medium text-slate-800">
+                        <span className="truncate">{displayName}</span>
+                        {/* Bu derste misafir olarak işaretlenmiş kayıtlı öğrenci */}
+                        {confirmedGuestNames.has(
+                          String(displayName || '').trim().toLocaleLowerCase('tr')
+                        ) ? (
+                          <span className="shrink-0 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-900">
+                            Misafir
+                          </span>
+                        ) : null}
+                      </div>
                       <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
                         {(
                           [
@@ -3305,6 +3400,113 @@ export default function ClassLiveLessons() {
                     </div>
                   );
                 })}
+
+                {/*
+                  Misafir öğrenciler — derse kayıtlı öğrenci listesi dışından
+                  katılanlar. Otomatik tespit kesin karar vermez: "Muhtemel
+                  Misafir" tek tıkla onaylanır. Bu bölüm yalnız öğretmen ve
+                  yönetici ekranında görünür; öğrenci panelinde yok.
+                */}
+                <div className="rounded-xl border border-amber-200 bg-amber-50/60 px-3 py-2.5 space-y-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-[11px] font-bold uppercase tracking-wide text-amber-900">
+                      Misafir öğrenciler
+                      {sessionGuests.filter((g) => String(g.status) === 'confirmed').length ? (
+                        <span className="ml-1.5 rounded bg-amber-200 px-1.5 py-0.5 text-[10px] text-amber-950">
+                          {sessionGuests.filter((g) => String(g.status) === 'confirmed').length}
+                        </span>
+                      ) : null}
+                    </p>
+                  </div>
+
+                  {sessionGuests.filter((g) => String(g.status) !== 'dismissed').length === 0 ? (
+                    <p className="text-[11px] text-amber-900/80">
+                      Derse listenin dışından katılan görünmüyor. Varsa aşağıdan adını yazıp
+                      ekleyebilirsiniz.
+                    </p>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {sessionGuests
+                        .filter((g) => String(g.status) !== 'dismissed')
+                        .map((g) => {
+                          const onayli = String(g.status) === 'confirmed';
+                          const busy = guestBusyId === g.id;
+                          return (
+                            <div
+                              key={g.id}
+                              className="rounded-lg bg-white px-2.5 py-2 ring-1 ring-amber-100"
+                            >
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <span className="text-sm font-medium text-slate-800">
+                                  {g.display_name}
+                                </span>
+                                {onayli ? (
+                                  <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-900">
+                                    Misafir
+                                  </span>
+                                ) : (
+                                  <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-700">
+                                    ⚠ Muhtemel Misafir
+                                  </span>
+                                )}
+                                {g.is_first_visit ? (
+                                  <span className="rounded bg-sky-100 px-1.5 py-0.5 text-[10px] font-semibold text-sky-900">
+                                    İlk kez
+                                  </span>
+                                ) : (
+                                  <span className="rounded bg-sky-50 px-1.5 py-0.5 text-[10px] font-semibold text-sky-900">
+                                    {g.total_guest_visits}. misafir ders
+                                  </span>
+                                )}
+                              </div>
+                              <p className="mt-0.5 text-[10px] text-slate-500">
+                                {guestSourceLabel(String(g.source))}
+                                {g.minutes_present != null ? ` · ${g.minutes_present} dk derste` : ''}
+                                {g.student_name ? ` · Öğrenci: ${g.student_name}` : ''}
+                              </p>
+                              <div className="mt-1.5 flex flex-wrap gap-1.5">
+                                {!onayli ? (
+                                  <button
+                                    type="button"
+                                    disabled={busy}
+                                    onClick={() => void onayla(g)}
+                                    className="min-h-[36px] rounded-lg bg-amber-600 px-2.5 text-[11px] font-semibold text-white disabled:opacity-50 touch-manipulation"
+                                  >
+                                    Misafir Olarak Onayla
+                                  </button>
+                                ) : null}
+                                <button
+                                  type="button"
+                                  disabled={busy}
+                                  onClick={() => void isaretiKaldir(g)}
+                                  className="min-h-[36px] rounded-lg border border-slate-200 bg-white px-2.5 text-[11px] font-semibold text-slate-700 disabled:opacity-50 touch-manipulation"
+                                >
+                                  Misafir işaretini kaldır
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                    </div>
+                  )}
+
+                  <div className="flex gap-1.5">
+                    <input
+                      value={guestNameDraft}
+                      onChange={(e) => setGuestNameDraft(e.target.value)}
+                      placeholder="Misafir adı soyadı"
+                      className="min-h-[36px] min-w-0 flex-1 rounded-lg border border-amber-200 bg-white px-2 text-xs"
+                    />
+                    <button
+                      type="button"
+                      disabled={!guestNameDraft.trim() || guestAdding}
+                      onClick={() => void misafirEkle()}
+                      className="min-h-[36px] shrink-0 rounded-lg border border-amber-300 bg-white px-2.5 text-[11px] font-semibold text-amber-900 disabled:opacity-50 touch-manipulation"
+                    >
+                      Misafir olarak işaretle
+                    </button>
+                  </div>
+                </div>
               </>
             )}
           </AppModalBody>
