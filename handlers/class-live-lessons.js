@@ -90,6 +90,10 @@ import {
 } from '../api/_lib/combined-class-bbb-reuse.js';
 import { buildBbbAttendeeJoinUrl, buildStaffBbbJoinUrl, parseBbbJoinCredentials, parseBbbMeetingIdFromJoinUrl, parseBbbPasswordFromJoinUrl, resolveLiveBbbAttendeeCredentials } from '../api/_lib/bbb.js';
 import { pollBbbPresenceForSession, applyAutoAttendanceForClassSession } from '../api/_lib/bbb-attendance.js';
+import {
+  detectGuestsForSession,
+  listGuestsForSession
+} from '../api/_lib/class-session-guest-store.js';
 import { isBbbAutoAttendanceEnabled } from '../api/_lib/bbb-auto-attendance-enabled.js';
 import { applyEarlyBbbAbsentCheck } from '../api/_lib/bbb-early-absent.js';
 import {
@@ -1577,7 +1581,7 @@ export default async function handler(req, res) {
       if (!sessionId) return res.status(400).json({ error: 'session_id_required' });
       const { data: session } = await supabaseAdmin
         .from('class_sessions')
-        .select('id,class_id,subject')
+        .select('id,class_id,subject,teacher_id,institution_id,start_time,end_time,bbb_seen_names')
         .eq('id', sessionId)
         .maybeSingle();
       if (!session) return res.status(404).json({ error: 'session_not_found' });
@@ -1595,7 +1599,22 @@ export default async function handler(req, res) {
         })
       ]);
       if (error) return res.status(500).json({ error: error.message });
-      return res.status(200).json({ data: data || [], roster });
+      /**
+       * Misafir öğrenciler: katılımcı listesinde kayıtlı öğrenciyle eşleşmeyen
+       * adlar "muhtemel misafir" olarak tazelenir ve yoklamayla aynı yanıtta
+       * döner — öğretmen ayrı bir istek beklemeden etiketi görür.
+       *
+       * Tespit ya da misafir tablosu sorun çıkarırsa yoklama ekranı eskisi
+       * gibi çalışmaya devam eder.
+       */
+      let guests = [];
+      try {
+        await detectGuestsForSession(session);
+        guests = await listGuestsForSession(sessionId, session);
+      } catch (guestErr) {
+        console.warn('[class-live-lessons] misafir tespiti:', guestErr?.message || guestErr);
+      }
+      return res.status(200).json({ data: data || [], roster, guests });
     }
 
     if (scope === 'attendance-prefs') {
@@ -2589,10 +2608,19 @@ export default async function handler(req, res) {
         force: String(row.status) === 'completed'
       });
 
+      // Katılımcı listesi tazelendi; eşleşmeyen adlar muhtemel misafir olarak işaretlenir
+      let guests = null;
+      try {
+        guests = await detectGuestsForSession(row);
+      } catch (guestErr) {
+        guests = { ok: false, reason: guestErr?.message || 'guest_detect_failed' };
+      }
+
       return res.status(200).json({
         ok: true,
         early_absent: early,
-        final_attendance: result
+        final_attendance: result,
+        guests
       });
     }
 
