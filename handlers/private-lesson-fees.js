@@ -1,7 +1,13 @@
 /**
  * Muhasebe — Özel Ders Ücretleri (veli tahsilatı).
- * Öğretmen hakediş / payroll tablolarına yazmaz; yalnızca tamamlanan özel ders saatlerini okur.
- * Dış öğrenci + payment_accounts (banka) seçimi destekler.
+ * Öğretmen hakediş / payroll tablolarına yazmaz; yalnızca tamamlanan özel
+ * dersleri okur. Dış öğrenci + payment_accounts (banka) seçimi destekler.
+ *
+ * ÖLÇÜ BİRİMİ: ders adedi — 1 ders = LESSON_DURATION_MINUTES (40 dk).
+ * Birim ücret bir DERSİN ücretidir; satır tutarı = ders adedi × birim ücret.
+ * `hours`/`system_hours`/`hours_override` adları eski mobil paketler
+ * bozulmasın diye korunuyor, taşıdıkları değer ders adedidir; yeni adlar
+ * `units`/`system_units`/`units_override`.
  */
 import { requireAuthenticatedActor, hasInstitutionAccess } from '../api/_lib/auth.js';
 import { errorMessage } from '../api/_lib/error-msg.js';
@@ -12,11 +18,12 @@ import {
   roleSetHasSuperAdmin
 } from '../api/_lib/actor-roles.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
-import { roundUnits } from '../api/_lib/class-lesson-payment-units.js';
+import { LESSON_DURATION_MINUTES, roundUnits } from '../api/_lib/class-lesson-payment-units.js';
 import {
   monthBoundsYm,
   scanDeclaredPrivateHoursByStudent,
-  scanPrivateLessonHoursByStudent
+  scanPrivateLessonHoursByStudent,
+  unitsToMinutes
 } from '../api/_lib/private-lesson-fee-hours.js';
 import {
   EXTRA_ITEM_KINDS,
@@ -164,6 +171,7 @@ function buildRow({
   teacherMap,
   accountMap
 }) {
+  // Hepsi ders adedi cinsinden
   const systemHours = roundUnits(hoursInfo?.system_hours || 0);
   const declaredHours = roundUnits(declaredInfo?.declared_hours || 0);
   const hoursOverride =
@@ -223,6 +231,9 @@ function buildRow({
     teachers,
     system_hours: systemHours,
     declared_hours: declaredHours,
+    // Yeni adlar — ölçü birimi açıkça ders adedi
+    system_units: systemHours,
+    declared_units: declaredHours,
     // Satır satır döküm: hangi ders ne zaman, hangi öğretmen, kaç saat
     lessons: (hoursInfo?.lessons || []).map((l) => ({
       ...l,
@@ -235,7 +246,12 @@ function buildRow({
     // Kaynak: saat nereden geldi — ekranda açıkça yazılsın
     hours_source: hoursOverride != null ? 'manual' : systemHours > 0 ? 'system' : declaredHours > 0 ? 'declaration' : 'none',
     hours_override: hoursOverride,
+    units_override: hoursOverride,
     hours,
+    units: hours,
+    // Raporda "toplam süre" yazabilmek için
+    total_minutes: unitsToMinutes(hours),
+    unit_period_minutes: LESSON_DURATION_MINUTES,
     unit_price_tl: unitPrice,
     lesson_total_tl: lessonTotal,
     extra_items: extras,
@@ -393,11 +409,16 @@ async function handleList(req, res, actor, roleSet) {
       student_count: rows.length,
       system_hours: sumSystemHours,
       hours: sumHours,
+      // Ders adedi — adı açık olan eşleri
+      system_units: sumSystemHours,
+      units: sumHours,
+      total_minutes: unitsToMinutes(sumHours),
       total_tl: sumTotal,
       extras_tl: sumExtras,
       collected_tl: sumCollected,
       remaining_tl: sumRemaining
     },
+    unit_period_minutes: LESSON_DURATION_MINUTES,
     extra_item_kinds: EXTRA_ITEM_KINDS,
     hint: feePack.tableMissing ? SQL_HINT : null
   });
@@ -468,11 +489,18 @@ async function handleUpsert(req, res, actor, roleSet) {
     updated_at: new Date().toISOString()
   };
 
-  if (Object.prototype.hasOwnProperty.call(body, 'hours_override')) {
-    if (body.hours_override === null || body.hours_override === '') {
+  // Elle girilen ders adedi — `units_override` yeni ad, `hours_override` eski
+  const overrideKey = Object.prototype.hasOwnProperty.call(body, 'units_override')
+    ? 'units_override'
+    : Object.prototype.hasOwnProperty.call(body, 'hours_override')
+      ? 'hours_override'
+      : null;
+  if (overrideKey) {
+    const raw = body[overrideKey];
+    if (raw === null || raw === '') {
       patch.hours_override = null;
     } else {
-      const h = Number(body.hours_override);
+      const h = Number(raw);
       if (!Number.isFinite(h) || h < 0) return jsonError(res, 400, 'invalid_hours_override');
       patch.hours_override = money(h);
     }

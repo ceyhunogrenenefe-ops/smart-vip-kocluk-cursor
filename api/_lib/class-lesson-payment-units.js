@@ -1,5 +1,18 @@
-/** Grup dersi ödeme özeti — 40 dakikalık birim ders periyodu */
-export const GROUP_LESSON_UNIT_MINUTES = 40;
+/**
+ * Kurum standardı: 1 ders saati = 40 dakika.
+ *
+ * Grup dersi, özel ders, öğretmen hakedişi ve veli ücretlendirmesi — hepsi
+ * bu tek sabiti kullanır. Değer başka hiçbir dosyada tekrar yazılmaz;
+ * ön yüzdeki eşi `src/lib/groupLessonPaymentUnits.ts` içindedir.
+ *
+ *   40 dk = 1 ders · 80 dk = 2 ders · 120 dk = 3 ders · 160 dk = 4 ders
+ *
+ * Hiçbir yerde "60 dakika = 1 ders" hesabı kullanılmaz.
+ */
+export const LESSON_DURATION_MINUTES = 40;
+
+/** Eski ad — çağrı yerleri bozulmasın diye duruyor, aynı sabittir. */
+export const GROUP_LESSON_UNIT_MINUTES = LESSON_DURATION_MINUTES;
 
 export function completedSessionMinutes(row) {
   const start = String(row?.start_time || '').slice(0, 8);

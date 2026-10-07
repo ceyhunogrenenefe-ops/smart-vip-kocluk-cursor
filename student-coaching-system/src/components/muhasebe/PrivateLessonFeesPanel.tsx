@@ -3,7 +3,11 @@ import { GraduationCap, Loader2, Plus, RefreshCw, Save, Trash2, UserPlus } from 
 import { toast } from 'sonner';
 import { useAuth } from '../../context/AuthContext';
 import { useApp } from '../../context/AppContext';
-import { formatTryAmount } from '../../lib/groupLessonPaymentUnits';
+import {
+  formatLessonUnits,
+  formatTryAmount,
+  LESSON_DURATION_MINUTES
+} from '../../lib/groupLessonPaymentUnits';
 import { listPaymentAccounts, type PaymentAccount } from '../../lib/studentPaymentTrackerApi';
 import {
   deletePrivateLessonFee,
@@ -230,7 +234,7 @@ export default function PrivateLessonFeesPanel() {
     const unit = Number(draft.unit_price_tl);
     const collected = Number(draft.amount_collected_tl);
     if (!Number.isFinite(hours) || hours < 0) {
-      toast.error('Geçerli ders saati girin');
+      toast.error('Geçerli ders adedi girin');
       return;
     }
     if (!Number.isFinite(unit) || unit < 0) {
@@ -335,7 +339,7 @@ export default function PrivateLessonFeesPanel() {
     const unit = Number(extUnit);
     const collected = Number(extCollected);
     if (!Number.isFinite(hours) || hours < 0) {
-      toast.error('Geçerli ders saati girin');
+      toast.error('Geçerli ders adedi girin');
       return;
     }
     if (!Number.isFinite(unit) || unit < 0) {
@@ -408,7 +412,7 @@ export default function PrivateLessonFeesPanel() {
             Özel Ders Ücretleri
           </h2>
           <p className="mt-0.5 text-sm text-slate-600 dark:text-slate-400">
-            Tamamlanan özel ders saatlerinden hesaplanır. Rehberlik, deneme, kaynak gibi ders dışı
+            Tamamlanan özel derslerden hesaplanır — 1 ders = 40 dakika. Rehberlik, deneme, kaynak gibi ders dışı
             kalemleri her öğrencinin altındaki “Ek kalemler” bölümünden ekleyebilir; dış öğrenci
             ekleyebilir, banka hesabı seçebilir, kaydı silebilirsiniz. Öğretmen hakedişine dokunulmaz.
           </p>
@@ -459,7 +463,7 @@ export default function PrivateLessonFeesPanel() {
             />
           </label>
           <label className="text-xs text-slate-500">
-            Saat
+            Ders adedi
             <input
               type="number"
               min={0}
@@ -543,7 +547,7 @@ export default function PrivateLessonFeesPanel() {
             {formatTryAmount(totals.billed)} ₺
           </p>
           <p className="mt-1 text-xs text-indigo-800/80 dark:text-indigo-200/80">
-            {summary?.student_count ?? rows.length} öğrenci · {formatTryAmount(summary?.hours ?? 0)} saat
+            {summary?.student_count ?? rows.length} öğrenci · {formatLessonUnits(summary?.hours ?? 0)} ders
             {totals.extras > 0 ? ` · ek kalem ${formatTryAmount(totals.extras)} ₺` : ''}
           </p>
         </div>
@@ -564,7 +568,7 @@ export default function PrivateLessonFeesPanel() {
             {formatTryAmount(Math.max(0, totals.billed - totals.collected))} ₺
           </p>
           <p className="mt-1 text-xs text-slate-500">
-            Sistem saati (otomatik): {formatTryAmount(summary?.system_hours ?? 0)}
+            Ders kaydından gelen (otomatik): {formatLessonUnits(summary?.system_hours ?? 0)} ders
           </p>
         </div>
       </div>
@@ -652,13 +656,14 @@ export default function PrivateLessonFeesPanel() {
 
                 <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
                   <label className="text-[11px] font-medium text-slate-500">
-                    Ders saati
+                    Ders adedi
                     <input
                       type="number"
                       min={0}
                       step={0.25}
                       value={draft.hours}
                       onChange={(e) => patchDraft(key, { hours: e.target.value })}
+                      title={`1 ders = ${LESSON_DURATION_MINUTES} dakika`}
                       className={fieldCls}
                     />
                     <span className="mt-0.5 block text-[10px] font-normal text-slate-400">
@@ -677,8 +682,8 @@ export default function PrivateLessonFeesPanel() {
                             }
                             title={
                               row.hours_source === 'declaration'
-                                ? 'Ders kaydı yok, saat öğretmen beyanından alındı'
-                                : 'Öğretmenin aylık beyanında bildirdiği özel ders'
+                                ? 'Ders kaydı yok, ders adedi öğretmen beyanından alındı'
+                                : 'Öğretmenin aylık beyanında bildirdiği özel ders adedi'
                             }
                           >
                             Beyan: {formatTryAmount(row.declared_hours)}
@@ -688,15 +693,20 @@ export default function PrivateLessonFeesPanel() {
                     </span>
                   </label>
                   <label className="text-[11px] font-medium text-slate-500">
-                    Birim ücret
+                    Ders birim ücreti
                     <input
                       type="number"
                       min={0}
                       step={1}
                       value={draft.unit_price_tl}
                       onChange={(e) => patchDraft(key, { unit_price_tl: e.target.value })}
+                      title={`Bir dersin (${LESSON_DURATION_MINUTES} dk) ücreti`}
                       className={fieldCls}
                     />
+                    <span className="mt-0.5 block text-[10px] font-normal text-slate-400">
+                      {formatLessonUnits(Number(draft.hours) || 0)} ders ·{' '}
+                      {Math.round((Number(draft.hours) || 0) * LESSON_DURATION_MINUTES)} dk
+                    </span>
                   </label>
                   <div className="text-[11px] font-medium text-slate-500">
                     Toplam
@@ -870,13 +880,13 @@ export default function PrivateLessonFeesPanel() {
                   )}
                 </div>
 
-                {/* Ders dökümü: hangi ders ne zaman, hangi öğretmen, kaç saat */}
+                {/* Ders dökümü: hangi ders ne zaman, hangi öğretmen, kaç ders */}
                 {acikDetay === key ? (
                   <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50/70 p-3 dark:border-slate-700 dark:bg-slate-950/40">
                     <div className="grid gap-4 lg:grid-cols-2">
                       <div>
                         <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                          Sistem ders kayıtları ({formatTryAmount(row.system_hours)} saat)
+                          Sistem ders kayıtları ({formatLessonUnits(row.system_hours)} ders)
                         </p>
                         {(row.lessons || []).length ? (
                           <table className="w-full text-left text-[11px]">
@@ -884,8 +894,11 @@ export default function PrivateLessonFeesPanel() {
                               <tr>
                                 <th className="py-0.5 font-medium">Tarih</th>
                                 <th className="py-0.5 font-medium">Öğretmen</th>
+                                {/* Kurum kuralı: başlangıç, bitiş, süre ve ders adedi ayrı ayrı */}
+                                <th className="py-0.5 text-right font-medium">Başlangıç</th>
+                                <th className="py-0.5 text-right font-medium">Bitiş</th>
                                 <th className="py-0.5 text-right font-medium">Süre</th>
-                                <th className="py-0.5 text-right font-medium">Saat</th>
+                                <th className="py-0.5 text-right font-medium">Ders</th>
                               </tr>
                             </thead>
                             <tbody>
@@ -894,14 +907,37 @@ export default function PrivateLessonFeesPanel() {
                                   <td className="py-0.5 tabular-nums">{l.lesson_date || '—'}</td>
                                   <td className="py-0.5">{l.teacher_name || '—'}</td>
                                   <td className="py-0.5 text-right tabular-nums text-slate-500">
+                                    {l.start_time || '—'}
+                                  </td>
+                                  <td className="py-0.5 text-right tabular-nums text-slate-500">
+                                    {l.end_time || '—'}
+                                  </td>
+                                  <td className="py-0.5 text-right tabular-nums text-slate-500">
                                     {l.duration_minutes ? `${l.duration_minutes} dk` : '—'}
                                   </td>
-                                  <td className="py-0.5 text-right tabular-nums">
-                                    {formatTryAmount(l.hours)}
+                                  <td className="py-0.5 text-right font-semibold tabular-nums">
+                                    {formatLessonUnits(l.units ?? l.hours)}
                                   </td>
                                 </tr>
                               ))}
                             </tbody>
+                            <tfoot className="text-slate-500">
+                              <tr className="border-t border-slate-300">
+                                <td className="py-0.5 font-medium" colSpan={4}>
+                                  Toplam
+                                </td>
+                                <td className="py-0.5 text-right tabular-nums">
+                                  {(row.lessons || []).reduce(
+                                    (a, l) => a + (Number(l.duration_minutes) || 0),
+                                    0
+                                  )}{' '}
+                                  dk
+                                </td>
+                                <td className="py-0.5 text-right font-bold tabular-nums text-slate-800 dark:text-slate-100">
+                                  {formatLessonUnits(row.system_hours)}
+                                </td>
+                              </tr>
+                            </tfoot>
                           </table>
                         ) : (
                           <p className="text-[11px] text-slate-400">Bu ay sisteme girilmiş ders kaydı yok.</p>
@@ -910,7 +946,7 @@ export default function PrivateLessonFeesPanel() {
 
                       <div>
                         <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                          Öğretmen beyanı ({formatTryAmount(row.declared_hours || 0)} saat)
+                          Öğretmen beyanı ({formatLessonUnits(row.declared_hours || 0)} ders)
                         </p>
                         {(row.declared_lines || []).length ? (
                           <table className="w-full text-left text-[11px]">
@@ -919,7 +955,7 @@ export default function PrivateLessonFeesPanel() {
                                 <th className="py-0.5 font-medium">Dönem</th>
                                 <th className="py-0.5 font-medium">Öğretmen</th>
                                 <th className="py-0.5 text-right font-medium">Ders</th>
-                                <th className="py-0.5 text-right font-medium">Saat</th>
+                                <th className="py-0.5 text-right font-medium">Süre</th>
                               </tr>
                             </thead>
                             <tbody>
@@ -934,11 +970,13 @@ export default function PrivateLessonFeesPanel() {
                                       <span className="block text-[10px] text-slate-400">{l.note}</span>
                                     ) : null}
                                   </td>
-                                  <td className="py-0.5 text-right tabular-nums text-slate-500">
-                                    {formatTryAmount(l.quantity)}
+                                  <td className="py-0.5 text-right font-semibold tabular-nums">
+                                    {formatLessonUnits(l.units ?? l.quantity)}
                                   </td>
-                                  <td className="py-0.5 text-right tabular-nums">
-                                    {formatTryAmount(l.hours)}
+                                  <td className="py-0.5 text-right tabular-nums text-slate-500">
+                                    {l.duration_minutes ??
+                                      Math.round((l.units ?? l.quantity) * LESSON_DURATION_MINUTES)}{' '}
+                                    dk
                                   </td>
                                 </tr>
                               ))}
