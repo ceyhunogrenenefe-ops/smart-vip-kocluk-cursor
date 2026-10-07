@@ -41,6 +41,8 @@ import AdminPanel from './pages/AdminPanel';
 import BookTracking from './pages/BookTracking';
 import WrittenExamTracking from './components/WrittenExamTracking';
 import Marketing from './pages/Marketing';
+import Landing from './pages/Landing';
+import { isNativeApp } from './lib/nativeApp';
 import UserManagement from './pages/UserManagement';
 import PrivateLessonAssignments from './pages/PrivateLessonAssignments';
 import Subscription from './pages/Subscription';
@@ -134,7 +136,17 @@ import { Toaster } from 'sonner';
 function HomeRedirect() {
   const { effectiveUser } = useAuth();
 
-  if (!effectiveUser) return <Navigate to="/login" replace />;
+  /**
+   * Oturumsuz ziyaretçi: web'de ana sayfa (kurum, kademeler, paketler) açılır,
+   * girişe oradaki "Giriş Yap" ile geçilir.
+   *
+   * Mobil uygulamada tanıtım sayfası gösterilmez: kullanıcı uygulamayı zaten
+   * girmek için açıyor, araya sayfa koymak gereksiz adım olur. Bu yüzden
+   * Capacitor kabuğunda eski davranış korunur.
+   */
+  if (!effectiveUser) {
+    return isNativeApp() ? <Navigate to="/login" replace /> : <Landing />;
+  }
   const tags = userRoleTags(effectiveUser);
 
   /** Yalnız CRM temsilcisi → izole inbox */
