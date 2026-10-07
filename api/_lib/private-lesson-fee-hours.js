@@ -1,25 +1,36 @@
 /**
- * Özel ders saatleri — teacher_lessons tamamlanan kayıtlardan (hakediş ile aynı birim mantığı).
+ * Özel ders adetleri — teacher_lessons tamamlanan kayıtlardan (hakediş ile aynı birim).
  * Salt okuma; hakediş tablolarına yazmaz.
+ *
+ * ÖLÇÜ BİRİMİ: ders adedi (1 ders = LESSON_DURATION_MINUTES = 40 dakika).
+ * Önceden burada 40 dakikalık birim "saate" çevriliyordu (× 40/60); bu yüzden
+ * 80 dakikalık ders ekranda 1,33 saat görünüyor ve birim ücretle çarpılınca
+ * veliye 2 ders yerine 1,33 ders fiyatı çıkıyordu. Artık çevrim yok:
+ * 80 dk → 2 ders → 2 × birim ücret.
+ *
+ * Alan adlarında `*_hours` geçmesi eski dağıtımlardaki (mobil paket) ekranlar
+ * bozulmasın diyedir; taşıdıkları değer ders adedidir.
  */
 import {
-  GROUP_LESSON_UNIT_MINUTES,
+  LESSON_DURATION_MINUTES,
   roundUnits,
   sessionLessonUnits40
 } from './class-lesson-payment-units.js';
 import { errorMessage } from './error-msg.js';
 
+/** Bir ders kaydının ders adedi. 80 dk → 2. */
 export function privateLessonUnitsFromRow(row) {
   const dm = row?.duration_minutes != null ? Number(row.duration_minutes) : NaN;
   if (Number.isFinite(dm) && dm > 0) {
-    return roundUnits(dm / GROUP_LESSON_UNIT_MINUTES);
+    return roundUnits(dm / LESSON_DURATION_MINUTES);
   }
+  // Süre yazılmamışsa başlangıç–bitiş saatinden hesaplanır
   return sessionLessonUnits40(row);
 }
 
-/** 40 dk birim → saat */
-export function unitsToHours(units) {
-  return roundUnits((Number(units) || 0) * (GROUP_LESSON_UNIT_MINUTES / 60));
+/** Ders adedi → dakika. Raporda "toplam süre" yazmak için. */
+export function unitsToMinutes(units) {
+  return Math.round((Number(units) || 0) * LESSON_DURATION_MINUTES);
 }
 
 export function monthBoundsYm(ym) {
@@ -34,13 +45,14 @@ export function monthBoundsYm(ym) {
 }
 
 /**
+ * Değerler DERS ADEDİ cinsindendir (1 ders = 40 dk).
  * @returns {Promise<Map<string, { system_hours: number, teachers: Map<string, { teacher_id: string, hours: number }> }>>}
  */
 export async function scanPrivateLessonHoursByStudent({ supabase, from, to, institutionId }) {
   let q = supabase
     .from('teacher_lessons')
     .select(
-      'id,teacher_id,student_id,duration_minutes,start_time,end_time,lesson_date,status,institution_id'
+      'id,teacher_id,student_id,title,duration_minutes,start_time,end_time,lesson_date,status,institution_id'
     )
     .eq('status', 'completed')
     .gte('lesson_date', from)
@@ -61,8 +73,8 @@ export async function scanPrivateLessonHoursByStudent({ supabase, from, to, inst
     const sid = String(row.student_id || '').trim();
     const tid = String(row.teacher_id || '').trim();
     if (!sid) continue;
+    // Ders adedi — saate çevrilmez
     const units = privateLessonUnitsFromRow(row);
-    const hours = unitsToHours(units);
     if (!byStudent.has(sid)) {
       // `lessons`: satır satır döküm — öğrenciye tıklayınca hangi derslerin
       // sayıldığı görülebilsin
@@ -72,14 +84,19 @@ export async function scanPrivateLessonHoursByStudent({ supabase, from, to, inst
     cur.lessons.push({
       id: row.id,
       teacher_id: tid || null,
+      title: row.title || null,
       lesson_date: row.lesson_date || null,
-      duration_minutes: row.duration_minutes ?? null,
-      hours
+      // Rapor: başlangıç, bitiş, toplam süre ve hesaplanan ders adedi ayrı ayrı
+      start_time: row.start_time ? String(row.start_time).slice(0, 5) : null,
+      end_time: row.end_time ? String(row.end_time).slice(0, 5) : null,
+      duration_minutes: row.duration_minutes != null ? Number(row.duration_minutes) : unitsToMinutes(units),
+      units,
+      hours: units
     });
-    cur.system_hours = roundUnits(cur.system_hours + hours);
+    cur.system_hours = roundUnits(cur.system_hours + units);
     if (tid) {
       const t = cur.teachers.get(tid) || { teacher_id: tid, hours: 0 };
-      t.hours = roundUnits(t.hours + hours);
+      t.hours = roundUnits(t.hours + units);
       cur.teachers.set(tid, t);
     }
   }
@@ -93,9 +110,8 @@ export async function scanPrivateLessonHoursByStudent({ supabase, from, to, inst
  * bildiriyor. Ders kaydı sisteme girilmemiş olsa bile veliden alınacak ücret
  * bu beyandan hesaplanabilsin diye okunur.
  *
- * Beyan ders ADEDİ olarak girilir; ücretlendirme saat üzerinden yapıldığı
- * için 40 dakikalık ders birimi saate çevrilir — hakediş ve beyan ekranıyla
- * aynı kural.
+ * Beyan ders ADEDİ olarak girilir ve ücretlendirme de ders adedi üzerinden
+ * yapılır; arada hiçbir çevrim yoktur — hakediş ekranıyla aynı birim.
  *
  * Yalnız GÖNDERİLMİŞ beyanlar sayılır; yarım kalan form ücreti etkilemesin.
  *
@@ -136,7 +152,8 @@ export async function scanDeclaredPrivateHoursByStudent({ supabase, from, to, in
       if (!sid) continue;
       const adet = Number(l.quantity);
       if (!Number.isFinite(adet) || adet <= 0) continue;
-      const hours = unitsToHours(adet);
+      // Beyan zaten ders adedi; çevrilmez
+      const units = roundUnits(adet);
       const tid = String(byDecl.get(String(l.declaration_id))?.teacher_id || '').trim();
 
       if (!out.has(sid)) out.set(sid, { declared_hours: 0, teachers: new Map(), lines: [] });
@@ -145,13 +162,15 @@ export async function scanDeclaredPrivateHoursByStudent({ supabase, from, to, in
         teacher_id: tid || null,
         period_month: byDecl.get(String(l.declaration_id))?.period_month || null,
         quantity: adet,
-        hours,
+        units,
+        duration_minutes: unitsToMinutes(units),
+        hours: units,
         note: l.note || null
       });
-      cur.declared_hours = roundUnits(cur.declared_hours + hours);
+      cur.declared_hours = roundUnits(cur.declared_hours + units);
       if (tid) {
         const t = cur.teachers.get(tid) || { teacher_id: tid, hours: 0 };
-        t.hours = roundUnits(t.hours + hours);
+        t.hours = roundUnits(t.hours + units);
         cur.teachers.set(tid, t);
       }
     }

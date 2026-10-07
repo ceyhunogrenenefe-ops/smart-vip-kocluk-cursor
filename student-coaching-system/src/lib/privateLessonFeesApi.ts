@@ -2,21 +2,35 @@ import { apiFetch } from './session';
 
 export type PrivateLessonFeeStatus = 'unpaid' | 'partial' | 'paid';
 
+/**
+ * ÖLÇÜ BİRİMİ UYARISI: bu dosyadaki `hours` / `system_hours` / `declared_hours`
+ * / `hours_override` alanları SAAT değil **DERS ADEDİ** taşır
+ * (1 ders = 40 dakika). Adlar eski mobil paketler bozulmasın diye korunuyor;
+ * sunucu aynı değerleri `units` / `system_units` / `declared_units` /
+ * `units_override` adlarıyla da döner ve yeni kod bunları kullanır.
+ */
 export type PrivateLessonFeeTeacher = {
   teacher_id: string;
   teacher_name: string;
   hours: number;
-  /** Öğretmenin aylık beyanında bildirdiği saat */
+  /** Öğretmenin aylık beyanında bildirdiği ders adedi */
   declared_hours?: number;
 };
 
-/** Sisteme girilmiş tek ders kaydı */
+/**
+ * Sisteme girilmiş tek ders kaydı.
+ * `hours` alanı DERS ADEDİ taşır (1 ders = 40 dk); yeni adı `units`.
+ */
 export type PrivateLessonFeeLesson = {
   id: string;
   teacher_id?: string | null;
   teacher_name?: string | null;
+  title?: string | null;
   lesson_date?: string | null;
+  start_time?: string | null;
+  end_time?: string | null;
   duration_minutes?: number | null;
+  units?: number;
   hours: number;
 };
 
@@ -26,6 +40,8 @@ export type PrivateLessonFeeDeclaredLine = {
   teacher_name?: string | null;
   period_month?: string | null;
   quantity: number;
+  units?: number;
+  duration_minutes?: number | null;
   hours: number;
   note?: string | null;
 };
@@ -78,8 +94,16 @@ export type PrivateLessonFeeRow = {
   student_name: string;
   teachers: PrivateLessonFeeTeacher[];
   system_hours: number;
-  /** Öğretmenin aylık beyanında bildirdiği özel ders (saate çevrilmiş) */
+  /** Öğretmenin aylık beyanında bildirdiği özel ders adedi */
   declared_hours?: number;
+  /** Adı açık eşleri — ders adedi */
+  system_units?: number;
+  declared_units?: number;
+  units?: number;
+  units_override?: number | null;
+  /** Ders adedinin dakika karşılığı (adet × 40) */
+  total_minutes?: number;
+  unit_period_minutes?: number;
   /** Satır satır döküm */
   lessons?: PrivateLessonFeeLesson[];
   declared_lines?: PrivateLessonFeeDeclaredLine[];
@@ -208,6 +232,8 @@ export async function upsertPrivateLessonFee(body: {
   collection_status?: PrivateLessonFeeStatus | string;
   payment_account_id?: string | null;
   notes?: string | null;
+  /** Elle girilen ders adedi — adı açık eşi */
+  units_override?: number | null;
   /** Ders dışı kalemler — gönderilirse satırın tamamı bununla değişir */
   extra_items?: Array<{
     id?: string;

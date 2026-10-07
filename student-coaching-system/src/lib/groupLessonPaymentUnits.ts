@@ -1,4 +1,21 @@
-export const GROUP_LESSON_UNIT_MINUTES = 40;
+/**
+ * Kurum standardı: 1 ders saati = 40 dakika.
+ * Sunucu tarafındaki eşi `api/_lib/class-lesson-payment-units.js` içindedir;
+ * değer başka hiçbir dosyada tekrar yazılmaz.
+ *
+ *   40 dk = 1 ders · 80 dk = 2 ders · 120 dk = 3 ders · 160 dk = 4 ders
+ */
+export const LESSON_DURATION_MINUTES = 40;
+
+/** Eski ad — çağrı yerleri bozulmasın diye duruyor, aynı sabittir. */
+export const GROUP_LESSON_UNIT_MINUTES = LESSON_DURATION_MINUTES;
+
+/** Dakikadan ders adedine. 80 dk → 2 ders. */
+export function lessonUnitsFromMinutes(minutes: number): number {
+  const m = Number(minutes) || 0;
+  if (m <= 0) return 0;
+  return roundLessonUnits(m / LESSON_DURATION_MINUTES);
+}
 
 export const GROUP_LESSON_UNIT_PRICE_PRESETS = [400, 500, 600, 700] as const;
 
