@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { FileText, Image as ImageIcon, Loader2, Plus, Save, Send, Trash2, X } from 'lucide-react';
+import { FileText, Image as ImageIcon, Loader2, Plus, RefreshCw, Save, Send, Trash2, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiFetch } from '../lib/session';
 
@@ -142,6 +142,7 @@ export default function WhatsAppTemplatesPage() {
   const [items, setItems] = useState<Template[]>([]);
   const [meta, setMeta] = useState<Meta | null>(null);
   const [metaError, setMetaError] = useState<string | null>(null);
+  const [yoklamaBusy, setYoklamaBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [draft, setDraft] = useState<Partial<Template> | null>(null);
   const [busy, setBusy] = useState(false);
@@ -244,6 +245,49 @@ Silinsin mi?`;
     await load();
   };
 
+  /**
+   * Yoklama şablonlarını Meta'ya gönderir / eşitler.
+   *
+   * Devamsızlık şablonu bir kez silindiğinde veli bildirimleri tamamen durdu
+   * ve geri kurmanın panelde yolu yoktu; bu düğme o yolu açıyor.
+   */
+  const yoklamaSablonlariniKur = async () => {
+    setYoklamaBusy(true);
+    try {
+      const res = await apiFetch('/api/message-templates', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'submit_attendance_templates' })
+      });
+      const j = await res.json().catch(() => ({}));
+      const list = (j?.ensured?.templates || []) as Array<{
+        type: string;
+        meta_approved?: boolean;
+        meta_status?: string | null;
+        hint?: string | null;
+      }>;
+      const hazir = list.filter((t) => t.meta_approved).length;
+      if (!res.ok && !list.length) {
+        toast.error(j?.error || 'Şablonlar gönderilemedi');
+        return;
+      }
+      const bekleyen = list.filter((t) => !t.meta_approved);
+      if (bekleyen.length) {
+        toast.warning(
+          `${hazir}/${list.length} şablon hazır. Bekleyen: ` +
+            bekleyen.map((t) => `${t.type}${t.meta_status ? ` (${t.meta_status})` : ''}`).join(', ')
+        );
+      } else {
+        toast.success(`${hazir} yoklama şablonu hazır.`);
+      }
+      await load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Şablonlar gönderilemedi');
+    } finally {
+      setYoklamaBusy(false);
+    }
+  };
+
   const varNums = useMemo(() => variableNumbers(String(draft?.body || '')), [draft?.body]);
   const varLabel = useMemo(() => {
     const m: Record<string, string> = {};
@@ -265,14 +309,30 @@ Silinsin mi?`;
           </p>
         </div>
         {!draft ? (
-          <button
-            type="button"
-            onClick={() => setDraft(bos())}
-            className="inline-flex items-center gap-2 rounded-xl bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-800"
-          >
-            <Plus className="h-4 w-4" />
-            Yeni şablon
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              disabled={yoklamaBusy}
+              onClick={() => void yoklamaSablonlariniKur()}
+              title="Devamsızlık, kamera, geç katılım ve koç raporu şablonlarını Meta'da oluşturur ya da onaylıysa eşitler"
+              className="inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-white px-3 py-2 text-sm font-semibold text-emerald-800 hover:bg-emerald-50 disabled:opacity-50"
+            >
+              {yoklamaBusy ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="h-4 w-4" />
+              )}
+              Yoklama şablonlarını kur / eşitle
+            </button>
+            <button
+              type="button"
+              onClick={() => setDraft(bos())}
+              className="inline-flex items-center gap-2 rounded-xl bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-800"
+            >
+              <Plus className="h-4 w-4" />
+              Yeni şablon
+            </button>
+          </div>
         ) : null}
       </div>
 

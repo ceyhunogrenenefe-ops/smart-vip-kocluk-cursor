@@ -1702,7 +1702,7 @@ export default function ClassLiveLessons() {
       const hintWa = (note: string) => {
         const n = String(note || '').toLowerCase();
         if (n.includes('template_not_found') || n === 'template_not_found')
-          return 'Supabase’de message_templates.type = class_absent_notice_1 satırı yok veya SQL migration çalışmadı.';
+          return 'Devamsızlık şablonu (class_absent_notice_1) kayıtlı değil — silinmiş olabilir. CRM → WhatsApp Şablonları ekranındaki “Yoklama şablonlarını Meta’ya gönder/eşitle” işlemi şablonu geri kurar.';
         if (n.includes('parent_phone_missing')) return 'Öğrenci kartında veli telefonu (E.164) eksik veya geçersiz.';
         if (n.includes('meta_whatsapp_not_ready')) return 'Vercel’de META_WHATSAPP_TOKEN ve META_PHONE_NUMBER_ID tanımlı değil.';
         if (n.includes('meta_template_name_required')) return 'Şablonda Meta şablon adı (meta_template_name) boş.';

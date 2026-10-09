@@ -11,6 +11,11 @@ import {
 import { createOrReuseMetaMessageTemplate } from '../api/_lib/meta-template-create.js';
 import { loadMetaWhatsAppSecretsFromDb } from '../api/_lib/meta-whatsapp.js';
 import { deleteMetaMessageTemplate } from '../api/_lib/meta-template-delete.js';
+import {
+  isProtectedMetaTemplateName,
+  isProtectedTemplateType,
+  protectedTemplateMessage
+} from '../api/_lib/protected-message-templates.js';
 import { HEADER_MEDIA_RULES, uploadTemplateHeaderMedia } from '../api/_lib/meta-template-media.js';
 import {
   fetchAllMetaMessageTemplates,
@@ -369,6 +374,13 @@ export default async function handler(req, res) {
       if (id.startsWith('meta:')) {
         const parts = id.split(':');
         const metaName = parts.slice(1, -1).join(':');
+        // Meta'dan silmek de gönderimi durdurur; sistem şablonları korunur
+        if (isProtectedMetaTemplateName(metaName)) {
+          return res.status(400).json({
+            error: 'protected_template',
+            message: protectedTemplateMessage(metaName)
+          });
+        }
         const r = await deleteMetaMessageTemplate({ name: metaName });
         if (!r.ok) return res.status(400).json({ error: 'meta_delete_failed', message: r.error });
         invalidateCrmTemplateCache();
@@ -377,11 +389,23 @@ export default async function handler(req, res) {
 
       const { data: row } = await supabaseAdmin
         .from(TABLE)
-        .select('whatsapp_template_status, meta_template_name, meta_template_id')
+        .select('type, name, whatsapp_template_status, meta_template_name, meta_template_id')
         .eq('id', id)
         .maybeSingle();
       const status = String(row?.whatsapp_template_status || '');
       const metaName = String(row?.meta_template_name || '').trim();
+
+      /**
+       * Otomasyonların kullandığı şablon silinemez. Devamsızlık şablonu bir kez
+       * silindi ve veli bildirimleri bir gün boyunca hiç gitmedi; kullanımdan
+       * kaldırmanın yolu silmek değil pasife almaktır.
+       */
+      if (isProtectedTemplateType(row?.type) || isProtectedMetaTemplateName(metaName)) {
+        return res.status(400).json({
+          error: 'protected_template',
+          message: protectedTemplateMessage(row?.name || row?.type || metaName)
+        });
+      }
 
       if (status !== 'DRAFT' && metaName) {
         const r = await deleteMetaMessageTemplate({
