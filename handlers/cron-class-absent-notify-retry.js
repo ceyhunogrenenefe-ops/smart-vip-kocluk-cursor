@@ -26,13 +26,20 @@ async function attendanceAutoWaEnabled(institutionId) {
   return data.auto_whatsapp_absent !== false;
 }
 
+/**
+ * Yeniden denemenin işe yaramayacağı hatalar.
+ *
+ * `template_not_found` bilerek burada DEĞİL: şablon satırı silindiğinde bütün
+ * gün bu hatayla düşen bildirimler, satır geri kurulunca kendiliğinden
+ * gitsin. Eski derse geç bildirim gitmesini aşağıdaki `lesson_day_passed`
+ * kontrolü zaten engelliyor.
+ */
 function permanentAbsentSendFailure(err) {
   const e = String(err || '').toLowerCase();
   return (
     e.includes('parent_phone') ||
     e.includes('invalid_phone') ||
     e.includes('meta_template_name_required') ||
-    e.includes('template_not_found') ||
     e.includes('template_variables_invalid')
   );
 }
