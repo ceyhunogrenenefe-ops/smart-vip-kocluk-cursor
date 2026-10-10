@@ -140,6 +140,7 @@ export const routeLoaders = {
   'public-teacher-book': () => import('../handlers/public-teacher-book.js'),
   'public/teachers': () => import('../handlers/public-teachers.js'),
   'public-teachers': () => import('../handlers/public-teachers.js'),
+  'public-exam-calendar': () => import('../handlers/public-exam-calendar.js'),
   'reviews/student': () => import('../handlers/reviews-student.js'),
   'reviews-student': () => import('../handlers/reviews-student.js'),
   'reviews/parent': () => import('../handlers/reviews-parent.js'),

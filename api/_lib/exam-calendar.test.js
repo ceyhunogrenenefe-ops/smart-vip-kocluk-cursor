@@ -1,6 +1,10 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { examCalendarLevelForClassLevel as lv } from './exam-calendar.js';
+import {
+  EXAM_CALENDAR_LEVELS,
+  examCalendarLevelForClassLevel as lv,
+  examCalendarLevelLabel
+} from './exam-calendar.js';
 import { EXAM_CALENDAR_SEED } from './exam-calendar-seed.js';
 
 describe('examCalendarLevelForClassLevel', () => {
@@ -13,8 +17,31 @@ describe('examCalendarLevelForClassLevel', () => {
   it('maps 12 / YKS / TYT to yks', () => {
     for (const v of ['12', 'YKS', 'YKS-Sayısal', 'TYT-Maarif', 'Mezun']) assert.equal(lv(v), 'yks', v);
   });
-  it('returns null for LGS, YÖS and lower grades', () => {
-    for (const v of ['LGS', '7', '6', '5. Sınıf', 'YOS', '7.sınıf LGS', '', null]) assert.equal(lv(v), null, String(v));
+  it('maps middle school grades to their own calendar', () => {
+    // Deneme Kulübü için açıldı: önceden bu kademeler null dönüyordu
+    assert.equal(lv('3'), '3');
+    assert.equal(lv('4. Sınıf'), '4');
+    assert.equal(lv('5'), '5');
+    assert.equal(lv('6'), '6');
+    assert.equal(lv('7. sınıf'), '7');
+  });
+  it('maps 8 and LGS to the lgs calendar', () => {
+    for (const v of ['8', '8. Sınıf', 'LGS', 'lgs', '8.sınıf LGS']) assert.equal(lv(v), 'lgs', String(v));
+  });
+  it('returns null for YÖS, 2. sınıf and boş değer', () => {
+    for (const v of ['YOS', 'YÖS', '2', '2. Sınıf', '', null, undefined]) assert.equal(lv(v), null, String(v));
+  });
+  it('bütün eşleşmeler geçerli bir kademe döndürür', () => {
+    for (const v of ['3', '4', '5', '6', '7', '8', 'LGS', '9', '10', '11', '12', 'YKS']) {
+      const r = lv(v);
+      assert.ok(EXAM_CALENDAR_LEVELS.includes(r), `${v} -> ${r}`);
+    }
+  });
+  it('her kademenin okunur bir adı var', () => {
+    for (const l of EXAM_CALENDAR_LEVELS) {
+      assert.ok(examCalendarLevelLabel(l).length > 0, l);
+    }
+    assert.equal(examCalendarLevelLabel('lgs'), 'LGS (8. Sınıf)');
   });
 });
 

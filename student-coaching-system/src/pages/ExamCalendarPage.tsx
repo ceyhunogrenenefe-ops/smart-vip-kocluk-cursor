@@ -23,7 +23,14 @@ type Payload = {
   can_edit?: boolean;
 };
 
+/** Sunucudaki EXAM_CALENDAR_LEVELS ile aynı sıra ve kimlikler */
 const LEVELS: Array<{ id: string; label: string; badge: string; border: string }> = [
+  { id: '3', label: '3. Sınıf', badge: 'bg-teal-50 text-teal-800', border: 'border-l-teal-600' },
+  { id: '4', label: '4. Sınıf', badge: 'bg-teal-50 text-teal-800', border: 'border-l-teal-600' },
+  { id: '5', label: '5. Sınıf', badge: 'bg-emerald-50 text-emerald-800', border: 'border-l-emerald-600' },
+  { id: '6', label: '6. Sınıf', badge: 'bg-emerald-50 text-emerald-800', border: 'border-l-emerald-600' },
+  { id: '7', label: '7. Sınıf', badge: 'bg-emerald-50 text-emerald-800', border: 'border-l-emerald-600' },
+  { id: 'lgs', label: 'LGS (8. Sınıf)', badge: 'bg-rose-50 text-rose-800', border: 'border-l-rose-600' },
   { id: '9', label: '9. Sınıf', badge: 'bg-sky-50 text-sky-800', border: 'border-l-sky-600' },
   { id: '10', label: '10. Sınıf', badge: 'bg-orange-50 text-orange-800', border: 'border-l-orange-600' },
   { id: '11', label: '11. Sınıf', badge: 'bg-purple-50 text-purple-800', border: 'border-l-purple-700' },
