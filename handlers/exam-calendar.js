@@ -79,7 +79,9 @@ function cleanRow(body) {
   const level = String(body.level || '').trim().toLowerCase();
   const date = String(body.exam_date || '').trim().slice(0, 10);
   const publisher = String(body.publisher || '').trim().slice(0, 200);
-  if (!EXAM_CALENDAR_LEVELS.includes(level)) return { error: 'Geçersiz sınıf (9, 10, 11 veya yks).' };
+  if (!EXAM_CALENDAR_LEVELS.includes(level)) {
+    return { error: `Geçersiz sınıf. Geçerli değerler: ${EXAM_CALENDAR_LEVELS.join(', ')}.` };
+  }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return { error: 'Tarih YYYY-AA-GG olmalı.' };
   if (!publisher) return { error: 'Yayınevi zorunlu.' };
   return {
