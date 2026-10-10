@@ -13,10 +13,23 @@ import { resolveBindingFromMetaBody } from './meta-template-binding.js';
 export const ATTENDANCE_META_SEED = [
   {
     type: 'class_absent_notice_1',
+    /**
+     * Meta adı neden `_v2`: eski `class_absent_notice_1` şablonu 8 Ekim 2026'da
+     * Meta'dan silindi. Yeniden gönderildiğinde Meta "zaten var" deyip (reused)
+     * PENDING döndürüyor ama kayıt WhatsApp Manager'da hiç görünmüyor — silinen
+     * ad takılı kalmış. Aynı adı tekrar denemek aynı sonucu veriyor, o yüzden
+     * temiz bir adla gönderiliyor.
+     */
+    metaTemplateName: 'class_absent_notice_v2',
     name: 'Yoklama — katılmayan öğrenci (veli)',
+    /**
+     * Metin, velilere 3.478 kez giden onaylı gövdeyle (FALLBACK_ABSENT) birebir
+     * aynı. Önceki tohum metni 2 değişkenliydi; onunla onay alsaydık veli daha
+     * az bilgi içeren bir mesaj almaya başlayacaktı.
+     */
     content:
-      'Sayın velimiz, öğrencimiz {{student_name}}, {{subject}} dersine katılmamıştır. Bilginize.',
-    variables: ['student_name', 'subject']
+      'Sayın veli, {{student_name}} {{lesson_date}} tarihinde {{lesson_time}} başlangıçlı {{class_name}} sınıfı {{subject}} grup canlı dersine katılmamıştır (yoklama: gelmedi).',
+    variables: ['student_name', 'lesson_date', 'lesson_time', 'class_name', 'subject']
   },
   {
     type: 'class_camera_off_notice',
