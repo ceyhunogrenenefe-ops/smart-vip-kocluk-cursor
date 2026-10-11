@@ -190,6 +190,7 @@
     { "source": "/gizlilik", "destination": "/gizlilik.html", "permanent": true },
     { "source": "/kullanici", "destination": "/kullanici.html", "permanent": true },
     { "source": "/veri-silme", "destination": "/veri-silme.html", "permanent": true },
+    { "source": "/hesap-silme", "destination": "/veri-silme.html", "permanent": true },
     {
       "source": "/:path*",
       "has": [

@@ -1,7 +1,7 @@
 # App Store yayın adımları (Mac olmadan)
 
 Paket kimliği: `com.dersonlinevipkocluk.student` · Uygulama adı: **Online VIP Ders ve Koçluk**
-Sürüm: 1.0.4 · iOS projesi: `student-coaching-system/ios` · Derleme: Codemagic (`codemagic.yaml`)
+Sürüm: 1.0.5 · iOS projesi: `student-coaching-system/ios` · Derleme: Codemagic (`codemagic.yaml`)
 
 ## 1) App Store Connect'te uygulama kaydı
 1. https://appstoreconnect.apple.com → **Uygulamalarım → +** → Yeni uygulama.
