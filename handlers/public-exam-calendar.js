@@ -27,9 +27,17 @@ const ALLOWED_ORIGINS = new Set([
 
 function applyCors(req, res) {
   const origin = String(req.headers?.origin || '').trim();
+  /**
+   * `Vary: Origin` HER ZAMAN gonderilir — eslesme olmasa da.
+   *
+   * Aksi halde Origin'siz bir istek (curl, bot, saglik kontrolu) kenar
+   * onbellegine ACAO basligi OLMADAN dusuyor ve ayni adresi isteyen tarayici
+   * o kopyayi aliyor; istek CORS'tan patliyor. Sitede takvim sayimi tam bu
+   * yuzden alinamadi.
+   */
+  res.setHeader('Vary', 'Origin');
   if (ALLOWED_ORIGINS.has(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
-    res.setHeader('Vary', 'Origin');
   }
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
