@@ -18,7 +18,7 @@ import {
 import { toast } from 'sonner';
 import { useAuth } from '../../context/AuthContext';
 import { useApp } from '../../context/AppContext';
-import { formatClassLevelLabel, type Student } from '../../types';
+import { CLASS_LEVELS, formatClassLevelLabel, type Student } from '../../types';
 import { normalizeWhatsAppPhoneForSend } from '../../lib/whatsappOutbound';
 import {
   buildPaymentWhatsAppMessage,
@@ -257,6 +257,7 @@ export default function StudentPaymentTrackerPanel() {
   const [filterStatus, setFilterStatus] = useState('');
   const [filterCoach, setFilterCoach] = useState('');
   const [filterAccount, setFilterAccount] = useState('');
+  const [filterClass, setFilterClass] = useState('');
   const [dueFrom, setDueFrom] = useState('');
   const [dueTo, setDueTo] = useState('');
   const [filterMonth, setFilterMonth] = useState('');
@@ -294,6 +295,28 @@ export default function StudentPaymentTrackerPanel() {
     [accounts, channel]
   );
 
+  /**
+   * Sinif secenekleri kapsamdaki ogrencilerden turetiliyor; satirlardan turetilseydi
+   * filtre secilince liste tek secenege dusup geri donulemez olurdu.
+   */
+  const classOptions = useMemo(() => {
+    const seen = new Set<string>();
+    for (const st of scopedStudents) {
+      const lv = st.classLevel;
+      if (lv !== undefined && lv !== null && String(lv).trim()) seen.add(String(lv));
+    }
+    const ordered = CLASS_LEVELS.filter((l) => seen.has(String(l.value))).map((l) => ({
+      value: String(l.value),
+      label: l.label
+    }));
+    const bilinen = new Set(ordered.map((o) => o.value));
+    const digerleri = [...seen]
+      .filter((v) => !bilinen.has(v))
+      .sort((a, b) => a.localeCompare(b, 'tr', { numeric: true }))
+      .map((v) => ({ value: v, label: formatClassLevelLabel(v) }));
+    return [...ordered, ...digerleri];
+  }, [scopedStudents]);
+
   const channelLabel = ACCOUNT_TYPE_LABELS[channel];
   const isCreditCard = channel === 'credit_card';
 
@@ -309,6 +332,7 @@ export default function StudentPaymentTrackerPanel() {
           paymentType: filterType || undefined,
           coachId: filterCoach || undefined,
           paymentAccountId: filterAccount || undefined,
+          classLevel: filterClass || undefined,
           accountType: channel,
           dueFrom: dueFrom || undefined,
           dueTo: dueTo || undefined,
@@ -330,7 +354,7 @@ export default function StudentPaymentTrackerPanel() {
     } finally {
       setLoading(false);
     }
-  }, [institutionId, filterStatus, filterType, filterCoach, filterAccount, channel, dueFrom, dueTo, onlyOverdue, q]);
+  }, [institutionId, filterStatus, filterType, filterCoach, filterAccount, filterClass, channel, dueFrom, dueTo, onlyOverdue, q]);
 
   useEffect(() => {
     setFilterAccount('');
@@ -1064,6 +1088,21 @@ export default function StudentPaymentTrackerPanel() {
             {channelAccounts.map((a) => (
               <option key={a.id} value={a.id}>
                 {a.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="text-xs text-slate-500">
+          Sınıf
+          <select
+            value={filterClass}
+            onChange={(e) => setFilterClass(e.target.value)}
+            className="mt-1 w-full rounded-lg border border-slate-200 px-2.5 py-2 text-sm dark:border-slate-600 dark:bg-slate-900"
+          >
+            <option value="">Tümü</option>
+            {classOptions.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
               </option>
             ))}
           </select>

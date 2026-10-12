@@ -127,6 +127,7 @@ export async function listStudentPayments(params: {
   dueFrom?: string;
   dueTo?: string;
   onlyOverdue?: boolean;
+  classLevel?: string;
   q?: string;
 } = {}) {
   const qs = new URLSearchParams();
@@ -140,6 +141,7 @@ export async function listStudentPayments(params: {
   if (params.dueFrom) qs.set('due_from', params.dueFrom);
   if (params.dueTo) qs.set('due_to', params.dueTo);
   if (params.onlyOverdue) qs.set('only_overdue', '1');
+  if (params.classLevel) qs.set('class_level', params.classLevel);
   if (params.q) qs.set('q', params.q);
   const res = await apiFetch(`/api/student-payment-tracker?${qs}`);
   const j = await parseJson(res);

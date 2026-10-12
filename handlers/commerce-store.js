@@ -1526,7 +1526,23 @@ async function handleStaff(op, body, actor) {
     }
     if (body.search) {
       const s = String(body.search).replace(/%/g, '').trim();
-      if (s) q = q.or(`customer_name.ilike.%${s}%,order_number.ilike.%${s}%`);
+      if (s) {
+        /**
+         * Tabloda ogrencinin adi gosteriliyor ama arama yalnizca siparisin
+         * customer_name alanina bakiyordu; veli adina acilmis siparislerde
+         * ogrenci adiyla arama hic sonuc vermiyordu. Ad eslesen ogrencilerin
+         * kimlikleri de OR kosuluna ekleniyor.
+         */
+        const needle = s.toLocaleLowerCase('tr');
+        const nameMatched = scopedStudents
+          .filter((st) => String(st.name || '').toLocaleLowerCase('tr').includes(needle))
+          .map((st) => st.id)
+          .filter(Boolean)
+          .slice(0, 200);
+        const parts = [`customer_name.ilike.%${s}%`, `order_number.ilike.%${s}%`];
+        if (nameMatched.length) parts.push(`student_id.in.(${nameMatched.join(',')})`);
+        q = q.or(parts.join(','));
+      }
     }
     const limit = Math.min(parseInt(body.limit ?? 100, 10) || 100, 200);
     const offset = parseInt(body.offset ?? 0, 10) || 0;

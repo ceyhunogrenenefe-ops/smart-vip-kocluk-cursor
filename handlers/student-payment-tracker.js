@@ -234,6 +234,7 @@ async function handleGetRecords(req, res, actor, roleSet) {
   const onlyOverdue = String(req.query?.only_overdue || '') === '1';
   const accountType = typeof req.query?.account_type === 'string' ? req.query.account_type.trim() : '';
   const qSearch = typeof req.query?.q === 'string' ? req.query.q.trim().toLowerCase() : '';
+  const classLevel = typeof req.query?.class_level === 'string' ? req.query.class_level.trim() : '';
 
   let q = supabaseAdmin
     .from('student_payment_records')
@@ -281,6 +282,11 @@ async function handleGetRecords(req, res, actor, roleSet) {
   }
 
   let enriched = await enrichRecords(data || []);
+  if (classLevel) {
+    // Zenginlestirmeden sonra: kayittaki class_level bos olabiliyor, enrichRecords
+    // ogrencinin kaydindan dolduruyor. Once filtrelenirse o kayitlar kaybolur.
+    enriched = enriched.filter((r) => String(r.class_level || '') === classLevel);
+  }
   if (onlyOverdue) {
     const today = todayYmd();
     enriched = enriched.filter((r) => r.status !== 'paid' && r.due_date && String(r.due_date).slice(0, 10) < today);
