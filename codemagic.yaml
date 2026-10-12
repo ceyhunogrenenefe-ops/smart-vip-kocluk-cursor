@@ -49,12 +49,14 @@ workflows:
             exit 1
           fi
           keychain initialize
-          # Dağıtım sertifikası yoksa CERTIFICATE_PRIVATE_KEY ile bir kez oluşturulur.
-          # Aynı anahtar her derlemede kullanıldığı için Apple'ın sertifika limiti dolmaz.
-          app-store-connect certificates create \
-            --type IOS_DISTRIBUTION \
-            --certificate-key=@env:CERTIFICATE_PRIVATE_KEY \
-            --save || echo "Sertifika oluşturulamadı (muhtemelen zaten var), mevcut olan denenecek"
+          # NOT: Burada eskiden kosulsuz 'certificates create' cagrisi vardi. Apple ayni
+          # ozel anahtar icin tekrari reddetmiyor, her derlemede YENI bir dagitim
+          # sertifikasi uretiyordu (23 Eylul: 7CDFSXR74P, 12 Ekim: NN9M9YW767).
+          # Hesap iki sertifika sinirina dayandi ve eylulde uretilen profil yeni
+          # sertifikayi icermedigi icin arsiv adimi su hatayla dustu:
+          #   Provisioning profile ... doesn't include signing certificate ...
+          # fetch-signing-files --create, anahtara uyan sertifika yoksa zaten
+          # kendisi uretiyor; ayri create cagrisina gerek yok.
           app-store-connect fetch-signing-files "$BUNDLE_ID" \
             --type IOS_APP_STORE \
             --certificate-key=@env:CERTIFICATE_PRIVATE_KEY \
