@@ -309,11 +309,25 @@ export default async function handler(req, res) {
       if (!row) return res.status(404).json({ error: 'template_not_found' });
       let payload;
       try {
+        /**
+         * Kategori/buton/altbilgi satirdan okunur. Eski satirlarda bu alanlar
+         * bos oldugu icin davranis birebir ayni kaliyor (category null -> UTILITY,
+         * buttons null -> buton bileseni hic eklenmiyor). Fiyat/tanitim iceren
+         * sablonlar UTILITY gonderilince Meta'da PENDING'de takiliyor; bu yuzden
+         * kategori artik sabit degil.
+         */
         payload = buildMetaTemplateCreatePayload({
           name: row.meta_template_name || row.type || row.name,
           language: row.meta_template_language || 'tr',
-          category: 'UTILITY',
+          category: row.category || 'UTILITY',
           bodyText: row.content,
+          examples: row.body_examples || {},
+          headerType: row.header_type || 'NONE',
+          headerText: row.header_text || '',
+          headerHandle: row.header_media_handle || '',
+          headerExample: row.header_example || '',
+          footerText: row.footer_text || '',
+          buttons: Array.isArray(row.buttons) ? row.buttons : [],
         });
       } catch (e) {
         return res.status(400).json({ ok: false, error: e.message });
