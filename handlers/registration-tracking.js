@@ -13,6 +13,7 @@ import {
   mergeLeadChannelMessages
 } from '../api/_lib/crm-lead-messages.js';
 import { isContactUpdate, markLeadContacted } from '../api/_lib/registration-lead-contact.js';
+import { isDuplicateLeadError } from '../api/_lib/registration-channel-ingest.js';
 import {
   normalizeTrPhone,
   normalizeGradeProgram,
@@ -265,6 +266,44 @@ function applyLeadFilters(q, filters, institutionId) {
   return query;
 }
 
+/**
+ * registration_leads_phone_unq kisiti (institution_id, normalized_phone) uzerinde.
+ * Insert/update reddedildiginde ham Postgres metni kullaniciya dusuyordu
+ * ("duplicate key value violates unique constraint ..."). Temsilci bundan
+ * ne yapacagini anlayamiyor; kaydin KIMDE oldugunu soyluyoruz.
+ */
+async function telefonCakismasiHatasi(institutionId, normalizedPhone, haricId) {
+  let q = supabaseAdmin
+    .from('registration_leads')
+    .select('id, full_name, grade_program, stage, primary_status, assigned_user_id, is_internal, created_at')
+    .eq('institution_id', institutionId)
+    .eq('normalized_phone', normalizedPhone)
+    .is('deleted_at', null)
+    .limit(1);
+  if (haricId) q = q.neq('id', haricId);
+  const { data } = await q;
+  const mevcut = (data || [])[0] || null;
+
+  const parcalar = ['Bu telefon numarasiyla kayitli bir aday zaten var.'];
+  if (mevcut) {
+    const kim = String(mevcut.full_name || '').trim();
+    if (kim) parcalar.push(`Kayit: ${kim}${mevcut.grade_program ? ' — ' + mevcut.grade_program : ''}.`);
+    if (mevcut.is_internal) {
+      parcalar.push('Bu kayit "dahili" isaretli oldugu icin normal listede gorunmuyor.');
+    }
+    parcalar.push('Yeni kayit acmak yerine mevcut kaydi acip guncelleyin.');
+  } else {
+    // Kisit reddetti ama satir okunamadi: baska kurumda ya da yetki disinda.
+    parcalar.push('Mevcut kaydi goruntuleme yetkiniz olmayabilir; yoneticinize danisin.');
+  }
+
+  const err = new Error(parcalar.join(' '));
+  err.statusCode = 409;
+  err.errorCode = 'duplicate_phone';
+  err.existingLead = mevcut;
+  return err;
+}
+
 async function findDuplicates(institutionId, payload) {
   const phone = normalizeTrPhone(payload.phone);
   const fullName = String(payload.full_name || `${payload.first_name || ''} ${payload.last_name || ''}`)
@@ -273,22 +312,52 @@ async function findDuplicates(institutionId, payload) {
   const period = String(payload.academic_period_key || '').trim();
   const grade = normalizeGradeProgram(payload.grade_program) || payload.grade_program;
 
+  const ALANLAR =
+    'id, full_name, grade_program, primary_status, stage, normalized_phone, academic_period_key, created_at';
+
+  /**
+   * Telefon tek basina sert tekrardir: veritabanindaki tekillik kisiti yalnizca
+   * (institution_id, normalized_phone) uzerinde. Onceden bu sorgu telefonu
+   * sinif ve donem ile BIRLIKTE ariyordu; ayni numara farkli sinif ya da donemle
+   * girildiginde on kontrol "tekrar yok" diyor, kayit sirasinda veritabani
+   * reddediyordu. Temsilci uyari almadan ham SQL hatasiyla karsilasiyordu.
+   */
+  let sertler = [];
+  if (phone) {
+    const { data, error } = await supabaseAdmin
+      .from('registration_leads')
+      .select(ALANLAR)
+      .eq('institution_id', institutionId)
+      .is('deleted_at', null)
+      .eq('normalized_phone', phone)
+      .limit(20);
+    if (error) throw error;
+    sertler = data || [];
+  }
+
+  // Ayni kisi farkli numarayla girilmis olabilir: ad + sinif + donem eslesmesi
   let query = supabaseAdmin
     .from('registration_leads')
-    .select('id, full_name, grade_program, primary_status, stage, normalized_phone, academic_period_key, created_at')
+    .select(ALANLAR)
     .eq('institution_id', institutionId)
     .is('deleted_at', null);
-
-  if (phone) query = query.eq('normalized_phone', phone);
   if (grade) query = query.eq('grade_program', grade);
   if (period) query = query.eq('academic_period_key', period);
 
-  const { data, error } = await query.limit(20);
+  const { data: adaylar, error } = await query.limit(20);
   if (error) throw error;
 
-  return (data || []).filter((row) => {
+  const yumusaklar = (adaylar || []).filter((row) => {
     const rowName = String(row.full_name || '').toLocaleLowerCase('tr-TR').trim();
-    return !fullName || rowName.includes(fullName) || fullName.includes(rowName);
+    if (!fullName || !rowName) return false;
+    return rowName.includes(fullName) || fullName.includes(rowName);
+  });
+
+  const gorulen = new Set();
+  return [...sertler, ...yumusaklar].filter((row) => {
+    if (gorulen.has(row.id)) return false;
+    gorulen.add(row.id);
+    return true;
   });
 }
 
@@ -654,6 +723,9 @@ async function handleCreateLead(body, institutionId, actor) {
   };
 
   const { data, error } = await supabaseAdmin.from('registration_leads').insert(row).select('*').single();
+  if (error && isDuplicateLeadError(error) && phone) {
+    throw await telefonCakismasiHatasi(institutionId, phone, null);
+  }
   if (error) throw error;
 
   await auditLog({
@@ -733,6 +805,9 @@ async function handleUpdateLead(leadId, body, institutionId, actor, tags) {
     .eq('id', leadId)
     .select('*')
     .single();
+  if (error && isDuplicateLeadError(error) && patch.normalized_phone) {
+    throw await telefonCakismasiHatasi(institutionId, patch.normalized_phone, leadId);
+  }
   if (error) throw error;
 
   await auditLog({
@@ -2228,6 +2303,14 @@ export default async function handler(req, res) {
     const msg = errorMessage(e);
     if (/Missing token|Invalid token|Token expired/i.test(msg)) {
       return res.status(401).json({ error: 'unauthorized', message: msg });
+    }
+    // Beklenen is kurali hatalari (orn. telefon cakismasi) 500 degil kendi kodu
+    if (e?.statusCode && e.statusCode >= 400 && e.statusCode < 500) {
+      return res.status(e.statusCode).json({
+        error: e.errorCode || 'bad_request',
+        message: msg,
+        existing_lead: e.existingLead || null
+      });
     }
     console.error('[registration-tracking]', e);
     return res.status(500).json({ error: 'server_error', message: msg });
