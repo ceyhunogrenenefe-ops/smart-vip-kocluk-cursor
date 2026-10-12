@@ -23,9 +23,18 @@ const ALLOWED_ORIGINS = new Set([
   'https://www.onlinevipdershane.com',
   'https://dersonlinevipkocluk.com',
   'https://www.dersonlinevipkocluk.com',
-  'http://localhost:3000',
-  'http://127.0.0.1:3000'
 ]);
+
+/**
+ * Yerel gelistirme: port Next.js tarafindan degisebiliyor (3000 doluysa 3001).
+ * Sabit liste yetmedigi icin localhost'un tum portlari kabul ediliyor.
+ * Bu uc kisisel veri dondurmedigi ve yalniz okudugu icin risk tasimaz.
+ */
+const LOCAL_ORIGIN = /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
+
+function originIzinli(origin) {
+  return ALLOWED_ORIGINS.has(origin) || LOCAL_ORIGIN.test(origin);
+}
 
 function applyCors(req, res) {
   const origin = String(req.headers?.origin || '').trim();
@@ -35,7 +44,7 @@ function applyCors(req, res) {
    * ayni adresi isteyen tarayici o kopyayi alip CORS'tan patliyor.
    */
   res.setHeader('Vary', 'Origin');
-  if (ALLOWED_ORIGINS.has(origin)) {
+  if (originIzinli(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
   }
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
