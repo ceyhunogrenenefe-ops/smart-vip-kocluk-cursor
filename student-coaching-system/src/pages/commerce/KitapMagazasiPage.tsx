@@ -240,7 +240,7 @@ function StaffOrdersTab() {
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
             <input
               className="pl-8 pr-3 py-1.5 border rounded-lg text-sm w-44 focus:outline-none focus:ring-2 focus:ring-indigo-400"
-              placeholder="Sipariş no / müşteri"
+              placeholder="Sipariş no / öğrenci / müşteri"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
@@ -264,7 +264,7 @@ function StaffOrdersTab() {
           >
             <option value="">Tüm kademeler</option>
             {classLevels.map((lv) => (
-              <option key={lv} value={lv}>{lv}. sınıf</option>
+              <option key={lv} value={lv}>{classLevelLabel(lv) || lv}</option>
             ))}
           </select>
           <select
