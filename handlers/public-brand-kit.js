@@ -16,37 +16,20 @@ import { errorMessage } from '../api/_lib/error-msg.js';
 /** Varsayilan kurum — Test Maker tek kurum icin calisiyor. */
 const DEFAULT_INSTITUTION_ID = '73323d75-eea1-4552-8bba-d50555423589';
 
-/** Izinli kaynaklar sabit; joker (*) kullanilmaz. */
-const ALLOWED_ORIGINS = new Set([
-  'https://online-vip-test-maker.vercel.app',
-  'https://onlinevipdershane.com',
-  'https://www.onlinevipdershane.com',
-  'https://dersonlinevipkocluk.com',
-  'https://www.dersonlinevipkocluk.com',
-]);
-
 /**
- * Yerel gelistirme: port Next.js tarafindan degisebiliyor (3000 doluysa 3001).
- * Sabit liste yetmedigi icin localhost'un tum portlari kabul ediliyor.
- * Bu uc kisisel veri dondurmedigi ve yalniz okudugu icin risk tasimaz.
+ * CORS: bu uc yalnizca kurumun KAMUYA ACIK kimligini doner (ad, logo,
+ * renk, slogan) - sitede zaten herkesin gordugu bilgiler. Kimlik bilgisi
+ * (cerez / Authorization) kullanilmiyor.
+ *
+ * Bu yuzden izin listesi yerine joker kullaniliyor. Izin listesi + Vary
+ * denendi ve KENDI SORUNUNU URETTI: yanit CDN onbellegine girince 3001
+ * icin uretilen ACAO basligi 3002'den gelen istege servis edildi,
+ * tarayici "header has a value http://127.0.0.1:3001 that is not equal
+ * to the supplied origin" diyerek istegi dusurdu. Yanit butun kaynaklar
+ * icin ayni olunca bu sinif hatalar tamamen ortadan kalkiyor.
  */
-const LOCAL_ORIGIN = /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
-
-function originIzinli(origin) {
-  return ALLOWED_ORIGINS.has(origin) || LOCAL_ORIGIN.test(origin);
-}
-
 function applyCors(req, res) {
-  const origin = String(req.headers?.origin || '').trim();
-  /**
-   * `Vary: Origin` HER ZAMAN gonderilir — eslesme olmasa da. Aksi halde
-   * Origin'siz bir istek kenar onbellegine ACAO basligi olmadan dusuyor ve
-   * ayni adresi isteyen tarayici o kopyayi alip CORS'tan patliyor.
-   */
-  res.setHeader('Vary', 'Origin');
-  if (originIzinli(origin)) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-  }
+  res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 }
@@ -55,7 +38,7 @@ function applyCors(req, res) {
  * Gercek goruntu bicimini base64 govdesinden tespit eder.
  *
  * Kayitli logonun MIME etiketi "image/jpeg" ama govde PNG imzasiyla
- * basliyor (iVBORw0KGgo = \x89PNG). Tarayici bunu tolere eder, jsPDF
+ * basliyor (iVBORw0KGgo = PNG). Tarayici bunu tolere eder, jsPDF
  * etmez: yanlis bicimle cagrilan addImage bozuk cikti verir. Bu yuzden
  * etikete degil govdeye bakip data URL'i duzelterek donuyoruz.
  */
