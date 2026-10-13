@@ -35,6 +35,7 @@ import {
   cleanupPreAugustAutoTaksitPayments,
   backfillPaidTaksitToStudentPayments
 } from '../api/_lib/parent-sign-taksit-payment-sync.js';
+import { fetchSozlesmeKapsama } from '../api/_lib/sozlesme-kapsama.js';
 
 const ODEME_SEKLI_SET = new Set(['aylik_taksit', 'kredi_karti_tek', 'kredi_karti_otomatik']);
 const ODEME_TERCİHİ_VELİ_SET = new Set(['henuz_odemedi', 'kredi_karti_odendi', 'aylik_taksit_istiyorum']);
@@ -959,6 +960,34 @@ export default async function handler(req, res) {
           .filter((u) => u.id);
 
         return res.status(200).json({ data: { students: studs || [], user_students } });
+      }
+
+      // Sozlesme kapsama denetimi: sinifta tanimli olup sozlesmesi olmayanlar.
+      // Salt okunur — hicbir sozlesme otomatik olusturulmaz.
+      if (String(req.query.sozlesme_kapsama || '') === '1') {
+        let instId = resolveReadInstitutionId(actor, req.query.institution_id);
+        if (!instId && role === 'admin') instId = actor.institution_id || null;
+        if (!instId && role !== 'super_admin') return res.status(400).json({ error: 'institution_required' });
+        if ((role === 'admin' || role === 'coach') && instId && !hasInstitutionAccess(actor, instId)) {
+          return res.status(403).json({ error: 'forbidden' });
+        }
+        try {
+          const data = await fetchSozlesmeKapsama({
+            institutionId: instId || null,
+            limit: Number(req.query.limit) || 600
+          });
+          return res.status(200).json({ data });
+        } catch (e) {
+          const m = errorMessage(e);
+          if (/does not exist|schema cache|PGRST205|relation/i.test(m)) {
+            return res.status(200).json({
+              data: { sinifta_tanimli: 0, sozlesmeli: 0, kapsam_disi: 0, eksik_toplam: 0, taksiti_var_sozlesmesiz: 0, odemesi_var_sozlesmesiz: 0, eksik: [] },
+              hint: 'kapsama_tablolari_eksik'
+            });
+          }
+          console.error('[parent-sign-contracts sozlesme_kapsama]', m, e);
+          return res.status(500).json({ error: m });
+        }
       }
 
       let q = supabaseAdmin.from('parent_sign_contracts').select('*').order('created_at', { ascending: false }).limit(200);

@@ -187,6 +187,18 @@ export function TahsilatTaksitPanel({ compactHeader = false, onStatsChange }: Pr
     [accounts, bankAccounts, cardAccounts]
   );
 
+  /** payment_accounts.id -> banka adi. Hesap secildigi halde hic gosterilmiyordu. */
+  const hesapEtiketi = useCallback(
+    (hesapId?: string | null): string => {
+      const id = String(hesapId || '').trim();
+      if (!id) return '';
+      const h = accounts.find((x) => x.id === id);
+      if (!h) return '';
+      return String(h.bank_name || h.label || '').trim() || h.label || '';
+    },
+    [accounts]
+  );
+
   const flat = useMemo(() => flattenTaksitRows(rows), [rows]);
 
   const stats = useMemo((): TahsilatStats => {
@@ -602,6 +614,14 @@ export function TahsilatTaksitPanel({ compactHeader = false, onStatsChange }: Pr
                       </label>
                       {x.odendi && x.odendiTarihi ? (
                         <span className="block text-[10px] text-slate-500 mt-0.5">{formatTrShortDate(x.odendiTarihi)}</span>
+                      ) : null}
+                      {x.odendi ? (
+                        <span
+                          className="block text-[10px] font-semibold text-emerald-700 dark:text-emerald-300"
+                          data-test="tahsilat-hesap"
+                        >
+                          {hesapEtiketi(x.odemeHesapId) || 'Hesap belirtilmemis'}
+                        </span>
                       ) : null}
                       {x.odendi ? (
                         <button

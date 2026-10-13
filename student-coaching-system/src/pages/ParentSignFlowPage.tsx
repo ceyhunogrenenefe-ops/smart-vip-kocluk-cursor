@@ -42,8 +42,11 @@ import {
   PARA_BIRIMI_OPTIONS,
   formatParaBirimiLabel,
   formatUcretWithCurrency,
-  type ParaBirimi
+  type ParaBirimi,
+  fetchSozlesmeKapsama,
+  type SozlesmeKapsama
 } from '../lib/parentSignApi';
+import { listPaymentAccounts, type PaymentAccount } from '../lib/studentPaymentTrackerApi';
 import {
   applyTaksitVadeEdit,
   classifyTaksit,
@@ -151,7 +154,8 @@ function taksitKartlariFromRow(r: ParentSignContractRow): TaksitKart[] {
       odendi: Boolean(o.odendi),
       odeme_notu: o.odeme_notu != null ? String(o.odeme_notu) : '',
       vade_tarihi: o.vade_tarihi != null ? String(o.vade_tarihi).slice(0, 10) : undefined,
-      odendi_tarihi: o.odendi_tarihi != null ? String(o.odendi_tarihi).slice(0, 10) : undefined
+      odendi_tarihi: o.odendi_tarihi != null ? String(o.odendi_tarihi).slice(0, 10) : undefined,
+      odeme_hesap_id: o.odeme_hesap_id != null ? String(o.odeme_hesap_id) : null
     });
   }
   return out;
@@ -421,6 +425,23 @@ export default function ParentSignFlowPage() {
   const isSuper = effectiveUser?.role === 'super_admin';
   const isInstitutionAdmin = isSuper || effectiveUser?.role === 'admin';
   const [rows, setRows] = useState<ParentSignContractRow[]>([]);
+  const [odemeHesaplari, setOdemeHesaplari] = useState<PaymentAccount[]>([]);
+  /**
+   * Odendi isaretlemesi window.prompt ile sadece tarih soruyordu; hesap
+   * secilmedigi icin backend varsayilan hesaba yaziyordu ve "hangi bankaya
+   * odendi" kaydedilmemis oluyordu. Modal her ikisini birlikte alir.
+   */
+  const [odemeModali, setOdemeModali] = useState<{
+    row: ParentSignContractRow;
+    index: number;
+    etiket: string;
+    tutar: string;
+  } | null>(null);
+  const [odemeTarihi, setOdemeTarihi] = useState(todayYmdLocal());
+  const [odemeHesapId, setOdemeHesapId] = useState('');
+  const [kapsama, setKapsama] = useState<SozlesmeKapsama | null>(null);
+  const [kapsamaYukleniyor, setKapsamaYukleniyor] = useState(false);
+  const [kapsamaAcik, setKapsamaAcik] = useState(false);
   const [filtreSinif, setFiltreSinif] = useState('');
   const [filtreDurum, setFiltreDurum] = useState('');
   const [filtreArama, setFiltreArama] = useState('');
@@ -1004,26 +1025,134 @@ export default function ParentSignFlowPage() {
       ogrenciAdi: `${r.ogrenci_ad || ''} ${r.ogrenci_soyad || ''}`.trim()
     });
 
+  useEffect(() => {
+    let iptal = false;
+    void (async () => {
+      if (!effectiveInstitutionId) {
+        if (!iptal) setOdemeHesaplari([]);
+        return;
+      }
+      try {
+        const acc = await listPaymentAccounts(effectiveInstitutionId);
+        if (!iptal) setOdemeHesaplari((acc.data || []).filter((a) => a.active !== false));
+      } catch {
+        if (!iptal) setOdemeHesaplari([]);
+      }
+    })();
+    return () => {
+      iptal = true;
+    };
+  }, [effectiveInstitutionId]);
+
+  const hesapEtiketi = useCallback(
+    (hesapId?: string | null): string => {
+      const id = String(hesapId || '').trim();
+      if (!id) return '';
+      const h = odemeHesaplari.find((x) => x.id === id);
+      if (!h) return '';
+      return String(h.bank_name || h.label || '').trim() || h.label || '';
+    },
+    [odemeHesaplari]
+  );
+
+  const kapsamaYukle = useCallback(async () => {
+    if (!effectiveInstitutionId) {
+      setKapsama(null);
+      return;
+    }
+    setKapsamaYukleniyor(true);
+    try {
+      setKapsama(await fetchSozlesmeKapsama(effectiveInstitutionId));
+    } catch {
+      setKapsama(null);
+    } finally {
+      setKapsamaYukleniyor(false);
+    }
+  }, [effectiveInstitutionId]);
+
+  useEffect(() => {
+    void kapsamaYukle();
+  }, [kapsamaYukle]);
+
+  /** Odeme sekli krediyse kart hesabini, degilse bankayi onerir. */
+  const onerilenHesapId = useCallback(
+    (r: ParentSignContractRow): string => {
+      const sekli = String(odemeSekliFromKayitJson(kayitJsonRecord(r)) || '');
+      const kartMi = sekli.startsWith('kredi_karti');
+      const kartlar = odemeHesaplari.filter((a) => a.account_type === 'credit_card');
+      const bankalar = odemeHesaplari.filter((a) => (a.account_type || 'bank') === 'bank');
+      if (kartMi && kartlar[0]?.id) return kartlar[0].id;
+      if (bankalar[0]?.id) return bankalar[0].id;
+      return odemeHesaplari[0]?.id || '';
+    },
+    [odemeHesaplari]
+  );
+
+  const odemeModaliniKapat = () => {
+    setOdemeModali(null);
+    setOdemeHesapId('');
+  };
+
+  /** Modaldaki onay: tarih + hesabi birlikte yazar ve senkronu zorlar. */
+  const odemeyiOnayla = async () => {
+    if (!odemeModali) return;
+    const temiz = String(odemeTarihi).trim().slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(temiz)) {
+      setMsg('Geçerli bir ödeme tarihi girin (YYYY-MM-DD)');
+      return;
+    }
+    if (!odemeHesapId) {
+      setMsg('Ödemenin girdiği banka veya kredi kartı hesabını seçin.');
+      return;
+    }
+    const { row, index } = odemeModali;
+    setParentSignRowBusy(`${row.id}:t${index}`);
+    setMsg(null);
+    try {
+      await patchParentSignKayitOnly({
+        id: row.id,
+        taksit_odeme_update: {
+          index,
+          odendi: true,
+          odendi_tarihi: temiz,
+          payment_account_id: odemeHesapId,
+          force_sync: true
+        }
+      });
+      odemeModaliniKapat();
+      await load();
+      setMsg(
+        `Ödendi · ${temiz} · ${hesapEtiketi(odemeHesapId) || 'hesap'} — öğrenci ödemelerine aktarıldı.`
+      );
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : 'Taksit güncellenemedi');
+    } finally {
+      setParentSignRowBusy(null);
+    }
+  };
+
   const toggleTaksitOdeme = async (r: ParentSignContractRow, index: number, odendi: boolean) => {
+    if (odendi) {
+      // Tarih ve hesap birlikte alinir; hesapsiz isaretleme bankayi kaybediyordu
+      const kart = taksitKartlariFromRow(r)[index];
+      setOdemeTarihi(todayYmdLocal());
+      setOdemeHesapId(String(kart?.odeme_hesap_id || '').trim() || onerilenHesapId(r));
+      setOdemeModali({
+        row: r,
+        index,
+        etiket: `${r.ogrenci_ad || ''} ${r.ogrenci_soyad || ''}`.trim() || '—',
+        tutar:
+          kart?.tutar_tl != null && Number.isFinite(kart.tutar_tl)
+            ? formatUcretWithCurrency(kart.tutar_tl, r.para_birimi)
+            : '—'
+      });
+      setMsg(null);
+      return;
+    }
     setParentSignRowBusy(`${r.id}:t${index}`);
     setMsg(null);
     try {
-      let odendi_tarihi: string | undefined;
-      if (odendi) {
-        const entered = window.prompt('Ödeme tarihi (YYYY-MM-DD)', todayYmdLocal());
-        if (entered == null) {
-          setParentSignRowBusy(null);
-          return;
-        }
-        const cleaned = String(entered).trim().slice(0, 10);
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(cleaned)) {
-          setMsg('Geçerli bir ödeme tarihi girin (YYYY-MM-DD)');
-          setParentSignRowBusy(null);
-          return;
-        }
-        odendi_tarihi = cleaned;
-      }
-      await patchParentSignKayitOnly({ id: r.id, taksit_odeme_update: { index, odendi, odendi_tarihi } });
+      await patchParentSignKayitOnly({ id: r.id, taksit_odeme_update: { index, odendi: false } });
       void load();
     } catch (e) {
       setMsg(e instanceof Error ? e.message : 'Taksit güncellenemedi');
@@ -2058,6 +2187,111 @@ export default function ParentSignFlowPage() {
           ) : null}
         </section>
 
+        {kapsama ? (
+          <section
+            className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900"
+            data-test="sozlesme-kapsama"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100">
+                Sözleşme kapsamı{' '}
+                <span
+                  className={`text-sm font-normal ${
+                    kapsama.eksik_toplam > 0 ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400'
+                  }`}
+                >
+                  ({kapsama.sozlesmeli} / {kapsama.sinifta_tanimli - kapsama.kapsam_disi} öğrenci)
+                </span>
+              </h2>
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => void kapsamaYukle()}
+                  disabled={kapsamaYukleniyor}
+                  className="text-xs font-semibold text-blue-700 hover:underline disabled:opacity-50 dark:text-blue-300"
+                >
+                  {kapsamaYukleniyor ? 'Yenileniyor…' : 'Yenile'}
+                </button>
+                {kapsama.eksik_toplam > 0 ? (
+                  <button
+                    type="button"
+                    onClick={() => setKapsamaAcik((v) => !v)}
+                    className="text-xs font-semibold text-slate-600 hover:underline dark:text-slate-300"
+                    data-test="kapsama-ac-kapa"
+                  >
+                    {kapsamaAcik ? 'Listeyi kapat' : `Eksik ${kapsama.eksik_toplam} öğrenciyi gör`}
+                  </button>
+                ) : null}
+              </div>
+            </div>
+
+            {kapsama.eksik_toplam === 0 ? (
+              <p className="mt-2 text-sm text-emerald-700 dark:text-emerald-300">
+                Sınıflarda tanımlı tüm öğrencilerin sözleşmesi var.
+                {kapsama.kapsam_disi > 0
+                  ? ` (${kapsama.kapsam_disi} ayrılmış/pasif öğrenci kapsam dışı sayıldı.)`
+                  : ''}
+              </p>
+            ) : (
+              <>
+                <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                  <div className="rounded-xl border border-red-200 bg-red-50 p-3 dark:border-red-900/50 dark:bg-red-950/20">
+                    <p className="text-[11px] font-semibold text-red-800 dark:text-red-200">Sözleşmesi yok</p>
+                    <p className="text-xl font-bold text-red-900 dark:text-red-100">{kapsama.eksik_toplam}</p>
+                  </div>
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 dark:border-amber-900/50 dark:bg-amber-950/20">
+                    <p className="text-[11px] font-semibold text-amber-900 dark:text-amber-100">
+                      Taksiti var, sözleşmesi yok
+                    </p>
+                    <p className="text-xl font-bold text-amber-900 dark:text-amber-100">
+                      {kapsama.taksiti_var_sozlesmesiz}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/40">
+                    <p className="text-[11px] font-semibold text-slate-700 dark:text-slate-200">Kapsam dışı</p>
+                    <p className="text-xl font-bold text-slate-800 dark:text-slate-100">{kapsama.kapsam_disi}</p>
+                    <p className="text-[10px] text-slate-500 dark:text-slate-400">ayrılmış / pasif</p>
+                  </div>
+                </div>
+
+                {kapsamaAcik ? (
+                  <ul className="mt-3 max-h-80 space-y-1 overflow-y-auto" data-test="kapsama-listesi">
+                    {kapsama.eksik.map((e) => (
+                      <li
+                        key={e.student_id}
+                        className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-1 text-sm last:border-0 dark:border-slate-700"
+                      >
+                        <span className="text-slate-800 dark:text-slate-100">
+                          {e.name}
+                          {e.class_level ? (
+                            <span className="ml-1 text-xs text-slate-500 dark:text-slate-400">· {e.class_level}</span>
+                          ) : null}
+                        </span>
+                        <span className="flex items-center gap-1">
+                          {e.taksiti_var ? (
+                            <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-900">
+                              taksiti var
+                            </span>
+                          ) : e.odemesi_var ? (
+                            <span className="rounded bg-sky-100 px-1.5 py-0.5 text-[10px] font-semibold text-sky-900">
+                              ödemesi var
+                            </span>
+                          ) : null}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+                <p className="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
+                  Sözleşmeler otomatik oluşturulmaz: ücret, taksit ve veli beyanı gerektirir. Yukarıdaki
+                  <strong> Yeni kayıt</strong> alanından öğrenciyi seçip sözleşmeyi açın; liste her
+                  yenilemede azalır.
+                </p>
+              </>
+            )}
+          </section>
+        ) : null}
+
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100">
@@ -2420,6 +2654,15 @@ export default function ParentSignFlowPage() {
                                   ) : (
                                     <span className="ml-1 text-amber-700 dark:text-amber-300">(bekliyor)</span>
                                   )}
+                                  {tk.odendi ? (
+                                    <span
+                                      className="mt-0.5 block text-[10px] font-normal text-emerald-700 dark:text-emerald-300"
+                                      data-test="taksit-tahsil-detay"
+                                    >
+                                      {hesapEtiketi(tk.odeme_hesap_id) || 'Hesap belirtilmemiş'}
+                                      {tk.odendi_tarihi ? ` · ${tk.odendi_tarihi}` : ''}
+                                    </span>
+                                  ) : null}
                                 </span>
                                 <div className="flex flex-wrap items-center gap-2">
                                   <label className="inline-flex items-center gap-1 text-slate-500 dark:text-slate-400">
@@ -2600,6 +2843,88 @@ export default function ParentSignFlowPage() {
           </ul>
         </section>
       </div>
+
+      {odemeModali ? (
+        <div
+          className="fixed inset-0 z-[210] flex items-start justify-center overflow-y-auto bg-black/50 px-3 py-10 backdrop-blur-sm"
+          role="presentation"
+          onClick={() => odemeModaliniKapat()}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="taksit-odeme-title"
+            className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-5 shadow-xl dark:border-slate-600 dark:bg-slate-900"
+            onClick={(e) => e.stopPropagation()}
+            data-test="taksit-odeme-modali"
+          >
+            <h2 id="taksit-odeme-title" className="text-base font-semibold text-slate-900 dark:text-white">
+              Taksiti tahsil edildi olarak işaretle
+            </h2>
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              {odemeModali.etiket} · {odemeModali.index + 1}. taksit · {odemeModali.tutar}
+            </p>
+
+            <label className="mt-4 block text-xs font-semibold text-slate-700 dark:text-slate-200">
+              Ödeme tarihi
+              <input
+                type="date"
+                value={odemeTarihi}
+                onChange={(e) => setOdemeTarihi(e.target.value)}
+                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-950"
+                data-test="taksit-odeme-tarihi"
+              />
+            </label>
+
+            <label className="mt-3 block text-xs font-semibold text-slate-700 dark:text-slate-200">
+              Hangi hesaba ödendi (banka / kredi kartı)
+              <select
+                value={odemeHesapId}
+                onChange={(e) => setOdemeHesapId(e.target.value)}
+                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-950"
+                data-test="taksit-odeme-hesabi"
+              >
+                <option value="">Hesap seçin…</option>
+                {odemeHesaplari.map((h) => (
+                  <option key={h.id} value={h.id}>
+                    {(h.bank_name || h.label || '').trim() || h.label}
+                    {h.account_type === 'credit_card' ? ' (kredi kartı)' : ''}
+                    {h.bank_name && h.label && h.bank_name !== h.label ? ` — ${h.label}` : ''}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+              Seçilen hesap ve tarih, Muhasebe → Öğrenci ödemelerine aynı kayıt olarak aktarılır.
+              {odemeHesaplari.length === 0
+                ? ' Hesap listesi boş — önce Öğrenci ödemelerinden hesap ekleyin.'
+                : ''}
+            </p>
+
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => odemeModaliniKapat()}
+                className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 dark:border-slate-600 dark:text-slate-200"
+              >
+                İptal
+              </button>
+              <button
+                type="button"
+                disabled={!odemeHesapId || parentSignRowBusy === `${odemeModali.row.id}:t${odemeModali.index}`}
+                onClick={() => void odemeyiOnayla()}
+                className="inline-flex items-center gap-2 rounded-xl bg-emerald-700 px-5 py-2 text-sm font-bold text-white hover:bg-emerald-600 disabled:opacity-50"
+                data-test="taksit-odeme-onayla"
+              >
+                {parentSignRowBusy === `${odemeModali.row.id}:t${odemeModali.index}` ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : null}
+                Tahsil edildi
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {editOpen ? (
         <div
