@@ -261,6 +261,15 @@ export type StaffStoreOrder = {
   status: string;
   payment_status?: string | null;
   payment_method?: string | null;
+  /**
+   * Hangi sanal POS kullanildi: paytr | garanti | ziraat | iban.
+   * commerce_orders'ta payment_method sutunu YOK; bu alan
+   * commerce_payments.provider'dan geliyor.
+   */
+  payment_provider?: string | null;
+  payment_provider_status?: string | null;
+  payment_paid_at?: string | null;
+  payment_providers?: string[];
   total_kurus: number;
   customer_name: string | null;
   customer_phone?: string | null;
@@ -288,6 +297,7 @@ export const csStaffListOrders = (params?: {
   class_id?: string;
   class_level?: string;
   search?: string;
+  payment_provider?: string;
   limit?: number;
   offset?: number;
 }) =>
@@ -296,6 +306,7 @@ export const csStaffListOrders = (params?: {
     classes: StaffStoreOrderClass[];
     student_count: number;
     scope: 'coach' | 'institution';
+    payment_providers?: string[];
   }>('staff.orders', params ?? {});
 
 export const csStaffDeleteOrders = (ids: string[]) =>

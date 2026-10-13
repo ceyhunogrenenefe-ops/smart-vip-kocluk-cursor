@@ -78,6 +78,43 @@ function paymentMethodLabel(method?: string | null) {
   return method || '—';
 }
 
+/**
+ * Hangi sanal POS kullanildi. Onceki surumde "Kart" yaziyordu ve PayTR ile
+ * Garanti ayirt edilemiyordu; mutabakat icin saglayicinin adi gerekli.
+ */
+const POS_ETIKET: Record<string, string> = {
+  paytr: 'PayTR',
+  garanti: 'Garanti',
+  ziraat: 'Ziraat',
+  iban: 'Havale / EFT',
+};
+
+function posEtiketi(saglayici?: string | null): string {
+  const k = String(saglayici || '').toLowerCase();
+  return POS_ETIKET[k] || (saglayici ? String(saglayici) : '—');
+}
+
+const POS_RENK: Record<string, string> = {
+  paytr: 'bg-sky-100 text-sky-800',
+  garanti: 'bg-emerald-100 text-emerald-800',
+  ziraat: 'bg-red-100 text-red-800',
+  iban: 'bg-slate-100 text-slate-700',
+};
+
+function PosRozeti({ saglayici }: { saglayici?: string | null }) {
+  const k = String(saglayici || '').toLowerCase();
+  if (!k) return <span className="text-gray-400">—</span>;
+  return (
+    <span
+      className={`inline-block rounded px-1.5 py-0.5 text-[11px] font-semibold ${
+        POS_RENK[k] || 'bg-gray-100 text-gray-700'
+      }`}
+    >
+      {posEtiketi(k)}
+    </span>
+  );
+}
+
 function OrderStatusBadge({ status }: { status: string }) {
   const colors: Record<string, string> = {
     paid: 'bg-blue-100 text-blue-800',
@@ -106,6 +143,8 @@ function StaffOrdersTab() {
   const [filterStatus, setFilterStatus] = useState('');
   const [filterClassId, setFilterClassId] = useState('');
   const [filterClassLevel, setFilterClassLevel] = useState('');
+  const [filterPos, setFilterPos] = useState('');
+  const [posSecenekleri, setPosSecenekleri] = useState<string[]>([]);
   const [search, setSearch] = useState('');
   const [scope, setScope] = useState<'coach' | 'institution'>('coach');
   const [studentCount, setStudentCount] = useState(0);
@@ -119,6 +158,7 @@ function StaffOrdersTab() {
     search?: string;
     class_id?: string;
     class_level?: string;
+    payment_provider?: string;
   }) => {
     setLoading(true);
     try {
@@ -127,11 +167,16 @@ function StaffOrdersTab() {
         search: params.search || undefined,
         class_id: params.class_id || undefined,
         class_level: params.class_level || undefined,
+        payment_provider: params.payment_provider || undefined,
         limit: 100,
       });
       setOrders(r.orders || []);
       setClasses(r.classes || []);
       setScope(r.scope);
+      // Secenekler filtreyle daralmasin: yalniz filtre yokken tazelenir
+      if (!params.payment_provider && Array.isArray(r.payment_providers)) {
+        setPosSecenekleri(r.payment_providers);
+      }
       setStudentCount(r.student_count ?? 0);
       setSelectedIds(new Set());
     } catch (e: unknown) {
@@ -150,10 +195,11 @@ function StaffOrdersTab() {
         search: search.trim() || undefined,
         class_id: filterClassId || undefined,
         class_level: filterClassLevel || undefined,
+        payment_provider: filterPos || undefined,
       });
     }, 300);
     return () => { if (searchTimer.current) clearTimeout(searchTimer.current); };
-  }, [filterStatus, filterClassId, filterClassLevel, search, load]);
+  }, [filterStatus, filterClassId, filterClassLevel, filterPos, search, load]);
 
   const classLevels = useMemo(() => {
     const set = new Set<string>();
@@ -269,6 +315,17 @@ function StaffOrdersTab() {
           </select>
           <select
             className="border rounded-lg text-sm px-2 py-1.5 focus:outline-none"
+            value={filterPos}
+            onChange={(e) => setFilterPos(e.target.value)}
+            data-test="pos-filtresi"
+          >
+            <option value="">Tüm ödeme yolları</option>
+            {posSecenekleri.map((p) => (
+              <option key={p} value={p}>{posEtiketi(p)}</option>
+            ))}
+          </select>
+          <select
+            className="border rounded-lg text-sm px-2 py-1.5 focus:outline-none"
             value={filterStatus}
             onChange={(e) => setFilterStatus(e.target.value)}
           >
@@ -344,8 +401,8 @@ function StaffOrdersTab() {
                         {o.customer_phone && <div className="text-[11px] text-gray-500">{o.customer_phone}</div>}
                       </td>
                       <td className="px-4 py-3 font-medium">{formatCommerceTry(o.total_kurus)}</td>
-                      <td className="px-4 py-3 text-xs">
-                        <div className="font-medium">{paymentMethodLabel(o.payment_method)}</div>
+                      <td className="px-4 py-3 text-xs" data-test="odeme-hucresi">
+                        <PosRozeti saglayici={o.payment_provider} />
                         {o.receipt_url && (
                           <a
                             href={o.receipt_url}

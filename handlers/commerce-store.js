@@ -1552,20 +1552,59 @@ async function handleStaff(op, body, actor) {
     const orders = (data || []).map((row) => {
       const decorated = decorateOrderWithIbanReceipt(row);
       const cid = classByStudent.get(row.student_id) || null;
+      /**
+       * Hangi sanal POS kullanildi? commerce_orders'ta payment_method diye
+       * bir sutun YOK; arayuz onu okumaya calisip hep bos gosteriyordu.
+       * Gercek bilgi commerce_payments.provider alaninda (paytr, garanti,
+       * ziraat, iban). Odenmis kayit varsa onu, yoksa en sonuncusunu veriyoruz.
+       */
+      const odemeler = Array.isArray(row.commerce_payments) ? row.commerce_payments : [];
+      const odenmis = odemeler.find((x) => x && x.status === 'paid');
+      const sonOdeme =
+        odenmis ||
+        [...odemeler].sort((a, b) =>
+          String(b?.paid_at || '').localeCompare(String(a?.paid_at || ''))
+        )[0] ||
+        null;
+
       return {
         ...decorated,
         student_name: nameById.get(row.student_id) || null,
         student_class_level: levelById.get(row.student_id) || null,
         class_id: cid,
         class_name: cid ? classNameById.get(cid) || null : null,
+        payment_provider: sonOdeme?.provider || null,
+        payment_provider_status: sonOdeme?.status || null,
+        payment_paid_at: sonOdeme?.paid_at || null,
+        payment_providers: [...new Set(odemeler.map((x) => x?.provider).filter(Boolean))],
       };
     });
+
+    /**
+     * Saglayici filtresi listeden SONRA uygulanir: bilgi iliskili tabloda
+     * oldugu icin sorguya .eq ile eklenemiyor.
+     */
+    const saglayiciFiltre = String(body.payment_provider || '').trim().toLowerCase();
+    const filtreli = saglayiciFiltre
+      ? orders.filter(
+          (o) =>
+            String(o.payment_provider || '').toLowerCase() === saglayiciFiltre ||
+            (o.payment_providers || []).some(
+              (p) => String(p).toLowerCase() === saglayiciFiltre
+            )
+        )
+      : orders;
+
     return {
       ok: true,
-      orders,
+      orders: filtreli,
       classes: classes || [],
       student_count: studentIds.length,
       scope: scope.coach_id ? 'coach' : 'institution',
+      /** Filtre listesini arayuz sabit yazmasin diye mevcut degerler */
+      payment_providers: [
+        ...new Set(orders.map((o) => o.payment_provider).filter(Boolean)),
+      ].sort(),
     };
   }
 

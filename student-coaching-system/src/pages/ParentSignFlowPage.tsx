@@ -371,13 +371,93 @@ function kayitRowStatusBadge(r: ParentSignContractRow) {
   );
 }
 
+/**
+ * Sinif alani serbest metin ve dagınık: "10", "10 sınıf", "5. Sınıf",
+ * "YÖS" ve "YOS" ayrı ayrı kaydedilmiş. Ham değerlerle açılır liste
+ * yapılırsa aynı sınıf birkaç satıra bölünür ve filtre işe yaramaz.
+ * Bu yüzden gruplama için ortak bir anahtar üretiliyor; kaydın kendi
+ * metni değiştirilmiyor.
+ */
+export function sinifAnahtari(ham: string | null | undefined): string {
+  const t = String(ham || '').trim();
+  if (!t) return '';
+  const kucuk = t.toLocaleLowerCase('tr-TR');
+  const rakam = /^(\d{1,2})/.exec(kucuk);
+  if (rakam) {
+    const n = Number(rakam[1]);
+    if (n >= 1 && n <= 12) return `${n}. Sınıf`;
+  }
+  if (kucuk.includes('lgs')) return 'LGS';
+  if (kucuk.includes('yös') || kucuk.includes('yos')) return 'YÖS';
+  if (kucuk.includes('mezun')) return 'Mezun';
+  return t;
+}
+
+/** Sınıf listesini sayısal sınıflar önce gelecek şekilde sıralar. */
+function sinifSirala(a: string, b: string): number {
+  const na = /^(\d{1,2})\./.exec(a);
+  const nb = /^(\d{1,2})\./.exec(b);
+  if (na && nb) return Number(na[1]) - Number(nb[1]);
+  if (na) return -1;
+  if (nb) return 1;
+  return a.localeCompare(b, 'tr');
+}
+
+/** Arama: Türkçe karakterleri ve büyük/küçük farkını yok sayar. */
+function aramaNormal(x: string | null | undefined): string {
+  return String(x || '')
+    .toLocaleLowerCase('tr-TR')
+    .replace(/ı/g, 'i')
+    .replace(/İ/g, 'i')
+    .trim();
+}
+
 export default function ParentSignFlowPage() {
   const [searchParams] = useSearchParams();
+
+
   const { effectiveUser } = useAuth();
   const { activeInstitutionId, institution } = useApp();
   const isSuper = effectiveUser?.role === 'super_admin';
   const isInstitutionAdmin = isSuper || effectiveUser?.role === 'admin';
   const [rows, setRows] = useState<ParentSignContractRow[]>([]);
+  const [filtreSinif, setFiltreSinif] = useState('');
+  const [filtreDurum, setFiltreDurum] = useState('');
+  const [filtreArama, setFiltreArama] = useState('');
+
+  /** Açılır listedeki sınıflar — kayıtlardan türetilir, sabit liste değil. */
+  const sinifSecenekleri = useMemo(() => {
+    const sayac = new Map<string, number>();
+    for (const r of rows) {
+      const k = sinifAnahtari(r.sinif);
+      if (!k) continue;
+      sayac.set(k, (sayac.get(k) || 0) + 1);
+    }
+    return [...sayac.entries()]
+      .sort((a, b) => sinifSirala(a[0], b[0]))
+      .map(([ad, adet]) => ({ ad, adet }));
+  }, [rows]);
+
+  const filtrelenmisRows = useMemo(() => {
+    const ara = aramaNormal(filtreArama);
+    return rows.filter((r) => {
+      if (filtreSinif && sinifAnahtari(r.sinif) !== filtreSinif) return false;
+      if (filtreDurum && String(r.status || '') !== filtreDurum) return false;
+      if (!ara) return true;
+      const alanlar = [
+        r.ogrenci_ad,
+        r.ogrenci_soyad,
+        r.veli_ad,
+        r.veli_soyad,
+        r.telefon,
+        r.contract_number,
+        r.sinif,
+      ];
+      return alanlar.some((x) => aramaNormal(x).includes(ara));
+    });
+  }, [rows, filtreSinif, filtreDurum, filtreArama]);
+
+  const filtreAktif = Boolean(filtreSinif || filtreDurum || filtreArama.trim());
   const [presets, setPresets] = useState<ParentSignClassPresetRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadingPresets, setLoadingPresets] = useState(false);
@@ -1981,10 +2061,53 @@ export default function ParentSignFlowPage() {
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100">
-              Kayıtlar {rows.length > 0 ? <span className="text-sm font-normal text-slate-500">({rows.length})</span> : null}
+              Kayıtlar{' '}
+              {rows.length > 0 ? (
+                <span className="text-sm font-normal text-slate-500" data-test="kayit-sayaci">
+                  ({filtreAktif ? `${filtrelenmisRows.length} / ${rows.length}` : rows.length})
+                </span>
+              ) : null}
             </h2>
             <button type="button" onClick={() => void load()} className="text-xs text-blue-700 font-semibold hover:underline">
               Yenile
+            </button>
+          </div>
+          <div className="mb-3 grid gap-2 sm:grid-cols-[1fr_auto_auto_auto]" data-test="veli-filtreleri">
+            <input
+              value={filtreArama}
+              onChange={(e) => setFiltreArama(e.target.value)}
+              placeholder="Öğrenci, veli, telefon veya sözleşme no…"
+              className="rounded-lg border border-slate-300 px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-900"
+              data-test="veli-arama"
+            />
+            <select
+              value={filtreSinif}
+              onChange={(e) => setFiltreSinif(e.target.value)}
+              className="rounded-lg border border-slate-300 px-2 py-2 text-sm dark:border-slate-600 dark:bg-slate-900"
+              data-test="veli-sinif-filtresi"
+            >
+              <option value="">Tüm sınıflar</option>
+              {sinifSecenekleri.map((x) => (
+                <option key={x.ad} value={x.ad}>{x.ad} ({x.adet})</option>
+              ))}
+            </select>
+            <select
+              value={filtreDurum}
+              onChange={(e) => setFiltreDurum(e.target.value)}
+              className="rounded-lg border border-slate-300 px-2 py-2 text-sm dark:border-slate-600 dark:bg-slate-900"
+              data-test="veli-durum-filtresi"
+            >
+              <option value="">Tüm durumlar</option>
+              <option value="signed">İmzalandı</option>
+              <option value="draft">İmza bekliyor</option>
+            </select>
+            <button
+              type="button"
+              onClick={() => { setFiltreArama(''); setFiltreSinif(''); setFiltreDurum(''); }}
+              disabled={!filtreAktif}
+              className="rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-600 disabled:opacity-40 dark:border-slate-600"
+            >
+              Temizle
             </button>
           </div>
           <p className="text-xs text-slate-500 mb-3">Satıra tıklayarak detayları ve işlemleri açın.</p>
@@ -1992,8 +2115,13 @@ export default function ParentSignFlowPage() {
           {!loading && rows.length === 0 ? (
             <p className="text-sm text-slate-500 py-6 text-center">Henüz kayıt yok.</p>
           ) : null}
+          {!loading && rows.length > 0 && filtrelenmisRows.length === 0 ? (
+            <p className="text-sm text-slate-500 py-6 text-center">
+              Bu filtrelere uyan kayıt yok.
+            </p>
+          ) : null}
           <ul className="space-y-3">
-            {rows.map((r) => {
+            {filtrelenmisRows.map((r) => {
               const expanded = expandedKayitId === r.id;
               const phase = kayitFormPhase(r);
               const displayAd = [r.ogrenci_ad, r.ogrenci_soyad].map((x) => String(x || '').trim()).filter(Boolean).join(' ');
