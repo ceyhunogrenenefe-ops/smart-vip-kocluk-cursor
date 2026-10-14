@@ -414,15 +414,28 @@ export default async function handler(req, res) {
            * Bize ait olmayan yuk null doner ve akis etkilenmez; mevcut
            * mesaj isleme her durumda aynen devam eder.
            */
+          /**
+           * AYNI OLAY BIRDEN COK KEZ GELEBILIR.
+           * collectEntryMessagingEvents, olayi `messaging[]`, `standby[]`
+           * ve `changes[field=messages]` kaynaklarindan toplar; Meta ayrica
+           * yanit gecikirse webhook'u yeniden gonderir. Mesaj kimligine
+           * (mid) gore burada tekillestiriyoruz; asil koruma yine de
+           * veritabani kilidinde (ig-gonderim-kilidi).
+           */
+          const gorulenOlaylar = new Set();
           for (const m of messaging) {
             try {
               const n = normalizeInstagramMessagingEvent(m);
               if (n.isEcho || !n.senderId || !n.quickReplyPayload) continue;
+              const olayAnahtari = `${n.messageId || ''}|${n.senderId}|${n.quickReplyPayload}`;
+              if (gorulenOlaylar.has(olayAnahtari)) continue;
+              gorulenOlaylar.add(olayAnahtari);
               const { takipButonunuIsle } = await import('../api/_lib/ig-takip-akisi.js');
               const sonuc = await takipButonunuIsle({
                 payload: n.quickReplyPayload,
                 igUserId: n.senderId,
-                institutionId: null
+                institutionId: null,
+                eventId: n.messageId || null
               });
               if (sonuc?.handled) {
                 console.info('[meta-webhook] IG_FOLLOW_GATE', {

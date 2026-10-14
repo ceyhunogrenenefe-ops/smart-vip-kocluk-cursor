@@ -15,6 +15,13 @@
  */
 import { supabaseAdmin } from './supabase-admin.js';
 import { yorumIcinPlan } from './ig-takip-kapisi.js';
+import {
+  ADIMLAR,
+  gonderimHakkiAl,
+  gonderimIncelemeyeAl,
+  gonderimSonucu,
+  islemAnahtari
+} from './ig-gonderim-kilidi.js';
 import { errorMessage } from './error-msg.js';
 import { mesajdakiBagi, pickAutomation, renderAutomationText } from './crm-comment-automation-core.js';
 
@@ -160,12 +167,33 @@ export async function runCommentAutomationForComment({ comment, institutionId })
       patch.dm_status = 'skipped';
       patch.dm_error = takipKapisi ? 'follow_invite_text_empty' : 'dm_text_empty';
     } else {
+      /**
+       * Yorum basina TEK gonderim. comment_id benzersiz indeksi ayni
+       * yorumu zaten engelliyor; bu kilit webhook'un iki ornekte ayni anda
+       * islenmesine (oku-sonra-yaz yarisi) karsi ikinci savunma.
+       */
+      const davetKey = islemAnahtari({
+        step: ADIMLAR.INVITE,
+        automationId: automation.id,
+        commentId
+      });
+      const hak = await gonderimHakkiAl({
+        dedupKey: davetKey,
+        automationId: automation.id,
+        igUserId: igUserId || null,
+        step: ADIMLAR.INVITE
+      });
+      if (!hak.alindi) {
+        patch.dm_status = 'skipped';
+        patch.dm_error = 'already_sent';
+      } else {
       try {
         await inbox.sendInstagramPrivateReply({
           commentId,
           text: dmText,
           quickReply: takipKapisi ? { title: plan.buttonText, payload: plan.payload } : undefined
         });
+        await gonderimSonucu({ dedupKey: davetKey, status: 'sent' });
         // Temsilci gelen kutusunda görsün
         if (igUserId) {
           await inbox
@@ -181,8 +209,11 @@ export async function runCommentAutomationForComment({ comment, institutionId })
             .catch(() => null);
         }
       } catch (e) {
+        // Sonuc belirsiz olabilir: anahtar korunur, korlemesine tekrar yok
+        await gonderimIncelemeyeAl({ dedupKey: davetKey, error: errorMessage(e) });
         patch.dm_status = 'failed';
         patch.dm_error = errorMessage(e).slice(0, 500);
+      }
       }
     }
 
