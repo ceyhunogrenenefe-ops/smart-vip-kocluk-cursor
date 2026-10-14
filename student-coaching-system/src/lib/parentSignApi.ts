@@ -217,6 +217,52 @@ export async function listParentSignFillCandidates(institutionId: string): Promi
   };
 }
 
+/** Sinifta tanimli olup sozlesmesi olmayan ogrenci */
+export type SozlesmesizOgrenci = {
+  student_id: string;
+  name: string;
+  class_level?: string | null;
+  enrollment_status?: string | null;
+  class_count: number;
+  odemesi_var: boolean;
+  taksiti_var: boolean;
+};
+
+export type SozlesmeKapsama = {
+  sinifta_tanimli: number;
+  sozlesmeli: number;
+  kapsam_disi: number;
+  eksik_toplam: number;
+  taksiti_var_sozlesmesiz: number;
+  odemesi_var_sozlesmesiz: number;
+  eksik: SozlesmesizOgrenci[];
+};
+
+const BOS_KAPSAMA: SozlesmeKapsama = {
+  sinifta_tanimli: 0,
+  sozlesmeli: 0,
+  kapsam_disi: 0,
+  eksik_toplam: 0,
+  taksiti_var_sozlesmesiz: 0,
+  odemesi_var_sozlesmesiz: 0,
+  eksik: []
+};
+
+/** Salt okunur denetim: hicbir sozlesme olusturmaz. */
+export async function fetchSozlesmeKapsama(institutionId?: string): Promise<SozlesmeKapsama> {
+  const qs = new URLSearchParams({ sozlesme_kapsama: '1' });
+  if (institutionId) qs.set('institution_id', institutionId);
+  const res = await apiFetch(`/api/parent-sign-contracts?${qs}`);
+  const j = (await res.json().catch(() => ({}))) as { data?: Partial<SozlesmeKapsama>; error?: string };
+  if (!res.ok) throw new Error(j.error || `API ${res.status}`);
+  const d = j.data || {};
+  return {
+    ...BOS_KAPSAMA,
+    ...d,
+    eksik: Array.isArray(d.eksik) ? d.eksik : []
+  };
+}
+
 export async function fetchParentSignInstitutionLegal(institutionId: string): Promise<ParentSignInstitutionLegal> {
   const q = institutionId ? `?institution_id=${encodeURIComponent(institutionId)}` : '';
   const res = await apiFetch(`/api/parent-sign-legal${q}`);

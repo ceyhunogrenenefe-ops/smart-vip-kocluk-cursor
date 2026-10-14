@@ -30,6 +30,12 @@ export type TaksitKartMuhasebe = {
   odeme_notu?: string;
   vade_tarihi?: string;
   odendi_tarihi?: string;
+  /**
+   * Taksitin tahsil edildigi banka / kredi karti hesabi (payment_accounts.id).
+   * Backend bu alani zaten yaziyordu ama arayuz hic okumuyordu; bu yuzden
+   * "hangi bankaya odendi" hicbir ekranda gorunmuyordu.
+   */
+  odeme_hesap_id?: string | null;
 };
 
 const YMD = /^\d{4}-\d{2}-\d{2}$/;
@@ -191,6 +197,8 @@ export type TaksitFlatRow = {
   vadeYmd: string;
   odendi: boolean;
   odendiTarihi: string;
+  /** Tahsilatin girdigi banka / kredi karti hesabi (payment_accounts.id) */
+  odemeHesapId: string | null;
   durum: TaksitDurum;
   signed: boolean;
   odemeSekli: OdemeSekli;
@@ -242,7 +250,8 @@ function parseCards(r: ParentSignContractRow): TaksitKartMuhasebe[] {
       odendi: Boolean(o.odendi),
       odeme_notu: o.odeme_notu != null ? String(o.odeme_notu) : '',
       vade_tarihi: o.vade_tarihi != null ? String(o.vade_tarihi).slice(0, 10) : undefined,
-      odendi_tarihi: o.odendi_tarihi != null ? String(o.odendi_tarihi).slice(0, 10) : ''
+      odendi_tarihi: o.odendi_tarihi != null ? String(o.odendi_tarihi).slice(0, 10) : '',
+      odeme_hesap_id: o.odeme_hesap_id != null ? String(o.odeme_hesap_id) : null
     });
   }
   return out;
@@ -276,6 +285,7 @@ export function flattenTaksitRows(contracts: ParentSignContractRow[]): TaksitFla
         vadeYmd: vade,
         odendi,
         odendiTarihi: String(c.odendi_tarihi || '').slice(0, 10),
+        odemeHesapId: c.odeme_hesap_id != null ? String(c.odeme_hesap_id) : null,
         durum: classifyTaksit(vade, odendi),
         signed,
         odemeSekli
