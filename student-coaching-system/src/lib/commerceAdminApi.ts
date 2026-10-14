@@ -188,6 +188,29 @@ export const caUpdateOfferFlags = (id: string, flags: { is_featured?: boolean; i
 export type OrderListParams = { status?: string; student_id?: string; search?: string; limit?: number; offset?: number };
 export const caListOrders = (params?: OrderListParams) => post<{ orders: CommerceOrder[] }>('orders.list', params ?? {});
 export const caGetOrder = (id: string) => post<{ order: CommerceOrder }>('orders.get', { id });
+
+/** Hicbir kurumun Magaza ekranindan ulasilamayan siparisler */
+export type SahipsizSiparis = CommerceOrder & { sahipsiz?: boolean; iletisim_yok?: boolean };
+export const caListUnassignedOrders = () =>
+  post<{ orders: SahipsizSiparis[]; total: number; paid_count: number }>('orders.unassigned', {});
+
+export type OwnerCandidate = {
+  id: string;
+  name: string | null;
+  class_level: string | null;
+  institution_id: string | null;
+  phone: string | null;
+  parent_phone: string | null;
+  email: string | null;
+};
+export const caOwnerCandidates = (search: string) =>
+  post<{ students: OwnerCandidate[] }>('orders.owner_candidates', { search });
+
+export const caSetOrderOwner = (id: string, student_id: string) =>
+  post<{ order: { id: string; student_id: string | null; institution_id: string | null } }>(
+    'orders.set_owner',
+    { id, student_id }
+  );
 export const caUpdateOrderStatus = (id: string, status: string, notes?: string) =>
   post<{ order: CommerceOrder }>('orders.update_status', { id, status, notes });
 export const caUpdateOrder = (

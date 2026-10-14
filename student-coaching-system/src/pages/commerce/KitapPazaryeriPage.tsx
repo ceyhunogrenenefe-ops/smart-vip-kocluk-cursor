@@ -3,6 +3,7 @@
  * Sekmeler: Satıcılar | Onay Bekleyenler | Kitaplar | Teklifler | Siparişler | Hakedişler | Kuponlar | Raporlar | Ayarlar
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import SahipsizSiparislerPanel from '../../components/commerce/SahipsizSiparislerPanel';
 import { useNavigate } from 'react-router-dom';
 import {
   AlertCircle,
@@ -1791,6 +1792,7 @@ function SiparislerTab() {
 
   return (
     <div>
+      <SahipsizSiparislerPanel />
       <div className="flex justify-between items-center mb-4 gap-3 flex-wrap">
         <div>
           <h2 className="text-lg font-semibold">Mağaza siparişleri</h2>

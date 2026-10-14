@@ -108,3 +108,37 @@ export function siparisleriBirlestir(ogrenciSiparisleri, misafirSiparisleri, lim
   const n = Number(limit);
   return Number.isFinite(n) && n > 0 ? hepsi.slice(0, n) : hepsi;
 }
+
+/**
+ * SAHİPSİZ SİPARİŞLER
+ *
+ * Hiçbir kurumun Mağaza ekranından ulaşılamayan siparişler: öğrenciye
+ * bağlı değil, kurumu yazılmamış ve iletişim bilgisi sistemdeki hiçbir
+ * öğrenci/kullanıcıyla eşleşmiyor. Bunlar tahminle bir kuruma
+ * yazılmaz — yönetici elle bağlar.
+ *
+ * @param {Array} orders commerce_orders satırları
+ * @param {{epostalar: Set<string>, telefonlar: Set<string>}} tumKumeler
+ *        sistemdeki TÜM öğrenci ve kullanıcıların iletişim kümeleri
+ */
+export function sahipsizSiparisler(orders, tumKumeler) {
+  const out = [];
+  for (const o of Array.isArray(orders) ? orders : []) {
+    if (!o) continue;
+    if (o.student_id) continue;
+    if (String(o.institution_id || '').trim()) continue;
+
+    const e = epostaAnahtari(o.customer_email);
+    if (e && tumKumeler?.epostalar?.has(e)) continue;
+    const t = telefonAnahtari(o.customer_phone);
+    if (t && tumKumeler?.telefonlar?.has(t)) continue;
+
+    out.push({
+      ...o,
+      sahipsiz: true,
+      /** İletişim bilgisi hiç yoksa elle bağlamak da zor — ayrıca işaretle */
+      iletisim_yok: !e && !t
+    });
+  }
+  return out;
+}
