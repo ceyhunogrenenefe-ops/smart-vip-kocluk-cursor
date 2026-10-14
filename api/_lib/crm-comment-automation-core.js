@@ -114,3 +114,18 @@ export function renderAutomationText(template, { username = '', keyword = '' } =
     .replace(/\{\{\s*keyword\s*\}\}/gi, keyword || '')
     .trim();
 }
+
+/**
+ * Mesaj metnindeki ilk bağlantıyı çıkarır.
+ *
+ * Neden: aynı PDF iki ayrı otomasyonda tanımlıysa (farklı gönderi, aynı
+ * anahtar kelime) aynı kişi aynı belgeyi iki kez alıyordu — `once_per_user`
+ * yalnız kendi otomasyonu içinde koruyor. Bağlantı, otomasyonlar arası
+ * tekilleştirme anahtarıdır.
+ */
+export function mesajdakiBagi(metin) {
+  const m = String(metin || '').match(/https?:\/\/[^\s<>"']+/);
+  if (!m) return null;
+  // Sondaki noktalama bağlantının parçası değildir
+  return m[0].replace(/[.,;:!?)\]]+$/, '');
+}

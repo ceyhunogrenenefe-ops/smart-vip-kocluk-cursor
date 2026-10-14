@@ -986,6 +986,28 @@ export async function listInstagramMedia({ limit = 25 } = {}) {
   return Array.isArray(json?.data) ? json.data : [];
 }
 
+/**
+ * Instagram hizli yanitlarini Meta'nin bekledigi bicime getirir.
+ *
+ * Meta her ogede content_type ISTER; eksikse mesaj HIC gitmez ve
+ * "(#100) The parameter message[quick_replies][0][content_type] is required"
+ * doner. Bu hata uretimde takip kapisinin "takip etmiyorsunuz" uyarisini
+ * sessizce dusurdu: kullanici butona basti, karsiliginda hicbir sey almadi.
+ * Cagiranlarin hatirlamasina birakmak yerine burada tamamlaniyor.
+ *
+ * Meta sinirlari: en fazla 13 hizli yanit, baslik 20 karakter.
+ */
+export function normalizeQuickReplies(quickReplies) {
+  return (Array.isArray(quickReplies) ? quickReplies : [])
+    .filter((q) => q && q.title)
+    .slice(0, 13)
+    .map((q) => ({
+      content_type: q.content_type || 'text',
+      title: String(q.title).slice(0, 20),
+      payload: String(q.payload ?? q.title).slice(0, 1000)
+    }));
+}
+
 export async function sendCrmInstagramQuickReplies({ igScopedId, text, quickReplies }) {
   await loadMetaWhatsAppSecretsFromDb();
   const { resolveSocialToken, resolvePageId } = await import('./meta-social-inbound.js');
@@ -1004,7 +1026,17 @@ export async function sendCrmInstagramQuickReplies({ igScopedId, text, quickRepl
     body: JSON.stringify({
       recipient: { id: String(igScopedId) },
       messaging_type: 'RESPONSE',
-      message: { text: String(text || '').slice(0, 1000), quick_replies: quickReplies }
+      message: {
+        text: String(text || '').slice(0, 1000),
+        /**
+         * Meta her hizli yanitta content_type ISTER; eksikse
+         * "(#100) The parameter message[quick_replies][0][content_type]
+         * is required" hatasi doner ve mesaj HIC gitmez. Cagiranlarin
+         * hatirlamasina birakmak yerine burada tamamliyoruz.
+         * Baslik siniri 20 karakter.
+         */
+        quick_replies: normalizeQuickReplies(quickReplies)
+      }
     })
   });
   const json = await res.json().catch(() => ({}));

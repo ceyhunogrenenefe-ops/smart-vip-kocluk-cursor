@@ -5,8 +5,7 @@ import {
   normalizeForMatch,
   pickAutomation,
   renderAutomationText,
-  tokenize
-} from './crm-comment-automation-core.js';
+  tokenize, mesajdakiBagi} from './crm-comment-automation-core.js';
 
 describe('anahtar kelime eşleştirme', () => {
   const kw = ['LGS'];
@@ -119,4 +118,31 @@ describe('metin yer tutucuları', () => {
   it('kullanıcı adı yoksa boş bırakır', () => {
     assert.equal(renderAutomationText('Selam {{username}}', {}), 'Selam');
   });
+});
+
+describe('mesajdakiBagi — otomasyonlar arasi tekillestirme', () => {
+  it('mesajdaki bag cikarilir', () => {
+  assert.equal(
+    mesajdakiBagi('Link: https://drive.google.com/drive/folders/1Ysu?usp=sharing iyi çalışmalar'),
+    'https://drive.google.com/drive/folders/1Ysu?usp=sharing'
+  );
+  });
+
+  it('sondaki noktalama bagin parcasi degildir', () => {
+  assert.equal(mesajdakiBagi('Buyrun: https://ornek.com/a.pdf.'), 'https://ornek.com/a.pdf');
+  assert.equal(mesajdakiBagi('(https://ornek.com/a)'), 'https://ornek.com/a');
+  });
+
+  it('ayni bagi tasiyan iki farkli mesaj ayni anahtari verir', () => {
+  const a = mesajdakiBagi('Merhaba 👋 https://drive.google.com/drive/folders/1Ysu?usp=sharing');
+  const b = mesajdakiBagi('Selam! Kaynaklar: https://drive.google.com/drive/folders/1Ysu?usp=sharing 📚');
+  assert.equal(a, b, 'ayni belge ayni anahtarla tekillestirilmeli');
+  });
+
+  it('bag yoksa null doner — tekillestirme devreye girmez', () => {
+  assert.equal(mesajdakiBagi('sadece metin'), null);
+  assert.equal(mesajdakiBagi(''), null);
+  assert.equal(mesajdakiBagi(null), null);
+  });
+
 });
