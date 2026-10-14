@@ -27,6 +27,7 @@
 import { randomUUID } from 'crypto';
 import { requireAuth } from '../api/_lib/auth.js';
 import { actorRoleSet, roleSetHasSuperAdmin, roleSetHasAdmin } from '../api/_lib/actor-roles.js';
+import { iletisimKumeleri, sahipsizSiparisler } from '../api/_lib/magaza-misafir-siparis.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { bulkUpsertBooks, ensureYankiVendor, seedLgs8DenemeKulubu, seedLgs8ParafIqSet, seedLgs8VipCatalog, seedLgs8VipSet, seedVip5Catalog, seedVip5Set, seedVip7Catalog, seedVip7Set, upsertYankiOfferForExistingBook } from '../api/_lib/commerce-lgs8-seed.js';
 import { attachOfferRelations, attachOfferRelationsList } from '../api/_lib/commerce-utils.js';
@@ -890,6 +891,103 @@ async function handleOrders(op, body, actor) {
       submitted: activated.submitted || null,
       sync_warning: activated.sync_warning || null,
     };
+  }
+
+  /**
+   * SAHIPSIZ SIPARISLER
+   * Hicbir kurumun Magaza ekranindan ulasilamayan siparisler: ogrenciye
+   * bagli degil, kurumu yazilmamis ve iletisimi sistemdeki hicbir
+   * ogrenci/kullaniciyla eslesmiyor. Olculdu: 132 siparisin 22'si boyle,
+   * 5'i odenmis/onayli gercek para.
+   */
+  if (op === 'orders.unassigned') {
+    const { data: adaylar, error: oErr } = await supabaseAdmin
+      .from('commerce_orders')
+      .select('*, commerce_order_items(id, title_snapshot, quantity, unit_price_kurus), commerce_payments(id, provider, status, paid_at)')
+      .is('student_id', null)
+      .is('institution_id', null)
+      .order('created_at', { ascending: false })
+      .limit(500);
+    if (oErr) throw oErr;
+
+    // Sistemdeki TUM iletisim bilgileri: biriyle eslesen siparis zaten
+    // bir kurumun Magaza ekraninda goruluyor, sahipsiz sayilmaz.
+    const [{ data: ogr }, { data: kul }] = await Promise.all([
+      supabaseAdmin.from('students').select('email, phone, parent_phone').limit(5000),
+      supabaseAdmin.from('users').select('email, phone').limit(5000)
+    ]);
+    const kumeler = iletisimKumeleri([...(ogr || []), ...(kul || [])]);
+    const liste = sahipsizSiparisler(adaylar || [], kumeler);
+
+    return {
+      ok: true,
+      orders: liste.map(decorateOrderWithIbanReceipt),
+      total: liste.length,
+      /** Gercek para tutan sahipsiz siparis sayisi — oncelik icin */
+      paid_count: liste.filter((o) => o.status === 'paid' || o.status === 'confirmed').length
+    };
+  }
+
+  /**
+   * Sahipsiz siparisi bir ogrenciye veya kuruma baglar.
+   * YALNIZ sahipsiz siparise izin verilir: zaten sahibi olan bir siparisin
+   * sahibini degistirmek ciroyu baska kuruma tasirdi.
+   */
+  if (op === 'orders.set_owner') {
+    const id = String(body.id || '').trim();
+    if (!id) throw new Error('id gerekli');
+    const studentId = String(body.student_id || '').trim();
+    const institutionIdIn = String(body.institution_id || '').trim();
+    if (!studentId && !institutionIdIn) throw new Error('Öğrenci veya kurum seçin');
+
+    const { data: mevcut, error: gErr } = await supabaseAdmin
+      .from('commerce_orders')
+      .select('id, student_id, institution_id')
+      .eq('id', id)
+      .maybeSingle();
+    if (gErr) throw gErr;
+    if (!mevcut) throw new Error('Sipariş bulunamadı');
+    if (mevcut.student_id || String(mevcut.institution_id || '').trim()) {
+      throw new Error('Bu siparişin sahibi zaten tanımlı; değiştirilemez.');
+    }
+
+    const yama = { updated_at: new Date().toISOString() };
+    if (studentId) {
+      const { data: st, error: sErr } = await supabaseAdmin
+        .from('students')
+        .select('id, institution_id')
+        .eq('id', studentId)
+        .maybeSingle();
+      if (sErr) throw sErr;
+      if (!st) throw new Error('Öğrenci bulunamadı');
+      yama.student_id = st.id;
+      // Kurum ogrenciden turetilir: elle girilen kurumla celismesin
+      yama.institution_id = st.institution_id || institutionIdIn || null;
+    } else {
+      yama.institution_id = institutionIdIn;
+    }
+
+    const { data, error } = await supabaseAdmin
+      .from('commerce_orders')
+      .update(yama)
+      .eq('id', id)
+      .select('id, student_id, institution_id')
+      .maybeSingle();
+    if (error) throw error;
+    return { ok: true, order: data };
+  }
+
+  /** Sahipsiz siparisi baglarken ogrenci aramasi */
+  if (op === 'orders.owner_candidates') {
+    const q = String(body.search || '').replace(/%/g, '').trim();
+    if (q.length < 2) return { ok: true, students: [] };
+    const { data, error } = await supabaseAdmin
+      .from('students')
+      .select('id, name, class_level, institution_id, phone, parent_phone, email')
+      .or(`name.ilike.%${q}%,phone.ilike.%${q}%,parent_phone.ilike.%${q}%,email.ilike.%${q}%`)
+      .limit(20);
+    if (error) throw error;
+    return { ok: true, students: data || [] };
   }
 
   if (op === 'orders.list') {

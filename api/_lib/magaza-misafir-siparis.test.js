@@ -5,6 +5,7 @@ import {
   iletisimKumeleri,
   misafirSiparisAtfi,
   misafirSiparisleriSuz,
+  sahipsizSiparisler,
   siparisleriBirlestir,
   telefonAnahtari
 } from './magaza-misafir-siparis.js';
@@ -117,4 +118,42 @@ test('birlestirme limiti uygular', () => {
   }));
   assert.equal(siparisleriBirlestir(liste, [], 4).length, 4);
   assert.equal(siparisleriBirlestir(liste, [], 4)[0].id, '9', 'en yeni basta olmali');
+});
+
+const TUM = iletisimKumeleri([{ email: 'bilinen@x.com', phone: '05321112233' }]);
+
+test('sahipsiz: ogrenciye bagli siparis sahipsiz degildir', () => {
+  const r = sahipsizSiparisler([{ id: '1', student_id: 's1' }], TUM);
+  assert.equal(r.length, 0);
+});
+
+test('sahipsiz: kurumu yazilmis siparis sahipsiz degildir', () => {
+  const r = sahipsizSiparisler([{ id: '1', student_id: null, institution_id: 'k1' }], TUM);
+  assert.equal(r.length, 0);
+});
+
+test('sahipsiz: iletisimi sistemde bulunan siparis sahipsiz degildir', () => {
+  const r = sahipsizSiparisler(
+    [
+      { id: 'a', student_id: null, institution_id: null, customer_email: 'BILINEN@x.com' },
+      { id: 'b', student_id: null, institution_id: null, customer_phone: '+90 532 111 22 33' }
+    ],
+    TUM
+  );
+  assert.equal(r.length, 0, 'eslesenler Magaza ekraninda zaten gorunuyor');
+});
+
+test('sahipsiz: hicbir yere baglanamayan siparis listelenir', () => {
+  const r = sahipsizSiparisler(
+    [{ id: 'x', student_id: null, institution_id: null, customer_email: 'yabanci@x.com', customer_phone: '05000000000' }],
+    TUM
+  );
+  assert.deepEqual(r.map((o) => o.id), ['x']);
+  assert.equal(r[0].sahipsiz, true);
+  assert.equal(r[0].iletisim_yok, false);
+});
+
+test('sahipsiz: iletisim bilgisi hic olmayan siparis ayrica isaretlenir', () => {
+  const r = sahipsizSiparisler([{ id: 'y', student_id: null, institution_id: null }], TUM);
+  assert.equal(r[0].iletisim_yok, true, 'elle baglamak icin bilgi yok uyarisi');
 });
