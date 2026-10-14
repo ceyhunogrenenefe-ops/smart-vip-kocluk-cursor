@@ -21,9 +21,22 @@ import { Link } from 'react-router-dom';
 import { listInstitutionsForPicker, type InstitutionPickRow } from '../lib/parentSignApi';
 import AdminTeacherReviewsPanel from '../components/teacher/AdminTeacherReviewsPanel';
 
+type Ucret = {
+  fee: number | null;
+  duration: number;
+  source: 'teacher' | 'default' | 'none';
+  enabled: boolean;
+};
+
 type Row = {
   id: string;
   slug: string;
+  /** Ogretmenin kendi ucreti; null ise kurum varsayilani gecerli */
+  private_lesson_fee_tl?: number | null;
+  private_lesson_enabled?: boolean;
+  lesson_duration_min?: number | null;
+  /** Sunucunun cozdugu etkin ucret — kural tek yerde dursun diye */
+  ucret?: Ucret;
   status: string;
   completion_pct: number;
   sync_status?: string;
@@ -317,6 +330,12 @@ function ProfileSitePreview({
 
 export default function TeacherProfileApprovalsPage() {
   const [rows, setRows] = useState<Row[]>([]);
+  const [fiyatAyari, setFiyatAyari] = useState<{ default_fee_tl: number; default_duration_min: number }>({
+    default_fee_tl: 0,
+    default_duration_min: 40
+  });
+  const [varsayilanTaslak, setVarsayilanTaslak] = useState('');
+  const [ucretTaslak, setUcretTaslak] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<string>('pending_approval');
   const [busyId, setBusyId] = useState('');
@@ -349,6 +368,10 @@ export default function TeacherProfileApprovalsPage() {
       const j = await res.json();
       if (!res.ok) throw new Error(j.message || j.error || res.statusText);
       setRows(j.data || []);
+      if (j.fiyat_ayari) {
+        setFiyatAyari(j.fiyat_ayari);
+        setVarsayilanTaslak(String(j.fiyat_ayari.default_fee_tl ?? ''));
+      }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Liste alınamadı');
     } finally {
@@ -403,7 +426,7 @@ export default function TeacherProfileApprovalsPage() {
 
   const missingLabel = (key: string) => FIELD_TR[key] || key;
 
-  const act = async (id: string, op: string, body?: Record<string, string>) => {
+  const act = async (id: string, op: string, body?: Record<string, string | number | boolean>) => {
     setBusyId(id);
     try {
       const res = await apiFetch(`/api/teacher-profiles-admin?op=${op}&id=${encodeURIComponent(id)}`, {
@@ -424,6 +447,43 @@ export default function TeacherProfileApprovalsPage() {
       toast.error(e instanceof Error ? e.message : 'İşlem başarısız');
     } finally {
       setBusyId('');
+    }
+  };
+
+  /**
+   * Ogretmenin ozel ders ucretini yazar.
+   * Tek satir guncellenir; baska ogretmenin ucreti etkilenmez. Bos deger
+   * ucreti kaldirir ve ogretmen kurum varsayilanina doner.
+   */
+  const ucretKaydet = async (row: Row) => {
+    const ham = ucretTaslak[row.id];
+    if (ham === undefined) return;
+    await act(row.id, 'set-private-fee', { private_lesson_fee_tl: ham });
+    setUcretTaslak((p) => {
+      const n = { ...p };
+      delete n[row.id];
+      return n;
+    });
+  };
+
+  const ozelDersAktifligi = async (row: Row, acik: boolean) => {
+    await act(row.id, 'set-private-fee', { private_lesson_enabled: acik });
+  };
+
+  /** Kurum varsayilani — ucreti girilmemis TUM ogretmenleri etkiler */
+  const varsayilaniKaydet = async () => {
+    try {
+      const res = await apiFetch('/api/teacher-profiles-admin?op=private-fee-settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ default_fee_tl: varsayilanTaslak })
+      });
+      const j = await res.json();
+      if (!res.ok) throw new Error(j.message || j.error || res.statusText);
+      toast.success('Varsayılan ücret kaydedildi');
+      await load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Kaydedilemedi');
     }
   };
 
@@ -624,6 +684,37 @@ export default function TeacherProfileApprovalsPage() {
         </button>
       </div>
 
+      {/* Ucreti girilmemis ogretmenler bu degeri kullanir */}
+      <div
+        className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-white p-4"
+        data-test="varsayilan-ucret-kutusu"
+      >
+        <div className="min-w-0">
+          <p className="text-sm font-bold text-slate-900">Varsayılan özel ders ücreti</p>
+          <p className="text-xs text-slate-500">
+            Kendi ücreti girilmemiş öğretmenler için geçerlidir. Öğretmene ücret girildiğinde
+            o öğretmen bu değerden etkilenmez.
+          </p>
+        </div>
+        <div className="ml-auto flex items-center gap-2">
+          <input
+            value={varsayilanTaslak}
+            onChange={(e) => setVarsayilanTaslak(e.target.value)}
+            inputMode="decimal"
+            className="w-32 rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
+            data-test="varsayilan-ucret-girisi"
+          />
+          <span className="text-xs text-slate-500">TL / {fiyatAyari.default_duration_min || 40} dk</span>
+          <button
+            type="button"
+            onClick={() => void varsayilaniKaydet()}
+            className="rounded-lg bg-[#1a3fad] px-3 py-1.5 text-sm font-semibold text-white"
+          >
+            Kaydet
+          </button>
+        </div>
+      </div>
+
       <AdminTeacherReviewsPanel />
 
       <div className="flex flex-wrap gap-2">
@@ -757,6 +848,56 @@ export default function TeacherProfileApprovalsPage() {
                             Panel kapalı
                           </span>
                         ) : null}
+                      </div>
+                      <div className="mt-2 flex flex-wrap items-center gap-2 rounded-lg bg-slate-50 p-2" data-test="ozel-ders-ucret">
+                        <span className="text-xs font-semibold text-slate-600">Özel ders ücreti</span>
+                        <input
+                          value={
+                            ucretTaslak[row.id] !== undefined
+                              ? ucretTaslak[row.id]
+                              : row.private_lesson_fee_tl != null
+                                ? String(row.private_lesson_fee_tl)
+                                : ''
+                          }
+                          onChange={(e) => setUcretTaslak((p) => ({ ...p, [row.id]: e.target.value }))}
+                          placeholder={`Varsayılan: ${fiyatAyari.default_fee_tl || 0} TL`}
+                          inputMode="decimal"
+                          className="w-32 rounded border border-slate-300 px-2 py-1 text-xs"
+                          data-test="ucret-girisi"
+                        />
+                        <span className="text-xs text-slate-500">TL / {row.ucret?.duration ?? 40} dk</span>
+                        <button
+                          type="button"
+                          disabled={busyId === row.id || ucretTaslak[row.id] === undefined}
+                          onClick={() => void ucretKaydet(row)}
+                          className="rounded bg-[#1a3fad] px-2.5 py-1 text-xs font-semibold text-white disabled:opacity-40"
+                        >
+                          Kaydet
+                        </button>
+                        <span
+                          className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                            row.ucret?.source === 'teacher'
+                              ? 'bg-emerald-100 text-emerald-800'
+                              : row.ucret?.source === 'default'
+                                ? 'bg-slate-200 text-slate-700'
+                                : 'bg-amber-100 text-amber-900'
+                          }`}
+                        >
+                          {row.ucret?.source === 'teacher'
+                            ? 'Kendi ücreti'
+                            : row.ucret?.source === 'default'
+                              ? 'Varsayılan'
+                              : 'Ücret yok'}
+                        </span>
+                        <label className="ml-2 flex items-center gap-1 text-xs text-slate-600">
+                          <input
+                            type="checkbox"
+                            checked={row.private_lesson_enabled !== false}
+                            disabled={busyId === row.id}
+                            onChange={(e) => void ozelDersAktifligi(row, e.target.checked)}
+                          />
+                          Özel derse açık
+                        </label>
                       </div>
                       <div className="mt-2 flex flex-wrap gap-2">
                         <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-700">

@@ -9,6 +9,7 @@
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { errorMessage } from '../api/_lib/error-msg.js';
 import { publicCardFromSnapshot, publicDetailFromSnapshot } from '../api/_lib/teacher-profile.js';
+import { fiyatAyariniOku } from '../api/_lib/ozel-ders-fiyat-ayari.js';
 import { listPublicTeacherReviews } from '../api/_lib/teacher-reviews.js';
 import { computePublicSlots, loadAvailabilityBundle } from '../api/_lib/teacher-availability.js';
 
@@ -83,7 +84,7 @@ export default async function handler(req, res) {
 
       return res.status(200).json({
         teacher: {
-          ...publicDetailFromSnapshot(data),
+          ...publicDetailFromSnapshot(data, await fiyatAyariniOku(null)),
           documents: (docs || []).map((d) => ({
             id: d.id,
             kind: d.kind,
@@ -118,10 +119,13 @@ export default async function handler(req, res) {
       .limit(500);
     if (managedErr) throw managedErr;
 
+    // Ücret varsayılanı bir kez okunur; her kart için tekrar sorgulanmaz
+    const fiyatAyari = await fiyatAyariniOku(null);
+
     return res.status(200).json({
       teachers: (data || [])
         .filter((r) => r.published_snapshot)
-        .map((r) => publicCardFromSnapshot(r)),
+        .map((r) => publicCardFromSnapshot(r, fiyatAyari)),
       managed_slugs: (managedRows || []).map((r) => r.slug).filter(Boolean)
     });
   } catch (e) {

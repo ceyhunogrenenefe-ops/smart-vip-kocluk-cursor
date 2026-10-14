@@ -129,6 +129,13 @@ function fieldDiffKeys(published, pendingOrWorking) {
   return changed;
 }
 
+import {
+  ogretmenUcreti,
+  sureyiTemizle,
+  ucretiTemizle
+} from '../api/_lib/ozel-ders-ucret.js';
+import { fiyatAyariniOku, fiyatAyariniYaz } from '../api/_lib/ozel-ders-fiyat-ayari.js';
+
 const MUTATION_OPS = new Set([
   'approve',
   'reject',
@@ -140,7 +147,8 @@ const MUTATION_OPS = new Set([
   'open-panel',
   'soft-delete',
   'restore',
-  'hard-delete'
+  'hard-delete',
+  'set-private-fee'
 ]);
 
 async function provisionAuthForPanelUser({ id, email, passwordPlain, name, role }) {
@@ -188,6 +196,33 @@ export default async function handler(req, res) {
     }
 
     // Sitedeki statik kadro listesi + panel eşleşme durumu
+    /** Kurum varsayılan özel ders ücreti — okuma */
+    if (req.method === 'GET' && op === 'private-fee-settings') {
+      const ayar = await fiyatAyariniOku(null);
+      return res.status(200).json({
+        data: ayar || { institution_id: null, default_fee_tl: 0, default_duration_min: 40 }
+      });
+    }
+
+    /** Kurum varsayılan özel ders ücreti — yazma */
+    if (req.method === 'POST' && op === 'private-fee-settings') {
+      const body = req.body || {};
+      const yama = {};
+      if (Object.prototype.hasOwnProperty.call(body, 'default_fee_tl')) {
+        const { value, error: fErr } = ucretiTemizle(body.default_fee_tl);
+        if (fErr) return res.status(400).json({ error: 'invalid', message: fErr });
+        // Varsayılan NULL olamaz; girilmezse 0 yazılır ve "fiyat yok" sayılır
+        yama.defaultFeeTl = value === null ? 0 : value;
+      }
+      if (Object.prototype.hasOwnProperty.call(body, 'default_duration_min')) {
+        const { value, error: sErr } = sureyiTemizle(body.default_duration_min);
+        if (sErr) return res.status(400).json({ error: 'invalid', message: sErr });
+        if (value !== null) yama.defaultDurationMin = value;
+      }
+      const data = await fiyatAyariniYaz(null, { ...yama, actorSub: String(actor?.sub || '') });
+      return res.status(200).json({ data });
+    }
+
     if (req.method === 'GET' && op === 'site-catalog') {
       const { data: profiles } = await supabaseAdmin
         .from('teacher_profiles')
@@ -289,13 +324,19 @@ export default async function handler(req, res) {
         for (const u of users || []) usersById[u.id] = u;
       }
 
+      // Etkin ücret listede de görünsün: yönetici hangi öğretmenin kendi
+      // ücreti var, hangisi varsayılanda kalmış tek bakışta görsün
+      const fiyatAyari = await fiyatAyariniOku(null);
+
       return res.status(200).json({
         data: (data || []).map((p) => ({
           ...p,
           user: usersById[p.user_id] || null,
           missing_required: missingRequiredFields(workingPayloadFromRow(p)),
-          status: isUpdatePendingStatus(p.status) ? 'update_pending' : p.status
-        }))
+          status: isUpdatePendingStatus(p.status) ? 'update_pending' : p.status,
+          ucret: ogretmenUcreti(p, fiyatAyari)
+        })),
+        fiyat_ayari: fiyatAyari || { default_fee_tl: 0, default_duration_min: 40 }
       });
     }
 
@@ -482,6 +523,47 @@ export default async function handler(req, res) {
         .eq('id', profile.user_id)
         .maybeSingle();
       const teacherInstitutionId = teacherUser?.institution_id || null;
+
+      /**
+       * Özel ders ücreti / süresi / aktifliği.
+       * YALNIZ bu üç alana dokunur: profilin onay durumuna, yayın
+       * anlık görüntüsüne, ders programına ve rezervasyonlara karışmaz.
+       * Bir öğretmenin ücreti diğerlerini etkilemez — tek satır güncellenir.
+       */
+      if (op === 'set-private-fee') {
+        const body = req.body || {};
+        const yama = { updated_at: new Date().toISOString() };
+
+        if (Object.prototype.hasOwnProperty.call(body, 'private_lesson_fee_tl')) {
+          const { value, error: fErr } = ucretiTemizle(body.private_lesson_fee_tl);
+          if (fErr) return res.status(400).json({ error: 'invalid', message: fErr });
+          yama.private_lesson_fee_tl = value;
+          yama.private_lesson_fee_updated_at = value === null ? null : yama.updated_at;
+          yama.private_lesson_fee_updated_by = value === null ? null : String(actor?.sub || '') || null;
+        }
+        if (Object.prototype.hasOwnProperty.call(body, 'lesson_duration_min')) {
+          const { value, error: sErr } = sureyiTemizle(body.lesson_duration_min);
+          if (sErr) return res.status(400).json({ error: 'invalid', message: sErr });
+          yama.lesson_duration_min = value;
+        }
+        if (Object.prototype.hasOwnProperty.call(body, 'private_lesson_enabled')) {
+          yama.private_lesson_enabled = body.private_lesson_enabled !== false;
+        }
+
+        const { data: guncel, error: uErr } = await supabaseAdmin
+          .from('teacher_profiles')
+          .update(yama)
+          .eq('id', id)
+          .select('id, display_name, first_name, last_name, branch, lesson_duration_min, private_lesson_enabled, private_lesson_fee_tl, private_lesson_fee_updated_at')
+          .maybeSingle();
+        if (uErr) throw uErr;
+        if (!guncel) return res.status(404).json({ error: 'not_found' });
+
+        const ayar = await fiyatAyariniOku(null);
+        return res.status(200).json({
+          data: { ...guncel, ucret: ogretmenUcreti(guncel, ayar) }
+        });
+      }
 
       if (op === 'retry-sync') {
         const result = await pushSiteSync(profile, 'teacher_profile_upsert');
