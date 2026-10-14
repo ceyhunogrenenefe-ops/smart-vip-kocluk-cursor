@@ -6,6 +6,12 @@
  * - Kurum yöneticisi: kendi kurumunun takvimini ekler / düzenler / siler.
  * - Süper admin: institution_id ile seçtiği kurumun takvimini yönetir.
  */
+import {
+  bugunYmd,
+  durumuTemizle,
+  elleIsaretli,
+  etkinDurum
+} from '../api/_lib/exam-calendar-durum.js';
 import { requireAuthenticatedActor } from '../api/_lib/auth.js';
 import { enrichStudentActor } from '../api/_lib/enrich-student-actor.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
@@ -19,7 +25,7 @@ import {
 
 const STAFF_ROLES = ['super_admin', 'admin', 'coach', 'teacher'];
 const COLUMNS =
-  'id, level, publisher, exam_no, difficulty, exam_date, content, source, sort_order, updated_at, institution_id';
+  'id, level, publisher, exam_no, difficulty, exam_date, content, source, sort_order, updated_at, institution_id, status, status_updated_at, status_updated_by';
 
 function parseBody(req) {
   const b = req.body;
@@ -98,6 +104,17 @@ function cleanRow(body) {
   };
 }
 
+/**
+ * Yalnız durum güncelleyen PATCH gövdesi mi?
+ * cleanRow sınıf/tarih/yayınevi ister; yönetici bir sınavı "Yapıldı"
+ * işaretlerken bunları yeniden göndermek zorunda kalmamalı.
+ */
+function sadeceDurumGuncellemesi(body) {
+  if (!body || typeof body !== 'object') return false;
+  if (!('status' in body)) return false;
+  return !body.publisher && !body.exam_date && !body.level;
+}
+
 export default async function handler(req, res) {
   let actor;
   try {
@@ -150,8 +167,20 @@ export default async function handler(req, res) {
       }
       const { data, error } = await q.limit(1000);
       if (error) throw new Error(error.message);
+      /**
+       * Etkin durumu sunucu hesaplar: kural istemciye kopyalanırsa ikisi
+       * zamanla ayrışır ve ekranda görünen durum ile süzme tutmaz.
+       * Tarih filtresi YOK — geçmiş sınavlar da döner.
+       */
+      const bugun = bugunYmd();
+      const rows = (data || []).map((r) => ({
+        ...r,
+        etkin_durum: etkinDurum(r, bugun),
+        durum_elle: elleIsaretli(r)
+      }));
       return res.status(200).json({
-        data: data || [],
+        data: rows,
+        bugun,
         scope: isStudentOnly ? 'student' : 'staff',
         level: myLevel,
         class_level: classLevel,
@@ -167,6 +196,31 @@ export default async function handler(req, res) {
     }
     const body = parseBody(req);
 
+    // Durum işaretleme: sınavın diğer alanlarına dokunmaz, kaydı silmez
+    if (req.method === 'PATCH' && sadeceDurumGuncellemesi(body)) {
+      const id = String(body.id || req.query?.id || '').trim();
+      if (!id) return res.status(400).json({ error: 'id_required' });
+      const { value, error: dErr } = durumuTemizle(body.status);
+      if (dErr) return res.status(400).json({ error: 'invalid', message: dErr });
+      const now = new Date().toISOString();
+      const { data, error } = await supabaseAdmin
+        .from('exam_calendar')
+        .update({
+          status: value,
+          status_updated_at: value ? now : null,
+          status_updated_by: value ? String(actor.sub || '') : null,
+          updated_at: now,
+          updated_by: String(actor.sub || '')
+        })
+        .eq('id', id)
+        .eq('institution_id', institutionId)
+        .select(COLUMNS)
+        .maybeSingle();
+      if (error) throw new Error(error.message);
+      if (!data) return res.status(404).json({ error: 'not_found' });
+      return res.status(200).json({ data });
+    }
+
     if (req.method === 'POST' || req.method === 'PATCH') {
       const { row, error: vErr } = cleanRow(body);
       if (vErr) return res.status(400).json({ error: 'invalid', message: vErr });
@@ -174,9 +228,18 @@ export default async function handler(req, res) {
       if (req.method === 'PATCH') {
         const id = String(body.id || req.query?.id || '').trim();
         if (!id) return res.status(400).json({ error: 'id_required' });
+        // Tam düzenlemede durum gönderildiyse onu da uygula
+        const durumAlani = {};
+        if ('status' in body) {
+          const { value, error: dErr } = durumuTemizle(body.status);
+          if (dErr) return res.status(400).json({ error: 'invalid', message: dErr });
+          durumAlani.status = value;
+          durumAlani.status_updated_at = value ? stamp.updated_at : null;
+          durumAlani.status_updated_by = value ? String(actor.sub || '') : null;
+        }
         const { data, error } = await supabaseAdmin
           .from('exam_calendar')
-          .update({ ...row, ...stamp })
+          .update({ ...row, ...durumAlani, ...stamp })
           .eq('id', id)
           .eq('institution_id', institutionId)
           .select(COLUMNS)
