@@ -16,7 +16,7 @@
 import { supabaseAdmin } from './supabase-admin.js';
 import { yorumIcinPlan } from './ig-takip-kapisi.js';
 import { errorMessage } from './error-msg.js';
-import { pickAutomation, renderAutomationText } from './crm-comment-automation-core.js';
+import { mesajdakiBagi, pickAutomation, renderAutomationText } from './crm-comment-automation-core.js';
 
 const TABLE = 'crm_comment_automations';
 const LOG_TABLE = 'crm_comment_automation_logs';
@@ -43,7 +43,7 @@ export async function loadActiveCommentAutomations(institutionId) {
   }
 }
 
-async function alreadyHandled({ commentId, automationId, igUserId, oncePerUser }) {
+async function alreadyHandled({ commentId, automationId, igUserId, oncePerUser, sentLink }) {
   try {
     const { data: byComment } = await supabaseAdmin
       .from(LOG_TABLE)
@@ -61,6 +61,23 @@ async function alreadyHandled({ commentId, automationId, igUserId, oncePerUser }
         .eq('dm_status', 'sent')
         .limit(1);
       if (Array.isArray(byUser) && byUser.length) return 'user_already_received';
+
+      /**
+       * AYNI BAĞLANTI BAŞKA BIR OTOMASYONDAN GITTIYSE TEKRAR GONDERME.
+       * Uretimde goruldu: ayni kisi iki ayri gonderiye "LGS" yazdi, iki
+       * otomasyon ayni Drive bagini gonderdi. once_per_user yalniz kendi
+       * otomasyonu icinde koruyordu.
+       */
+      if (sentLink) {
+        const { data: byLink } = await supabaseAdmin
+          .from(LOG_TABLE)
+          .select('id')
+          .eq('ig_user_id', String(igUserId))
+          .eq('sent_link', sentLink)
+          .eq('dm_status', 'sent')
+          .limit(1);
+        if (Array.isArray(byLink) && byLink.length) return 'link_already_sent';
+      }
     }
   } catch (e) {
     if (!tableMissing(e)) console.warn('[comment-automation] tekillik:', errorMessage(e));
@@ -96,7 +113,8 @@ export async function runCommentAutomationForComment({ comment, institutionId })
       commentId,
       automationId: automation.id,
       igUserId,
-      oncePerUser: automation.once_per_user !== false
+      oncePerUser: automation.once_per_user !== false,
+      sentLink: mesajdakiBagi(automation.dm_text)
     });
     if (dup) return { ran: false, reason: dup, automationId: automation.id };
 
@@ -109,6 +127,8 @@ export async function runCommentAutomationForComment({ comment, institutionId })
       ig_user_id: igUserId || null,
       username: comment?.fromUsername || null,
       matched_keyword: keyword,
+      // Otomasyonlar arasi tekillestirme anahtari
+      sent_link: mesajdakiBagi(automation.dm_text),
       dm_status: 'pending'
     });
     if (logErr) {
