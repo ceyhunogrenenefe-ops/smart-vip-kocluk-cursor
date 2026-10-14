@@ -14,6 +14,7 @@
  *   bozulmaz.
  */
 import { supabaseAdmin } from './supabase-admin.js';
+import { yorumIcinPlan } from './ig-takip-kapisi.js';
 import { errorMessage } from './error-msg.js';
 import { pickAutomation, renderAutomationText } from './crm-comment-automation-core.js';
 
@@ -122,13 +123,29 @@ export async function runCommentAutomationForComment({ comment, institutionId })
     const vars = { username: comment?.fromUsername || '', keyword };
     const patch = { dm_status: 'sent', dm_error: null };
 
-    const dmText = renderAutomationText(automation.dm_text, vars);
+    /**
+     * TAKIP KAPISI
+     * Kapali (varsayilan): plan.aksiyon='send_pdf' -> mevcut davranis aynen.
+     * Acik: PDF yerine DAVET mesaji gider; PDF bagi burada GECMEZ ve
+     * yorum altina "PDF gonderdik" yaniti verilmez.
+     */
+    const plan = yorumIcinPlan(automation);
+    const takipKapisi = plan.aksiyon === 'send_invite';
+    if (takipKapisi) patch.follow_state = 'invite_sent';
+
+    const dmText = takipKapisi
+      ? renderAutomationText(plan.text, vars)
+      : renderAutomationText(automation.dm_text, vars);
     if (!dmText) {
       patch.dm_status = 'skipped';
-      patch.dm_error = 'dm_text_empty';
+      patch.dm_error = takipKapisi ? 'follow_invite_text_empty' : 'dm_text_empty';
     } else {
       try {
-        await inbox.sendInstagramPrivateReply({ commentId, text: dmText });
+        await inbox.sendInstagramPrivateReply({
+          commentId,
+          text: dmText,
+          quickReply: takipKapisi ? { title: plan.buttonText, payload: plan.payload } : undefined
+        });
         // Temsilci gelen kutusunda görsün
         if (igUserId) {
           await inbox
@@ -149,7 +166,12 @@ export async function runCommentAutomationForComment({ comment, institutionId })
       }
     }
 
-    const replyText = renderAutomationText(automation.reply_comment_text, vars);
+    /**
+     * Spec: "PDF henuz gonderilmemisse 'PDF gonderdik' yaniti verilmesin."
+     * Takip kapisi acikken yorum yaniti, PDF dogrulama sonrasi
+     * gonderildiginde verilir (bkz. ig-takip-kapisi akisi).
+     */
+    const replyText = takipKapisi ? '' : renderAutomationText(automation.reply_comment_text, vars);
     if (replyText) {
       try {
         await inbox.replyToInstagramComment({ commentId, text: replyText });

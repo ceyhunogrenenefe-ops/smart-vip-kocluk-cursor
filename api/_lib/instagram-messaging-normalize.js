@@ -94,10 +94,23 @@ export function normalizeInstagramMessagingEvent(ev) {
     text = '[Instagram sohbet başladı]';
   }
 
+  /**
+   * Buton yuku ayri alan olarak veriliyor: eskiden yalniz `text` icine
+   * katlaniyordu ve otomasyon butonlari metinden ayirt edilemiyordu.
+   * Takip kapisi bu yuke gore yonlendirme yapiyor.
+   */
+  const quickReplyPayload =
+    ev?.message?.quick_reply?.payload != null
+      ? String(ev.message.quick_reply.payload)
+      : ev?.postback?.payload != null
+        ? String(ev.postback.payload)
+        : null;
+
   const hasInboundContent = Boolean(text || hasAttachments);
   return {
     senderId,
     text,
+    quickReplyPayload,
     messageId,
     messageType: text && !hasAttachments ? 'text' : hasAttachments ? 'attachment' : 'text',
     hasInboundContent,

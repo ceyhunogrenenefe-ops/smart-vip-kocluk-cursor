@@ -16,6 +16,12 @@ type Automation = {
   reply_comment_text: string | null;
   once_per_user: boolean;
   is_active: boolean;
+  /** PDF gondermeden once Instagram takip kontrolu yap */
+  follow_gate_enabled?: boolean;
+  follow_invite_text?: string | null;
+  follow_button_text?: string | null;
+  follow_retry_text?: string | null;
+  follow_retry_button_text?: string | null;
   sent_count?: number;
   last_sent_at?: string | null;
 };
@@ -40,7 +46,22 @@ const BOS: Automation = {
   dm_text: '',
   reply_comment_text: null,
   once_per_user: true,
-  is_active: false
+  is_active: false,
+  follow_gate_enabled: false,
+  follow_invite_text: null,
+  follow_button_text: null,
+  follow_retry_text: null,
+  follow_retry_button_text: null
+};
+
+/** Takip dogrulamasi bu kurulumda calisiyor mu */
+type Yetenek = {
+  baglanti_var?: boolean;
+  token_calisiyor?: boolean;
+  alan_destekleniyor?: boolean | null;
+  ig_username?: string | null;
+  neden?: string | null;
+  oneri?: string | null;
 };
 
 const input =
@@ -62,6 +83,8 @@ export default function CrmCommentAutomationPanel() {
   const [media, setMedia] = useState<Media[]>([]);
   const [mediaHint, setMediaHint] = useState<string | null>(null);
   const [draft, setDraft] = useState<Automation | null>(null);
+  const [yetenek, setYetenek] = useState<Yetenek | null>(null);
+  const [yetenekYukleniyor, setYetenekYukleniyor] = useState(false);
   const [keywordText, setKeywordText] = useState('');
   const [testText, setTestText] = useState('');
   const [loading, setLoading] = useState(true);
@@ -108,6 +131,20 @@ export default function CrmCommentAutomationPanel() {
     setKeywordText((a.keywords || []).join(', '));
     setTestText('');
     void loadMedia();
+  };
+
+  /** Takip dogrulamasi calisiyor mu — hicbir mesaj gondermez */
+  const yetenegiSor = async () => {
+    setYetenekYukleniyor(true);
+    try {
+      const r = await apiFetch('/api/crm-comment-automations?op=follow-capability');
+      const j = await r.json();
+      setYetenek(j?.data || null);
+    } catch {
+      setYetenek({ neden: 'Yetenek denetimi yapılamadı.' });
+    } finally {
+      setYetenekYukleniyor(false);
+    }
   };
 
   const kaydet = async () => {
@@ -330,6 +367,123 @@ export default function CrmCommentAutomationPanel() {
               {'{{username}}'} kullanıcı adıyla, {'{{keyword}}'} yazdığı kelimeyle değişir.
             </span>
           </label>
+
+          {/* --- Takip kontrolu --- */}
+          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3" data-test="takip-kapisi">
+            <label className="flex items-start gap-2 text-xs font-medium text-slate-700">
+              <input
+                type="checkbox"
+                checked={draft.follow_gate_enabled === true}
+                onChange={(e) => {
+                  setDraft({ ...draft, follow_gate_enabled: e.target.checked });
+                  if (e.target.checked && !yetenek) void yetenegiSor();
+                }}
+                className="mt-0.5"
+                data-test="takip-kapisi-ac"
+              />
+              <span>
+                <b>PDF göndermeden önce Instagram takip kontrolü yap</b>
+                <span className="mt-0.5 block text-[11px] font-normal text-slate-500">
+                  Açıkken yoruma önce takip daveti gider; PDF bağlantısı yalnızca takip
+                  <b> Meta API ile doğrulandıktan sonra</b> gönderilir.
+                </span>
+              </span>
+            </label>
+
+            {draft.follow_gate_enabled ? (
+              <div className="mt-3 space-y-3">
+                {/* Yetenek durumu: dogrulama bu kurulumda calisiyor mu */}
+                <div className="rounded-lg border border-slate-200 bg-white p-2.5 text-[11px]">
+                  <div className="flex items-center justify-between gap-2">
+                    <b className="text-slate-700">Takip doğrulaması durumu</b>
+                    <button
+                      type="button"
+                      onClick={() => void yetenegiSor()}
+                      disabled={yetenekYukleniyor}
+                      className="font-semibold text-indigo-700 hover:underline disabled:opacity-50"
+                    >
+                      {yetenekYukleniyor ? 'Kontrol ediliyor…' : 'Yeniden kontrol et'}
+                    </button>
+                  </div>
+                  {yetenek ? (
+                    <div className="mt-1.5 space-y-1 text-slate-600">
+                      <p>
+                        Bağlantı: {yetenek.baglanti_var ? '✅' : '❌'} · Jeton:{' '}
+                        {yetenek.token_calisiyor ? '✅' : '❌'} · Takip alanı:{' '}
+                        {yetenek.alan_destekleniyor === true
+                          ? '✅ okunabiliyor'
+                          : yetenek.alan_destekleniyor === false
+                            ? '❌ okunamıyor'
+                            : '⏳ henüz sınanamadı'}
+                      </p>
+                      {yetenek.neden ? <p className="text-amber-800">{yetenek.neden}</p> : null}
+                      {yetenek.oneri ? <p className="text-slate-500">{yetenek.oneri}</p> : null}
+                    </div>
+                  ) : (
+                    <p className="mt-1 text-slate-500">Henüz kontrol edilmedi.</p>
+                  )}
+                  <p className="mt-1.5 text-slate-500">
+                    Meta, takip durumunu yalnızca işletmeye <b>mesaj göndermiş</b> kullanıcılar için
+                    verir. Akış bu yüzden önce DM + buton gönderir; butona basmak onayı oluşturur.
+                    Doğrulama yapılamazsa PDF <b>gönderilmez</b>.
+                  </p>
+                </div>
+
+                <label className="block text-xs font-medium text-slate-600">
+                  Takip daveti mesajı (PDF bağlantısı KOYMAYIN)
+                  <textarea
+                    rows={3}
+                    value={draft.follow_invite_text || ''}
+                    onChange={(e) => setDraft({ ...draft, follow_invite_text: e.target.value })}
+                    placeholder={'Merhaba! 👋 PDF için önce hesabımızı takip etmeniz gerekiyor ❤️'}
+                    className={input}
+                  />
+                </label>
+
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <label className="block text-xs font-medium text-slate-600">
+                    &quot;Takip Ettim&quot; butonu
+                    <input
+                      maxLength={20}
+                      value={draft.follow_button_text || ''}
+                      onChange={(e) => setDraft({ ...draft, follow_button_text: e.target.value })}
+                      placeholder="✅ Takip Ettim"
+                      className={input}
+                    />
+                  </label>
+                  <label className="block text-xs font-medium text-slate-600">
+                    &quot;Tekrar Kontrol Et&quot; butonu
+                    <input
+                      maxLength={20}
+                      value={draft.follow_retry_button_text || ''}
+                      onChange={(e) =>
+                        setDraft({ ...draft, follow_retry_button_text: e.target.value })
+                      }
+                      placeholder="🔄 Tekrar Kontrol Et"
+                      className={input}
+                    />
+                  </label>
+                </div>
+
+                <label className="block text-xs font-medium text-slate-600">
+                  Takip etmeyen kullanıcıya gönderilecek mesaj
+                  <textarea
+                    rows={2}
+                    value={draft.follow_retry_text || ''}
+                    onChange={(e) => setDraft({ ...draft, follow_retry_text: e.target.value })}
+                    placeholder="Henüz takip ettiğinizi doğrulayamadık 😊"
+                    className={input}
+                  />
+                </label>
+
+                <p className="text-[11px] text-slate-500">
+                  Doğrulama sonrası gönderilecek PDF mesajı yukarıdaki{' '}
+                  <b>Gönderilecek özel mesaj</b> alanıdır. Yorum altı yanıtı yalnızca PDF
+                  gerçekten gönderildikten sonra verilir.
+                </p>
+              </div>
+            ) : null}
+          </div>
 
           <label className="block text-xs font-medium text-slate-600">
             Yorumun altına açık yanıt (isteğe bağlı)

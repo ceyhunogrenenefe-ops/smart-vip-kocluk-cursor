@@ -407,6 +407,34 @@ export default async function handler(req, res) {
             return true;
           }).length;
           statusOnly = false;
+
+          /**
+           * TAKIP KAPISI BUTONLARI
+           * "Takip Ettim" / "Tekrar Kontrol Et" yanitlari burada yakalanir.
+           * Bize ait olmayan yuk null doner ve akis etkilenmez; mevcut
+           * mesaj isleme her durumda aynen devam eder.
+           */
+          for (const m of messaging) {
+            try {
+              const n = normalizeInstagramMessagingEvent(m);
+              if (n.isEcho || !n.senderId || !n.quickReplyPayload) continue;
+              const { takipButonunuIsle } = await import('../api/_lib/ig-takip-akisi.js');
+              const sonuc = await takipButonunuIsle({
+                payload: n.quickReplyPayload,
+                igUserId: n.senderId,
+                institutionId: null
+              });
+              if (sonuc?.handled) {
+                console.info('[meta-webhook] IG_FOLLOW_GATE', {
+                  state: sonuc.state || null,
+                  reason: sonuc.reason || null
+                });
+              }
+            } catch (e) {
+              console.warn('[meta-webhook] follow gate', e instanceof Error ? e.message : e);
+            }
+          }
+
           const r = await ingestInstagramMessagingEvents(messaging);
           igIngested += Number(r?.processed || 0);
           try {

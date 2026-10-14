@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import HaftaAktarModal from './HaftaAktarModal';
 import { addDays, format, isBefore, parseISO, startOfWeek } from 'date-fns';
 import { tr } from 'date-fns/locale/tr';
 import { IconTapButton } from '../ui/IconTapButton';
@@ -251,6 +252,7 @@ export function WeeklyPlannerCalendar({
   }, [classLevel, getTopicsByClass]);
 
   const [anchor, setAnchor] = useState(() => new Date());
+  const [haftaAktarAcik, setHaftaAktarAcik] = useState(false);
   const weekStartStr = useMemo(
     () => format(startOfWeek(anchor, { weekStartsOn: 1 }), 'yyyy-MM-dd'),
     [anchor]
@@ -1595,6 +1597,17 @@ export function WeeklyPlannerCalendar({
                 >
                   Bu hafta
                 </button>
+                {canEditPlan && studentId ? (
+                  <button
+                    type="button"
+                    onClick={() => setHaftaAktarAcik(true)}
+                    className="min-h-[44px] touch-manipulation rounded-lg px-3 py-2 text-xs font-semibold text-indigo-700 transition hover:bg-white hover:shadow-sm dark:text-indigo-300 dark:hover:bg-slate-700"
+                    title="Bu haftanın planını başka bir haftaya kopyala"
+                    data-test="hafta-aktar-ac"
+                  >
+                    Planı haftaya aktar
+                  </button>
+                ) : null}
                 <IconTapButton
                   onClick={() => setAnchor((a) => addDays(a, 7))}
                   className={cn(
@@ -3077,6 +3090,19 @@ export function WeeklyPlannerCalendar({
           </div>
         </AppModalFooter>
       </AppModal>
+
+      {haftaAktarAcik && studentId ? (
+        <HaftaAktarModal
+          studentId={studentId}
+          studentName={studentName}
+          kaynakHafta={weekStartStr}
+          onClose={() => setHaftaAktarAcik(false)}
+          onDone={() => {
+            // Hedef hafta ekrandaki hafta olabilir; her durumda tazele
+            void reload();
+          }}
+        />
+      ) : null}
     </div>
   );
 }
