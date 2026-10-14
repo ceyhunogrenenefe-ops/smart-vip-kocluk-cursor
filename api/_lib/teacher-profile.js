@@ -1,3 +1,4 @@
+import { ogretmenUcreti, ucretEtiketi } from './ozel-ders-ucret.js';
 /**
  * Öğretmen vitrin profili — tek kaynak (users.teacher → teacher_profiles).
  */
@@ -305,7 +306,13 @@ export async function writeAuditLog({
   }
 }
 
-export function publicCardFromSnapshot(row) {
+/**
+ * Ücret bilgisi published_snapshot'tan DEĞİL canlı satırdan okunur.
+ * Yönetici ücreti değiştirince site anında yansıtsın diye: snapshot
+ * yalnız profil yeniden yayımlanınca tazeleniyor, fiyat ise anında
+ * geçerli olmalı.
+ */
+export function publicCardFromSnapshot(row, fiyatAyari) {
   const snap = row?.published_snapshot && typeof row.published_snapshot === 'object'
     ? row.published_snapshot
     : workingPayloadFromRow(row);
@@ -333,17 +340,27 @@ export function publicCardFromSnapshot(row) {
     lessons: row.completed_lessons_count != null ? Number(row.completed_lessons_count) : 0,
     // Liste (hover tanıtım) için zorunlu — detayda vardı, kartta yoktu
     video_url: videos[0]?.url || snap.video_url || null,
-    videos
+    videos,
+    ...(() => {
+      const u = ogretmenUcreti(row, fiyatAyari);
+      return {
+        private_lesson_fee_tl: u.fee,
+        private_lesson_duration_min: u.duration,
+        /** 'teacher' | 'default' | 'none' — sitede rozet/metin seçimi için */
+        private_lesson_fee_source: u.source,
+        private_lesson_fee_label: ucretEtiketi(u.fee, u.duration)
+      };
+    })()
   };
 }
 
-export function publicDetailFromSnapshot(row) {
+export function publicDetailFromSnapshot(row, fiyatAyari) {
   const snap = row?.published_snapshot && typeof row.published_snapshot === 'object'
     ? row.published_snapshot
     : workingPayloadFromRow(row);
   const videos = normalizeTeacherVideos(snap.videos, snap.video_url || snap.video_path || '');
   return {
-    ...publicCardFromSnapshot(row),
+    ...publicCardFromSnapshot(row, fiyatAyari),
     full_bio: snap.full_bio || null,
     city: snap.city || null,
     department: snap.department || null,

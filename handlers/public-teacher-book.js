@@ -4,6 +4,8 @@
  * Body: { slug, starts_at, ends_at, student_name, student_email, student_phone, notes }
  */
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
+import { ogretmenUcreti } from '../api/_lib/ozel-ders-ucret.js';
+import { fiyatAyariniOku } from '../api/_lib/ozel-ders-fiyat-ayari.js';
 import { errorMessage } from '../api/_lib/error-msg.js';
 import { computePublicSlots, loadAvailabilityBundle } from '../api/_lib/teacher-availability.js';
 
@@ -76,11 +78,22 @@ export default async function handler(req, res) {
       return res.status(409).json({ error: 'slot_unavailable' });
     }
 
+    /**
+     * Ücret SUNUCUDA belirlenir; istemciden gelen tutar kullanılmaz.
+     * Rezervasyon anındaki ücret satıra yazılır ki sonradan yapılan fiyat
+     * değişikliği geçmiş rezervasyonu değiştirmesin.
+     */
+    const fiyatAyari = await fiyatAyariniOku(null);
+    const ucret = ogretmenUcreti(profile, fiyatAyari);
+
     const { data: booking, error } = await supabaseAdmin
       .from('teacher_private_bookings')
       .insert({
         teacher_id: teacherId,
         profile_id: profile.id,
+        price_tl: ucret.fee,
+        price_duration_min: ucret.duration,
+        price_source: ucret.source,
         student_name: String(body.student_name || '').slice(0, 120) || null,
         student_email: String(body.student_email || '').slice(0, 200) || null,
         student_phone: String(body.student_phone || '').slice(0, 40) || null,
