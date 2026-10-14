@@ -162,3 +162,111 @@ export function yazimIcinSadele(kopya) {
   const { _kaynak_id, _kaynak_tarih, ...temiz } = kopya;
   return temiz;
 }
+
+/* ------------------------------------------------------------------ */
+/* Koç haftalık hedefleri                                              */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Hedefleri hedef haftaya kopyalar.
+ *
+ * NEDEN HEDEF BAĞI DEĞİL HEDEFİN KENDİSİ KOPYALANIR
+ * coach_weekly_goals.week_start_date ile haftaya bağlıdır. Eski hedefin
+ * kimliğini yeni haftanın görevine yazmak, yeni haftanın çalışmasını eski
+ * haftanın hedefine işler ve iki haftanın raporunu da bozar. Bu yüzden
+ * hedefin kopyası çıkarılır ve görevler KOPYAYA bağlanır.
+ *
+ * goal_start_date / goal_end_date, week_start_date ile aynı olmak zorunda
+ * değil (hedef haftayı aşabiliyor). Bu yüzden üçü de AYNI gün farkıyla
+ * kaydırılır; göreli aralık korunur.
+ *
+ * Hedeflerde ilerleme sütunu yok — ilerleme görevlerden hesaplanıyor —
+ * bu yüzden sıfırlanacak bir şey yoktur. homework_id taşınmaz.
+ */
+export function hedefKopyasiUret(hedefler, secenek = {}) {
+  const liste = Array.isArray(hedefler) ? hedefler : [];
+  const hedefHafta = String(secenek.hedefHaftaBasi || '').slice(0, 10);
+  const kaynakHafta = String(secenek.kaynakHaftaBasi || '').slice(0, 10);
+  if (!YMD.test(hedefHafta) || !YMD.test(kaynakHafta)) {
+    return { kopyalar: [], kimlikEslesmesi: new Map(), atlanan: liste.length };
+  }
+  const kayma = gunFarki(kaynakHafta, hedefHafta);
+  const idUret =
+    typeof secenek.idUret === 'function'
+      ? secenek.idUret
+      : () => `cwg-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+
+  /** Hedef haftada aynı hedef zaten varsa yenisi açılmaz, ona bağlanır */
+  const mevcutAnahtar = new Map();
+  for (const m of Array.isArray(secenek.mevcutHedefler) ? secenek.mevcutHedefler : []) {
+    mevcutAnahtar.set(hedefAnahtari(m), m.id);
+  }
+
+  const kopyalar = [];
+  const kimlikEslesmesi = new Map();
+  let atlanan = 0;
+
+  for (const g of liste) {
+    if (!g?.id) {
+      atlanan += 1;
+      continue;
+    }
+    const anahtar = hedefAnahtari(g);
+    const mevcutId = mevcutAnahtar.get(anahtar);
+    if (mevcutId) {
+      // Birleştirme: hedef haftada aynısı var, görevler ona bağlanır
+      kimlikEslesmesi.set(g.id, mevcutId);
+      continue;
+    }
+    const yeniId = idUret();
+    kimlikEslesmesi.set(g.id, yeniId);
+    kopyalar.push({
+      id: yeniId,
+      student_id: g.student_id,
+      coach_id: g.coach_id ?? null,
+      institution_id: g.institution_id ?? null,
+      subject: g.subject ?? '',
+      title: g.title ?? '',
+      target_quantity: g.target_quantity ?? 0,
+      quantity_unit: g.quantity_unit ?? null,
+      week_start_date: hedefHafta,
+      goal_start_date: g.goal_start_date ? tarihKaydir(g.goal_start_date, kayma) : null,
+      goal_end_date: g.goal_end_date ? tarihKaydir(g.goal_end_date, kayma) : null,
+      // Ödev kendi haftasına ait; bağ taşınmaz
+      homework_id: null,
+      _kaynak_id: g.id
+    });
+  }
+  return { kopyalar, kimlikEslesmesi, atlanan };
+}
+
+/**
+ * Aynı hedefi tanımlayan anahtar: ders + başlık + birim.
+ *
+ * Türkçe "İ" küçültüldüğünde kimi kaynakta "i", kimisinde "i + birleşen
+ * nokta" (U+0307) üretiliyor. Aynı başlık bu yüzden eşleşmeyip hedef
+ * haftada mükerrer hedef açılabiliyordu; birleşen işaretler atılıyor.
+ */
+export function hedefAnahtari(g) {
+  const sadelestir = (v) =>
+    String(v || '')
+      .trim()
+      .toLocaleLowerCase('tr')
+      .normalize('NFKD')
+      .replace(/\p{M}/gu, '')
+      .replace(/\s+/g, ' ');
+  return [sadelestir(g?.subject), sadelestir(g?.title), sadelestir(g?.quantity_unit)].join('|');
+}
+
+/** Kopyalanan görevleri, kopyalanan hedeflere bağlar. */
+export function gorevleriHedeflereBagla(kopyalar, kimlikEslesmesi, kaynakSatirlar) {
+  const kaynakGoreveGoreHedef = new Map();
+  for (const r of Array.isArray(kaynakSatirlar) ? kaynakSatirlar : []) {
+    if (r?.id) kaynakGoreveGoreHedef.set(r.id, r.coach_goal_id || null);
+  }
+  return (Array.isArray(kopyalar) ? kopyalar : []).map((k) => {
+    const eskiHedef = kaynakGoreveGoreHedef.get(k._kaynak_id) || null;
+    const yeniHedef = eskiHedef ? kimlikEslesmesi?.get(eskiHedef) || null : null;
+    return { ...k, coach_goal_id: yeniHedef };
+  });
+}
