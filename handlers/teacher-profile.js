@@ -5,6 +5,12 @@
  * POST  /api/teacher-profile?op=submit  (onaya gönder; yayına admin onayı gerekir)
  */
 import { requireAuthenticatedActor } from '../api/_lib/auth.js';
+import {
+  ogretmenUcreti,
+  sureyiTemizle,
+  ucretiTemizle
+} from '../api/_lib/ozel-ders-ucret.js';
+import { fiyatAyariniOku } from '../api/_lib/ozel-ders-fiyat-ayari.js';
 import { actorRoleSet } from '../api/_lib/actor-roles.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { errorMessage } from '../api/_lib/error-msg.js';
@@ -114,7 +120,16 @@ export default async function handler(req, res) {
         awaiting_approval:
           profile.status === 'pending_approval' || isUpdatePendingStatus(profile.status),
         pending_revision: pendingRev || null,
-        account: { id: user.id, name: user.name, email: user.email, phone: user.phone }
+        account: { id: user.id, name: user.name, email: user.email, phone: user.phone },
+        /**
+         * Ozel ders ucreti onay kuyrugunun disindadir; anlik gecerli olan
+         * deger profilin kendi satirindan okunur, pending_data'dan degil.
+         */
+        ozel_ders: {
+          ...ogretmenUcreti(profile, await fiyatAyariniOku(user.institution_id || null)),
+          kendi_ucreti: profile.private_lesson_fee_tl != null ? Number(profile.private_lesson_fee_tl) : null,
+          guncelleme: profile.private_lesson_fee_updated_at || null
+        }
       });
     }
 
@@ -227,6 +242,51 @@ export default async function handler(req, res) {
         revision,
         message: 'Profiliniz yönetici onayına gönderildi'
       });
+    }
+
+    /**
+     * Ogretmenin KENDI ozel ders ucreti.
+     *
+     * Bilerek profil onay kuyrugundan GECMEZ: profil metinleri yoneticinin
+     * onayindan sonra yayina giriyor (pending_data), ama fiyat anlik
+     * gecerli olmali — veli siteye bakip eski fiyati gormemeli. Ayrica
+     * editing_enabled sarti aranmaz; o kisit profil icerigi icindir,
+     * ucret icerik degil.
+     *
+     * Yonetici paneli ayni alani yazmaya devam eder; son yazan gecerlidir.
+     */
+    if (req.method === 'POST' && op === 'ozel-ders-ucret') {
+      const body = req.body || {};
+      const yama = { updated_at: new Date().toISOString() };
+
+      if (Object.prototype.hasOwnProperty.call(body, 'private_lesson_fee_tl')) {
+        const { value, error: fErr } = ucretiTemizle(body.private_lesson_fee_tl);
+        if (fErr) return res.status(400).json({ error: 'invalid', message: fErr });
+        yama.private_lesson_fee_tl = value;
+        yama.private_lesson_fee_updated_at = value === null ? null : yama.updated_at;
+        yama.private_lesson_fee_updated_by = value === null ? null : uid;
+      }
+      if (Object.prototype.hasOwnProperty.call(body, 'lesson_duration_min')) {
+        const { value, error: sErr } = sureyiTemizle(body.lesson_duration_min);
+        if (sErr) return res.status(400).json({ error: 'invalid', message: sErr });
+        yama.lesson_duration_min = value;
+      }
+      if (Object.prototype.hasOwnProperty.call(body, 'private_lesson_enabled')) {
+        yama.private_lesson_enabled = body.private_lesson_enabled !== false;
+      }
+
+      const { data: guncel, error: uErr2 } = await supabaseAdmin
+        .from('teacher_profiles')
+        .update(yama)
+        .eq('id', profile.id)
+        .eq('user_id', uid)
+        .select('id, lesson_duration_min, private_lesson_enabled, private_lesson_fee_tl, private_lesson_fee_updated_at')
+        .maybeSingle();
+      if (uErr2) throw uErr2;
+      if (!guncel) return res.status(404).json({ error: 'not_found' });
+
+      const ayar = await fiyatAyariniOku(user.institution_id || null);
+      return res.status(200).json({ data: { ...guncel, ucret: ogretmenUcreti(guncel, ayar) } });
     }
 
     if (req.method === 'PATCH') {

@@ -18,6 +18,15 @@ type ProfileResponse = {
   awaiting_approval?: boolean;
   approved_data?: Record<string, unknown> | null;
   account?: { name?: string; email?: string };
+  /** Ozel ders ucreti onay kuyrugunun disindadir; anlik gecerlidir */
+  ozel_ders?: {
+    fee: number | null;
+    duration: number;
+    source: 'teacher' | 'default' | 'none';
+    enabled: boolean;
+    kendi_ucreti: number | null;
+    guncelleme: string | null;
+  };
 };
 
 function normalizeVideosFromWorking(working: Record<string, unknown>): TeacherVideo[] {
@@ -78,6 +87,9 @@ export default function TeacherVitrineProfilePage() {
   const [submitting, setSubmitting] = useState(false);
   const [tab, setTab] = useState<'basic' | 'cv' | 'media' | 'lesson' | 'availability'>('basic');
   const [data, setData] = useState<ProfileResponse | null>(null);
+  const [ucretTaslak, setUcretTaslak] = useState('');
+  const [sureTaslak, setSureTaslak] = useState('');
+  const [ucretKaydediliyor, setUcretKaydediliyor] = useState(false);
   const [form, setForm] = useState<Record<string, unknown>>({});
   const [photoUploading, setPhotoUploading] = useState(false);
   const [localPhotoPreview, setLocalPhotoPreview] = useState<string | null>(null);
@@ -90,6 +102,8 @@ export default function TeacherVitrineProfilePage() {
       const j = (await res.json()) as ProfileResponse & { error?: string };
       if (!res.ok) throw new Error(j.error || res.statusText);
       setData(j);
+      setUcretTaslak(j?.ozel_ders?.kendi_ucreti != null ? String(j.ozel_ders.kendi_ucreti) : '');
+      setSureTaslak(j?.ozel_ders?.duration ? String(j.ozel_ders.duration) : '');
       const working = { ...(j.working || {}) };
       const videos = normalizeVideosFromWorking(working);
       setForm({
@@ -162,6 +176,32 @@ export default function TeacherVitrineProfilePage() {
   };
 
   const canEdit = data?.can_edit ?? data?.editing_enabled ?? true;
+  /**
+   * Ozel ders ucreti profil onay kuyrugundan GECMEZ: veli siteye bakip
+   * eski fiyati gormemeli. Bu yuzden ayri bir uca yaziliyor.
+   */
+  const ucretKaydet = async () => {
+    setUcretKaydediliyor(true);
+    try {
+      const res = await apiFetch('/api/teacher-profile?op=ozel-ders-ucret', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          private_lesson_fee_tl: ucretTaslak,
+          lesson_duration_min: sureTaslak
+        })
+      });
+      const j = await res.json();
+      if (!res.ok) throw new Error(j.message || j.error || res.statusText);
+      toast.success('Özel ders ücretiniz güncellendi, sitede anında geçerli.');
+      await load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Ücret kaydedilemedi');
+    } finally {
+      setUcretKaydediliyor(false);
+    }
+  };
+
   const editingDisabled = !canEdit;
 
   const uploadProfilePhoto = async (file: File) => {
@@ -370,8 +410,69 @@ export default function TeacherVitrineProfilePage() {
       <div>
         <h1 className="text-xl font-bold text-slate-900 sm:text-2xl">Profilimi Düzenle</h1>
         <p className="mt-1 text-sm text-slate-600">
-          Bu profil onaylandıktan sonra onlinevipdershane.com Özel Ders sayfasında yayınlanır. Ders ücretlerini yalnızca yönetim belirler.
+          Bu profil onaylandıktan sonra onlinevipdershane.com Özel Ders sayfasında yayınlanır. Özel ders ücretinizi aşağıdan kendiniz belirleyebilirsiniz; ücret onay beklemeden anında yayına girer.
         </p>
+      </div>
+
+      {/* Ucret onay kuyrugunun disinda: anlik gecerli */}
+      <div
+        className="rounded-2xl border border-emerald-200 bg-emerald-50/60 p-4"
+        data-test="ogretmen-ucret-karti"
+      >
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h2 className="text-sm font-bold text-emerald-900">Özel ders ücretim</h2>
+            <p className="mt-0.5 text-xs text-emerald-900/80">
+              Sitede öğretmen kartınızda ve profilinizde bu tutar görünür. Boş bırakırsanız
+              kurumun varsayılan ücreti geçerli olur.
+              {data?.ozel_ders?.source === 'default' ? (
+                <>
+                  {' '}
+                  Şu an <strong>varsayılan {data.ozel_ders.fee ?? 0} TL</strong> geçerli.
+                </>
+              ) : null}
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="flex items-center gap-1 text-xs text-emerald-900">
+              Ücret
+              <input
+                value={ucretTaslak}
+                onChange={(e) => setUcretTaslak(e.target.value)}
+                inputMode="decimal"
+                placeholder={String(data?.ozel_ders?.fee ?? '')}
+                className="w-28 rounded-lg border border-emerald-300 px-2 py-1.5 text-sm"
+                data-test="ogretmen-ucret-girisi"
+              />
+              TL
+            </label>
+            <label className="flex items-center gap-1 text-xs text-emerald-900">
+              Süre
+              <input
+                value={sureTaslak}
+                onChange={(e) => setSureTaslak(e.target.value)}
+                inputMode="numeric"
+                className="w-20 rounded-lg border border-emerald-300 px-2 py-1.5 text-sm"
+                data-test="ogretmen-sure-girisi"
+              />
+              dk
+            </label>
+            <button
+              type="button"
+              onClick={() => void ucretKaydet()}
+              disabled={ucretKaydediliyor}
+              className="rounded-lg bg-emerald-700 px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-50"
+              data-test="ogretmen-ucret-kaydet"
+            >
+              {ucretKaydediliyor ? 'Kaydediliyor…' : 'Kaydet'}
+            </button>
+          </div>
+        </div>
+        {data?.ozel_ders?.guncelleme ? (
+          <p className="mt-2 text-[11px] text-emerald-900/70">
+            Son güncelleme: {new Date(data.ozel_ders.guncelleme).toLocaleString('tr-TR')}
+          </p>
+        ) : null}
       </div>
 
       {editingDisabled ? (
