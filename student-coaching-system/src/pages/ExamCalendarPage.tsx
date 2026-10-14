@@ -13,10 +13,48 @@ type ExamRow = {
   exam_date: string;
   content: string | null;
   source: string | null;
+  /** Yonetici isareti; null ise isaretlenmemis demektir */
+  status?: 'yapildi' | 'yapilmadi' | 'planlandi' | null;
+  /** Sunucunun hesapladigi etkin durum — kural tek yerde dursun diye */
+  etkin_durum?: 'yapildi' | 'yapilmadi' | 'planlandi';
+  durum_elle?: boolean;
+};
+
+type Durum = 'yapildi' | 'yapilmadi' | 'planlandi';
+
+/**
+ * Tarihi gecen sinav KENDILIGINDEN "yapildi" sayilmaz. Takvim satiri ile
+ * gercek sinav sonuclari arasinda veritabani bagi yok; gerceklesme
+ * yalnizca yoneticinin isaretlemesiyle belirlenir. Sunucu etkin_durum
+ * donduruyor, burasi yalnizca o deger gelmezse ayni kurali uygular.
+ */
+function etkinDurumOf(r: ExamRow, bugun: string): Durum {
+  if (r.etkin_durum) return r.etkin_durum;
+  if (r.status === 'yapildi' || r.status === 'yapilmadi' || r.status === 'planlandi') return r.status;
+  return r.exam_date >= bugun ? 'planlandi' : 'yapilmadi';
+}
+
+const DURUM_ETIKET: Record<Durum, string> = {
+  yapildi: 'Yapıldı',
+  yapilmadi: 'Yapılmadı',
+  planlandi: 'Planlandı'
+};
+
+const DURUM_ROZET: Record<Durum, string> = {
+  yapildi: 'bg-emerald-100 text-emerald-800',
+  yapilmadi: 'bg-orange-100 text-orange-800',
+  planlandi: 'bg-sky-100 text-sky-800'
+};
+
+const DURUM_NOKTA: Record<Durum, string> = {
+  yapildi: '🟢',
+  yapilmadi: '🟠',
+  planlandi: '🔵'
 };
 
 type Payload = {
   data: ExamRow[];
+  bugun?: string;
   scope: 'student' | 'staff';
   level: string | null;
   class_level?: string | null;
@@ -82,7 +120,6 @@ export default function ExamCalendarPage() {
   const [level, setLevel] = useState('9');
   const [search, setSearch] = useState('');
   const [difficulty, setDifficulty] = useState('');
-  const [showPast, setShowPast] = useState(false);
   const [edit, setEdit] = useState<typeof EMPTY_EDIT | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -102,26 +139,77 @@ export default function ExamCalendarPage() {
     void load();
   }, [load]);
 
+  const [durumFiltre, setDurumFiltre] = useState<Durum | ''>('');
+  const [tarihBas, setTarihBas] = useState('');
+  const [tarihBit, setTarihBit] = useState('');
+  const [durumBusy, setDurumBusy] = useState<string | null>(null);
+
   const isStudent = payload?.scope === 'student';
   const activeLevel = isStudent ? payload?.level || '' : level;
   const today = todayYmd();
 
-  const { upcoming, past } = useMemo(() => {
+  const bugun = payload?.bugun || today;
+
+  /**
+   * Sinif + arama + zorluk suzmesi. Tarih suzmesi YOK: gecmis sinavlar
+   * listede kalir. Onceki surum listeyi "yaklasan" ve kapali duran
+   * "gecmis" akordeonuna boluyordu; tarihi gecen sinav gozden kayboluyordu.
+   */
+  const temelListe = useMemo(() => {
     const q = search.trim().toLocaleLowerCase('tr');
-    const rows = (payload?.data || [])
+    return (payload?.data || [])
       .filter((r) => r.level === activeLevel)
       .filter((r) => !difficulty || (r.difficulty || '') === difficulty)
       .filter((r) => !q || `${r.publisher} ${r.content || ''}`.toLocaleLowerCase('tr').includes(q));
-    return {
-      upcoming: rows.filter((r) => r.exam_date >= today),
-      past: rows.filter((r) => r.exam_date < today).reverse()
-    };
-  }, [payload, activeLevel, difficulty, search, today]);
+  }, [payload, activeLevel, difficulty, search]);
+
+  const durumSayac = useMemo(() => {
+    const c: Record<Durum, number> = { yapildi: 0, yapilmadi: 0, planlandi: 0 };
+    for (const r of temelListe) c[etkinDurumOf(r, bugun)] += 1;
+    return c;
+  }, [temelListe, bugun]);
+
+  /** Durum ve tarih araligi filtreleri — hicbir kaydi silmez, yalniz secer */
+  const gorunenler = useMemo(() => {
+    const liste = temelListe.filter((r) => {
+      if (durumFiltre && etkinDurumOf(r, bugun) !== durumFiltre) return false;
+      if (tarihBas && r.exam_date < tarihBas) return false;
+      if (tarihBit && r.exam_date > tarihBit) return false;
+      return true;
+    });
+    // Yaklasanlar once, sonra gecmisler yeniden eskiye
+    const ileri = liste.filter((r) => r.exam_date >= bugun);
+    const geri = liste.filter((r) => r.exam_date < bugun).reverse();
+    return [...ileri, ...geri];
+  }, [temelListe, durumFiltre, tarihBas, tarihBit, bugun]);
+
+  const filtreAktif = Boolean(durumFiltre || tarihBas || tarihBit);
 
   const difficulties = useMemo(
     () => [...new Set((payload?.data || []).map((r) => r.difficulty).filter(Boolean) as string[])].sort(),
     [payload]
   );
+
+  /**
+   * Sinavin gerceklesme durumunu elle isaretler.
+   * Yalniz status alanini gonderir; sinavin diger alanlarina, sonuclara
+   * ve ogrenci analizlerine dokunmaz. Bos deger isareti kaldirir.
+   */
+  const durumAta = async (r: ExamRow, yeni: Durum | '') => {
+    setDurumBusy(r.id);
+    try {
+      await api('/api/exam-calendar', {
+        method: 'PATCH',
+        body: JSON.stringify({ id: r.id, status: yeni || null })
+      });
+      await load();
+      toast.success(yeni ? `"${r.publisher}" → ${DURUM_ETIKET[yeni]}` : 'İşaret kaldırıldı');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Durum güncellenemedi');
+    } finally {
+      setDurumBusy(null);
+    }
+  };
 
   const save = async () => {
     if (!edit) return;
@@ -165,6 +253,7 @@ export default function ExamCalendarPage() {
   const renderCard = (r: ExamRow, isNext: boolean, isPast: boolean) => {
     const meta = levelMeta(r.level);
     const d = daysUntil(r.exam_date);
+    const durum = etkinDurumOf(r, bugun);
     return (
       <div
         key={r.id}
@@ -176,6 +265,14 @@ export default function ExamCalendarPage() {
           <div className="min-w-0">
             <p className="font-semibold text-slate-900">{r.publisher}</p>
             <p className="text-xs text-slate-500">Deneme #{r.exam_no || '-'}</p>
+            <span
+              className={`mt-1 inline-block rounded-full px-2 py-0.5 text-[11px] font-semibold ${DURUM_ROZET[durum]}`}
+              data-test="sinav-durum-rozeti"
+              title={r.durum_elle ? 'Yönetici işaretledi' : 'Tarihe göre otomatik'}
+            >
+              {DURUM_NOKTA[durum]} {DURUM_ETIKET[durum]}
+              {r.durum_elle ? '' : ' (otomatik)'}
+            </span>
           </div>
           {r.difficulty ? (
             <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ${DIFFICULTY_STYLE[r.difficulty] || 'bg-slate-100 text-slate-700'}`}>
@@ -194,7 +291,23 @@ export default function ExamCalendarPage() {
         </p>
         {r.content ? <p className="mt-2 text-xs leading-relaxed text-slate-600">{r.content}</p> : null}
         {payload?.can_edit ? (
-          <div className="mt-3 flex gap-2 border-t border-slate-100 pt-2">
+          <div className="mt-3 border-t border-slate-100 pt-2">
+            <label className="mb-2 flex items-center gap-1.5 text-[11px] text-slate-500">
+              Durum
+              <select
+                value={r.status || ''}
+                disabled={durumBusy === r.id}
+                onChange={(e) => void durumAta(r, e.target.value as Durum | '')}
+                className="rounded border border-slate-200 px-1.5 py-1 text-[11px] disabled:opacity-50"
+                data-test="sinav-durum-secici"
+              >
+                <option value="">Otomatik (tarihe göre)</option>
+                <option value="yapildi">🟢 Yapıldı</option>
+                <option value="yapilmadi">🟠 Yapılmadı</option>
+                <option value="planlandi">🔵 Planlandı</option>
+              </select>
+            </label>
+            <div className="flex gap-2">
             <button
               type="button"
               onClick={() =>
@@ -219,6 +332,7 @@ export default function ExamCalendarPage() {
             >
               <Trash2 className="h-3.5 w-3.5" /> Sil
             </button>
+            </div>
           </div>
         ) : null}
       </div>
@@ -290,6 +404,63 @@ export default function ExamCalendarPage() {
               </option>
             ))}
           </select>
+          <label className="flex items-center gap-1 text-xs text-slate-500">
+            Başlangıç
+            <input
+              type="date"
+              value={tarihBas}
+              onChange={(e) => setTarihBas(e.target.value)}
+              className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
+              data-test="sinav-tarih-bas"
+            />
+          </label>
+          <label className="flex items-center gap-1 text-xs text-slate-500">
+            Bitiş
+            <input
+              type="date"
+              value={tarihBit}
+              onChange={(e) => setTarihBit(e.target.value)}
+              className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
+              data-test="sinav-tarih-bit"
+            />
+          </label>
+          {filtreAktif ? (
+            <button
+              type="button"
+              onClick={() => {
+                setDurumFiltre('');
+                setTarihBas('');
+                setTarihBit('');
+              }}
+              className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-50"
+            >
+              Filtreleri temizle
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+
+      {activeLevel ? (
+        <div className="flex flex-wrap gap-2" data-test="sinav-durum-filtreleri">
+          {([
+            ['', 'Tüm sınavlar', temelListe.length],
+            ['yapildi', '🟢 Yapılanlar', durumSayac.yapildi],
+            ['yapilmadi', '🟠 Yapılmayanlar', durumSayac.yapilmadi],
+            ['planlandi', '🔵 Planlananlar', durumSayac.planlandi]
+          ] as [Durum | '', string, number][]).map(([id, ad, adet]) => (
+            <button
+              key={id || 'tumu'}
+              type="button"
+              onClick={() => setDurumFiltre(id)}
+              className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
+                durumFiltre === id
+                  ? 'border-indigo-600 bg-indigo-600 text-white'
+                  : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+              }`}
+            >
+              {ad} <span className="opacity-75">({adet})</span>
+            </button>
+          ))}
         </div>
       ) : null}
 
@@ -305,29 +476,26 @@ export default function ExamCalendarPage() {
       ) : (
         <>
           <div>
-            <h2 className="mb-2 text-sm font-semibold text-slate-700">Yaklaşan sınavlar ({upcoming.length})</h2>
-            {upcoming.length === 0 ? (
-              <p className="text-sm text-slate-500">Yaklaşan sınav yok.</p>
+            <h2 className="mb-2 text-sm font-semibold text-slate-700">
+              Sınavlar{' '}
+              <span className="font-normal text-slate-500" data-test="sinav-sayaci">
+                ({filtreAktif ? `${gorunenler.length} / ${temelListe.length}` : temelListe.length})
+              </span>
+            </h2>
+            {gorunenler.length === 0 ? (
+              <p className="text-sm text-slate-500">
+                {temelListe.length === 0 ? 'Bu sınıfta sınav yok.' : 'Bu filtrelere uyan sınav yok.'}
+              </p>
             ) : (
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {upcoming.map((r, i) => renderCard(r, i === 0, false))}
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3" data-test="sinav-listesi">
+                {gorunenler.map((r) => {
+                  const gecmis = r.exam_date < bugun;
+                  const ilkYaklasan = !gecmis && r.id === gorunenler.find((x) => x.exam_date >= bugun)?.id;
+                  return renderCard(r, Boolean(ilkYaklasan), gecmis);
+                })}
               </div>
             )}
           </div>
-          {past.length ? (
-            <div>
-              <button
-                type="button"
-                onClick={() => setShowPast((v) => !v)}
-                className="mb-2 text-sm font-semibold text-slate-600 hover:text-slate-900"
-              >
-                {showPast ? '▾' : '▸'} Geçmiş sınavlar ({past.length})
-              </button>
-              {showPast ? (
-                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{past.map((r) => renderCard(r, false, true))}</div>
-              ) : null}
-            </div>
-          ) : null}
         </>
       )}
 
