@@ -41,6 +41,11 @@
  */
 
 import { requireAuth } from '../api/_lib/auth.js';
+import {
+  iletisimKumeleri,
+  misafirSiparisleriSuz,
+  siparisleriBirlestir
+} from '../api/_lib/magaza-misafir-siparis.js';
 import { actorRoleSet } from '../api/_lib/actor-roles.js';
 import { buildCatalogListRows, filterCatalogListRows } from '../api/_lib/commerce-store-catalog.js';
 import {
@@ -1466,7 +1471,8 @@ async function handleStaff(op, body, actor) {
 
     let studentQuery = supabaseAdmin
       .from('students')
-      .select('id, name, class_level')
+      // Misafir siparisleri kuruma baglamak icin iletisim alanlari da gerekli
+      .select('id, name, class_level, email, phone, parent_phone')
       .limit(500);
     const scope = staffStudentScopeFilter(actor, roleSet, institutionId);
     if (scope.institution_id) studentQuery = studentQuery.eq('institution_id', scope.institution_id);
@@ -1544,12 +1550,61 @@ async function handleStaff(op, body, actor) {
         q = q.or(parts.join(','));
       }
     }
-    const limit = Math.min(parseInt(body.limit ?? 100, 10) || 100, 200);
+    const limit = Math.min(parseInt(body.limit ?? 100, 10) || 100, 500);
     const offset = parseInt(body.offset ?? 0, 10) || 0;
     q = q.range(offset, offset + limit - 1);
     const { data, error } = await q;
     if (error) throw error;
-    const orders = (data || []).map((row) => {
+
+    /**
+     * MISAFIR SIPARISLER
+     * Ana sorgu `.in('student_id', studentIds)` kullaniyor; SQL'de IN
+     * listesi NULL ile eslesmez, bu yuzden siteden misafir olarak verilen
+     * siparisler bu ekranda HIC gorunmuyordu (olculdu: 132 siparisin
+     * 65'inde student_id bos, 45'i odenmis/onayli gercek para).
+     * Ayri bir sorguyla cekilip kuruma atfedilenler listeye katiliyor.
+     */
+    let misafirler = [];
+    try {
+      let mq = supabaseAdmin
+        .from('commerce_orders')
+        .select('*, commerce_order_items(id, title_snapshot, quantity, unit_price_kurus, vendor_id), commerce_payments(id, provider, status, paid_at), commerce_vendor_orders(id, vendor_id, status, commerce_vendors(id, name))')
+        .is('student_id', null)
+        .order('created_at', { ascending: false })
+        .limit(500);
+      if (body.status) mq = mq.eq('status', body.status);
+      if (body.search) {
+        const s2 = String(body.search).replace(/%/g, '').trim();
+        if (s2) mq = mq.or(`customer_name.ilike.%${s2}%,order_number.ilike.%${s2}%`);
+      }
+      const { data: mdata, error: merr } = await mq;
+      if (merr) throw merr;
+
+      // Kapsamdaki ogrencilerin ve kurum kullanicilarinin iletisim bilgileri
+      let kisiler = scopedStudents;
+      if (!scope.coach_id && scope.institution_id) {
+        const { data: kurumKullanicilari } = await supabaseAdmin
+          .from('users')
+          .select('email, phone')
+          .eq('institution_id', scope.institution_id)
+          .limit(2000);
+        kisiler = [...scopedStudents, ...(kurumKullanicilari || [])];
+      }
+      const kumeler = iletisimKumeleri(kisiler);
+      misafirler = misafirSiparisleriSuz(mdata || [], {
+        institutionId: scope.institution_id || institutionId || null,
+        epostalar: kumeler.epostalar,
+        telefonlar: kumeler.telefonlar,
+        kocKapsami: Boolean(scope.coach_id)
+      });
+    } catch (e) {
+      // Misafir siparisler getirilemezse ogrenci siparisleri yine gorunsun
+      console.warn('[commerce-store staff.orders misafir]', e instanceof Error ? e.message : e);
+    }
+    // Ogrenci siparisleri ile misafir siparisler ayni susleme surecinden
+    // gecsin ki POS, dekont ve sinif alanlari ikisinde de dolu olsun
+    const hamSiparisler = siparisleriBirlestir(data || [], misafirler, limit);
+    const orders = hamSiparisler.map((row) => {
       const decorated = decorateOrderWithIbanReceipt(row);
       const cid = classByStudent.get(row.student_id) || null;
       /**
@@ -1601,6 +1656,9 @@ async function handleStaff(op, body, actor) {
       classes: classes || [],
       student_count: studentIds.length,
       scope: scope.coach_id ? 'coach' : 'institution',
+      /** Kapsamdaki gercek sipariş sayisi — limit yuzunden kesilen var mi */
+      total_in_scope: siparisleriBirlestir(data || [], misafirler).length,
+      guest_count: misafirler.length,
       /** Filtre listesini arayuz sabit yazmasin diye mevcut degerler */
       payment_providers: [
         ...new Set(orders.map((o) => o.payment_provider).filter(Boolean)),

@@ -148,6 +148,9 @@ function StaffOrdersTab() {
   const [search, setSearch] = useState('');
   const [scope, setScope] = useState<'coach' | 'institution'>('coach');
   const [studentCount, setStudentCount] = useState(0);
+  /** Kapsamdaki gercek siparis sayisi — limit yuzunden kesilen var mi */
+  const [toplamSiparis, setToplamSiparis] = useState(0);
+  const [misafirSayisi, setMisafirSayisi] = useState(0);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
@@ -168,7 +171,8 @@ function StaffOrdersTab() {
         class_id: params.class_id || undefined,
         class_level: params.class_level || undefined,
         payment_provider: params.payment_provider || undefined,
-        limit: 100,
+        // 100 sabitti ve 132 siparisin 32'si sessizce dusuyordu
+        limit: 300,
       });
       setOrders(r.orders || []);
       setClasses(r.classes || []);
@@ -178,6 +182,8 @@ function StaffOrdersTab() {
         setPosSecenekleri(r.payment_providers);
       }
       setStudentCount(r.student_count ?? 0);
+      setToplamSiparis(r.total_in_scope ?? (r.orders || []).length);
+      setMisafirSayisi(r.guest_count ?? 0);
       setSelectedIds(new Set());
     } catch (e: unknown) {
       toast.error((e as Error).message);
@@ -262,11 +268,20 @@ function StaffOrdersTab() {
     <div>
       <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h2 className="text-lg font-semibold text-gray-900">Mağaza siparişleri</h2>
+          <h2 className="text-lg font-semibold text-gray-900">
+            Mağaza siparişleri{' '}
+            <span className="text-sm font-normal text-gray-500" data-test="siparis-sayaci">
+              ({orders.length === toplamSiparis ? toplamSiparis : `${orders.length} / ${toplamSiparis}`})
+            </span>
+          </h2>
           <p className="text-xs text-gray-500 mt-0.5">
             {scope === 'coach'
-              ? `Koç listenizdeki ${studentCount} öğrencinin kitap mağazası siparişleri.`
-              : `Kapsamdaki ${studentCount} öğrencinin kitap mağazası siparişleri.`}
+              ? `Koç listenizdeki ${studentCount} öğrencinin siparişleri`
+              : `Kapsamdaki ${studentCount} öğrencinin siparişleri`}
+            {misafirSayisi > 0 ? ` + öğrenciye bağlı olmayan ${misafirSayisi} sipariş` : ''}.
+            {orders.length < toplamSiparis
+              ? ` Listede ilk ${orders.length} kayıt var; daraltmak için filtre kullanın.`
+              : ''}
             {' '}Soldan seçip toplu silebilirsiniz (ödenmişler hariç).
           </p>
         </div>
@@ -397,7 +412,24 @@ function StaffOrdersTab() {
                       </td>
                       <td className="px-4 py-3 text-xs text-gray-700">{o.class_name || '—'}</td>
                       <td className="px-4 py-3">
-                        <div>{o.customer_name ?? '—'}</div>
+                        <div className="flex items-center gap-1.5">
+                          <span>{o.customer_name ?? '—'}</span>
+                          {o.misafir_siparis ? (
+                            <span
+                              className="rounded bg-violet-100 px-1.5 py-0.5 text-[10px] font-semibold text-violet-800"
+                              title={
+                                o.misafir_atif === 'kurum'
+                                  ? 'Öğrenci hesabına bağlı değil; kuruma kayıtlı sipariş'
+                                  : o.misafir_atif === 'eposta'
+                                    ? 'Öğrenci hesabına bağlı değil; e-posta ile eşleşti'
+                                    : 'Öğrenci hesabına bağlı değil; telefon ile eşleşti'
+                              }
+                              data-test="misafir-rozeti"
+                            >
+                              Misafir
+                            </span>
+                          ) : null}
+                        </div>
                         {o.customer_phone && <div className="text-[11px] text-gray-500">{o.customer_phone}</div>}
                       </td>
                       <td className="px-4 py-3 font-medium">{formatCommerceTry(o.total_kurus)}</td>

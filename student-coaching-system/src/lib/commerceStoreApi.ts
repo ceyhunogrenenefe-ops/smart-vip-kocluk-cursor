@@ -267,6 +267,10 @@ export type StaffStoreOrder = {
    * commerce_payments.provider'dan geliyor.
    */
   payment_provider?: string | null;
+  /** Ogrenciye bagli olmayan (siteden misafir) siparis */
+  misafir_siparis?: boolean;
+  /** Kuruma neden atfedildi: kurum | eposta | telefon */
+  misafir_atif?: 'kurum' | 'eposta' | 'telefon' | null;
   payment_provider_status?: string | null;
   payment_paid_at?: string | null;
   payment_providers?: string[];
@@ -307,6 +311,9 @@ export const csStaffListOrders = (params?: {
     student_count: number;
     scope: 'coach' | 'institution';
     payment_providers?: string[];
+    /** Limit nedeniyle kesilen var mi anlamak icin kapsamdaki gercek toplam */
+    total_in_scope?: number;
+    guest_count?: number;
   }>('staff.orders', params ?? {});
 
 export const csStaffDeleteOrders = (ids: string[]) =>
