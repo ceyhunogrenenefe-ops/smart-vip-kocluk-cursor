@@ -113,6 +113,8 @@ export default function Students() {
     birthDate: '',
     school: '',
     classLevel: 9 as ClassLevel,
+    /** Sinif seviyesine EK konu programlari (or. 11. sinif + TYT-Maarif) */
+    extraTopicLevels: [] as string[],
     programName: 'tyt' as ProgramName,
     coachId: '',
     groupName: '',
@@ -226,6 +228,7 @@ export default function Students() {
       birthDate: '',
       school: '',
       classLevel: 9 as ClassLevel,
+      extraTopicLevels: [],
       programName: 'tyt' as ProgramName,
       coachId: '',
       groupName: '',
@@ -264,6 +267,7 @@ export default function Students() {
       birthDate: '',
       school: '',
       classLevel: 9 as ClassLevel,
+      extraTopicLevels: [],
       programName: 'tyt' as ProgramName,
       coachId: '',
       groupName: '',
@@ -332,6 +336,7 @@ export default function Students() {
           birthDate: formData.birthDate.trim() || undefined,
           school: formData.school.trim() || undefined,
           classLevel: formData.classLevel,
+          extraTopicLevels: formData.extraTopicLevels,
           coachId: canAssignCoach ? formData.coachId.trim() || undefined : editingStudent.coachId,
           institutionId: canPickInstitution ? formData.institutionId.trim() || undefined : editingStudent.institutionId,
           programId: formData.programName,
@@ -387,6 +392,7 @@ export default function Students() {
           birthDate: formData.birthDate.trim() || undefined,
           school: formData.school.trim() || undefined,
           classLevel: formData.classLevel,
+          extraTopicLevels: formData.extraTopicLevels,
           coachId: resolvedCoach || undefined,
           institutionId: resolvedInstitution,
           programId: formData.programName,
@@ -434,6 +440,7 @@ export default function Students() {
       birthDate: student.birthDate?.split('T')[0] || '',
       school: student.school || '',
       classLevel: student.classLevel ?? (9 as ClassLevel),
+      extraTopicLevels: student.extraTopicLevels ?? [],
       programName: student.programName || inferProgramName(student.classLevel),
       coachId: student.coachId || '',
       groupName: student.groupName || '',
@@ -861,6 +868,47 @@ export default function Students() {
                       </option>
                     ))}
                   </select>
+                </div>
+
+                {/* Ek konu programlari */}
+                <div className="sm:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Ek konu programları
+                  </label>
+                  <p className="mb-2 text-xs text-gray-500">
+                    Öğrencinin sınıfı değişmez; seçilen programların konuları plana <b>eklenir</b>.
+                    Örneğin 11. sınıf öğrencisine <b>TYT Maarif Model</b> ekleyince TYT konularını da
+                    çalışabilir.
+                  </p>
+                  <div className="flex flex-wrap gap-2" data-test="ek-konu-programlari">
+                    {CLASS_LEVELS.filter((l) => String(l.value) !== String(formData.classLevel)).map(
+                      (level) => {
+                        const deger = String(level.value);
+                        const secili = formData.extraTopicLevels.includes(deger);
+                        return (
+                          <button
+                            key={deger}
+                            type="button"
+                            onClick={() =>
+                              setFormData({
+                                ...formData,
+                                extraTopicLevels: secili
+                                  ? formData.extraTopicLevels.filter((x) => x !== deger)
+                                  : [...formData.extraTopicLevels, deger],
+                              })
+                            }
+                            className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
+                              secili
+                                ? 'border-red-500 bg-red-500 text-white'
+                                : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
+                            }`}
+                          >
+                            {level.label}
+                          </button>
+                        );
+                      }
+                    )}
+                  </div>
                 </div>
 
                 {/* Program */}

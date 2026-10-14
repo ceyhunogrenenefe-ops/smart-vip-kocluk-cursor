@@ -210,6 +210,8 @@ export interface Database {
           program_id?: string | null;
           whatsapp_automation_enabled?: boolean | null;
           enrollment_status?: 'confirmed' | 'trial' | 'withdrawn' | null;
+          /** Sinif seviyesine EK konu programlari (or. TYT-Maarif) */
+          extra_topic_levels?: string[] | null;
           deleted_at?: string | null;
           created_at: string;
           updated_at: string;
