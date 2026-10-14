@@ -63,6 +63,27 @@ export default async function handler(req, res) {
     }
 
     /** Anahtar kelime denemesi — mesaj göndermeden eşleşme kontrolü */
+    /**
+     * Takip dogrulamasi bu kurulumda calisiyor mu?
+     * Hicbir mesaj gondermez; yoneticiye nedenini ve onerilen akisi verir.
+     */
+    if (req.method === 'GET' && op === 'follow-capability') {
+      try {
+        const { takipDogrulamaYetenegi } = await import('../api/_lib/ig-takip-dogrula.js');
+        const data = await takipDogrulamaYetenegi(institutionId);
+        return res.status(200).json({ ok: true, data });
+      } catch (e) {
+        return res.status(200).json({
+          ok: false,
+          data: {
+            baglanti_var: false,
+            neden: e instanceof Error ? e.message : String(e),
+            oneri: 'Meta baglantisini kontrol edin.'
+          }
+        });
+      }
+    }
+
     if (req.method === 'POST' && op === 'test') {
       const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : req.body || {};
       const keyword = matchKeyword(body.text, sanitizeKeywords(body.keywords), {
@@ -113,11 +134,25 @@ export default async function handler(req, res) {
         reply_comment_text: String(body.reply_comment_text || '').trim().slice(0, 500) || null,
         once_per_user: body.once_per_user !== false,
         is_active: body.is_active === true,
+        // Takip kapisi — kapali birakilirsa otomasyon eskisi gibi calisir
+        follow_gate_enabled: body.follow_gate_enabled === true,
+        follow_invite_text: String(body.follow_invite_text || '').trim().slice(0, 1000) || null,
+        follow_button_text: String(body.follow_button_text || '').trim().slice(0, 20) || null,
+        follow_retry_text: String(body.follow_retry_text || '').trim().slice(0, 1000) || null,
+        follow_retry_button_text:
+          String(body.follow_retry_button_text || '').trim().slice(0, 20) || null,
         updated_at: new Date().toISOString()
       };
 
       if (!row.keywords.length) return res.status(400).json({ error: 'keywords_required' });
-      if (!row.dm_text) return res.status(400).json({ error: 'dm_text_required' });
+      if (!row.dm_text) {
+        return res.status(400).json({
+          error: 'dm_text_required',
+          message: row.follow_gate_enabled
+            ? 'Takip doğrulandıktan sonra gönderilecek PDF mesajı boş olamaz.'
+            : 'DM metni boş olamaz.'
+        });
+      }
 
       if (id) {
         let q = supabaseAdmin.from(TABLE).update(row).eq('id', id);

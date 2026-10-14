@@ -881,7 +881,14 @@ export async function sendCrmWhatsAppInteractive({ phone, interactive, instituti
  * sonraki 7 gün içinde gönderilebilir; tekrar denenirse Meta hata döner.
  * Bu yüzden çağıran taraf comment_id bazında tekilleştirir.
  */
-export async function sendInstagramPrivateReply({ commentId, text }) {
+/**
+ * @param {object} p
+ * @param {{title: string, payload: string}} [p.quickReply] Tek butonlu hizli yanit.
+ *   Takip kapisinda "Takip Ettim" / "Tekrar Kontrol Et" icin kullanilir.
+ *   Butona basmak Instagram'da bir MESAJ sayilir; Meta'nin takip alanini
+ *   okuyabilmesi icin gereken kullanici onayi boylece olusur.
+ */
+export async function sendInstagramPrivateReply({ commentId, text, quickReply }) {
   await loadMetaWhatsAppSecretsFromDb();
   const { resolveSocialToken, resolvePageId } = await import('./meta-social-inbound.js');
   const { token } = resolveSocialToken();
@@ -898,7 +905,21 @@ export async function sendInstagramPrivateReply({ commentId, text }) {
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       recipient: { comment_id: String(commentId) },
-      message: { text: String(text || '').slice(0, 1000) }
+      message: {
+        text: String(text || '').slice(0, 1000),
+        ...(quickReply?.title && quickReply?.payload
+          ? {
+              quick_replies: [
+                {
+                  content_type: 'text',
+                  // Instagram hizli yanit basligi 20 karakterle sinirli
+                  title: String(quickReply.title).slice(0, 20),
+                  payload: String(quickReply.payload).slice(0, 1000)
+                }
+              ]
+            }
+          : {})
+      }
     })
   });
   const json = await res.json().catch(() => ({}));
