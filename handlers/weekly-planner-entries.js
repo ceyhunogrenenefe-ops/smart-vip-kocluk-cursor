@@ -8,6 +8,14 @@ import {
   buildAccessContext
 } from '../api/_lib/student-access-gate.js';
 
+import {
+  cakismalariAyikla,
+  haftaBasi,
+  planKopyasiUret,
+  tarihKaydir,
+  yazimIcinSadele
+} from '../api/_lib/haftalik-plan-kopyala.js';
+
 const padDate = (v) => String(v || '').trim().slice(0, 10);
 
 const toMinutes = (t) => {
@@ -58,6 +66,7 @@ export default async function handler(req, res) {
   try {
     const ctx = await buildAccessContext(requireAuth(req));
     const { actor, roleSet } = ctx;
+    const op = String(req.query.op || '').trim();
 
     if (req.method === 'GET') {
       const studentRaw = actorIsStudentRole(roleSet)
@@ -81,6 +90,154 @@ export default async function handler(req, res) {
         .order('start_time', { ascending: true });
       if (error) throw error;
       return res.status(200).json({ data: data || [] });
+    }
+
+    /**
+     * HAFTALIK PLANI BASKA HAFTAYA AKTAR
+     *
+     * op=copy-week-preview  : hicbir sey yazmaz, ne olacagini dondurur
+     * op=copy-week          : aktarir. mode: 'iptal' | 'birlestir' | 'degistir'
+     *
+     * Hedef haftada plan varsa ASLA dogrudan uzerine yazilmaz; kip
+     * acikca secilmek zorundadir. Varsayilan 'iptal'dir.
+     */
+    if (req.method === 'POST' && (op === 'copy-week' || op === 'copy-week-preview')) {
+      const body = req.body || {};
+      const sid = actorIsStudentRole(roleSet)
+        ? String(actor.student_id || '')
+        : String(body.student_id || body.studentId || '').trim();
+      if (!sid) return res.status(400).json({ error: 'student_id_required' });
+
+      // Aktarim yalnizca SECILEN ogrenci icin; yazma yetkisi her iki opta da aranir
+      const mutate = await assertStudentPlannerWrite(ctx, sid);
+      if (!mutate.ok) return res.status(mutate.status).json({ error: 'forbidden' });
+
+      const kaynakHafta = haftaBasi(padDate(body.source_week || body.sourceWeek));
+      const hedefHafta = haftaBasi(padDate(body.target_week || body.targetWeek));
+      if (!kaynakHafta || !hedefHafta) return res.status(400).json({ error: 'week_required' });
+      if (kaynakHafta === hedefHafta) return res.status(400).json({ error: 'same_week' });
+
+      const kaynakSon = tarihKaydir(kaynakHafta, 6);
+      const hedefSon = tarihKaydir(hedefHafta, 6);
+
+      const [{ data: kaynakSatirlar, error: kErr }, { data: hedefSatirlar, error: hErr }] =
+        await Promise.all([
+          supabaseAdmin
+            .from('weekly_planner_entries')
+            .select('*')
+            .eq('student_id', sid)
+            .gte('planner_date', kaynakHafta)
+            .lte('planner_date', kaynakSon)
+            .order('planner_date', { ascending: true }),
+          supabaseAdmin
+            .from('weekly_planner_entries')
+            .select('*')
+            .eq('student_id', sid)
+            .gte('planner_date', hedefHafta)
+            .lte('planner_date', hedefSon)
+            .order('planner_date', { ascending: true })
+        ]);
+      if (kErr) throw kErr;
+      if (hErr) throw hErr;
+
+      if (!(kaynakSatirlar || []).length) {
+        return res.status(400).json({ error: 'source_week_empty', message: 'Kaynak haftada görev yok.' });
+      }
+
+      const uretim = planKopyasiUret(kaynakSatirlar || [], {
+        kaynakHaftaBasi: kaynakHafta,
+        hedefHaftaBasi: hedefHafta
+      });
+      if (uretim.hata) return res.status(400).json({ error: uretim.hata });
+
+      const mevcutSayi = (hedefSatirlar || []).length;
+      const { eklenecek, cakisan } = cakismalariAyikla(uretim.kopyalar, hedefSatirlar || []);
+
+      const ozet = {
+        source_week: kaynakHafta,
+        target_week: hedefHafta,
+        source_count: (kaynakSatirlar || []).length,
+        target_existing_count: mevcutSayi,
+        copy_count: uretim.kopyalar.length,
+        skipped_invalid: uretim.atlanan,
+        conflict_count: cakisan.length,
+        mergeable_count: eklenecek.length
+      };
+
+      if (op === 'copy-week-preview') {
+        return res.status(200).json({
+          data: {
+            ...ozet,
+            preview: uretim.kopyalar,
+            conflicts: cakisan.map((c) => ({
+              planner_date: c.kopya.planner_date,
+              start_time: c.kopya.start_time,
+              end_time: c.kopya.end_time,
+              title: c.kopya.title,
+              existing_title: c.mevcut.title,
+              existing_start: c.mevcut.start_time,
+              existing_end: c.mevcut.end_time
+            })),
+            existing: hedefSatirlar || []
+          }
+        });
+      }
+
+      const mode = String(body.mode || 'iptal').trim();
+      if (mevcutSayi > 0 && mode === 'iptal') {
+        return res.status(409).json({ error: 'target_week_not_empty', data: ozet });
+      }
+      if (!['iptal', 'birlestir', 'degistir'].includes(mode)) {
+        return res.status(400).json({ error: 'invalid_mode' });
+      }
+
+      let silinen = 0;
+      let yazilacak = uretim.kopyalar;
+
+      if (mevcutSayi > 0 && mode === 'birlestir') {
+        // Cakisan saatler korunur: mevcut gorev silinmez, kopyasi eklenmez
+        yazilacak = eklenecek;
+      }
+
+      if (mevcutSayi > 0 && mode === 'degistir') {
+        /**
+         * Yalniz PLAN satirlari silinir. weekly_entries (gerceklesen
+         * calisma) ayri tabloda durur ve bu islemden etkilenmez.
+         */
+        const silinecekIdler = (hedefSatirlar || []).map((r) => r.id).filter(Boolean);
+        if (silinecekIdler.length) {
+          const { error: dErr } = await supabaseAdmin
+            .from('weekly_planner_entries')
+            .delete()
+            .eq('student_id', sid)
+            .in('id', silinecekIdler);
+          if (dErr) throw dErr;
+          silinen = silinecekIdler.length;
+        }
+      }
+
+      if (!yazilacak.length) {
+        return res.status(200).json({ data: { ...ozet, inserted: 0, deleted: silinen, mode } });
+      }
+
+      const now = new Date().toISOString();
+      const satirlar = yazilacak.map((k) => ({
+        ...yazimIcinSadele(k),
+        student_id: sid,
+        institution_id: k.institution_id ?? mutate.student?.institution_id ?? actor.institution_id ?? null,
+        created_at: now,
+        updated_at: now
+      }));
+
+      const { data: eklenen, error: iErr } = await supabaseAdmin
+        .from('weekly_planner_entries')
+        .insert(satirlar)
+        .select();
+      if (iErr) throw iErr;
+
+      return res.status(200).json({
+        data: { ...ozet, inserted: (eklenen || []).length, deleted: silinen, mode, entries: eklenen || [] }
+      });
     }
 
     if (req.method === 'POST') {
