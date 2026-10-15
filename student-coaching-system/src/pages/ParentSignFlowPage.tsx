@@ -425,7 +425,10 @@ export default function ParentSignFlowPage() {
   const isSuper = effectiveUser?.role === 'super_admin';
   const isInstitutionAdmin = isSuper || effectiveUser?.role === 'admin';
   const [rows, setRows] = useState<ParentSignContractRow[]>([]);
-  const [odemeHesaplari, setOdemeHesaplari] = useState<PaymentAccount[]>([]);
+  /** Tum hesaplar (pasifler dahil) — yalnizca eski odemelerin hesap adini gostermek icin. */
+  const [tumHesaplar, setTumHesaplar] = useState<PaymentAccount[]>([]);
+  /** Secilebilir hesaplar: pasif yapilan hesaplar veli onay/imzada secilemez. */
+  const odemeHesaplari = useMemo(() => tumHesaplar.filter((a) => a.active !== false), [tumHesaplar]);
   /**
    * Odendi isaretlemesi window.prompt ile sadece tarih soruyordu; hesap
    * secilmedigi icin backend varsayilan hesaba yaziyordu ve "hangi bankaya
@@ -1029,14 +1032,14 @@ export default function ParentSignFlowPage() {
     let iptal = false;
     void (async () => {
       if (!effectiveInstitutionId) {
-        if (!iptal) setOdemeHesaplari([]);
+        if (!iptal) setTumHesaplar([]);
         return;
       }
       try {
-        const acc = await listPaymentAccounts(effectiveInstitutionId);
-        if (!iptal) setOdemeHesaplari((acc.data || []).filter((a) => a.active !== false));
+        const acc = await listPaymentAccounts(effectiveInstitutionId, undefined, { includeInactive: true });
+        if (!iptal) setTumHesaplar(acc.data || []);
       } catch {
-        if (!iptal) setOdemeHesaplari([]);
+        if (!iptal) setTumHesaplar([]);
       }
     })();
     return () => {
@@ -1048,11 +1051,12 @@ export default function ParentSignFlowPage() {
     (hesapId?: string | null): string => {
       const id = String(hesapId || '').trim();
       if (!id) return '';
-      const h = odemeHesaplari.find((x) => x.id === id);
+      const h = tumHesaplar.find((x) => x.id === id);
       if (!h) return '';
-      return String(h.bank_name || h.label || '').trim() || h.label || '';
+      const ad = String(h.bank_name || h.label || '').trim() || h.label || '';
+      return h.active === false ? `${ad} (pasif)` : ad;
     },
-    [odemeHesaplari]
+    [tumHesaplar]
   );
 
   const kapsamaYukle = useCallback(async () => {
@@ -1105,6 +1109,10 @@ export default function ParentSignFlowPage() {
       setMsg('Ödemenin girdiği banka veya kredi kartı hesabını seçin.');
       return;
     }
+    if (!odemeHesaplari.some((h) => h.id === odemeHesapId)) {
+      setMsg('Bu hesap pasif. Lütfen aktif bir banka veya kredi kartı hesabı seçin.');
+      return;
+    }
     const { row, index } = odemeModali;
     setParentSignRowBusy(`${row.id}:t${index}`);
     setMsg(null);
@@ -1136,7 +1144,10 @@ export default function ParentSignFlowPage() {
       // Tarih ve hesap birlikte alinir; hesapsiz isaretleme bankayi kaybediyordu
       const kart = taksitKartlariFromRow(r)[index];
       setOdemeTarihi(todayYmdLocal());
-      setOdemeHesapId(String(kart?.odeme_hesap_id || '').trim() || onerilenHesapId(r));
+      // Kayitli hesap sonradan pasif yapildiysa onu on-secme; aktif bir hesap oner.
+      const kayitli = String(kart?.odeme_hesap_id || '').trim();
+      const kayitliAktif = kayitli && odemeHesaplari.some((h) => h.id === kayitli);
+      setOdemeHesapId(kayitliAktif ? kayitli : onerilenHesapId(r));
       setOdemeModali({
         row: r,
         index,

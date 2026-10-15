@@ -10,6 +10,7 @@ import {
   Plus,
   RefreshCw,
   Search,
+  Settings2,
   Link2,
   Trash2,
   Wallet,
@@ -27,6 +28,7 @@ import {
   deleteStudentPayment,
   listPaymentAccounts,
   listStudentPayments,
+  patchPaymentAccount,
   patchStudentPayment,
   ACCOUNT_TYPE_LABELS,
   PAYMENT_STATUS_LABELS,
@@ -271,6 +273,12 @@ export default function StudentPaymentTrackerPanel() {
 
   const [accountOpen, setAccountOpen] = useState(false);
   const [accountSaving, setAccountSaving] = useState(false);
+  /** Duzenlenen hesabin id'si; null ise modal yeni hesap ekler. */
+  const [editingAccountId, setEditingAccountId] = useState<string | null>(null);
+  const [manageOpen, setManageOpen] = useState(false);
+  const [manageAccounts, setManageAccounts] = useState<PaymentAccount[]>([]);
+  const [manageLoading, setManageLoading] = useState(false);
+  const [togglingId, setTogglingId] = useState<string | null>(null);
   const [accountForm, setAccountForm] = useState({
     label: '',
     bank_name: '',
@@ -465,7 +473,56 @@ export default function StudentPaymentTrackerPanel() {
     setFormOpen(true);
   };
 
+  const loadManageAccounts = useCallback(async () => {
+    setManageLoading(true);
+    try {
+      const r = await listPaymentAccounts(institutionId || undefined, undefined, { includeInactive: true });
+      setManageAccounts(r.data);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Hesaplar yüklenemedi');
+    } finally {
+      setManageLoading(false);
+    }
+  }, [institutionId]);
+
+  const openManage = () => {
+    setManageOpen(true);
+    void loadManageAccounts();
+  };
+
+  const openEditAccount = (a: PaymentAccount) => {
+    setEditingAccountId(a.id);
+    setAccountForm({
+      label: a.label || '',
+      bank_name: a.bank_name || '',
+      account_holder: a.account_holder || '',
+      account_type: (a.account_type || 'bank') as PaymentAccountType,
+      iban: a.iban || '',
+      notes: a.notes || ''
+    });
+    setAccountOpen(true);
+  };
+
+  const toggleAccountActive = async (a: PaymentAccount) => {
+    const yeni = a.active === false;
+    setTogglingId(a.id);
+    try {
+      await patchPaymentAccount({ id: a.id, active: yeni });
+      toast.success(
+        yeni
+          ? `${a.label} aktif yapıldı`
+          : `${a.label} pasif yapıldı — veli onay ve imzada artık seçilemez`
+      );
+      await Promise.all([loadManageAccounts(), reload()]);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Güncellenemedi');
+    } finally {
+      setTogglingId(null);
+    }
+  };
+
   const openAccountModal = (type: PaymentAccountType) => {
+    setEditingAccountId(null);
     setChannel(type);
     setAccountForm({
       label: '',
@@ -576,21 +633,36 @@ export default function StudentPaymentTrackerPanel() {
     }
     setAccountSaving(true);
     try {
-      await createPaymentAccount({
-        label: accountForm.label.trim(),
-        bank_name: accountForm.bank_name || null,
-        account_holder: accountForm.account_holder || null,
-        account_type: accountForm.account_type,
-        iban: accountForm.iban || null,
-        notes: accountForm.notes || null,
-        institution_id: institutionId || null
-      });
-      toast.success('Ödeme hesabı eklendi');
+      if (editingAccountId) {
+        await patchPaymentAccount({
+          id: editingAccountId,
+          label: accountForm.label.trim(),
+          bank_name: accountForm.bank_name || null,
+          account_holder: accountForm.account_holder || null,
+          account_type: accountForm.account_type,
+          iban: accountForm.account_type === 'bank' ? accountForm.iban || null : null,
+          notes: accountForm.notes || null
+        });
+        toast.success('Hesap güncellendi');
+      } else {
+        await createPaymentAccount({
+          label: accountForm.label.trim(),
+          bank_name: accountForm.bank_name || null,
+          account_holder: accountForm.account_holder || null,
+          account_type: accountForm.account_type,
+          iban: accountForm.iban || null,
+          notes: accountForm.notes || null,
+          institution_id: institutionId || null
+        });
+        toast.success('Ödeme hesabı eklendi');
+      }
       setAccountOpen(false);
+      setEditingAccountId(null);
       setAccountForm({ label: '', bank_name: '', account_holder: '', account_type: 'bank', iban: '', notes: '' });
       await reload();
+      if (manageOpen) await loadManageAccounts();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Hesap eklenemedi');
+      toast.error(e instanceof Error ? e.message : editingAccountId ? 'Güncellenemedi' : 'Hesap eklenemedi');
     } finally {
       setAccountSaving(false);
     }
@@ -880,6 +952,13 @@ export default function StudentPaymentTrackerPanel() {
             className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
           >
             <RefreshCw className="h-4 w-4" /> Yenile
+          </button>
+          <button
+            type="button"
+            onClick={openManage}
+            className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
+          >
+            <Settings2 className="h-4 w-4" /> Hesapları yönet
           </button>
           {isCreditCard ? (
             <button
@@ -1485,10 +1564,117 @@ export default function StudentPaymentTrackerPanel() {
         </AppModalFooter>
       </AppModal>
 
+      <AppModal open={manageOpen} onClose={() => setManageOpen(false)} panelClassName="max-w-2xl">
+        <AppModalHeader>
+          <div>
+            <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Ödeme hesapları</h3>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Pasif hesaplar veli onay ve imza ekranında, tahsilat ve ödeme formlarında seçilemez. Eski kayıtlar
+              silinmez.
+            </p>
+          </div>
+          <button type="button" className="text-sm text-slate-500" onClick={() => setManageOpen(false)}>
+            Kapat
+          </button>
+        </AppModalHeader>
+        <AppModalBody>
+          {manageLoading && !manageAccounts.length ? (
+            <div className="flex items-center gap-2 py-6 text-sm text-slate-500">
+              <Loader2 className="h-4 w-4 animate-spin" /> Yükleniyor…
+            </div>
+          ) : manageAccounts.length === 0 ? (
+            <p className="py-6 text-sm text-slate-500">Henüz hesap yok.</p>
+          ) : (
+            <ul className="divide-y divide-slate-100 dark:divide-slate-800">
+              {manageAccounts.map((a) => {
+                const aktif = a.active !== false;
+                const kart = a.account_type === 'credit_card';
+                return (
+                  <li key={a.id} className={`flex flex-wrap items-center gap-3 py-3 ${aktif ? '' : 'opacity-60'}`}>
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-100 dark:bg-slate-800">
+                      {kart ? (
+                        <CreditCard className="h-4 w-4 text-violet-600" />
+                      ) : (
+                        <Building2 className="h-4 w-4 text-emerald-600" />
+                      )}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="truncate text-sm font-semibold text-slate-900 dark:text-white">{a.label}</span>
+                        <span
+                          className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                            aktif
+                              ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300'
+                              : 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300'
+                          }`}
+                        >
+                          {aktif ? 'Aktif' : 'Pasif'}
+                        </span>
+                      </div>
+                      <div className="truncate text-xs text-slate-500">
+                        {[ACCOUNT_TYPE_LABELS[(a.account_type || 'bank') as PaymentAccountType], a.bank_name, a.account_holder, a.iban]
+                          .filter(Boolean)
+                          .join(' · ')}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => openEditAccount(a)}
+                        className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-200"
+                      >
+                        <Pencil className="h-3.5 w-3.5" /> Düzenle
+                      </button>
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={aktif}
+                        disabled={togglingId === a.id}
+                        onClick={() => void toggleAccountActive(a)}
+                        className={`inline-flex min-w-[96px] items-center justify-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-semibold disabled:opacity-50 ${
+                          aktif
+                            ? 'border border-slate-200 text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-200'
+                            : 'bg-emerald-600 text-white hover:bg-emerald-700'
+                        }`}
+                      >
+                        {togglingId === a.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+                        {aktif ? 'Pasif yap' : 'Aktif yap'}
+                      </button>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </AppModalBody>
+        <AppModalFooter>
+          <button
+            type="button"
+            onClick={() => openAccountModal('bank')}
+            className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 px-3 py-2 text-sm font-medium dark:border-slate-600"
+          >
+            <Building2 className="h-4 w-4" /> Banka hesabı ekle
+          </button>
+          <button
+            type="button"
+            onClick={() => openAccountModal('credit_card')}
+            className="inline-flex items-center gap-1.5 rounded-xl border border-violet-200 px-3 py-2 text-sm font-medium text-violet-800 dark:border-violet-800 dark:text-violet-200"
+          >
+            <CreditCard className="h-4 w-4" /> Kredi kartı ekle
+          </button>
+        </AppModalFooter>
+      </AppModal>
+
       <AppModal open={accountOpen} onClose={() => setAccountOpen(false)} panelClassName="max-w-md">
         <AppModalHeader>
           <h3 className="text-lg font-semibold text-slate-900 dark:text-white">
-            {accountForm.account_type === 'credit_card' ? 'Kredi kartı ekle' : 'Banka hesabı ekle'}
+            {editingAccountId
+              ? accountForm.account_type === 'credit_card'
+                ? 'Kredi kartını düzenle'
+                : 'Banka hesabını düzenle'
+              : accountForm.account_type === 'credit_card'
+                ? 'Kredi kartı ekle'
+                : 'Banka hesabı ekle'}
           </h3>
           <button type="button" className="text-sm text-slate-500" onClick={() => setAccountOpen(false)}>
             Kapat
@@ -1518,7 +1704,23 @@ export default function StudentPaymentTrackerPanel() {
                 className="mt-1 w-full rounded-lg border border-slate-200 px-2.5 py-2 text-sm dark:border-slate-600 dark:bg-slate-900"
               />
             </label>
-            <input type="hidden" value={accountForm.account_type} readOnly />
+            {editingAccountId ? (
+              <label className="text-xs text-slate-600">
+                Hesap türü
+                <select
+                  value={accountForm.account_type}
+                  onChange={(e) =>
+                    setAccountForm((f) => ({ ...f, account_type: e.target.value as PaymentAccountType }))
+                  }
+                  className="mt-1 w-full rounded-lg border border-slate-200 px-2.5 py-2 text-sm dark:border-slate-600 dark:bg-slate-900"
+                >
+                  <option value="bank">Banka hesabı</option>
+                  <option value="credit_card">Kredi kartı</option>
+                </select>
+              </label>
+            ) : (
+              <input type="hidden" value={accountForm.account_type} readOnly />
+            )}
             <label className="text-xs text-slate-600">
               Kart / hesap sahibi
               <input
@@ -1566,7 +1768,7 @@ export default function StudentPaymentTrackerPanel() {
             }`}
           >
             {accountSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-            Ekle
+            {editingAccountId ? 'Kaydet' : 'Ekle'}
           </button>
         </AppModalFooter>
       </AppModal>

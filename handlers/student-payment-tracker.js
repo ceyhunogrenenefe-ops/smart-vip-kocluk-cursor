@@ -175,12 +175,15 @@ function scopeInstitution(actor, roleSet, queryInst) {
 async function handleGetAccounts(req, res, actor, roleSet) {
   const inst = scopeInstitution(actor, roleSet, req.query?.institution_id);
   const accountType = typeof req.query?.account_type === 'string' ? req.query.account_type.trim() : '';
+  // Varsayilan: yalnizca aktif hesaplar (veli onay/imza, tahsilat secimleri).
+  // Hesap yonetim ekrani pasifleri de gormek icin include_inactive=1 gonderir.
+  const includeInactive = String(req.query?.include_inactive || '') === '1';
   let q = supabaseAdmin
     .from('payment_accounts')
     .select('*')
-    .eq('active', true)
     .order('sort_order', { ascending: true })
     .order('label', { ascending: true });
+  if (!includeInactive) q = q.eq('active', true);
 
   if (inst) {
     q = q.or(`institution_id.eq.${inst},institution_id.is.null`);

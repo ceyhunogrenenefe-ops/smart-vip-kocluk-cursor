@@ -101,10 +101,20 @@ async function parseJson(res: Response) {
   return (await res.json().catch(() => ({}))) as Record<string, unknown>;
 }
 
-export async function listPaymentAccounts(institutionId?: string, accountType?: PaymentAccountType) {
+/**
+ * Varsayilan olarak yalnizca AKTIF hesaplari dondurur; veli onay/imza ve tahsilat
+ * ekranlari pasif hesaplari bu sayede hic gormez. Yonetim ekrani icin
+ * `includeInactive: true` verin.
+ */
+export async function listPaymentAccounts(
+  institutionId?: string,
+  accountType?: PaymentAccountType,
+  opts: { includeInactive?: boolean } = {}
+) {
   const qs = new URLSearchParams({ op: 'accounts' });
   if (institutionId) qs.set('institution_id', institutionId);
   if (accountType) qs.set('account_type', accountType);
+  if (opts.includeInactive) qs.set('include_inactive', '1');
   const res = await apiFetch(`/api/student-payment-tracker?${qs}`);
   const j = await parseJson(res);
   if (!res.ok && j.hint !== 'student_payment_tracker_sql_missing') {
@@ -163,6 +173,18 @@ export async function createPaymentAccount(body: Partial<PaymentAccount> & { lab
   });
   const j = await parseJson(res);
   if (!res.ok) throw new Error(String(j.error || 'Hesap eklenemedi'));
+  return j.data as PaymentAccount;
+}
+
+/** Hesap bilgilerini gunceller veya aktif/pasif yapar. */
+export async function patchPaymentAccount(body: Partial<PaymentAccount> & { id: string }) {
+  const res = await apiFetch('/api/student-payment-tracker', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ op: 'account', ...body })
+  });
+  const j = await parseJson(res);
+  if (!res.ok) throw new Error(String(j.error || 'Hesap güncellenemedi'));
   return j.data as PaymentAccount;
 }
 
