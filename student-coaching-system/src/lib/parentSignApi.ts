@@ -475,7 +475,7 @@ export async function patchParentSignKayitOnly(body: {
   return (j as { data: ParentSignContractRow }).data;
 }
 
-/** Ağustos+ ödenmiş taksitleri öğrenci ödemelerine aktarır (banka/kart ayrımıyla). */
+/** Tüm ödenmiş taksitleri öğrenci ödemelerine aktarır (banka/kart ayrımıyla). */
 export async function syncPaidTaksitToStudentPayments(institutionId?: string) {
   const res = await apiFetch('/api/parent-sign-contracts', {
     method: 'POST',
