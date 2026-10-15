@@ -93,6 +93,25 @@ export function buildVeliSignReadyWhatsAppText(payload) {
   return lines.join('\n').trim();
 }
 
+/**
+ * WhatsApp Merkezi'ndeki "Aç / Kapat" düğmesi message_templates.is_active alanını
+ * değiştirir. Kapalıyken veli onay/imza bildirimi gönderilmez (anlık + cron).
+ * Tablo okunamazsa gönderimi engellemez (eski davranış).
+ */
+export async function isVeliSignReadyNotifyPaused() {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('message_templates')
+      .select('is_active')
+      .eq('type', VELI_SIGN_READY_TEMPLATE_TYPE)
+      .maybeSingle();
+    if (error) return false;
+    return data?.is_active === false;
+  } catch {
+    return false;
+  }
+}
+
 async function alreadySentSignReadyNotify(contractId) {
   const id = String(contractId || '').trim();
   if (!id) return true;
@@ -116,6 +135,11 @@ async function alreadySentSignReadyNotify(contractId) {
 export async function notifyVeliSignReady({ contract, institution }) {
   const contractId = String(contract?.id || '').trim();
   if (!contractId) return { ok: false, error: 'missing_contract' };
+
+  if (await isVeliSignReadyNotifyPaused()) {
+    // Log yazilmaz: cron her 10 dk calisir, duraklatma suresince log sismesin.
+    return { ok: false, skipped: 'paused' };
+  }
 
   if (await alreadySentSignReadyNotify(contractId)) {
     return { ok: true, skipped: 'already_sent' };
