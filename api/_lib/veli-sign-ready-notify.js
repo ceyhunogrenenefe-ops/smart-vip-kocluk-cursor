@@ -112,7 +112,16 @@ export async function isVeliSignReadyNotifyPaused() {
   }
 }
 
-async function alreadySentSignReadyNotify(contractId) {
+const PAUSED_LOG_CODE = 'paused';
+
+/**
+ * Bu sözleşme için bildirim işi bitmiş mi?
+ * - gönderildiyse (sent), ya da
+ * - bildirim kapalıyken sıraya girdiyse (skipped + paused): bildirim tekrar
+ *   açıldığında bu bekleyenlere toplu mesaj gitmez; yalnızca açıldıktan sonra
+ *   ücreti girilen sözleşmelere gider.
+ */
+async function alreadyHandledSignReadyNotify(contractId) {
   const id = String(contractId || '').trim();
   if (!id) return true;
   const { data, error } = await supabaseAdmin
@@ -120,13 +129,13 @@ async function alreadySentSignReadyNotify(contractId) {
     .select('id')
     .eq('kind', VELI_SIGN_READY_WA_KIND)
     .eq('related_id', id)
-    .eq('status', 'sent')
-    .maybeSingle();
+    .or(`status.eq.sent,and(status.eq.skipped,twilio_error_code.eq.${PAUSED_LOG_CODE})`)
+    .limit(1);
   if (error) {
-    console.warn('[veli-sign-ready-notify] alreadySent', error.message);
+    console.warn('[veli-sign-ready-notify] alreadyHandled', error.message);
     return false;
   }
-  return Boolean(data);
+  return Boolean(data?.length);
 }
 
 /**
@@ -136,13 +145,22 @@ export async function notifyVeliSignReady({ contract, institution }) {
   const contractId = String(contract?.id || '').trim();
   if (!contractId) return { ok: false, error: 'missing_contract' };
 
-  if (await isVeliSignReadyNotifyPaused()) {
-    // Log yazilmaz: cron her 10 dk calisir, duraklatma suresince log sismesin.
-    return { ok: false, skipped: 'paused' };
+  if (await alreadyHandledSignReadyNotify(contractId)) {
+    return { ok: true, skipped: 'already_sent' };
   }
 
-  if (await alreadySentSignReadyNotify(contractId)) {
-    return { ok: true, skipped: 'already_sent' };
+  if (await isVeliSignReadyNotifyPaused()) {
+    // Sozlesme basina tek kayit: bildirim acilinca bu sozlesmeye mesaj gitmez.
+    await insertWhatsAppAutomationLog({
+      studentId: null,
+      relatedId: contractId,
+      kind: VELI_SIGN_READY_WA_KIND,
+      message: 'veli_sign_ready: bildirim kapali — gonderilmedi',
+      status: 'skipped',
+      logCode: PAUSED_LOG_CODE,
+      error: 'notification_paused'
+    });
+    return { ok: false, skipped: 'paused' };
   }
 
   const phone = resolveVeliPhoneFromContract(contract);
