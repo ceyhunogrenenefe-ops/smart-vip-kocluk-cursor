@@ -1,6 +1,10 @@
 import { supabaseAdmin } from './supabase-admin.js';
 import { errorMessage } from './error-msg.js';
-import { notifyVeliSignReady, VELI_SIGN_READY_TEMPLATE_TYPE } from './veli-sign-ready-notify.js';
+import {
+  isVeliSignReadyNotifyPaused,
+  notifyVeliSignReady,
+  VELI_SIGN_READY_TEMPLATE_TYPE
+} from './veli-sign-ready-notify.js';
 
 const MAX_CONTRACTS = 40;
 
@@ -8,6 +12,9 @@ const MAX_CONTRACTS = 40;
  * ready_to_sign aşamasında imza bildirimi gitmemiş sözleşmeleri yeniden dener.
  */
 export async function runVeliSignReadyNotifyRetryJob() {
+  if (await isVeliSignReadyNotifyPaused()) {
+    return { ok: true, paused: true, scanned: 0, processed: 0, template_type: VELI_SIGN_READY_TEMPLATE_TYPE, summary: [] };
+  }
   const { data: rows, error } = await supabaseAdmin
     .from('parent_sign_contracts')
     .select(
