@@ -8,8 +8,12 @@ import { errorMessage } from './error-msg.js';
 
 const YMD = /^\d{4}-\d{2}-\d{2}$/;
 const NOTE_PREFIX = 'parent_sign_taksit:';
-/** Tahsilat → öğrenci ödemesi senkronu bu tarihten itibaren geçerlidir */
-export const TAKSIT_PAYMENT_SYNC_FROM = '2026-08-01';
+/**
+ * Tahsilat → öğrenci ödemesi senkronu bu tarihten itibaren geçerlidir.
+ * Eskiden '2026-08-01' idi; Ağustos öncesi onaylı taksitler genel bakışta eksik
+ * kalıyordu. Artık tüm onaylı taksitler aktarılır.
+ */
+export const TAKSIT_PAYMENT_SYNC_FROM = '2000-01-01';
 
 export function istanbulYmd() {
   try {
@@ -155,7 +159,7 @@ export async function syncParentSignTaksitToStudentPayment({
 
   let findQ = supabaseAdmin
     .from('student_payment_records')
-    .select('id, notes, payment_account_id')
+    .select('id, notes, payment_account_id, status')
     .eq('notes', noteKey)
     .limit(1);
   let { data: foundRows, error: fe } = await findQ;
@@ -167,15 +171,23 @@ export async function syncParentSignTaksitToStudentPayment({
   }
   let existingId = foundRows?.[0]?.id || null;
   let existingAccountId = foundRows?.[0]?.payment_account_id || null;
+  let existingStatus = foundRows?.[0]?.status || null;
 
   if (!existingId) {
     const { data: loose } = await supabaseAdmin
       .from('student_payment_records')
-      .select('id, notes, payment_account_id')
+      .select('id, notes, payment_account_id, status')
       .ilike('notes', `%${noteKey}%`)
       .limit(5);
     existingId = loose?.[0]?.id || null;
     existingAccountId = loose?.[0]?.payment_account_id || null;
+    existingStatus = loose?.[0]?.status || null;
+  }
+
+  // Öğrenci ödemelerinden silinen (iptal) kayıt geri getirilmez. Genelde aynı
+  // ödeme elle başka başlıkla girilmiştir; geri gelirse genel bakışta çift sayılır.
+  if (existingId && existingStatus === 'cancelled') {
+    return { ok: true, skipped: true, reason: 'deleted_by_user', id: existingId };
   }
 
   if (!paid) {
@@ -290,7 +302,7 @@ export async function syncParentSignTaksitToStudentPayment({
 }
 
 /**
- * parent_sign_taksit otomatik kayıtlarından Ağustos öncekileri siler.
+ * parent_sign_taksit otomatik kayıtlarından senkron başlangıcından öncekileri siler.
  * Manuel (notes farklı) kayıtlar dokunulmaz.
  */
 export async function cleanupPreAugustAutoTaksitPayments({ institutionId } = {}) {
@@ -325,7 +337,7 @@ export async function cleanupPreAugustAutoTaksitPayments({ institutionId } = {})
 }
 
 /**
- * Kurumdaki ödenmiş taksit kartlarını öğrenci ödemelerine aktarır (yalnızca Ağustos+).
+ * Kurumdaki tüm ödenmiş taksit kartlarını öğrenci ödemelerine aktarır.
  * remapAccount=true: ödeme şekline göre banka/kart hesabını yeniden atar.
  */
 export async function backfillPaidTaksitToStudentPayments({

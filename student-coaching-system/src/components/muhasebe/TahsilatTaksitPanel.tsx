@@ -380,7 +380,7 @@ export function TahsilatTaksitPanel({ compactHeader = false, onStatsChange }: Pr
               disabled={loading || syncingPaid || !effectiveInstitutionId}
               onClick={() => void syncAllPaid()}
               className="inline-flex items-center gap-2 rounded-xl border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-950 hover:bg-emerald-100 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-100 disabled:opacity-50"
-              title="Ağustos 2026 sonrası ödenen taksitleri banka/kart ayrımıyla öğrenci ödemelerine aktarır"
+              title="Onaylanan tüm taksitleri banka/kart ayrımıyla öğrenci ödemelerine aktarır (silinmiş kayıtlar geri getirilmez)"
             >
               {syncingPaid ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wallet className="w-4 h-4" />}
               Gerçekleşenleri aktar
