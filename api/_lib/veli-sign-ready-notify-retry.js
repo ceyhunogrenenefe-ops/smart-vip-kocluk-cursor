@@ -12,9 +12,9 @@ const MAX_CONTRACTS = 40;
  * ready_to_sign aşamasında imza bildirimi gitmemiş sözleşmeleri yeniden dener.
  */
 export async function runVeliSignReadyNotifyRetryJob() {
-  if (await isVeliSignReadyNotifyPaused()) {
-    return { ok: true, paused: true, scanned: 0, processed: 0, template_type: VELI_SIGN_READY_TEMPLATE_TYPE, summary: [] };
-  }
+  // Kapaliyken de calisir: bekleyen sozlesmeleri "kapaliyken sıraya girdi" olarak
+  // isaretler ki bildirim acildiginda bunlara toplu mesaj gitmesin.
+  const paused = await isVeliSignReadyNotifyPaused();
   const { data: rows, error } = await supabaseAdmin
     .from('parent_sign_contracts')
     .select(
@@ -69,6 +69,7 @@ export async function runVeliSignReadyNotifyRetryJob() {
 
   return {
     ok: true,
+    paused,
     scanned: candidates.length,
     processed,
     template_type: VELI_SIGN_READY_TEMPLATE_TYPE,
