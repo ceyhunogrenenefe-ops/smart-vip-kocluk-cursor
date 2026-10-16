@@ -997,3 +997,66 @@ export function fetchEdesisHataKarnesiReports(hataKarnesiId: string) {
     `op=hata-karnesi-reports&hataKarnesiId=${encodeURIComponent(hataKarnesiId)}`
   );
 }
+
+export type EdesisRoomRef = { id: string | number; name?: string; gradeName?: string | null };
+export type EdesisGroupSyncItem = {
+  studentId: string;
+  name: string;
+  className: string;
+  alsoIn?: string[];
+  targetRoom?: EdesisRoomRef | null;
+  fromRoom?: EdesisRoomRef | null;
+  fromTerm?: { id: string | number; name?: string } | null;
+  edesisStudentId?: string;
+  matchMethod?: string | null;
+  action: 'create' | 'move' | 'link' | 'ok' | 'skip';
+  reason?: string;
+  done?: boolean;
+  error?: string;
+};
+export type EdesisGroupSyncPlan = {
+  ok: boolean;
+  error?: string;
+  term?: { id: string | number; name: string };
+  classes?: Array<{
+    classId: string;
+    className: string;
+    grade: string;
+    letter: string;
+    room: EdesisRoomRef | null;
+    how: string;
+    studentCount: number;
+  }>;
+  items?: EdesisGroupSyncItem[];
+  summary?: Partial<Record<EdesisGroupSyncItem['action'], number>>;
+  totalStudents?: number;
+};
+export type EdesisGroupSyncApplyResult = {
+  ok: boolean;
+  error?: string;
+  applied?: number;
+  done?: number;
+  failed?: number;
+  remaining?: number;
+  results?: EdesisGroupSyncItem[];
+};
+
+/** Önizleme: hiçbir şey değiştirmez. */
+export async function previewEdesisGroupClassSync(): Promise<EdesisGroupSyncPlan> {
+  const res = await apiFetch('/api/edesis-sync?op=group-class-sync');
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(j.error || j.message || res.statusText);
+  return j as EdesisGroupSyncPlan;
+}
+
+/** Uygular (her çağrıda en fazla `limit` öğrenci). */
+export async function applyEdesisGroupClassSync(limit = 12): Promise<EdesisGroupSyncApplyResult> {
+  const res = await apiFetch('/api/edesis-sync?op=group-class-sync', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ apply: true, limit })
+  });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(j.error || j.message || res.statusText);
+  return j as EdesisGroupSyncApplyResult;
+}

@@ -3037,6 +3037,29 @@ export default async function handler(req, res) {
       });
     }
 
+    if (op === 'group-class-sync') {
+      if (!(actor.role === 'super_admin' || actor.role === 'admin')) {
+        return res.status(403).json({ error: 'admin_required' });
+      }
+      const { buildGroupClassSyncPlan, applyGroupClassSyncPlan } = await import(
+        '../api/_lib/edesis-group-class-sync.js'
+      );
+      const body = req.body && typeof req.body === 'object' ? req.body : {};
+      const institutionId =
+        actor.role === 'admin' && actor.institution_id
+          ? String(actor.institution_id)
+          : EDESIS_AUTO_ENROLL_INSTITUTION_ID;
+      try {
+        // GET = önizleme (hiçbir şey değişmez); POST + apply:true = uygula
+        if (req.method === 'POST' && body.apply === true) {
+          return res.status(200).json(await applyGroupClassSyncPlan({ institutionId, limit: body.limit }));
+        }
+        return res.status(200).json(await buildGroupClassSyncPlan({ institutionId }));
+      } catch (e) {
+        return res.status(200).json({ ok: false, error: errorMessage(e) });
+      }
+    }
+
     if (op === 'enroll-platform-students' && (req.method === 'POST' || req.method === 'GET')) {
       if (!(actor.role === 'super_admin' || actor.role === 'admin')) {
         return res.status(403).json({ error: 'admin_required' });
@@ -3098,7 +3121,8 @@ export default async function handler(req, res) {
         'create-classroom',
         'create-student',
         'create-parent',
-        'enroll-platform-students'
+        'enroll-platform-students',
+        'group-class-sync'
       ]
     });
   } catch (e) {
