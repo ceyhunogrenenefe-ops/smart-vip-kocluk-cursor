@@ -242,7 +242,7 @@ export function pickCreatedEdesisId(item) {
   return id != null && String(id).trim() && String(id).trim() !== '0' ? String(id).trim() : '';
 }
 
-function splitName(full) {
+export function splitName(full) {
   const parts = String(full || '').trim().split(/\s+/).filter(Boolean);
   if (!parts.length) return { firstName: 'Öğrenci', lastName: '-' };
   if (parts.length === 1) return { firstName: parts[0], lastName: '-' };
@@ -291,7 +291,7 @@ function buildStudentBody(pending, classroomId, termId) {
   return body;
 }
 
-async function persistLink(platformStudentId, edesisStudentId) {
+export async function persistLink(platformStudentId, edesisStudentId) {
   if (!platformStudentId || !edesisStudentId) return false;
   const { supabaseAdmin } = await import('./supabase-admin.js');
   const { error } = await supabaseAdmin
@@ -428,7 +428,7 @@ async function findExistingEdesisStudent(pending, termId) {
   return null;
 }
 
-async function createEdesisStudentWithFallback(pending, classroomId, cfg, termId) {
+export async function createEdesisStudentWithFallback(pending, classroomId, cfg, termId) {
   const full = buildStudentBody(pending, classroomId, termId);
   try {
     return await createEdesisStudent(full, cfg);
@@ -486,7 +486,7 @@ async function createEdesisStudentWithFallback(pending, classroomId, cfg, termId
   }
 }
 
-async function moveStudentToTerm(edesisStudentId, term, classroom) {
+export async function moveStudentToTerm(edesisStudentId, term, classroom) {
   if (!edesisStudentId || !term?.id) return { ok: false, error: 'term_or_student_missing' };
   try {
     await changeEdesisStudentTerm({

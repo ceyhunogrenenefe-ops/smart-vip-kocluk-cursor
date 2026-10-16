@@ -23,6 +23,7 @@ import { useAuth } from '../context/AuthContext';
 import { sortByFirstName } from '../lib/personNameSort';
 import EdesisSyncPanel from '../components/settings/EdesisSyncPanel';
 import EdesisExamAssignPanel from '../components/edesis/EdesisExamAssignPanel';
+import EdesisGroupClassSyncPanel from '../components/edesis/EdesisGroupClassSyncPanel';
 import {
   createEdesisClassroomHub,
   createEdesisParentHub,
@@ -95,6 +96,7 @@ function ExamRow({
 
 export default function EdesisPage() {
   const { user } = useAuth();
+  const isAdminLike = user?.role === 'super_admin' || user?.role === 'admin';
   const [searchParams, setSearchParams] = useSearchParams();
   const [status, setStatus] = useState<EdesisStatus | null>(null);
   const [syncBusy, setSyncBusy] = useState(false);
@@ -650,6 +652,8 @@ export default function EdesisPage() {
           ))}
         </div>
       </section>
+
+      {isAdminLike ? <EdesisGroupClassSyncPanel disabled={!status?.configured} /> : null}
 
       <div className="flex flex-wrap gap-2">
         <button
