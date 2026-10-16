@@ -48,6 +48,10 @@ export function studentRowToStudent(s: ApiStudentRow): Student {
     school: s.school || undefined,
     parentName: s.parent_name || undefined,
     parentPhone: s.parent_phone || '',
+    // Sinif seviyesine EK konu programlari (or. 11. sinif + TYT-Maarif)
+    extraTopicLevels: Array.isArray(s.extra_topic_levels)
+      ? (s.extra_topic_levels as unknown[]).map((x) => String(x)).filter(Boolean)
+      : [],
     coachId: s.coach_id || undefined,
     institutionId: s.institution_id || undefined,
     whatsappAutomationEnabled: s.whatsapp_automation_enabled !== false,
