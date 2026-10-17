@@ -12,15 +12,45 @@ import { getClassLessonReminderPhone } from './meetings-resolve.js';
 export const CLASS_LESSON_REMINDER_KIND = 'class_lesson_reminder';
 export const CLASS_LESSON_REMINDER_TEMPLATE = 'class_lesson_reminder';
 
-/** Meta üzerinden grup dersi hatırlatması — varsayılan kapalı; Vercel: CLASS_LESSON_REMINDER_META_ENABLED=1 */
+/**
+ * Meta Cloud API ile grup dersi hatırlatması.
+ * Varsayılan açık (koç gateway birincil; Meta yalnızca kanal/fallback gerektiğinde).
+ * Kapatmak için: CLASS_LESSON_REMINDER_META_ENABLED=0
+ */
 export function isClassLessonReminderMetaEnabled() {
-  return String(process.env.CLASS_LESSON_REMINDER_META_ENABLED ?? '0').trim() === '1';
+  const v = String(process.env.CLASS_LESSON_REMINDER_META_ENABLED ?? '1').trim().toLowerCase();
+  return v !== '0' && v !== 'false' && v !== 'off';
 }
 
-/** Tüm grup hatırlatma cron/manuel — env ile zorla kapat (CLASS_LESSON_REMINDER_ENABLED=0) */
+/**
+ * Tüm grup hatırlatmayı (cron + manuel) acil kapatma.
+ * Yalnızca CLASS_LESSON_REMINDER_ENABLED=0|false|off|paused iken true.
+ * Boş / tanımsız = gönderim açık (2026-06 askısı kaldırıldı).
+ */
 export function isClassLessonReminderForceDisabled() {
-  const v = String(process.env.CLASS_LESSON_REMINDER_ENABLED ?? '').trim().toLowerCase();
+  const v = String(process.env.CLASS_LESSON_REMINDER_ENABLED ?? '1').trim().toLowerCase();
   return v === '0' || v === 'false' || v === 'off' || v === 'paused';
+}
+
+/**
+ * 2026-06 askı migration’ı is_active=false bırakmış olabilir — deploy sonrası self-heal.
+ * Acil kapatma CLASS_LESSON_REMINDER_ENABLED=0 iken dokunulmaz.
+ */
+export async function ensureClassLessonReminderTemplateActive(row) {
+  if (!row?.id && !row?.type) return row;
+  if (row.is_active !== false) return row;
+  if (isClassLessonReminderForceDisabled()) return row;
+  const { data, error } = await supabaseAdmin
+    .from('message_templates')
+    .update({ is_active: true, updated_at: new Date().toISOString() })
+    .eq('type', CLASS_LESSON_REMINDER_TEMPLATE)
+    .select('*')
+    .maybeSingle();
+  if (error) {
+    console.warn('[class-lesson-reminder] resume is_active failed:', error.message);
+    return { ...row, is_active: true };
+  }
+  return data || { ...row, is_active: true };
 }
 
 export async function loadClassLessonReminderTemplate() {
@@ -30,7 +60,7 @@ export async function loadClassLessonReminderTemplate() {
     .eq('type', CLASS_LESSON_REMINDER_TEMPLATE)
     .maybeSingle();
   if (error) throw error;
-  return data;
+  return ensureClassLessonReminderTemplateActive(data);
 }
 
 export function validateClassLessonReminderTemplate(row) {
