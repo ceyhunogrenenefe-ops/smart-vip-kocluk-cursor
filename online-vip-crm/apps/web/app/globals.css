@@ -1,0 +1,52 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --brand-primary: #e8232a;
+  --brand-secondary: #1a3fad;
+  --brand-accent: #0ea5e9;
+  --brand-background: #f1f5f9;
+  --brand-text: #0f172a;
+  --surface: #ffffff;
+  --border: #e2e8f0;
+  --muted: #64748b;
+}
+
+html,
+body {
+  min-height: 100%;
+}
+
+body {
+  color: var(--brand-text);
+  background: var(--brand-background);
+  font-family: var(--font-sans), system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  .login-atmosphere {
+    background:
+      radial-gradient(ellipse 80% 60% at 10% 20%, rgba(232, 35, 42, 0.22), transparent 55%),
+      radial-gradient(ellipse 70% 50% at 90% 10%, rgba(26, 63, 173, 0.28), transparent 50%),
+      radial-gradient(ellipse 60% 40% at 70% 90%, rgba(14, 165, 233, 0.18), transparent 45%),
+      linear-gradient(160deg, #0b1a3a 0%, #122a5c 42%, #1a1530 100%);
+  }
+
+  .skeleton {
+    background: linear-gradient(
+      90deg,
+      #e2e8f0 0%,
+      #f8fafc 50%,
+      #e2e8f0 100%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 1.6s linear infinite;
+  }
+}
