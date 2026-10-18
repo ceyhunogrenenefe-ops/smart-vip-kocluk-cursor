@@ -125,7 +125,8 @@ export async function syncParentSignTaksitToStudentPayment({
   paidAt,
   actorSub,
   paymentAccountId,
-  remapAccount = false
+  remapAccount = false,
+  reviveCancelled = false
 }) {
   const contractId = String(contract?.id || '').trim();
   if (!contractId) return { ok: false, reason: 'no_contract' };
@@ -184,9 +185,11 @@ export async function syncParentSignTaksitToStudentPayment({
     existingStatus = loose?.[0]?.status || null;
   }
 
-  // Öğrenci ödemelerinden silinen (iptal) kayıt geri getirilmez. Genelde aynı
-  // ödeme elle başka başlıkla girilmiştir; geri gelirse genel bakışta çift sayılır.
-  if (existingId && existingStatus === 'cancelled') {
+  // Toplu aktarımda öğrenci ödemelerinden silinen (iptal) kayıt geri getirilmez:
+  // genelde aynı ödeme elle başka başlıkla girilmiştir, geri gelirse çift sayılır.
+  // Ama kullanıcı taksiti tahsilat ekranında bilerek "ödendi" işaretlediyse
+  // (reviveCancelled) kayıt yeniden açılır; yoksa ödeme genel bakışa hiç düşmüyordu.
+  if (existingId && existingStatus === 'cancelled' && !reviveCancelled) {
     return { ok: true, skipped: true, reason: 'deleted_by_user', id: existingId };
   }
 

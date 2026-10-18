@@ -1131,7 +1131,9 @@ export default async function handler(req, res) {
               paidAt: paidDate || todayStr,
               actorSub: String(actor?.sub || actor?.id || '') || null,
               paymentAccountId: paymentAccountId || tk[idx].odeme_hesap_id || null,
-              remapAccount: Boolean(paymentAccountId) || forceSync
+              remapAccount: Boolean(paymentAccountId) || forceSync,
+              // Elle "ödendi" işareti: daha önce silinmiş kayıt olsa da yeniden aç
+              reviveCancelled: true
             });
           } catch (syncErr) {
             console.warn(
