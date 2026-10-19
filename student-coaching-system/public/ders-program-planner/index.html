@@ -247,8 +247,21 @@
   .tiny{font-size:12.5px; color:var(--muted)}
 
   /* PNG export sheet (rendered off-screen, captured by html2canvas) */
-  .png-stage{position:fixed; left:-100000px; top:0; background:#fff; padding:34px; width:1180px}
+  .png-stage{position:fixed; left:-100000px; top:0; background:#fff; padding:0; width:1180px; box-sizing:border-box}
+  .png-sheet{box-sizing:border-box; padding:34px; background:#fff}
   .png-sheet .ph{text-align:center; margin-bottom:18px; padding-bottom:14px; border-bottom:3px solid var(--brand-red)}
+  .png-sheet .topbar{height:10px; border-radius:6px; margin-bottom:22px; background:linear-gradient(90deg,#3B82F6 0%,#10B981 20%,#F59E0B 40%,#EF4444 60%,#8B5CF6 80%,#EC4899 100%)}
+  .png-sheet table{table-layout:fixed; word-wrap:break-word; overflow-wrap:anywhere}
+  .png-sheet thead th.dayh{text-align:center; font-size:15px; letter-spacing:.02em; border:2px solid #fff}
+  .png-sheet thead th.pcol{background:var(--brand-navy-soft); color:var(--brand-navy); border-color:#B9C4DA; font-weight:700}
+  .png-sheet td.lcell{padding:5px}
+  .png-sheet .lchip{border-radius:10px; padding:8px 10px; border-left:6px solid; min-height:40px}
+  .png-sheet .lchip + .lchip{margin-top:5px}
+  .png-sheet .lchip .subj{font-size:15px; font-weight:700}
+  .png-sheet .lchip .tch, .png-sheet .lchip .tch-class{color:#334155}
+  .png-sheet td.ecell{background:#F8FAFC; color:#94A3B8; text-align:center; vertical-align:middle}
+  .png-sheet .legend{display:flex; flex-wrap:wrap; gap:8px; margin-top:18px; justify-content:center}
+  .png-sheet .legend span{display:inline-block; padding:6px 12px; border-radius:999px; font-size:13px; font-weight:700}
   .png-sheet .ph img{height:88px; width:auto; margin:0 auto 12px; display:block; background:transparent}
   .png-sheet .ph .tt{font-family:"Fraunces",serif; font-size:30px; font-weight:600; color:var(--brand-navy)}
   .png-sheet .ph .sb{color:var(--brand-red); font-weight:600; text-transform:uppercase; letter-spacing:.05em; font-size:14px; margin-top:5px}
@@ -2977,8 +2990,8 @@ function teacherTableBodyHTML(teacherName){
   return rowsMeta.map(row=>{
     const cells=state.days.map((d,di)=>{
       const cellItems=items.filter(it=>it.di===di&&matchesTeacherRow(it,row));
-      if(!cellItems.length) return `<td class="cellh"></td>`;
-      return `<td class="cellh">${teacherCellInnerHTML(cellItems)}</td>`;
+      if(!cellItems.length) return `<td class="cellh ecell"></td>`;
+      return `<td class="cellh lcell">${teacherCellPngHTML(cellItems)}</td>`;
     }).join('');
     const sub=row.times.size===1?[...row.times][0]:'';
     return `<tr>
@@ -2993,15 +3006,87 @@ function downloadDataUrl(dataUrl, filename){
   a.download=filename;
   a.click();
 }
+/* Renkli PNG: her güne ayrı başlık rengi, her derse ayrı kart rengi */
+const PNG_DAY_COLORS=['#2563EB','#059669','#D97706','#DC2626','#7C3AED','#DB2777','#0891B2','#65A30D'];
+const PNG_SUBJECT_THEMES=[
+  [/matemat|geometri/,                 {bg:'#DBEAFE', bd:'#2563EB', fg:'#1E3A8A'}],
+  [/fizik/,                            {bg:'#EDE9FE', bd:'#7C3AED', fg:'#4C1D95'}],
+  [/kimya/,                            {bg:'#FEF3C7', bd:'#D97706', fg:'#78350F'}],
+  [/biyoloji|fen bil/,                 {bg:'#DCFCE7', bd:'#16A34A', fg:'#14532D'}],
+  [/türk|edebiyat|paragraf|dil bilgisi/,{bg:'#FEE2E2', bd:'#DC2626', fg:'#7F1D1D'}],
+  [/tarih|inkılap/,                    {bg:'#FFEDD5', bd:'#EA580C', fg:'#7C2D12'}],
+  [/coğrafya/,                         {bg:'#CCFBF1', bd:'#0D9488', fg:'#134E4A'}],
+  [/ingilizce|english|almanca|yabancı/,{bg:'#FCE7F3', bd:'#DB2777', fg:'#831843'}],
+  [/felsefe|psikoloji|sosyoloji|mantık/,{bg:'#E0E7FF', bd:'#4F46E5', fg:'#312E81'}],
+  [/din kült|değerler/,                {bg:'#ECFCCB', bd:'#65A30D', fg:'#365314'}],
+  [/sosyal/,                           {bg:'#FFE4E6', bd:'#E11D48', fg:'#881337'}],
+  [/rehber|koçluk|etüt|deneme/,        {bg:'#F1F5F9', bd:'#475569', fg:'#1E293B'}],
+];
+const PNG_FALLBACK_THEMES=[
+  {bg:'#E0F2FE', bd:'#0284C7', fg:'#0C4A6E'},
+  {bg:'#FAE8FF', bd:'#C026D3', fg:'#701A75'},
+  {bg:'#FEF9C3', bd:'#CA8A04', fg:'#713F12'},
+  {bg:'#D1FAE5', bd:'#059669', fg:'#064E3B'},
+  {bg:'#FFEDD5', bd:'#F97316', fg:'#7C2D12'},
+  {bg:'#E0E7FF', bd:'#6366F1', fg:'#312E81'},
+];
+function pngSubjectTheme(subject){
+  const key=String(subject||'').toLocaleLowerCase('tr').trim();
+  for(const [re,theme] of PNG_SUBJECT_THEMES){ if(re.test(key)) return theme; }
+  let h=0; for(const ch of key) h=(h*31+ch.charCodeAt(0))>>>0;
+  return PNG_FALLBACK_THEMES[h%PNG_FALLBACK_THEMES.length];
+}
+function pngChipStyle(subject){
+  const t=pngSubjectTheme(subject);
+  return `background:${t.bg};border-left-color:${t.bd};color:${t.fg}`;
+}
+function pngDayHeadersHTML(){
+  return state.days.map((d,di)=>{
+    const c=PNG_DAY_COLORS[di%PNG_DAY_COLORS.length];
+    return `<th class="dayh" style="background:${c};border-color:#fff">${esc(d)}</th>`;
+  }).join('');
+}
+function pngLegendHTML(subjects){
+  const uniq=[...new Set((subjects||[]).map(s=>String(s||'').trim()).filter(Boolean))]
+    .sort((a,b)=>a.localeCompare(b,'tr'));
+  if(!uniq.length) return '';
+  return `<div class="legend">${uniq.map(s=>{
+    const t=pngSubjectTheme(s);
+    return `<span style="background:${t.bg};color:${t.fg};border:2px solid ${t.bd}">${esc(s)}</span>`;
+  }).join('')}</div>`;
+}
+function teacherCellPngHTML(cellItems){
+  return cellItems.map(it=>`<div class="lchip" style="${pngChipStyle(it.subject)}">
+    <span class="subj" style="color:inherit">${esc(it.subject||'—')}</span>
+    <span class="tch-class">${esc(it.gname)}</span>
+    ${it.time?`<span class="slot-time" style="color:inherit">${esc(it.time)}</span>`:''}
+  </div>`).join('');
+}
 async function capturePngSheet(innerHTML){
   if(!window.html2canvas) throw new Error('PNG aracı yüklenemedi (internet bağlantısı gerekiyor).');
   const stage=document.createElement('div'); stage.className='png-stage';
-  stage.innerHTML=`<div class="png-sheet">${innerHTML}</div>`;
+  /* Genişlik gün sayısına göre: 7 gün (Pazar dahil) sığmazsa son sütun kırpılıyordu */
+  const nDays=Math.max(1,(state.days||[]).length);
+  const stageW=Math.max(1180, 68+120+nDays*165);
+  stage.style.width=stageW+'px';
+  stage.innerHTML=`<div class="png-sheet"><div class="topbar"></div>${innerHTML}</div>`;
   document.body.appendChild(stage);
   try{
-    const img=stage.querySelector('img');
-    if(img && !img.complete) await new Promise(r=>{img.onload=r; img.onerror=r;});
-    const canvas=await html2canvas(stage.querySelector('.png-sheet'),{scale:2, backgroundColor:'#ffffff', useCORS:true, logging:false});
+    const imgs=[...stage.querySelectorAll('img')];
+    await Promise.all(imgs.map(img=>img.complete?null:new Promise(r=>{img.onload=r; img.onerror=r;})));
+    if(document.fonts&&document.fonts.ready) await document.fonts.ready;
+    await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+    const sheet=stage.querySelector('.png-sheet');
+    let w=Math.max(stageW, sheet.scrollWidth, sheet.offsetWidth);
+    sheet.querySelectorAll('table').forEach(t=>{ w=Math.max(w, t.scrollWidth+68); });
+    if(w>stageW){ stage.style.width=w+'px'; await new Promise(r=>requestAnimationFrame(r)); }
+    const h=Math.max(sheet.scrollHeight, sheet.offsetHeight);
+    const canvas=await html2canvas(sheet,{
+      scale:2, backgroundColor:'#ffffff', useCORS:true, logging:false,
+      width:w, height:h, scrollX:0, scrollY:0,
+      windowWidth:Math.max(w+100, window.innerWidth||0),
+      windowHeight:Math.max(h+100, window.innerHeight||0)
+    });
     return canvas.toDataURL('image/png');
   } finally {
     stage.remove();
@@ -3013,7 +3098,8 @@ async function exportTeacherPNG(teacherName, opts={}){
   const tableBody=teacherTableBodyHTML(teacherName);
   const dataUrl=await capturePngSheet(`
     <div class="ph">${logoSrc?`<img src="${logoSrc}" alt="">`:''}<div class="tt">${esc(teacherName)}</div><div class="sb">Öğretmen Haftalık Programı</div></div>
-    <table><thead><tr><th class="pcol">Saat</th>${state.days.map(d=>`<th>${esc(d)}</th>`).join('')}</tr></thead><tbody>${tableBody}</tbody></table>
+    <table><thead><tr><th class="pcol">Saat</th>${pngDayHeadersHTML()}</tr></thead><tbody>${tableBody}</tbody></table>
+    ${pngLegendHTML(collectTeacherLessons(teacherName).map(it=>it.subject))}
   `);
   const filename=teacherPngSafeName(teacherName)+' - ogretmen programi.png';
   if(download) downloadDataUrl(dataUrl, filename);
@@ -3028,7 +3114,7 @@ async function exportCombinedTeachersPNG(opts={}){
     const n=collectTeacherLessons(t).length;
     return `<div class="tch-block">
       <div class="tch-block-head"><div class="nm">${esc(t)}</div><div class="meta">${n} ders</div></div>
-      <table><thead><tr><th class="pcol">Saat</th>${state.days.map(d=>`<th>${esc(d)}</th>`).join('')}</tr></thead><tbody>${teacherTableBodyHTML(t)}</tbody></table>
+      <table><thead><tr><th class="pcol">Saat</th>${pngDayHeadersHTML()}</tr></thead><tbody>${teacherTableBodyHTML(t)}</tbody></table>
     </div>`;
   }).join('');
   const dataUrl=await capturePngSheet(`
@@ -3080,18 +3166,24 @@ async function exportPNG(){
     ${state.days.map((d,di)=>{
       const dayPer=periodsForDay(g, di);
       const p=dayPer[pi];
-      if(!p) return `<td class="cellh">—</td>`;
+      if(!p) return `<td class="cellh ecell">—</td>`;
       const v=g.schedule[di+'_'+pi];
-      const inner=(v&&(v.subject||v.teacher))
-        ? `<span class="subj">${esc(v.subject||'')}</span>${cellSlotTimeHTML(p)}${v.teacher?`<span class="tch">${esc(v.teacher)}</span>`:''}`
-        : `<span class="tch" style="opacity:.7">${esc(p.time||p.label||'')}</span>`;
-      return `<td class="cellh">${inner}</td>`;
+      if(v&&(v.subject||v.teacher)){
+        const short=formatPeriodTimeShort(p);
+        return `<td class="cellh lcell"><div class="lchip" style="${pngChipStyle(v.subject)}">
+          <span class="subj" style="color:inherit">${esc(v.subject||'')}</span>
+          ${short?`<span class="slot-time" style="color:inherit">${esc(short)}</span>`:''}
+          ${v.teacher?`<span class="tch">${esc(v.teacher)}</span>`:''}
+        </div></td>`;
+      }
+      return `<td class="cellh ecell"><span class="tch" style="color:#94A3B8">${esc(p.time||p.label||'')}</span></td>`;
     }).join('')}
   </tr>`).join('');
   try{
     const dataUrl=await capturePngSheet(`
       <div class="ph">${logoSrc?`<img src="${logoSrc}" alt="">`:''}<div class="tt">${esc(g.name)}</div><div class="sb">Haftalık Ders Programı</div></div>
-      <table><thead><tr><th class="pcol">Saat</th>${state.days.map(d=>`<th>${esc(d)}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table>
+      <table><thead><tr><th class="pcol">Saat</th>${pngDayHeadersHTML()}</tr></thead><tbody>${rows}</tbody></table>
+      ${pngLegendHTML(Object.values(g.schedule||{}).map(v=>v&&v.subject))}
     `);
     downloadDataUrl(dataUrl, ((g.name||'ders-programi').replace(/[\\/:*?"<>|]+/g,' ').trim())+' - ders programi.png');
   }catch(e){ alert('PNG oluşturulamadı: '+(e.message||e)); }
