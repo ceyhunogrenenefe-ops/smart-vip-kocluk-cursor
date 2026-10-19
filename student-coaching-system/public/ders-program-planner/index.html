@@ -160,6 +160,13 @@
   /* Master timetable (all classes) */
   .master-wrap{overflow:auto; border:1px solid var(--line); border-radius:var(--radius); background:var(--surface); box-shadow:var(--shadow); max-height:calc(100vh - 220px)}
   table.master{border-collapse:collapse; min-width:100%; font-size:11px}
+  /* Ekranda renkli ders kartları (PNG ile aynı renkler) */
+  .cell.has-lesson.subj-c:not(.conflict):not(.locked-slot):not(.drag-over){background:var(--sbg); box-shadow:inset 5px 0 0 var(--sbd)}
+  .cell.has-lesson.subj-c:not(.conflict):not(.locked-slot):not(.drag-over):hover{filter:brightness(.97)}
+  .subj-c:not(.conflict) .subj, .subj-c:not(.conflict) .abbr{color:var(--sfg)}
+  .subj-c:not(.conflict) .slot-time{color:var(--sfg); opacity:.85}
+  .mcell.has-lesson.subj-c:not(.conflict):not(.locked-slot):not(.drag-over){background:var(--sbg); box-shadow:inset 3px 0 0 var(--sbd)}
+  table.tt thead th.dayh-c, table.master thead th.dayh-c{color:#fff; text-align:center; font-weight:700; letter-spacing:.02em}
   table.master th, table.master td{border:1px solid var(--line); padding:0; vertical-align:middle; text-align:center}
   table.master thead th{background:var(--surface-2); font-weight:600; font-size:11px; padding:6px 4px; position:sticky; top:0; z-index:2}
   table.master thead tr.row2 th{top:28px; font-size:10px; color:var(--muted); font-weight:500; padding:4px 2px}
@@ -1788,7 +1795,7 @@ function teacherTimetableHTML(teacherName, opts={}){
       const conf=cellItems.some(it=>conflictCells.has(it.gid+'|'+it.key));
       const inner=teacherCellInnerHTML(cellItems);
       if(print) return `<td class="pcell">${inner}</td>`;
-      return `<td><div class="cell has-lesson readonly-slot ${conf?'conflict':''}">${conf?'<span class="tch">⚠ Çakışma</span>':''}${inner}</div></td>`;
+      return `<td><div class="cell has-lesson subj-c readonly-slot ${conf?'conflict':''}"${subjVarsAttr(cellItems[0]&&cellItems[0].subject)}>${conf?'<span class="tch">⚠ Çakışma</span>':''}${inner}</div></td>`;
     }).join('');
     const sub=row.times.size===1?[...row.times][0]:'';
     return `<tr>
@@ -1800,7 +1807,7 @@ function teacherTimetableHTML(teacherName, opts={}){
   const wrapOpen=print?'':`<div class="tt-wrap">`;
   const wrapClose=print?'':'</div>';
   return `${wrapOpen}<table class="${tableClass}">
-    <thead><tr><th class="pcol">Saat</th>${state.days.map(d=>`<th>${esc(d)}</th>`).join('')}</tr></thead>
+    <thead><tr><th class="pcol">Saat</th>${state.days.map((d,di)=>`<th class="dayh-c" style="${dayHeadStyle(di)}">${esc(d)}</th>`).join('')}</tr></thead>
     <tbody>${body}</tbody>
   </table>${wrapClose}`;
 }
@@ -1916,7 +1923,7 @@ function renderMaster(){
   const dayHeaders=state.days.map((d,di)=>{
     const per=masterPeriodsForDay(di);
     const cls=di>0?' day-sep':'';
-    return `<th colspan="${Math.max(per.length,1)}" class="${cls.trim()}">${esc(d)}</th>`;
+    return `<th colspan="${Math.max(per.length,1)}" class="${(cls+' dayh-c').trim()}" style="${dayHeadStyle(di)}">${esc(d)}</th>`;
   }).join('');
   const periodHeaders=state.days.map((d,di)=>{
     const per=masterPeriodsForDay(di);
@@ -1950,9 +1957,9 @@ function renderMaster(){
       const inner=has
         ? `<span class="abbr">${esc(subjectAbbr(cell.subject))}${slotLocked?' 🔒':''}${conf?' ⚠':''}${shared?' ⊕':''}</span>${cellSlotTimeHTML(periodForGroupSlot(g, di, dataKey, p))}<span class="mini">${esc(cell.teacher||'')}</span>`
         : (slotLocked?'🔒':'·');
-      const cls=[conf?'conflict':'', shared?'shared-lesson':'', has?'has-lesson':'empty', slotLocked?'locked-slot':'', g.locked?'group-locked':'', readonly?'readonly-slot':''].filter(Boolean).join(' ');
+      const cls=[conf?'conflict':'', shared?'shared-lesson':'', has?'has-lesson subj-c':'empty', slotLocked?'locked-slot':'', g.locked?'group-locked':'', readonly?'readonly-slot':''].filter(Boolean).join(' ');
       const dragAttr=has&&!slotLocked&&!readonly?' draggable="true"':'';
-      return `<td${pi===0&&di>0?' class="day-sep"':''}><div role="button" tabindex="0" class="mcell ${cls}" data-act="edit-master-cell" data-gid="${g.id}" data-key="${dataKey}" data-di="${di}" data-pi="${pi}"${dragAttr} title="${esc(g.name+' · '+d+' · '+(p.label||'')+' '+(p.time||'')+(slotLocked?' · Kilitli':'')+confHint+(has?' · Sürükleyerek taşıyın':''))}">${inner}</div></td>`;
+      return `<td${pi===0&&di>0?' class="day-sep"':''}><div role="button" tabindex="0" class="mcell ${cls}"${has?subjVarsAttr(cell.subject):''} data-act="edit-master-cell" data-gid="${g.id}" data-key="${dataKey}" data-di="${di}" data-pi="${pi}"${dragAttr} title="${esc(g.name+' · '+d+' · '+(p.label||'')+' '+(p.time||'')+(slotLocked?' · Kilitli':'')+confHint+(has?' · Sürükleyerek taşıyın':''))}">${inner}</div></td>`;
     }).join('');
     }).join('');
     return `<tr>
@@ -2040,7 +2047,7 @@ function renderProgram(){
   if(g){
     const maxP=maxPeriodsAcrossDays(g);
     table=`<div class="tt-wrap"><table class="tt">
-      <thead><tr><th class="pcol">Saat</th>${state.days.map(d=>`<th>${esc(d)}</th>`).join('')}</tr></thead>
+      <thead><tr><th class="pcol">Saat</th>${state.days.map((d,di)=>`<th class="dayh-c" style="${dayHeadStyle(di)}">${esc(d)}</th>`).join('')}</tr></thead>
       <tbody>
       ${Array.from({length:maxP},(_,pi)=>`<tr>
         <td class="pcol"><div class="pl">${pi+1}. Ders</div><div class="pt tiny">günlere göre değişebilir</div></td>
@@ -2064,7 +2071,7 @@ function renderProgram(){
             : (shared&&sharedPartners.length
               ? ` · ortak ders: ${sharedPartners.map(p=>p.gname+(p.when?(' '+p.when):'')).join(', ')}`
               : '');
-          return `<td><div role="button" tabindex="0" class="cell ${conf?'conflict':''} ${shared?'shared-lesson':''} ${hasLesson?'has-lesson':''} ${slotLocked?'locked-slot':''} ${readonly?'readonly-slot':''}" data-act="edit-cell" data-gid="${g.id}" data-key="${key}" data-di="${di}" data-pi="${pi}" ${hasLesson&&!slotLocked&&!readonly?'draggable="true"':''} aria-label="${esc(d)} ${esc(p.label)} ders ata${confLabel}" title="${esc(p.label+' '+(p.time||''))}">${inner}</div></td>`;
+          return `<td><div role="button" tabindex="0" class="cell ${conf?'conflict':''} ${shared?'shared-lesson':''} ${hasLesson?'has-lesson subj-c':''} ${slotLocked?'locked-slot':''} ${readonly?'readonly-slot':''}"${hasLesson?subjVarsAttr(v.subject):''} data-act="edit-cell" data-gid="${g.id}" data-key="${key}" data-di="${di}" data-pi="${pi}" ${hasLesson&&!slotLocked&&!readonly?'draggable="true"':''} aria-label="${esc(d)} ${esc(p.label)} ders ata${confLabel}" title="${esc(p.label+' '+(p.time||''))}">${inner}</div></td>`;
         }).join('')}
       </tr>`).join('')}
       </tbody></table></div>`;
@@ -3039,6 +3046,14 @@ function pngSubjectTheme(subject){
 function pngChipStyle(subject){
   const t=pngSubjectTheme(subject);
   return `background:${t.bg};border-left-color:${t.bd};color:${t.fg}`;
+}
+function subjVarsAttr(subject){
+  if(!String(subject||'').trim()) return '';
+  const t=pngSubjectTheme(subject);
+  return ` style="--sbg:${t.bg};--sbd:${t.bd};--sfg:${t.fg}"`;
+}
+function dayHeadStyle(di){
+  return `background:${PNG_DAY_COLORS[di%PNG_DAY_COLORS.length]};color:#fff`;
 }
 function pngDayHeadersHTML(){
   return state.days.map((d,di)=>{
