@@ -50,6 +50,24 @@ describe('mergeWeeklyAndSessionSlots', () => {
     assert.equal(merged[0].teacher_name, 'Fen C');
   });
 
+  it('keeps Sunday lessons (day 7) from sessions and weekly template', () => {
+    const merged = mergeWeeklyAndSessionSlots(
+      [{ day_of_week: 7, start_time: '17:00:00', end_time: '17:40:00', subject: 'FİZİK', teacher_name: 'Fiz' }],
+      [
+        {
+          lesson_date: '2026-10-25',
+          start_time: '18:00:00',
+          end_time: '18:40:00',
+          subject: 'KİMYA',
+          status: 'scheduled'
+        }
+      ]
+    );
+    assert.equal(isoToDowMon1('2026-10-25'), 7);
+    assert.equal(merged.length, 2);
+    assert.ok(merged.every((m) => m.day_of_week === 7));
+  });
+
   it('skips cancelled sessions', () => {
     const merged = mergeWeeklyAndSessionSlots([], [
       {

@@ -25,7 +25,7 @@ function slotKey(dayOfWeek, startTime) {
 
 /**
  * Aynı gün+saat için tarihli oturum şablonu ezer.
- * Pazar (7) planlayıcı tablosunda yok — atlanır.
+ * Pazartesi (1) … Pazar (7) hepsi dahil.
  */
 export function mergeWeeklyAndSessionSlots(weekly, sessions) {
   const out = [];
@@ -34,7 +34,7 @@ export function mergeWeeklyAndSessionSlots(weekly, sessions) {
   for (const s of sessions || []) {
     if (String(s.status || '').toLowerCase() === 'cancelled') continue;
     const day = isoToDowMon1(s.lesson_date);
-    if (day < 1 || day > 6) continue;
+    if (day < 1 || day > 7) continue;
     const key = slotKey(day, s.start_time);
     if (seen.has(key)) continue;
     seen.add(key);
@@ -49,7 +49,7 @@ export function mergeWeeklyAndSessionSlots(weekly, sessions) {
 
   for (const w of weekly || []) {
     const day = Number(w.day_of_week);
-    if (day < 1 || day > 6) continue;
+    if (day < 1 || day > 7) continue;
     const key = slotKey(day, w.start_time);
     if (seen.has(key)) continue;
     seen.add(key);
