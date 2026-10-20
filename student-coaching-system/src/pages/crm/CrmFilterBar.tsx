@@ -2,6 +2,7 @@ import { CalendarRange, Users } from 'lucide-react';
 import type { RegCoach } from '../../lib/registrationTrackingApi';
 
 export type CrmTimePreset =
+  | 'all'
   | 'today'
   | 'yesterday'
   | 'last_7_days'
@@ -10,6 +11,7 @@ export type CrmTimePreset =
   | 'custom';
 
 const PRESETS: { id: CrmTimePreset; label: string }[] = [
+  { id: 'all', label: 'Tümü' },
   { id: 'today', label: 'Bugün' },
   { id: 'yesterday', label: 'Dün' },
   { id: 'last_7_days', label: 'Son 7 Gün' },
@@ -28,6 +30,11 @@ type Props = {
   onFrom: (v: string) => void;
   onTo: (v: string) => void;
   onAgent: (id: string) => void;
+  /** Pipeline gibi ekranlarda "Tümü" ile tarih filtresini kapatır. */
+  includeAll?: boolean;
+  /** Temsilci seçici. Pipeline kendi koç filtresini kullandığı için kapatılabilir. */
+  showAgent?: boolean;
+  hint?: string;
 };
 
 export default function CrmFilterBar({
@@ -39,17 +46,22 @@ export default function CrmFilterBar({
   onPreset,
   onFrom,
   onTo,
-  onAgent
+  onAgent,
+  includeAll = false,
+  showAgent = true,
+  hint
 }: Props) {
+  const presets = includeAll ? PRESETS : PRESETS.filter((p) => p.id !== 'all');
   return (
     <div className="flex flex-col gap-3 rounded-2xl border border-slate-200/80 bg-white/90 p-3 shadow-sm sm:flex-row sm:flex-wrap sm:items-end sm:justify-between">
       <div>
         <p className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">
           <CalendarRange className="h-3.5 w-3.5" />
           Zaman
+          {hint ? <span className="normal-case tracking-normal text-slate-400">· {hint}</span> : null}
         </p>
         <div className="flex flex-wrap gap-1.5">
-          {PRESETS.map((p) => (
+          {presets.map((p) => (
             <button
               key={p.id}
               type="button"
@@ -80,6 +92,7 @@ export default function CrmFilterBar({
           </div>
         )}
       </div>
+      {showAgent ? (
       <label className="block min-w-[220px]">
         <span className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">
           <Users className="h-3.5 w-3.5" />
@@ -98,6 +111,7 @@ export default function CrmFilterBar({
           ))}
         </select>
       </label>
+      ) : null}
     </div>
   );
 }

@@ -1729,6 +1729,16 @@ function teachersInSchedule(){
   }));
   return [...map.values()].sort((a,b)=>a.localeCompare(b,'tr'));
 }
+function teachersOnGroup(g){
+  const map=new Map();
+  if(!g) return [];
+  Object.values(g.schedule||{}).forEach(v=>{
+    if(!v||!v.teacher) return;
+    const t=String(v.teacher).trim(); if(!t) return;
+    const k=norm(t); if(!map.has(k)) map.set(k,t);
+  });
+  return [...map.values()].sort((a,b)=>a.localeCompare(b,'tr'));
+}
 function collectTeacherLessons(teacherName){
   const tn=norm(teacherName);
   const items=[];
@@ -3173,7 +3183,14 @@ async function exportPNG(){
     }catch(e){ alert('PNG oluşturulamadı: '+(e.message||e)); }
     return;
   }
-  const g=group(activeGroupId); if(!g) return;
+  try{
+    const out=await exportGroupPngData(activeGroupId);
+    downloadDataUrl(out.dataUrl, out.filename);
+  }catch(e){ alert('PNG oluşturulamadı: '+(e.message||e)); }
+}
+async function exportGroupPngData(groupId){
+  const g=group(groupId||activeGroupId);
+  if(!g) throw new Error('Önce bir sınıf seçin.');
   const logo=document.querySelector('.logo'); const logoSrc=logo?logo.getAttribute('src'):'';
   const maxP=maxPeriodsAcrossDays(g);
   const rows=Array.from({length:maxP},(_,pi)=>`<tr>
@@ -3194,14 +3211,13 @@ async function exportPNG(){
       return `<td class="cellh ecell"><span class="tch" style="color:#94A3B8">${esc(p.time||p.label||'')}</span></td>`;
     }).join('')}
   </tr>`).join('');
-  try{
-    const dataUrl=await capturePngSheet(`
-      <div class="ph">${logoSrc?`<img src="${logoSrc}" alt="">`:''}<div class="tt">${esc(g.name)}</div><div class="sb">Haftalık Ders Programı</div></div>
-      <table><thead><tr><th class="pcol">Saat</th>${pngDayHeadersHTML()}</tr></thead><tbody>${rows}</tbody></table>
-      ${pngLegendHTML(Object.values(g.schedule||{}).map(v=>v&&v.subject))}
-    `);
-    downloadDataUrl(dataUrl, ((g.name||'ders-programi').replace(/[\\/:*?"<>|]+/g,' ').trim())+' - ders programi.png');
-  }catch(e){ alert('PNG oluşturulamadı: '+(e.message||e)); }
+  const dataUrl=await capturePngSheet(`
+    <div class="ph">${logoSrc?`<img src="${logoSrc}" alt="">`:''}<div class="tt">${esc(g.name)}</div><div class="sb">Haftalık Ders Programı</div></div>
+    <table><thead><tr><th class="pcol">Saat</th>${pngDayHeadersHTML()}</tr></thead><tbody>${rows}</tbody></table>
+    ${pngLegendHTML(Object.values(g.schedule||{}).map(v=>v&&v.subject))}
+  `);
+  const filename=((g.name||'ders-programi').replace(/[\\/:*?"<>|]+/g,' ').trim())+' - ders programi.png';
+  return { groupId:g.id, groupName:g.name, filename, dataUrl, teachers:teachersOnGroup(g) };
 }
 /* CSV parser (delimiter auto: , ; tab; quote-aware) */
 function parseCSV(text){
@@ -3382,6 +3398,26 @@ window.addEventListener('message', (ev)=>{
   else if(msg.type==='PING') reply({type:'PONG'});
   else if(msg.type==='LIST_TEACHERS'){
     reply({type:'TEACHER_LIST', payload:{ teachers: teachersInSchedule() }});
+  }
+  else if(msg.type==='ACTIVE_GROUP_INFO'){
+    const g=group(activeGroupId);
+    if(!g) reply({type:'ACTIVE_GROUP_INFO_ERROR', error:'Önce planlayıcıda bir sınıf seçin.'});
+    else reply({type:'ACTIVE_GROUP_INFO', payload:{
+      groupId:g.id,
+      groupName:g.name,
+      classTeachers:teachersOnGroup(g),
+      allTeachers:allTeachers()
+    }});
+  }
+  else if(msg.type==='EXPORT_GROUP_PNG'){
+    (async()=>{
+      try{
+        const out=await exportGroupPngData(msg.payload?.groupId||activeGroupId);
+        reply({type:'GROUP_PNG', payload:out});
+      }catch(e){
+        reply({type:'GROUP_PNG_ERROR', error:String(e&&e.message||e)});
+      }
+    })();
   }
   else if(msg.type==='EXPORT_TEACHER_PNGS'){
     (async()=>{

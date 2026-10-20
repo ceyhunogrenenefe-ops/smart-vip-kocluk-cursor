@@ -29,6 +29,7 @@ import { PLANNER_CURRICULUM_PRESETS, PLANNER_POOL_SUBJECTS } from '../lib/planne
 import {
   resolveTeacherPhones,
   sendTeacherSchedulePngsViaGateway,
+  classScheduleWaCaption,
   type TeacherPhoneMatch,
   type TeacherPhoneUnmatched,
   type TeacherPngItem
@@ -206,6 +207,8 @@ function postPlannerMessage<T>(
       else if (type === 'SET_STATE' && msg.type === 'SET_OK') resolve(msg as T);
       else if (type === 'SET_CONTEXT' && msg.type === 'SET_CONTEXT_OK') resolve(msg as T);
       else if (type === 'LIST_TEACHERS' && msg.type === 'TEACHER_LIST') resolve(msg.payload as T);
+      else if (type === 'ACTIVE_GROUP_INFO' && msg.type === 'ACTIVE_GROUP_INFO') resolve(msg.payload as T);
+      else if (type === 'EXPORT_GROUP_PNG' && msg.type === 'GROUP_PNG') resolve(msg.payload as T);
       else if (type === 'EXPORT_TEACHER_PNGS' && msg.type === 'TEACHER_PNGS') resolve(msg.payload as T);
       else if (type === 'EXPORT_COMBINED_TEACHER_PNG' && msg.type === 'COMBINED_TEACHER_PNG')
         resolve(msg.payload as T);
@@ -281,6 +284,13 @@ export default function SchedulePlannerPage({ mode = 'default' }: { mode?: 'defa
   const [waUnmatched, setWaUnmatched] = useState<TeacherPhoneUnmatched[]>([]);
   const [waTeachers, setWaTeachers] = useState<string[]>([]);
   const [waProgress, setWaProgress] = useState('');
+  const [classWaOpen, setClassWaOpen] = useState(false);
+  const [classWaName, setClassWaName] = useState('');
+  const [classWaGroupId, setClassWaGroupId] = useState('');
+  const [classWaQuery, setClassWaQuery] = useState('');
+  const [classWaRows, setClassWaRows] = useState<
+    { name: string; phone: string; onClass: boolean; reason: string; selected: boolean }[]
+  >([]);
   const autoPlanLoadedFor = useRef('');
   const planTouchedRef = useRef(false);
   const planLoadGenRef = useRef(0);
@@ -950,6 +960,118 @@ export default function SchedulePlannerPage({ mode = 'default' }: { mode?: 'defa
     }
   };
 
+  const openClassWa = async () => {
+    if (!institutionId) {
+      toast.error('Kurum seçili değil.');
+      return;
+    }
+    if (!iframeReady) {
+      toast.error('Planlayıcı henüz hazır değil.');
+      return;
+    }
+    setBusy('class-wa');
+    try {
+      const info = await postPlannerMessage<{
+        groupId: string;
+        groupName: string;
+        classTeachers: string[];
+        allTeachers: string[];
+      }>(iframeRef.current, 'ACTIVE_GROUP_INFO', undefined, 8000);
+      const classSet = new Set((info.classTeachers || []).map((n) => n.toLocaleLowerCase('tr-TR')));
+      const names = [
+        ...new Set([...(info.classTeachers || []), ...(info.allTeachers || [])].map((n) => String(n || '').trim()).filter(Boolean))
+      ];
+      if (!names.length) throw new Error('Gönderilecek öğretmen yok. Programa öğretmen adı yazın.');
+      const { matched, unmatched } = await resolveTeacherPhones({ institutionId, names });
+      const phoneByName = new Map<string, TeacherPhoneMatch>();
+      for (const m of matched) phoneByName.set(m.name.toLocaleLowerCase('tr-TR'), m);
+      const reasonByName = new Map<string, string>();
+      for (const u of unmatched) reasonByName.set(u.name.toLocaleLowerCase('tr-TR'), u.reason);
+      const rows = names
+        .map((name) => {
+          const key = name.toLocaleLowerCase('tr-TR');
+          const hit = phoneByName.get(key);
+          const onClass = classSet.has(key);
+          return {
+            name,
+            phone: hit?.phone || '',
+            onClass,
+            reason: hit ? '' : reasonByName.get(key) || 'teacher_not_matched',
+            selected: Boolean(hit && onClass)
+          };
+        })
+        .sort((a, b) => Number(b.onClass) - Number(a.onClass) || a.name.localeCompare(b.name, 'tr'));
+      setClassWaName(info.groupName || 'Sınıf');
+      setClassWaGroupId(info.groupId || '');
+      setClassWaRows(rows);
+      setClassWaQuery('');
+      setClassWaOpen(true);
+    } catch (e) {
+      toast.error(String((e as Error).message || e));
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const handleSendClassScheduleWa = async () => {
+    const picked = classWaRows.filter((r) => r.selected && r.phone);
+    if (!picked.length) {
+      toast.error('Telefonu olan en az bir öğretmen seçin.');
+      return;
+    }
+    if (
+      !confirm(
+        `«${classWaName}» programı ${picked.length} öğretmene WhatsApp gateway ile gönderilsin mi?`
+      )
+    ) {
+      return;
+    }
+    setBusy('class-wa-send');
+    setWaProgress('Sınıf programı PNG oluşturuluyor…');
+    try {
+      const exported = await postPlannerMessage<{
+        groupName: string;
+        filename: string;
+        dataUrl: string;
+      }>(iframeRef.current, 'EXPORT_GROUP_PNG', { groupId: classWaGroupId }, 25000);
+      if (!exported?.dataUrl) throw new Error('PNG üretilemedi.');
+      const filename = exported.filename || `${classWaName} - ders programi.png`;
+      const items: TeacherPngItem[] = picked.map((r) => ({
+        teacherName: r.name,
+        filename,
+        dataUrl: exported.dataUrl
+      }));
+      const phonesByName = new Map<string, string>();
+      for (const r of picked) {
+        phonesByName.set(r.name, r.phone);
+        phonesByName.set(r.name.toLocaleUpperCase('tr-TR'), r.phone);
+      }
+      setWaProgress(`Gönderiliyor 0/${items.length}…`);
+      const result = await sendTeacherSchedulePngsViaGateway({
+        coachUserId: effectiveUser?.id,
+        captionFor: (teacherName) => classScheduleWaCaption(teacherName, exported.groupName || classWaName),
+        items,
+        phonesByName,
+        onProgress: ({ index, total, teacherName, ok, error }) => {
+          setWaProgress(
+            `${ok ? '✓' : '✗'} ${teacherName} (${index}/${total})${error ? ` — ${error}` : ''}`
+          );
+        }
+      });
+      toast.success(
+        `«${classWaName}»: ${result.sent} öğretmene gönderildi` +
+          (result.failed ? `, ${result.failed} hata` : '') +
+          (result.skipped ? `, ${result.skipped} atlandı` : '')
+      );
+      setClassWaOpen(false);
+    } catch (e) {
+      toast.error(String((e as Error).message || e));
+    } finally {
+      setBusy('');
+      setWaProgress('');
+    }
+  };
+
     /** Canlı 5A–8F haftalık program + gelecek oturumları boşalt; öğrenci/öğretmen kalır */
   const handleClearLiveTargetSchedules = async () => {
     if (
@@ -1519,6 +1641,20 @@ export default function SchedulePlannerPage({ mode = 'default' }: { mode?: 'defa
             )}
             Öğretmen WA
           </button>
+          <button
+            type="button"
+            onClick={() => void openClassWa()}
+            disabled={!!busy || !iframeReady || !(isAdmin || isSuper)}
+            className="inline-flex items-center gap-1 rounded-lg border border-sky-300 bg-sky-50 px-3 py-1.5 text-sm text-sky-950 hover:bg-sky-100 disabled:opacity-50"
+            title="Seçili sınıf programını, seçtiğiniz öğretmenlere WhatsApp gateway ile gönder"
+          >
+            {busy === 'class-wa' || busy === 'class-wa-send' ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <MessageCircle className="h-4 w-4" />
+            )}
+            Sınıf programı WA
+          </button>
           {isNewTerm ? (
             <>
               {isPlatformInstitution ? (
@@ -1827,6 +1963,124 @@ export default function SchedulePlannerPage({ mode = 'default' }: { mode?: 'defa
               >
                 {busy === 'wa-send' ? <Loader2 className="h-4 w-4 animate-spin" /> : <MessageCircle className="h-4 w-4" />}
                 Gateway ile gönder
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {classWaOpen ? (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/40 p-4">
+          <div className="max-h-[90vh] w-full max-w-lg overflow-auto rounded-2xl border border-slate-200 bg-white p-5 shadow-xl dark:border-slate-700 dark:bg-slate-900">
+            <div className="mb-3 flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">
+                  «{classWaName}» → WhatsApp
+                </h2>
+                <p className="mt-1 text-xs text-slate-500">
+                  Seçili sınıfın haftalık program PNG’si, işaretlediğiniz öğretmenlere gateway ile gider.
+                  Sınıftaki öğretmenler telefonu varsa baştan seçilidir.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setClassWaOpen(false)}
+                className="rounded p-1 text-slate-500 hover:bg-slate-100"
+                aria-label="Kapat"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            {waProgress && (busy === 'class-wa-send' || busy === 'class-wa') ? (
+              <div className="mb-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                {waProgress}
+              </div>
+            ) : null}
+            <input
+              value={classWaQuery}
+              onChange={(e) => setClassWaQuery(e.target.value)}
+              placeholder="Öğretmen ara…"
+              className="mb-3 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-800"
+            />
+            <div className="mb-2 flex items-center justify-between text-xs text-slate-500">
+              <span>
+                Seçili:{' '}
+                <strong className="text-emerald-700">
+                  {classWaRows.filter((r) => r.selected && r.phone).length}
+                </strong>
+              </span>
+              <button
+                type="button"
+                className="underline"
+                onClick={() =>
+                  setClassWaRows((rows) => {
+                    const visible = new Set(
+                      rows
+                        .filter((r) => {
+                          const q = classWaQuery.trim().toLocaleLowerCase('tr-TR');
+                          return !q || r.name.toLocaleLowerCase('tr-TR').includes(q);
+                        })
+                        .filter((r) => r.phone)
+                        .map((r) => r.name)
+                    );
+                    const allOn = rows.filter((r) => visible.has(r.name)).every((r) => r.selected);
+                    return rows.map((r) =>
+                      visible.has(r.name) ? { ...r, selected: !allOn } : r
+                    );
+                  })
+                }
+              >
+                Görünenleri seç / kaldır
+              </button>
+            </div>
+            <ul className="max-h-72 space-y-1 overflow-auto rounded-lg border border-slate-200 p-2 text-sm">
+              {classWaRows
+                .filter((r) => {
+                  const q = classWaQuery.trim().toLocaleLowerCase('tr-TR');
+                  return !q || r.name.toLocaleLowerCase('tr-TR').includes(q);
+                })
+                .map((r) => (
+                  <li key={r.name}>
+                    <label className={`flex items-center gap-2 rounded px-1 py-1 ${r.phone ? 'hover:bg-slate-50' : 'opacity-60'}`}>
+                      <input
+                        type="checkbox"
+                        disabled={!r.phone || busy === 'class-wa-send'}
+                        checked={r.selected && Boolean(r.phone)}
+                        onChange={(e) =>
+                          setClassWaRows((rows) =>
+                            rows.map((x) => (x.name === r.name ? { ...x, selected: e.target.checked } : x))
+                          )
+                        }
+                      />
+                      <span className="min-w-0 flex-1">
+                        {r.name}
+                        {r.onClass ? (
+                          <span className="ml-1 text-[10px] font-semibold uppercase text-sky-700">sınıfta</span>
+                        ) : null}
+                      </span>
+                      <span className="shrink-0 text-xs text-slate-500">
+                        {r.phone || (r.reason === 'phone_missing' ? 'telefon yok' : 'eşleşmedi')}
+                      </span>
+                    </label>
+                  </li>
+                ))}
+            </ul>
+            <div className="flex flex-wrap justify-end gap-2 pt-3">
+              <button
+                type="button"
+                onClick={() => setClassWaOpen(false)}
+                className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm hover:bg-slate-50"
+              >
+                Vazgeç
+              </button>
+              <button
+                type="button"
+                disabled={!!busy || !classWaRows.some((r) => r.selected && r.phone)}
+                onClick={() => void handleSendClassScheduleWa()}
+                className="inline-flex items-center gap-1 rounded-lg bg-sky-700 px-3 py-1.5 text-sm text-white hover:bg-sky-800 disabled:opacity-50"
+              >
+                {busy === 'class-wa-send' ? <Loader2 className="h-4 w-4 animate-spin" /> : <MessageCircle className="h-4 w-4" />}
+                Seçilenlere gönder
               </button>
             </div>
           </div>
