@@ -259,7 +259,8 @@ const VELI_KAYIT_PROGRAM_SET = new Set([
   'LGS yaz kampı',
   '5, 6, 7. Sınıf yaz kampı',
   'Kitap Okuma Atölyesi',
-  '3 ve 4. Sınıf yaz kampı'
+  '3 ve 4. Sınıf yaz kampı',
+  'Özel Ders'
 ]);
 
 function pickFirstNonEmpty(...vals) {
