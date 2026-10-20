@@ -6,20 +6,15 @@ import {
   mergeSeenNames,
   resolveBbbMeetingIdFromSession
 } from './bbb-attendance.js';
-import { sendAbsentNoticeForStudent } from './class-attendance-notify.js';
 import { wallTimeToUtcMs, sessionEndUtcMs } from './class-session-end-ms.js';
 
 /** Ders başlangıcından sonra bu süre geçmeden erken devamsızlık işlenmez (varsayılan 10 dk). */
 export const BBB_EARLY_ABSENT_GRACE_MS =
   Math.max(1, Number(process.env.BBB_EARLY_ABSENT_GRACE_MINUTES || 10) || 10) * 60_000;
 
-async function absentWaAlreadySent(sessionId, studentId) {
-  const { attendanceWaAlreadySent, ABSENT_WA_KINDS } = await import('./class-attendance-notify.js');
-  return attendanceWaAlreadySent(sessionId, studentId, ABSENT_WA_KINDS);
-}
-
 /**
- * Ders başladıktan 10 dk sonra hâlâ BBB’de görünmeyen öğrenciler: yoklama absent + Meta şablon.
+ * Ders başladıktan 10 dk sonra hâlâ BBB’de görünmeyen öğrenciler: yoklama absent.
+ * Veli mesajı gitmez; öğretmen yoklama ekranında onaylayınca gider.
  * Sonradan BBB’ye giren otomatik kayıtlı absent ise present yapılır (marked_by boş).
  */
 export async function applyEarlyBbbAbsentCheck(session, classStudentIds, className, nowMs = Date.now()) {
@@ -75,7 +70,6 @@ export async function applyEarlyBbbAbsentCheck(session, classStudentIds, classNa
     ])
   );
 
-  const instKey = row.institution_id != null ? String(row.institution_id).trim() : '';
   let marked_present = 0;
   let marked_absent = 0;
   let notified = 0;
@@ -102,7 +96,7 @@ export async function applyEarlyBbbAbsentCheck(session, classStudentIds, classNa
       continue;
     }
 
-    if (prior?.status === 'present' || prior?.status === 'late') continue;
+    if (prior?.status === 'present' || prior?.status === 'late' || prior?.status === 'excused') continue;
     if (prior?.marked_by) continue;
 
     const { error: upErr } = await supabaseAdmin.from('class_session_attendance').upsert(
@@ -117,25 +111,6 @@ export async function applyEarlyBbbAbsentCheck(session, classStudentIds, classNa
     );
     if (upErr) throw upErr;
     marked_absent += 1;
-
-    if (await absentWaAlreadySent(session.id, sid)) continue;
-
-    try {
-      const r = await sendAbsentNoticeForStudent({
-        session: row,
-        className,
-        studentId: sid,
-        institutionId: instKey
-      });
-      if (r.ok && !r.skipped) notified += 1;
-      absent_whatsapp.push({ student_id: sid, ...r });
-    } catch (e) {
-      absent_whatsapp.push({
-        student_id: sid,
-        ok: false,
-        note: e instanceof Error ? e.message : 'exception'
-      });
-    }
   }
 
   if (attendeeNames.length) {
