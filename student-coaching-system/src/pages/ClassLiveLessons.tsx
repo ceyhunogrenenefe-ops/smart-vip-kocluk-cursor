@@ -1596,7 +1596,8 @@ export default function ClassLiveLessons() {
         const start = clockMinutes(s.start_time);
         const end = clockMinutes(s.end_time);
         if (start == null || end == null || end < start) return false;
-        return minutes >= start - 10 && minutes <= end + 15;
+        // Ders başlar başlamaz değil: öğrenciler odaya girsin diye 10 dk sonra.
+        return minutes >= start + 10 && minutes <= end + 15;
       });
     if (hit) void openAttendanceForSession(hit);
   }, [canMarkAttendance, attendanceSession, selectedClassId, weekSessions, openAttendanceForSession]);
