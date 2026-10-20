@@ -39,6 +39,12 @@ function dataUrlToBase64(dataUrl: string): string {
   return raw;
 }
 
+export function classScheduleWaCaption(teacherName: string, className: string): string {
+  const name = String(teacherName || 'Öğretmen').trim() || 'Öğretmen';
+  const cls = String(className || 'Sınıf').trim() || 'Sınıf';
+  return `Merhaba ${name},\n\n«${cls}» sınıfının haftalık ders programı ektedir.\n\nOnline VIP Dershane`;
+}
+
 export function teacherScheduleWaCaption(teacherName: string, planLabel?: string): string {
   const name = String(teacherName || 'Öğretmen').trim() || 'Öğretmen';
   const plan = String(planLabel || '').trim();
@@ -73,6 +79,7 @@ export async function resolveTeacherPhones(opts: {
 export async function sendTeacherSchedulePngsViaGateway(opts: {
   coachUserId?: string;
   planLabel?: string;
+  captionFor?: (teacherName: string) => string;
   items: TeacherPngItem[];
   phonesByName: Map<string, string>;
   gapMs?: number;
@@ -110,7 +117,7 @@ export async function sendTeacherSchedulePngsViaGateway(opts: {
         targetPhone: phone,
         filename: item.filename || `${name} - ogretmen programi.png`,
         base64,
-        caption: teacherScheduleWaCaption(name, opts.planLabel),
+        caption: opts.captionFor ? opts.captionFor(name) : teacherScheduleWaCaption(name, opts.planLabel),
         mimeType: 'image/png'
       });
       sent += 1;

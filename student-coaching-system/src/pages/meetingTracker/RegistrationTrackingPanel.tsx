@@ -52,6 +52,8 @@ import {
   type CrmFilterPrefs
 } from '../../lib/registrationTrackingConfig';
 import RegLeadCard from './registrationTracking/RegLeadCard';
+import CrmFilterBar, { type CrmTimePreset } from '../crm/CrmFilterBar';
+import { istanbulYmd, pipelineDateRange, readPipelineRangePreset } from '../crm/crmDateRange';
 import { useAuth } from '../../context/AuthContext';
 import RegLeadDrawer from './registrationTracking/RegLeadDrawer';
 import CrmKanbanBoard from './registrationTracking/CrmKanbanBoard';
@@ -96,6 +98,11 @@ export default function RegistrationTrackingPanel({ isManager, canAssign, instit
   const coachId = params.get('rt_coach') || '';
   const dateFrom = params.get('rt_from') || '';
   const dateTo = params.get('rt_to') || '';
+  const rangePreset = readPipelineRangePreset(params.get('rt_range'), Boolean(dateFrom || dateTo));
+  const activeRange = useMemo(
+    () => (rangePreset === 'custom' ? pipelineDateRange('custom', dateFrom, dateTo) : pipelineDateRange(rangePreset)),
+    [rangePreset, dateFrom, dateTo]
+  );
   const [coaches, setCoaches] = useState<RegCoach[]>([]);
   const [agentLoads, setAgentLoads] = useState<RegAgentLoad[]>([]);
   const [filterPrefs, setFilterPrefs] = useState<CrmFilterPrefs>(() =>
@@ -119,6 +126,31 @@ export default function RegistrationTrackingPanel({ isManager, canAssign, instit
       const n = new URLSearchParams(p);
       if (!q) n.delete('rt_quick');
       else n.set('rt_quick', q);
+      return n;
+    });
+  };
+
+  const setDateRange = (preset: CrmTimePreset, from = '', to = '') => {
+    setParams((p) => {
+      const n = new URLSearchParams(p);
+      if (preset === 'all') {
+        n.delete('rt_range');
+        n.delete('rt_from');
+        n.delete('rt_to');
+        return n;
+      }
+      n.set('rt_range', preset);
+      if (preset === 'custom') {
+        const today = istanbulYmd();
+        const start = (from || dateFrom || today).slice(0, 10);
+        const end = (to || dateTo || start).slice(0, 10);
+        const ordered = start <= end ? { from: start, to: end } : { from: end, to: start };
+        n.set('rt_from', ordered.from);
+        n.set('rt_to', ordered.to);
+        return n;
+      }
+      n.delete('rt_from');
+      n.delete('rt_to');
       return n;
     });
   };
@@ -148,10 +180,12 @@ export default function RegistrationTrackingPanel({ isManager, canAssign, instit
       q.include_lost = '1';
     }
     if (coachId) q.coach_id = coachId;
-    if (dateFrom) q.date_from = dateFrom;
-    if (dateTo) q.date_to = dateTo;
+    if (activeRange) {
+      q.date_from = activeRange.from;
+      q.date_to = activeRange.to;
+    }
     return q;
-  }, [debouncedSearch, includeLost, quickFilter, coachId, dateFrom, dateTo]);
+  }, [debouncedSearch, includeLost, quickFilter, coachId, activeRange]);
 
   const reload = useCallback(async () => {
     if (!institutionId && !isManager) return;
@@ -392,6 +426,21 @@ export default function RegistrationTrackingPanel({ isManager, canAssign, instit
         ))}
       </div>
 
+      <CrmFilterBar
+        preset={rangePreset}
+        from={rangePreset === 'custom' ? dateFrom : activeRange?.from || ''}
+        to={rangePreset === 'custom' ? dateTo : activeRange?.to || ''}
+        agentId=""
+        agents={[]}
+        includeAll
+        showAgent={false}
+        hint="kayıt tarihine göre"
+        onPreset={(preset) => setDateRange(preset)}
+        onFrom={(v) => setDateRange('custom', v, dateTo)}
+        onTo={(v) => setDateRange('custom', dateFrom, v)}
+        onAgent={() => undefined}
+      />
+
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative min-w-[200px] flex-1">
@@ -466,37 +515,6 @@ export default function RegistrationTrackingPanel({ isManager, canAssign, instit
             </option>
           ))}
         </select>
-        <label className="flex items-center gap-1 text-xs text-slate-600 dark:text-slate-300">
-          Tarih
-          <input
-            type="date"
-            className="rounded-lg border border-slate-200 px-2 py-1.5 text-xs dark:border-slate-600 dark:bg-slate-800"
-            value={dateFrom}
-            onChange={(e) =>
-              setParams((p) => {
-                const n = new URLSearchParams(p);
-                if (e.target.value) n.set('rt_from', e.target.value);
-                else n.delete('rt_from');
-                return n;
-              })
-            }
-          />
-          <span>—</span>
-          <input
-            type="date"
-            className="rounded-lg border border-slate-200 px-2 py-1.5 text-xs dark:border-slate-600 dark:bg-slate-800"
-            value={dateTo}
-            onChange={(e) =>
-              setParams((p) => {
-                const n = new URLSearchParams(p);
-                if (e.target.value) n.set('rt_to', e.target.value);
-                else n.delete('rt_to');
-                return n;
-              })
-            }
-          />
-        </label>
-
         <button type="button" onClick={reload} className="rounded-lg border p-2 hover:bg-slate-50 dark:border-slate-600">
           <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
         </button>
