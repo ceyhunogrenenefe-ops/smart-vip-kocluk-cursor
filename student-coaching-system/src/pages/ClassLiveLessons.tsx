@@ -169,6 +169,36 @@ function dowSlotFromIso(iso: string): number {
 
 const todayIso = () => isoFromLocalDate(new Date());
 
+function clockMinutes(hm: string): number | null {
+  const p = String(hm || '').slice(0, 5).split(':');
+  const h = Number(p[0]);
+  const m = Number(p[1]);
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return null;
+  return h * 60 + m;
+}
+
+function liveAttendanceNote(live: { provider?: string; running?: boolean; note?: string } | null): string {
+  if (!live) return '';
+  const note = String(live.note || '');
+  if (note === 'zoom_not_configured' || note === 'zoom_auth_failed') {
+    return 'Zoom listesi okunamadı (hesap bağlı değil). Katılımı elle işaretleyin. Mesaj, onaydan sonra gider.';
+  }
+  if (note === 'zoom_dashboard_unavailable') {
+    return 'Zoom canlı listesi bu hesapta açık değil. Katılımı elle işaretleyin. Mesaj, onaydan sonra gider.';
+  }
+  if (!live.running) {
+    if (live.provider === 'zoom') {
+      return 'Zoom odası şu an açık görünmüyor. Liste elle doldurulur. Mesaj, onaydan sonra gider.';
+    }
+    if (live.provider === 'bbb') {
+      return 'BigBlueButton odası şu an açık görünmüyor. Liste elle doldurulur. Mesaj, onaydan sonra gider.';
+    }
+    return 'Canlı oda bulunamadı. Katılımı elle işaretleyin. Mesaj, onaydan sonra gider.';
+  }
+  const from = live.provider === 'zoom' ? 'Zoom' : 'BigBlueButton';
+  return `${from} odasındaki katılım ve kamera dolduruldu. İzinli ve sizin işaretledikleriniz duruyor. Ortak Zoom’da başka sınıf görünürse misafir işaretini kaldırın. Mesaj, onaydan sonra gider.`;
+}
+
 export default function ClassLiveLessons() {
   const { effectiveUser } = useAuth();
   const { students, teacherScopeStudents, institution, activeInstitutionId, coaches } = useApp();
@@ -549,6 +579,8 @@ export default function ClassLiveLessons() {
   const [attendanceModalLoading, setAttendanceModalLoading] = useState(false);
   const [attendanceSaving, setAttendanceSaving] = useState(false);
   const [attendanceCameraWarn, setAttendanceCameraWarn] = useState<string | null>(null);
+  const [attendanceLiveNote, setAttendanceLiveNote] = useState('');
+  const liveAttendanceDismissed = useRef(new Set<string>());
   /** Misafir öğrenciler — yalnız öğretmen/yönetici ekranında görünür */
   const [sessionGuests, setSessionGuests] = useState<SessionGuest[]>([]);
   const [guestBusyId, setGuestBusyId] = useState('');
@@ -1414,9 +1446,11 @@ export default function ClassLiveLessons() {
   };
 
   const closeAttendanceModal = () => {
+    if (attendanceSession?.id) liveAttendanceDismissed.current.add(attendanceSession.id);
     setAttendanceSession(null);
     setAttendanceDraft([]);
     setAttendanceCameraWarn(null);
+    setAttendanceLiveNote('');
     setAttendanceModalLoading(false);
     setSessionGuests([]);
     setGuestNameDraft('');
@@ -1433,6 +1467,26 @@ export default function ClassLiveLessons() {
       const j = await res.json().catch(() => ({}));
       const existing = Array.isArray(j.data) ? j.data : [];
       const roster = Array.isArray(j.roster) ? j.roster : [];
+      const live =
+        j.live && typeof j.live === 'object'
+          ? (j.live as {
+              provider?: string;
+              running?: boolean;
+              note?: string;
+              suggestions?: {
+                student_id?: string;
+                status?: string;
+                camera_status?: 'on' | 'off' | null;
+                locked?: boolean;
+              }[];
+            })
+          : null;
+      setAttendanceLiveNote(liveAttendanceNote(live));
+      const sugById = new Map(
+        (Array.isArray(live?.suggestions) ? live.suggestions : [])
+          .map((row) => [String(row.student_id || '').trim(), row] as const)
+          .filter(([id]) => Boolean(id))
+      );
       // Misafirler yoklamayla aynı yanıtta gelir; tespit sunucuda tazelenir
       setSessionGuests(Array.isArray(j.guests) ? (j.guests as SessionGuest[]) : []);
       const statusById = new Map<string, string>(
@@ -1447,7 +1501,7 @@ export default function ClassLiveLessons() {
           String(row.camera_status || '').trim()
         ])
       );
-      const resolveStatus = (studentId: string) => {
+      const storedStatus = (studentId: string) => {
         const direct = statusById.get(studentId);
         if (direct) return direct;
         const stu = resolveStudentInList(safeStudents, studentId);
@@ -1456,8 +1510,24 @@ export default function ClassLiveLessons() {
         if (stu?.authUserId && statusById.has(stu.authUserId)) return statusById.get(stu.authUserId)!;
         return '';
       };
+      const resolveStatus = (studentId: string) => {
+        const stored = storedStatus(studentId);
+        if (stored === 'excused' || stored === 'late') return stored;
+        const sug = sugById.get(studentId);
+        if (live?.running && sug && !sug.locked && sug.status) return String(sug.status);
+        return stored;
+      };
       const resolveCamera = (studentId: string, status: string): 'on' | 'off' | null => {
         if (status === 'absent' || status === 'excused') return null;
+        const sug = sugById.get(studentId);
+        if (
+          live?.running &&
+          sug &&
+          !sug.locked &&
+          (sug.camera_status === 'on' || sug.camera_status === 'off')
+        ) {
+          return sug.camera_status;
+        }
         const raw = cameraById.get(studentId) || '';
         if (raw === 'on' || raw === 'open') return 'on';
         if (raw === 'off' || raw === 'closed') return 'off';
@@ -1469,7 +1539,7 @@ export default function ClassLiveLessons() {
           '';
         if (alt === 'on' || alt === 'open') return 'on';
         if (alt === 'off' || alt === 'closed') return 'off';
-        // İlk kayıt / kamera seçilmemiş: Kaydet engellenmesin — varsayılan açık
+        if (live?.running && sug && !sug.locked) return null;
         return 'on';
       };
       const toDraftStatus = (st: string): 'present' | 'absent' | 'late' | 'excused' => {
@@ -1511,6 +1581,25 @@ export default function ClassLiveLessons() {
       setAttendanceModalLoading(false);
     }
   }, [classes, safeStudents]);
+
+  useEffect(() => {
+    if (!canMarkAttendance || attendanceSession || !selectedClassId) return;
+    const now = new Date();
+    const today = isoFromLocalDate(now);
+    const minutes = now.getHours() * 60 + now.getMinutes();
+    const hit = [...weekSessions]
+      .filter((s) => s.class_id === selectedClassId && s.lesson_date === today)
+      .filter((s) => String(s.status) !== 'cancelled')
+      .filter((s) => !liveAttendanceDismissed.current.has(s.id))
+      .sort((a, b) => String(a.start_time).localeCompare(String(b.start_time)))
+      .find((s) => {
+        const start = clockMinutes(s.start_time);
+        const end = clockMinutes(s.end_time);
+        if (start == null || end == null || end < start) return false;
+        return minutes >= start - 10 && minutes <= end + 15;
+      });
+    if (hit) void openAttendanceForSession(hit);
+  }, [canMarkAttendance, attendanceSession, selectedClassId, weekSessions, openAttendanceForSession]);
 
   /**
    * Misafir işlemleri. Kayıt silinmez: "misafir değil" denilince satır
@@ -3286,6 +3375,19 @@ export default function ClassLiveLessons() {
               </p>
             ) : (
               <>
+                {attendanceLiveNote ? (
+                  <div className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-950 space-y-2">
+                    <p>{attendanceLiveNote}</p>
+                    <button
+                      type="button"
+                      disabled={attendanceModalLoading}
+                      onClick={() => attendanceSession && void openAttendanceForSession(attendanceSession)}
+                      className="rounded-lg border border-sky-300 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-sky-900 disabled:opacity-50 touch-manipulation"
+                    >
+                      Katılımı yenile
+                    </button>
+                  </div>
+                ) : null}
                 <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700 grid grid-cols-2 gap-x-3 gap-y-1 sm:grid-cols-3">
                   <span>👥 {attendanceSummary.total} Öğrenci</span>
                   <span>✅ {attendanceSummary.present} Katıldı</span>
@@ -3524,7 +3626,7 @@ export default function ClassLiveLessons() {
               className="min-h-[44px] flex-1 rounded-lg bg-amber-600 text-white text-sm font-semibold disabled:opacity-50 touch-manipulation"
               onClick={() => void saveAttendance()}
             >
-              {attendanceSaving ? 'Kaydediliyor…' : 'Kaydet'}
+              {attendanceSaving ? 'Kaydediliyor…' : 'Onayla ve mesaj gönder'}
             </button>
           </AppModalFooter>
         </AppModal>

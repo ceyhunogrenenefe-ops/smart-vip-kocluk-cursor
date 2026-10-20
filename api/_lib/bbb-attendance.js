@@ -1,6 +1,5 @@
 import { supabaseAdmin } from './supabase-admin.js';
 import { bbbGetMeetingAttendeeNames, isBbbJoinUrl, parseBbbMeetingIdFromJoinUrl, sanitizeBbbMeetingId } from './bbb.js';
-import { sendAbsentNoticeForStudent } from './class-attendance-notify.js';
 
 /** Türkçe karakter / boşluk normalize — öğrenci adı ↔ BBB fullName */
 export function normalizePersonNameForMatch(raw) {
@@ -193,7 +192,8 @@ export async function pollBbbPresenceForSession(session) {
 }
 
 /**
- * Sınıf öğrencileri için otomatik yoklama + devamsız Meta şablonu (mevcut sendAbsentNotice).
+ * Sınıf öğrencileri için otomatik yoklama kaydı.
+ * Veli mesajı burada gitmez; öğretmen yoklamayı onaylayınca mark-attendance gönderir.
  * Manuel işaretlenmiş öğrencilerin statüsü değiştirilmez.
  */
 export async function applyAutoAttendanceForClassSession(session, classStudentIds, className, opts = {}) {
@@ -250,26 +250,7 @@ export async function applyAutoAttendanceForClassSession(session, classStudentId
     if (upErr) throw upErr;
   }
 
-  const instKey = session.institution_id != null ? String(session.institution_id).trim() : '';
   const absent_whatsapp = [];
-  for (const row of prepared) {
-    if (row.status !== 'absent') continue;
-    try {
-      const r = await sendAbsentNoticeForStudent({
-        session,
-        className,
-        studentId: row.student_id,
-        institutionId: instKey
-      });
-      absent_whatsapp.push({ student_id: row.student_id, ...r });
-    } catch (e) {
-      absent_whatsapp.push({
-        student_id: row.student_id,
-        ok: false,
-        note: e instanceof Error ? e.message : 'exception'
-      });
-    }
-  }
 
   const { error: markErr } = await supabaseAdmin
     .from('class_sessions')

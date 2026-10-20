@@ -89,7 +89,9 @@ import {
   backfillCombinedClassBbbAlignment
 } from '../api/_lib/combined-class-bbb-reuse.js';
 import { buildBbbAttendeeJoinUrl, buildStaffBbbJoinUrl, parseBbbJoinCredentials, parseBbbMeetingIdFromJoinUrl, parseBbbPasswordFromJoinUrl, resolveLiveBbbAttendeeCredentials } from '../api/_lib/bbb.js';
-import { pollBbbPresenceForSession, applyAutoAttendanceForClassSession } from '../api/_lib/bbb-attendance.js';
+import { pollBbbPresenceForSession, applyAutoAttendanceForClassSession, mergeSeenNames } from '../api/_lib/bbb-attendance.js';
+import { fetchLiveAttendees } from '../api/_lib/live-attendance-source.js';
+import { buildLiveAttendanceDraft } from '../api/_lib/live-attendance-draft.js';
 import {
   detectGuestsForSession,
   listGuestsForSession
@@ -1579,26 +1581,57 @@ export default async function handler(req, res) {
     if (scope === 'attendance') {
       const sessionId = String(req.query.session_id || '').trim();
       if (!sessionId) return res.status(400).json({ error: 'session_id_required' });
-      const { data: session } = await supabaseAdmin
+      const { data: sessionRow } = await supabaseAdmin
         .from('class_sessions')
-        .select('id,class_id,subject,teacher_id,institution_id,start_time,end_time,bbb_seen_names')
+        .select(
+          'id,class_id,subject,teacher_id,institution_id,lesson_date,start_time,end_time,meeting_link,meeting_link_moderator,bbb_meeting_id,bbb_seen_names,status'
+        )
         .eq('id', sessionId)
         .maybeSingle();
-      if (!session) return res.status(404).json({ error: 'session_not_found' });
+      if (!sessionRow) return res.status(404).json({ error: 'session_not_found' });
+      let session = sessionRow;
       const allowedClassIds = await getManagedClassIds(actor);
       if (!seesAllInstitutionClasses(role, roleTags)) {
         if (!allowedClassIds || !allowedClassIds.includes(session.class_id)) {
           return res.status(403).json({ error: 'forbidden' });
         }
       }
-      const [{ data, error }, roster] = await Promise.all([
+      const [{ data, error }, roster, classRes] = await Promise.all([
         supabaseAdmin.from('class_session_attendance').select('*').eq('session_id', sessionId),
         buildClassSessionAttendanceRoster({
           classId: session.class_id,
           subject: session.subject
-        })
+        }),
+        supabaseAdmin.from('classes').select('id,name,class_level').eq('id', session.class_id).maybeSingle()
       ]);
       if (error) return res.status(500).json({ error: error.message });
+      /**
+       * Canlı oda (etüt Zoom, ders BBB) taslak üretir. Satır yazılmaz,
+       * WhatsApp gitmez. İzinli ve öğretmen kaydı taslakta kilitli kalır.
+       */
+      let live = { provider: '', running: false, attendees: [], note: 'no_live_room', suggestions: [] };
+      try {
+        const fetched = await fetchLiveAttendees(session, classRes.data || null);
+        const names = (fetched.attendees || []).map((a) => a.fullName).filter(Boolean);
+        if (names.length) {
+          const merged = mergeSeenNames(session.bbb_seen_names, names);
+          session = { ...session, bbb_seen_names: merged };
+          await supabaseAdmin
+            .from('class_sessions')
+            .update({ bbb_seen_names: merged, updated_at: new Date().toISOString() })
+            .eq('id', session.id);
+        }
+        const draft = buildLiveAttendanceDraft(roster, fetched.attendees, data || [], fetched.running);
+        live = {
+          provider: fetched.provider,
+          running: fetched.running,
+          note: fetched.note,
+          suggestions: draft.suggestions
+        };
+      } catch (liveErr) {
+        console.warn('[class-live-lessons] canlı yoklama:', liveErr?.message || liveErr);
+        live = { provider: '', running: false, attendees: [], note: 'live_error', suggestions: [] };
+      }
       /**
        * Misafir öğrenciler: katılımcı listesinde kayıtlı öğrenciyle eşleşmeyen
        * adlar "muhtemel misafir" olarak tazelenir ve yoklamayla aynı yanıtta
@@ -1614,7 +1647,7 @@ export default async function handler(req, res) {
       } catch (guestErr) {
         console.warn('[class-live-lessons] misafir tespiti:', guestErr?.message || guestErr);
       }
-      return res.status(200).json({ data: data || [], roster, guests });
+      return res.status(200).json({ data: data || [], roster, guests, live });
     }
 
     if (scope === 'attendance-prefs') {
