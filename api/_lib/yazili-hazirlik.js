@@ -1,6 +1,7 @@
 import { supabaseAdmin } from './supabase-admin.js';
 import { errorMessage } from './error-msg.js';
 import { isMissingTableError } from './supabase-schema.js';
+import { MAX_PDF_BYTES } from './yazili-hazirlik-slots.js';
 
 export const YAZILI_HAZIRLIK_TABLE = 'yazili_hazirlik_pdf';
 export const YAZILI_HAZIRLIK_BUCKET = 'yazili-hazirlik';
@@ -110,20 +111,20 @@ export async function ensureYaziliHazirlikSchema() {
   return schemaFlight;
 }
 
+const BUCKET_AYAR = {
+  public: false,
+  fileSizeLimit: MAX_PDF_BYTES,
+  allowedMimeTypes: ['application/pdf']
+};
+
 export async function ensureYaziliHazirlikBucket() {
   if (bucketReady) return;
-  const created = await supabaseAdmin.storage.createBucket(YAZILI_HAZIRLIK_BUCKET, {
-    public: false,
-    fileSizeLimit: 20 * 1024 * 1024,
-    allowedMimeTypes: ['application/pdf']
-  });
-  if (created.error && !/already|exists/i.test(String(created.error.message || ''))) {
-    const updated = await supabaseAdmin.storage.updateBucket(YAZILI_HAZIRLIK_BUCKET, {
-      public: false,
-      fileSizeLimit: 20 * 1024 * 1024,
-      allowedMimeTypes: ['application/pdf']
-    });
-    if (updated.error && !/not found/i.test(String(updated.error.message || ''))) {
+  const created = await supabaseAdmin.storage.createBucket(YAZILI_HAZIRLIK_BUCKET, BUCKET_AYAR);
+  const already = created.error && /already|exists/i.test(String(created.error.message || ''));
+  if (created.error && !already) throw created.error;
+  if (already) {
+    const updated = await supabaseAdmin.storage.updateBucket(YAZILI_HAZIRLIK_BUCKET, BUCKET_AYAR);
+    if (updated.error && !/maximum|exceed|global|file size/i.test(String(updated.error.message || ''))) {
       throw updated.error;
     }
   }
