@@ -14,12 +14,23 @@ const parseB64url = (input) => {
   return Buffer.from(padded, 'base64').toString('utf8');
 };
 
+let warnedInsecureSecret = false;
 const getSecret = () => {
   const secret = process.env.APP_JWT_SECRET;
   if (secret && secret.trim()) return secret.trim();
   // Dev/preview fallback: production'da mutlaka APP_JWT_SECRET set edilmelidir.
+  if (!warnedInsecureSecret) {
+    warnedInsecureSecret = true;
+    console.error('[auth] APP_JWT_SECRET tanımlı değil — güvensiz varsayılan anahtar kullanılıyor', {
+      env: process.env.VERCEL_ENV || process.env.NODE_ENV || 'unknown'
+    });
+  }
   return 'dev-insecure-secret-change-me';
 };
+
+/** Yalnız yerel geliştirmede açıkça istenirse token'sız istek kabul edilir. */
+const allowAnonymousDev = () =>
+  process.env.ALLOW_ANONYMOUS_API === '1' && !process.env.VERCEL && process.env.NODE_ENV !== 'production';
 
 export const signAuthToken = (payload) => {
   const header = { alg: 'HS256', typ: 'JWT' };
@@ -61,8 +72,8 @@ export const requireAuth = (req) => {
   const auth = req.headers.authorization || '';
   const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
   if (!token) {
-    // Demo/preview fallback: token yoksa read/write akışı kilitlenmesin.
-    // Production'da mutlaka gerçek JWT kullanılmalıdır.
+    // Güvenlik: token'sız istek artık yetkisiz (eskiden süper admin sayılıyordu).
+    if (!allowAnonymousDev()) throw new Error('Missing token');
     return {
       sub: 'anonymous',
       role: 'super_admin',

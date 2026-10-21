@@ -7,6 +7,36 @@
 import { routeLoaders } from './_route-loaders.js';
 import { applyCors, handleCorsPreflight } from './_lib/cors-mobile.js';
 
+/**
+ * Bu uçlar `requireAuth` ile korunur ve token'sız istekleri artık reddeder. Bazı handler'lar
+ * hata yakalayıp 500 döndüğü için burada önce temiz bir 401 veriyoruz (istemci oturumu yeniler).
+ * `commerce-store` bilinçli olarak yok: token'sız katalog herkese açıktır.
+ */
+const TOKEN_REQUIRED_ROUTES = new Set([
+  'students',
+  'coaches',
+  'users',
+  'users/bulk-import',
+  'users-bulk-import',
+  'weekly-entries',
+  'weekly-planner-entries',
+  'planner-daily-log',
+  'etut-session-report',
+  'coach-weekly-goals',
+  'student-screen-time',
+  'book-readings',
+  'topic-progress',
+  'written-exams',
+  'commerce-admin',
+  'commerce-vendor',
+  'commerce-upload'
+]);
+
+function hasBearerToken(req) {
+  const auth = String(req.headers?.authorization || '');
+  return auth.startsWith('Bearer ') && auth.slice(7).trim().length > 0;
+}
+
 function segmentsFromReq(req) {
   const raw = req.query?.segments;
   let segments =
@@ -52,6 +82,11 @@ export default async function handler(req, res) {
 
   if (!load) {
     res.status(404).json({ error: 'unknown_route', path: routePath });
+    return;
+  }
+
+  if (TOKEN_REQUIRED_ROUTES.has(routePath) && !hasBearerToken(req)) {
+    res.status(401).json({ error: 'Missing token' });
     return;
   }
 

@@ -7,12 +7,18 @@ import { errorMessage } from '../api/_lib/error-msg.js';
 /**
  * AuthContext.tsx içindeki DEMO_USERS ile aynı kimlik bilgileri — UI demo girişi sonrası JWT üretmek için.
  */
-const DEMO_ACCOUNTS = [
-  { email: 'admin@smartkocluk.com', password: 'Admin123!', role: 'super_admin', name: 'Süper Admin' },
-  { email: 'admin@smartvip.com', password: 'admin123', role: 'admin', name: 'Admin' },
-  { email: 'ogretmen@smartvip.com', password: 'ogretmen123', role: 'coach', name: 'Öğretmen Koç' },
-  { email: 'ogrenci@smartvip.com', password: 'ogrenci123', role: 'student', name: 'Öğrenci' }
-];
+// Güvenlik: kodda sabit şifreli demo hesaplar kaldırıldı (depo herkese açık; süper admin dahil
+// herkes bu şifrelerle girebiliyordu). Demo hesapları yalnız `ENABLE_DEMO_LOGIN=1` olan, Vercel
+// dışı yerel ortamda çalışır. Gerçek hesaplar her zaman veritabanındaki şifreyle doğrulanır.
+const DEMO_ACCOUNTS =
+  process.env.ENABLE_DEMO_LOGIN === '1' && !process.env.VERCEL
+    ? [
+        { email: 'admin@smartkocluk.com', password: 'Admin123!', role: 'super_admin', name: 'Süper Admin' },
+        { email: 'admin@smartvip.com', password: 'admin123', role: 'admin', name: 'Admin' },
+        { email: 'ogretmen@smartvip.com', password: 'ogretmen123', role: 'coach', name: 'Öğretmen Koç' },
+        { email: 'ogrenci@smartvip.com', password: 'ogrenci123', role: 'student', name: 'Öğrenci' }
+      ]
+    : [];
 
 const USER_LOGIN_COLUMNS =
   'id, name, email, phone, role, roles, password_hash, institution_id, package, start_date, end_date, is_active, created_at, last_login_at';
