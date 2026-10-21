@@ -64,6 +64,7 @@ import CoachStatsPage from './pages/CoachStatsPage';
 import BbbPortalJoinPage from './pages/BbbPortalJoinPage';
 import BbbGuestJoinPage from './pages/BbbGuestJoinPage';
 import TeacherPanel from './pages/TeacherPanel';
+import YaziliHazirlikPage from './pages/YaziliHazirlikPage';
 import TeacherSolutionAppointmentsPage from './pages/TeacherSolutionAppointmentsPage';
 import WeeklyPlannerPage from './pages/WeeklyPlannerPage';
 import MyProfilePage from './pages/MyProfilePage';
@@ -639,6 +640,14 @@ function App() {
                 </ProtectedRoute>
               } />
             </Route>
+
+            <Route path="/yazili-hazirlik" element={
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/yazili-hazirlik')}>
+                <Layout>
+                  <YaziliHazirlikPage />
+                </Layout>
+              </ProtectedRoute>
+            } />
 
             <Route path="/teacher-panel" element={
               <ProtectedRoute allowedRoles={rolesForProtectedRoute('/teacher-panel')}>

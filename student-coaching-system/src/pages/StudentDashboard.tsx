@@ -412,6 +412,17 @@ export default function StudentDashboard() {
         </div>
       )}
 
+      <Link
+        to="/yazili-hazirlik"
+        className="flex items-center justify-between gap-3 rounded-xl border border-indigo-100 bg-white px-4 py-4 shadow-sm hover:bg-indigo-50"
+      >
+        <span>
+          <span className="block font-semibold text-[#173b70]">Yazılıya hazırlık</span>
+          <span className="text-sm text-slate-500">1. ve 2. dönem yazılılarının 1. 2. ve 3. çalışmalarını indirin</span>
+        </span>
+        <FileText className="h-5 w-5 shrink-0 text-indigo-700" />
+      </Link>
+
       {/* Tab Navigation */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
         <div className="flex border-b border-gray-100">

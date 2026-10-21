@@ -132,12 +132,20 @@ export const STUDENT_PANEL_SUBMENU_ITEMS: FlatNavItem[] = [
   { path: '/student-dashboard/denemeler', icon: ClipboardList, label: 'Deneme sınavları' },
   { path: '/student-dashboard/yazili', icon: FileCheck, label: 'Yazılılarım' },
   { path: '/student-dashboard/kitaplar', icon: BookMarked, label: 'Kitaplarım' },
+  { path: '/yazili-hazirlik', icon: FileText, label: 'Yazılıya Hazırlık' },
 ];
+
+export const NAV_YAZILI_HAZIRLIK: FlatNavItem = {
+  path: '/yazili-hazirlik',
+  icon: FileText,
+  label: 'Yazılıya Hazırlık'
+};
 
 const PANEL_PATHS = new Set([
   '/dashboard',
   '/coach-dashboard',
   '/teacher-panel',
+  '/yazili-hazirlik',
   '/student-dashboard',
   /** Koc/ogretmen vitrin profili — panel satirinda (rest'e dusmesin) */
   '/profilimi-duzenle',
@@ -193,6 +201,7 @@ export const MOBILE_ACADEMIC_MATCH_PATHS = [
   '/soru-havuzu',
   '/soru-analitik',
   '/student-dashboard',
+  '/yazili-hazirlik',
   '/student-analytics',
   '/exam-tracking'
 ] as const;
@@ -299,6 +308,7 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
   if (tags.includes('super_admin')) {
     return [
       { path: '/dashboard', icon: LayoutDashboard, label: 'Ana Panel' },
+      NAV_YAZILI_HAZIRLIK,
       { path: '/weekly-planner', icon: Calendar, label: 'Haftalık plan' },
       { path: '/attendance-report', icon: ClipboardList, label: 'Yoklama raporu' },
     { path: '/class-lesson-topic-progress', icon: MapPin, label: 'Grup dersi konu ilerlemesi' },
@@ -382,6 +392,7 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
 
   const MENU_ADMIN: FlatNavItem[] = [
     { path: '/dashboard', icon: LayoutDashboard, label: 'Ana Panel' },
+    NAV_YAZILI_HAZIRLIK,
     ...privateLiveNavForRoles(['admin']),
     { path: '/private-lesson-assignments', icon: UserCheck, label: 'Özel ders atamaları' },
     { path: '/class-live-lessons', icon: Calendar, label: 'Canlı Grup Dersi' },
@@ -435,6 +446,7 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
 
   const MENU_TEACHER: FlatNavItem[] = [
     { path: '/teacher-panel', icon: LayoutDashboard, label: 'Öğretmen Paneli' },
+    NAV_YAZILI_HAZIRLIK,
     NAV_TEACHER_VITRINE_PROFILE,
     NAV_TEACHER_AVAILABILITY,
     { path: '/teacher-solution-appointments', icon: Calendar, label: 'Bugünkü Randevular' },
@@ -456,6 +468,7 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
 
   const MENU_COACH: FlatNavItem[] = [
     { path: '/coach-dashboard', icon: LayoutDashboard, label: 'Koç Paneli' },
+    NAV_YAZILI_HAZIRLIK,
     { path: '/coach-kilavuz', icon: ScrollText, label: 'Kullanım kılavuzu' },
     { path: '/class-live-lessons', icon: Calendar, label: 'Canlı Grup Dersi' },
     { path: '/edu-panel', icon: Presentation, label: EDU_HOMEWORK_ANIMATIONS_LABEL },
@@ -560,7 +573,9 @@ export function structureNavFromFlat(flat: FlatNavItem[]): StructuredNav {
         ...it,
         // Vitrine linki kendi ikonunu korusun; diger panel kokleri dashboard ikonu
         icon:
-          it.path === NAV_TEACHER_VITRINE_PROFILE.path || it.path === NAV_TEACHER_AVAILABILITY.path
+          it.path === NAV_TEACHER_VITRINE_PROFILE.path ||
+          it.path === NAV_TEACHER_AVAILABILITY.path ||
+          it.path === NAV_YAZILI_HAZIRLIK.path
             ? it.icon
             : LayoutDashboard,
         label: it.label
