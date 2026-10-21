@@ -5,6 +5,7 @@
  * POST ?op=commit             — yüklenen dosyayı rafa yazar
  * GET  ?op=download&id=       — öğrenci / öğretmen indirme bağlantısı
  * DELETE ?id=                 — öğretmen kendi dosyasını kaldırır
+ * GET  ?op=report             — yönetici: öğretmen bazında yükleme takibi
  */
 import { requireAuthenticatedActor } from '../api/_lib/auth.js';
 import { actorRoleSet, roleSetHasAdmin, roleSetHasSuperAdmin } from '../api/_lib/actor-roles.js';
@@ -12,7 +13,9 @@ import { enrichStudentActor } from '../api/_lib/enrich-student-actor.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { errorMessage } from '../api/_lib/error-msg.js';
 import { getTeacherPanelClassIds } from '../api/_lib/teacher-class-scope.js';
+import { yaziliHazirlikRaporu } from '../api/_lib/yazili-hazirlik-rapor.js';
 import {
+  ensureYaziliHazirlikBucket,
   ensureYaziliHazirlikSchema,
   yaziliHazirlikDosyaSil,
   yaziliHazirlikIndirmeLinki,
@@ -157,6 +160,17 @@ export default async function handler(req, res) {
 
     const op = String(req.query?.op || '').trim();
 
+    if (req.method === 'GET' && op === 'report') {
+      const yonetici = roleSetHasAdmin(roles) || roleSetHasSuperAdmin(roles);
+      if (!yonetici) return res.status(403).json({ error: 'forbidden' });
+      const superAdmin = roleSetHasSuperAdmin(roles);
+      const istenenKurum = String(req.query?.institution_id || '').trim();
+      const kurumId = superAdmin ? istenenKurum || null : String(actor.institution_id || '').trim();
+      if (!superAdmin && !kurumId) return res.status(200).json({ institutions: [], teachers: [], files: [] });
+      const rapor = await yaziliHazirlikRaporu({ institutionId: kurumId, allInstitutions: superAdmin && !kurumId });
+      return res.status(200).json(rapor);
+    }
+
     if (req.method === 'GET' && op === 'download') {
       const id = String(req.query?.id || '').trim();
       if (!id) return res.status(400).json({ error: 'id_required' });
@@ -189,8 +203,11 @@ export default async function handler(req, res) {
       }
       const teacherFilter = uploader && !roleSetHasAdmin(roles) && !roleSetHasSuperAdmin(roles) ? actor.sub : '';
       const subjectsByClass = await subjectsFor(classIds, teacherFilter);
+      const maxBytes = uploader ? await ensureYaziliHazirlikBucket().catch(() => MAX_PDF_BYTES) : MAX_PDF_BYTES;
       return res.status(200).json({
         canUpload: uploader,
+        canReport: roleSetHasAdmin(roles) || roleSetHasSuperAdmin(roles),
+        maxBytes,
         classes: classes.map((c) => ({ id: c.id, name: c.name || 'Sınıf' })),
         subjectsByClass,
         files
@@ -204,15 +221,23 @@ export default async function handler(req, res) {
       const subject = temizKonu(body.subject);
       const classId = String(body.class_id || '').trim();
       const fileSize = Number(body.file_size || 0);
-      const maxMb = Math.round(MAX_PDF_BYTES / (1024 * 1024));
+      const limitBytes = await ensureYaziliHazirlikBucket();
+      const maxMb = Math.round(limitBytes / (1024 * 1024));
       if (!slot) return hataYaniti(res, 400, 'gecersiz_raf', 'Dönem, yazılı veya çalışma seçilemedi. Sayfayı yenileyip tekrar deneyin.');
       if (!subject) return hataYaniti(res, 400, 'ders_gerekli', 'Önce ders adını yazın.');
       if (!classId) return hataYaniti(res, 400, 'sinif_gerekli', 'Önce sınıf seçin.');
-      if (fileSize > MAX_PDF_BYTES) {
-        return hataYaniti(res, 400, 'pdf_too_large', `PDF en fazla ${maxMb} MB olabilir`);
+      if (fileSize > limitBytes) {
+        return hataYaniti(
+          res,
+          400,
+          'pdf_too_large',
+          `PDF en fazla ${maxMb} MB olabilir. Dosyayı sıkıştırıp (ör. "PDF küçült") tekrar yükleyin.`
+        );
       }
       const allowed = await assertClassAllowed(actor, roles, classId);
-      if (!allowed) return res.status(403).json({ error: 'forbidden' });
+      if (!allowed) {
+        return hataYaniti(res, 403, 'forbidden', 'Bu sınıfa yükleme yetkiniz yok. Yöneticiden sizi sınıfa öğretmen olarak eklemesini isteyin.');
+      }
       const path = yuklemeYolu(actor.sub, classId, slot, body.file_name);
       const signed = await yaziliHazirlikYuklemeLinki(path);
       return res.status(200).json({
@@ -313,6 +338,7 @@ export default async function handler(req, res) {
       return res.status(401).json({ error: msg });
     }
     const status = Number(e?.status || e?.statusCode) || 500;
+    console.error('[yazili-hazirlik]', req.method, String(req.query?.op || ''), msg);
     const code = status >= 400 && status < 600 ? status : 500;
     return res.status(code).json({ error: msg, hint: msg });
   }

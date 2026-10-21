@@ -32,6 +32,7 @@ create index if not exists yazili_hazirlik_pdf_class_idx
 let schemaReady = false;
 let schemaFlight = null;
 let bucketReady = false;
+let bucketLimitBytes = MAX_PDF_BYTES;
 
 function supabaseProjectRef() {
   const url = String(process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '').trim();
@@ -111,40 +112,31 @@ export async function ensureYaziliHazirlikSchema() {
   return schemaFlight;
 }
 
-const BUCKET_AYARLARI = [
-  { public: false, fileSizeLimit: MAX_PDF_BYTES, allowedMimeTypes: ['application/pdf'] },
-  { public: false, fileSizeLimit: 50 * 1024 * 1024, allowedMimeTypes: ['application/pdf'] },
-  { public: false, allowedMimeTypes: ['application/pdf'] },
-  { public: false }
-];
+const BUCKET_AYAR = { public: false, fileSizeLimit: MAX_PDF_BYTES, allowedMimeTypes: ['application/pdf'] };
 
-function kovaZatenVar(error) {
-  return /already|exists/i.test(String(error?.message || ''));
-}
-
-async function kovayiAyarla(ayar) {
-  const updated = await supabaseAdmin.storage.updateBucket(YAZILI_HAZIRLIK_BUCKET, ayar);
-  if (!updated.error) return 'ok';
-  const mesaj = String(updated.error.message || '');
-  if (!/not found|does not exist/i.test(mesaj)) return 'reject';
-  const created = await supabaseAdmin.storage.createBucket(YAZILI_HAZIRLIK_BUCKET, ayar);
-  if (!created.error || kovaZatenVar(created.error)) return 'ok';
-  return 'reject';
-}
-
+/**
+ * Kovayı yalnızca yoksa oluşturur; var olan kovanın ayarına dokunmaz.
+ * (Eskiden her istekte boyut güncelleniyordu; proje genel sınırını aşan değer 400 ile
+ * reddedilince yükleme bağlantısı hiç üretilmiyordu.)
+ * Dönen değer: kovanın gerçek dosya sınırı (bayt) — öğretmene doğru sınırı göstermek için.
+ */
 export async function ensureYaziliHazirlikBucket() {
-  if (bucketReady) return;
-  for (const ayar of BUCKET_AYARLARI) {
-    try {
-      if ((await kovayiAyarla(ayar)) === 'ok') {
-        bucketReady = true;
-        return;
-      }
-    } catch {
-      /* proje sınırı bu boyutu reddederse bir alt ayarı dene */
-    }
+  if (bucketReady) return bucketLimitBytes;
+  const { data, error } = await supabaseAdmin.storage.getBucket(YAZILI_HAZIRLIK_BUCKET);
+  if (!error && data) {
+    const limit = Number(data.file_size_limit || 0);
+    bucketLimitBytes = limit > 0 ? Math.min(limit, MAX_PDF_BYTES) : MAX_PDF_BYTES;
+    bucketReady = true;
+    return bucketLimitBytes;
   }
+  const created = await supabaseAdmin.storage.createBucket(YAZILI_HAZIRLIK_BUCKET, BUCKET_AYAR);
+  if (created.error && !/already|exists/i.test(String(created.error.message || ''))) {
+    console.error('[yazili-hazirlik] kova oluşturulamadı', created.error.message || created.error);
+    throw Object.assign(new Error('PDF deposu hazırlanamadı. Lütfen yöneticiye bildirin.'), { status: 503 });
+  }
+  bucketLimitBytes = MAX_PDF_BYTES;
   bucketReady = true;
+  return bucketLimitBytes;
 }
 
 export async function yaziliHazirlikYuklemeLinki(path) {
@@ -153,7 +145,12 @@ export async function yaziliHazirlikYuklemeLinki(path) {
   if (result.error) {
     result = await supabaseAdmin.storage.from(YAZILI_HAZIRLIK_BUCKET).createSignedUploadUrl(path);
   }
-  if (result.error) throw result.error;
+  if (result.error) {
+    console.error('[yazili-hazirlik] yükleme bağlantısı alınamadı', result.error.message || result.error);
+    throw Object.assign(new Error('Yükleme bağlantısı alınamadı. Birkaç saniye sonra tekrar deneyin.'), {
+      status: 502
+    });
+  }
   return {
     path: result.data?.path || path,
     token: result.data?.token || null,

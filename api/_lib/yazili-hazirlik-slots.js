@@ -3,7 +3,11 @@
 export const DONEMLER = [1, 2];
 export const YAZILILAR = [1, 2];
 export const CALISMALAR = [1, 2, 3];
-export const MAX_PDF_BYTES = 100 * 1024 * 1024;
+/**
+ * Supabase Storage genel dosya sınırı varsayılan 50 MB; kova sınırı bunun üstüne çıkamaz.
+ * Daha büyük dosya için önce Supabase panelinden genel sınır yükseltilmeli, sonra bu değer.
+ */
+export const MAX_PDF_BYTES = 50 * 1024 * 1024;
 
 export function parseSlot(input) {
   const donem = Number(input?.donem);
