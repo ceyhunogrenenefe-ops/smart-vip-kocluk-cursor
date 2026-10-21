@@ -9,6 +9,7 @@ import {
 } from './grade11Maarif2026TopicPool';
 import { grade7Maarif2026TopicPool } from './grade7Maarif2026TopicPool';
 import { grade2Maarif2026TopicPool } from './grade2Maarif2026TopicPool';
+import { grade4TopicPool } from './grade4TopicPool';
 import { mergeTopicPools } from '../lib/mergeTopicPools';
 
 // Konu Havuzu - 3. Sınıf, 4. Sınıf, 5. Sınıf, 6. Sınıf, 7. Sınıf, LGS Tüm Dersler ve Konular
@@ -2610,15 +2611,19 @@ const baseTopicPool: TopicPool = {
 export const topicPool: TopicPool = replaceClassLevelTopics(
   replaceClassLevelTopics(
     replaceClassLevelTopics(
-      mergeTopicPools(mergeTopicPools(baseTopicPool, yosTopicPool), tytMaarifTopicPool),
-      11,
-      grade11Maarif2026TopicPool
+      replaceClassLevelTopics(
+        mergeTopicPools(mergeTopicPools(baseTopicPool, yosTopicPool), tytMaarifTopicPool),
+        11,
+        grade11Maarif2026TopicPool
+      ),
+      7,
+      grade7Maarif2026TopicPool
     ),
-    7,
-    grade7Maarif2026TopicPool
+    2,
+    grade2Maarif2026TopicPool
   ),
-  2,
-  grade2Maarif2026TopicPool
+  4,
+  grade4TopicPool
 );
 
 // Örnek Öğrenciler
