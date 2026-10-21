@@ -142,11 +142,19 @@ export const NAV_YAZILI_HAZIRLIK: FlatNavItem = {
   label: 'Yazılıya Hazırlık'
 };
 
+/** Yönetici: hangi öğretmen kaç yazılı hazırlık çalışması yükledi */
+export const NAV_YAZILI_HAZIRLIK_TAKIP: FlatNavItem = {
+  path: '/yazili-hazirlik-takip',
+  icon: ClipboardCheck,
+  label: 'Yazılı Hazırlık Takibi'
+};
+
 const PANEL_PATHS = new Set([
   '/dashboard',
   '/coach-dashboard',
   '/teacher-panel',
   '/yazili-hazirlik',
+  '/yazili-hazirlik-takip',
   '/student-dashboard',
   /** Koc/ogretmen vitrin profili — panel satirinda (rest'e dusmesin) */
   '/profilimi-duzenle',
@@ -374,6 +382,7 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
     return [
       { path: '/dashboard', icon: LayoutDashboard, label: 'Ana Panel' },
       NAV_YAZILI_HAZIRLIK,
+      NAV_YAZILI_HAZIRLIK_TAKIP,
       { path: '/weekly-planner', icon: Calendar, label: 'Haftalık plan' },
       { path: '/attendance-report', icon: ClipboardList, label: 'Yoklama raporu' },
       { path: '/class-lesson-topic-progress', icon: MapPin, label: 'Grup dersi konu ilerlemesi' },
@@ -462,6 +471,7 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
   const MENU_ADMIN: FlatNavItem[] = [
     { path: '/dashboard', icon: LayoutDashboard, label: 'Ana Panel' },
     NAV_YAZILI_HAZIRLIK,
+    NAV_YAZILI_HAZIRLIK_TAKIP,
     ...privateLiveNavForRoles(['admin']),
     { path: '/private-lesson-assignments', icon: UserCheck, label: 'Özel ders atamaları' },
     { path: '/class-live-lessons', icon: Calendar, label: 'Canlı Grup Dersi' },
@@ -657,7 +667,8 @@ export function structureNavFromFlat(flat: FlatNavItem[]): StructuredNav {
         icon:
           it.path === NAV_TEACHER_VITRINE_PROFILE.path ||
           it.path === NAV_TEACHER_AVAILABILITY.path ||
-          it.path === NAV_YAZILI_HAZIRLIK.path
+          it.path === NAV_YAZILI_HAZIRLIK.path ||
+          it.path === NAV_YAZILI_HAZIRLIK_TAKIP.path
             ? it.icon
             : LayoutDashboard,
         label: it.label

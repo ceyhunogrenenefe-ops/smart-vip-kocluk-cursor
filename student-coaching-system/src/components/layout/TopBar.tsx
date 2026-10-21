@@ -84,6 +84,7 @@ export default function TopBar({ onMenuClick, drawerOpen = false, hideMenuButton
       '/coach-stats': 'Koç İstatistikleri',
       '/teacher-dashboard': 'Öğretmen Paneli',
       '/user-management': 'Kullanıcı Yönetimi',
+      '/yazili-hazirlik-takip': 'Yazılı Hazırlık Takibi',
       '/veli-onay': 'Veli onayı & e-imza',
       '/tahsilat-muhasebe': 'Muhasebe',
       '/muhasebe': 'Muhasebe',
