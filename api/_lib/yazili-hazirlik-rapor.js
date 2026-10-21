@@ -1,7 +1,7 @@
 /**
  * Yazılıya hazırlık — yönetici takip raporu.
- * Kurum bazında: sınıfa atanmış her öğretmen ve yükleme yapan herkes, kaç çalışma yüklediği,
- * hangi dönem/yazılıya yüklediği ve son yükleme zamanı. Hiç yüklemeyenler de 0 ile listelenir.
+ * Satır: kurum + sınıf + ders + öğretmen; kaç çalışma yüklendiği, dönem/yazılı dağılımı,
+ * son yükleme. Ders programında olup hiç yüklemeyenler de 0 ile listelenir.
  */
 import { supabaseAdmin } from './supabase-admin.js';
 import { YAZILI_HAZIRLIK_TABLE } from './yazili-hazirlik.js';
@@ -25,26 +25,38 @@ function parcala(list, size = 300) {
   return out;
 }
 
-/** Saf hesap: test edilebilir (DB'siz). */
-export function raporuOlustur({ institutions, classes, classTeachers, users, files }) {
+const dersAnahtari = (d) => String(d || '').trim().toLocaleLowerCase('tr');
+
+/**
+ * Saf hesap: test edilebilir (DB'siz).
+ * Satır = kurum + sınıf + ders + öğretmen. Ders bilgisi yüklenen dosyadan, yükleme yoksa
+ * haftalık ders programından (class_weekly_slots) gelir; programda da yoksa ders boş kalır.
+ */
+export function raporuOlustur({ institutions, classes, classTeachers, slots = [], users, files }) {
   const kurumAd = new Map(institutions.map((k) => [String(k.id), k.name || 'Kurum']));
   const sinif = new Map(classes.map((c) => [String(c.id), c]));
   const kullanici = new Map(users.map((u) => [String(u.id), u]));
+  const aktif = (id) => {
+    const u = kullanici.get(String(id));
+    return Boolean(u) && u.is_active !== false;
+  };
 
-  const anahtar = (kurumId, ogretmenId) => `${kurumId}::${ogretmenId}`;
   const satirlar = new Map();
-  const satirAl = (kurumId, ogretmenId) => {
-    const k = anahtar(kurumId, ogretmenId);
+  const satirAl = (classId, ogretmenId, ders) => {
+    const c = sinif.get(String(classId));
+    const kurumId = String(c?.institution_id || '');
+    const k = `${kurumId}::${classId}::${ogretmenId}::${dersAnahtari(ders)}`;
     if (!satirlar.has(k)) {
-      const u = kullanici.get(ogretmenId);
+      const u = kullanici.get(String(ogretmenId));
       satirlar.set(k, {
+        key: k,
         institution_id: kurumId,
         institution_name: kurumAd.get(kurumId) || 'Kurum',
-        teacher_id: ogretmenId,
+        class_id: String(classId),
+        class_name: c?.name || 'Sınıf',
+        teacher_id: String(ogretmenId),
         teacher_name: u?.name || 'Bilinmeyen kullanıcı',
-        teacher_active: u ? u.is_active !== false : false,
-        classes: new Set(),
-        subjects: new Set(),
+        subject: String(ders || '').trim(),
         total: 0,
         by_slot: { '1-1': 0, '1-2': 0, '2-1': 0, '2-2': 0 },
         last_upload: null
@@ -53,22 +65,10 @@ export function raporuOlustur({ institutions, classes, classTeachers, users, fil
     return satirlar.get(k);
   };
 
-  for (const ct of classTeachers) {
-    const c = sinif.get(String(ct.class_id));
-    if (!c) continue;
-    const u = kullanici.get(String(ct.teacher_id));
-    if (!u || u.is_active === false) continue;
-    const satir = satirAl(String(c.institution_id || ''), String(ct.teacher_id));
-    satir.classes.add(c.name || 'Sınıf');
-  }
-
+  // 1) Yüklenen dosyalar
   const dosyalar = [];
   for (const f of files) {
-    const c = sinif.get(String(f.class_id));
-    const kurumId = String(c?.institution_id || f.institution_id || '');
-    const satir = satirAl(kurumId, String(f.teacher_user_id));
-    if (c?.name) satir.classes.add(c.name);
-    satir.subjects.add(f.subject);
+    const satir = satirAl(f.class_id, f.teacher_user_id, f.subject);
     satir.total += 1;
     const yk = `${f.donem}-${f.yazili}`;
     if (yk in satir.by_slot) satir.by_slot[yk] += 1;
@@ -76,9 +76,8 @@ export function raporuOlustur({ institutions, classes, classTeachers, users, fil
     if (t && (!satir.last_upload || t > satir.last_upload)) satir.last_upload = t;
     dosyalar.push({
       id: f.id,
-      institution_id: kurumId,
-      teacher_id: String(f.teacher_user_id),
-      class_name: c?.name || 'Sınıf',
+      row_key: satir.key,
+      class_name: satir.class_name,
       subject: f.subject,
       donem: f.donem,
       yazili: f.yazili,
@@ -88,26 +87,40 @@ export function raporuOlustur({ institutions, classes, classTeachers, users, fil
     });
   }
 
-  const teachers = [...satirlar.values()]
-    .map((s) => ({
-      ...s,
-      classes: [...s.classes].sort((a, b) => a.localeCompare(b, 'tr')),
-      subjects: [...s.subjects].sort((a, b) => a.localeCompare(b, 'tr'))
-    }))
-    .sort(
-      (a, b) =>
-        a.institution_name.localeCompare(b.institution_name, 'tr') ||
-        b.total - a.total ||
-        a.teacher_name.localeCompare(b.teacher_name, 'tr')
-    );
+  // 2) Ders programındaki sınıf-ders-öğretmen (yükleme yoksa 0)
+  const programli = new Set();
+  for (const sl of slots) {
+    if (!sl.teacher_id || !sinif.has(String(sl.class_id)) || !aktif(sl.teacher_id)) continue;
+    const ders = String(sl.subject || '').trim();
+    if (!ders) continue;
+    satirAl(sl.class_id, sl.teacher_id, ders);
+    programli.add(`${sl.class_id}::${sl.teacher_id}`);
+  }
 
-  const kullanilanKurumlar = new Set(teachers.map((t) => t.institution_id));
+  // 3) Sınıfa atanmış ama programda dersi olmayan ve hiç yüklememiş öğretmen
+  const yukleyen = new Set(files.map((f) => `${f.class_id}::${f.teacher_user_id}`));
+  for (const ct of classTeachers) {
+    const k = `${ct.class_id}::${ct.teacher_id}`;
+    if (!sinif.has(String(ct.class_id)) || !aktif(ct.teacher_id)) continue;
+    if (programli.has(k) || yukleyen.has(k)) continue;
+    satirAl(ct.class_id, ct.teacher_id, '');
+  }
+
+  const rows = [...satirlar.values()].sort(
+    (a, b) =>
+      a.institution_name.localeCompare(b.institution_name, 'tr') ||
+      a.class_name.localeCompare(b.class_name, 'tr', { numeric: true }) ||
+      a.subject.localeCompare(b.subject, 'tr') ||
+      a.teacher_name.localeCompare(b.teacher_name, 'tr')
+  );
+
+  const kullanilanKurumlar = new Set(rows.map((r) => r.institution_id));
   return {
     institutions: institutions
       .filter((k) => kullanilanKurumlar.has(String(k.id)))
       .map((k) => ({ id: String(k.id), name: k.name || 'Kurum' }))
       .sort((a, b) => a.name.localeCompare(b.name, 'tr')),
-    teachers,
+    rows,
     files: dosyalar.sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')))
   };
 }
@@ -121,11 +134,17 @@ export async function yaziliHazirlikRaporu({ institutionId = null, allInstitutio
   const classIds = classes.map((c) => c.id);
 
   const classTeachers = [];
+  const slots = [];
   const files = [];
   for (const grup of parcala(classIds)) {
     classTeachers.push(
       ...(await hepsiniOku(() =>
         supabaseAdmin.from('class_teachers').select('class_id,teacher_id').in('class_id', grup).order('class_id')
+      ))
+    );
+    slots.push(
+      ...(await hepsiniOku(() =>
+        supabaseAdmin.from('class_weekly_slots').select('class_id,teacher_id,subject').in('class_id', grup).order('id')
       ))
     );
     files.push(
@@ -140,7 +159,11 @@ export async function yaziliHazirlikRaporu({ institutionId = null, allInstitutio
   }
 
   const userIds = [
-    ...new Set([...classTeachers.map((r) => r.teacher_id), ...files.map((f) => f.teacher_user_id)].filter(Boolean).map(String))
+    ...new Set(
+      [...classTeachers.map((r) => r.teacher_id), ...slots.map((r) => r.teacher_id), ...files.map((f) => f.teacher_user_id)]
+        .filter(Boolean)
+        .map(String)
+    )
   ];
   const users = [];
   for (const grup of parcala(userIds)) {
@@ -157,5 +180,5 @@ export async function yaziliHazirlikRaporu({ institutionId = null, allInstitutio
     institutions.push(...(data || []));
   }
 
-  return raporuOlustur({ institutions, classes, classTeachers, users, files });
+  return raporuOlustur({ institutions, classes, classTeachers, slots, users, files });
 }
