@@ -133,7 +133,7 @@ export default function YaziliHazirlikPage() {
         error?: string;
       };
       if (!hazir.ok || !hazirJson.data?.path || !hazirJson.data.signedUrl) {
-        throw new Error(hazirJson.hint || 'PDF yükleme hazırlığı başarısız');
+        throw new Error(hazirJson.hint || hazirJson.error || 'PDF yükleme hazırlığı başarısız');
       }
       const put = await fetch(hazirJson.data.signedUrl, {
         method: 'PUT',

@@ -111,21 +111,37 @@ export async function ensureYaziliHazirlikSchema() {
   return schemaFlight;
 }
 
-const BUCKET_AYAR = {
-  public: false,
-  fileSizeLimit: MAX_PDF_BYTES,
-  allowedMimeTypes: ['application/pdf']
-};
+const BUCKET_AYARLARI = [
+  { public: false, fileSizeLimit: MAX_PDF_BYTES, allowedMimeTypes: ['application/pdf'] },
+  { public: false, fileSizeLimit: 50 * 1024 * 1024, allowedMimeTypes: ['application/pdf'] },
+  { public: false, allowedMimeTypes: ['application/pdf'] },
+  { public: false }
+];
+
+function kovaZatenVar(error) {
+  return /already|exists/i.test(String(error?.message || ''));
+}
+
+async function kovayiAyarla(ayar) {
+  const updated = await supabaseAdmin.storage.updateBucket(YAZILI_HAZIRLIK_BUCKET, ayar);
+  if (!updated.error) return 'ok';
+  const mesaj = String(updated.error.message || '');
+  if (!/not found|does not exist/i.test(mesaj)) return 'reject';
+  const created = await supabaseAdmin.storage.createBucket(YAZILI_HAZIRLIK_BUCKET, ayar);
+  if (!created.error || kovaZatenVar(created.error)) return 'ok';
+  return 'reject';
+}
 
 export async function ensureYaziliHazirlikBucket() {
   if (bucketReady) return;
-  const created = await supabaseAdmin.storage.createBucket(YAZILI_HAZIRLIK_BUCKET, BUCKET_AYAR);
-  const already = created.error && /already|exists/i.test(String(created.error.message || ''));
-  if (created.error && !already) throw created.error;
-  if (already) {
-    const updated = await supabaseAdmin.storage.updateBucket(YAZILI_HAZIRLIK_BUCKET, BUCKET_AYAR);
-    if (updated.error && !/maximum|exceed|global|file size/i.test(String(updated.error.message || ''))) {
-      throw updated.error;
+  for (const ayar of BUCKET_AYARLARI) {
+    try {
+      if ((await kovayiAyarla(ayar)) === 'ok') {
+        bucketReady = true;
+        return;
+      }
+    } catch {
+      /* proje sınırı bu boyutu reddederse bir alt ayarı dene */
     }
   }
   bucketReady = true;
