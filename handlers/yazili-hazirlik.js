@@ -29,6 +29,13 @@ import {
 
 function parseBody(req) {
   const b = req.body;
+  if (Buffer.isBuffer(b)) {
+    try {
+      return JSON.parse(b.toString('utf8') || '{}');
+    } catch {
+      return {};
+    }
+  }
   if (b && typeof b === 'object') return b;
   if (typeof b === 'string') {
     try {
@@ -38,6 +45,10 @@ function parseBody(req) {
     }
   }
   return {};
+}
+
+function hataYaniti(res, status, error, hint) {
+  return res.status(status).json({ error, hint: hint || error });
 }
 
 function canUpload(roles) {
@@ -193,14 +204,12 @@ export default async function handler(req, res) {
       const subject = temizKonu(body.subject);
       const classId = String(body.class_id || '').trim();
       const fileSize = Number(body.file_size || 0);
-      if (!slot) return res.status(400).json({ error: 'gecersiz_raf' });
-      if (!subject) return res.status(400).json({ error: 'ders_gerekli' });
-      if (!classId) return res.status(400).json({ error: 'sinif_gerekli' });
+      const maxMb = Math.round(MAX_PDF_BYTES / (1024 * 1024));
+      if (!slot) return hataYaniti(res, 400, 'gecersiz_raf', 'Dönem, yazılı veya çalışma seçilemedi. Sayfayı yenileyip tekrar deneyin.');
+      if (!subject) return hataYaniti(res, 400, 'ders_gerekli', 'Önce ders adını yazın.');
+      if (!classId) return hataYaniti(res, 400, 'sinif_gerekli', 'Önce sınıf seçin.');
       if (fileSize > MAX_PDF_BYTES) {
-        return res.status(400).json({
-          error: 'pdf_too_large',
-          hint: `PDF en fazla ${Math.round(MAX_PDF_BYTES / (1024 * 1024))} MB olabilir`
-        });
+        return hataYaniti(res, 400, 'pdf_too_large', `PDF en fazla ${maxMb} MB olabilir`);
       }
       const allowed = await assertClassAllowed(actor, roles, classId);
       if (!allowed) return res.status(403).json({ error: 'forbidden' });
@@ -303,7 +312,8 @@ export default async function handler(req, res) {
     if (/missing token|invalid token|token expired|invalid signature/i.test(msg)) {
       return res.status(401).json({ error: msg });
     }
-    const status = Number(e?.status) || 500;
-    return res.status(status >= 400 && status < 600 ? status : 500).json({ error: msg });
+    const status = Number(e?.status || e?.statusCode) || 500;
+    const code = status >= 400 && status < 600 ? status : 500;
+    return res.status(code).json({ error: msg, hint: msg });
   }
 }
