@@ -69,4 +69,18 @@ export const grade4TopicPool: TopicPool = {
       'Beden eğitimi',
     ],
   },
+  'İNGİLİZCE': {
+    4: [
+      '4. Sınıf Ünite 1 – Classroom Rules',
+      '4. Sınıf Ünite 2 – Nationality',
+      '4. Sınıf Ünite 3 – Cartoon Characters',
+      '4. Sınıf Ünite 4 – Free Time',
+      '4. Sınıf Ünite 5 – My Day',
+      '4. Sınıf Ünite 6 – Fun With Science',
+      '4. Sınıf Ünite 7 – Jobs',
+      '4. Sınıf Ünite 8 – My Clothes',
+      '4. Sınıf Ünite 9 – My Friends',
+      '4. Sınıf Ünite 10 – Food And Drinks',
+    ],
+  },
 };
