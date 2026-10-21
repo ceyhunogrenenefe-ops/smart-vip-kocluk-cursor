@@ -5,7 +5,6 @@ import {
   ChevronDown,
   ChevronRight,
   Loader2,
-  Pencil,
   Plus,
   Send,
   Settings2,
@@ -16,9 +15,10 @@ import {
 import { toast } from 'sonner';
 import { apiFetch } from '../../lib/session';
 import PlannerSekmeleri from '../../components/schedule/PlannerSekmeleri';
+import SinifProgrami from './SinifProgrami';
 
 /* ---------- Tipler ---------- */
-type Ayar = {
+export type Ayar = {
   baslangic: string;
   bitis: string;
   haftasonu: string[];
@@ -27,9 +27,9 @@ type Ayar = {
   dersBasinaHazirlik: number;
   oncelik: 'haftasonu' | 'yakin';
 };
-type Sinif = { id: string; name: string; level: number | null; student_count: number };
-type Ogretmen = { id: string; name: string };
-type Satir = {
+export type Sinif = { id: string; name: string; level: number | null; student_count: number };
+export type Ogretmen = { id: string; name: string };
+export type Satir = {
   class_id: string;
   class_name: string;
   subject: string;
@@ -41,7 +41,7 @@ type Satir = {
   takvim_not: string | null;
   saved: boolean;
 };
-type Ders = {
+export type Ders = {
   id: string;
   class_id: string;
   subject: string;
@@ -53,8 +53,8 @@ type Ders = {
   status: 'draft' | 'published';
   session_id: string | null;
 };
-type Mesgul = { class_id: string; teacher_id: string | null; lesson_date?: string; day_of_week?: number; start_time: string; end_time: string; subject: string };
-type Durum = {
+export type Mesgul = { id?: string; class_id: string; teacher_id: string | null; lesson_date?: string; day_of_week?: number; start_time: string; end_time: string; subject: string };
+export type Durum = {
   institution_id: string;
   institutions: { id: string; name: string }[];
   takvim_adi: string;
@@ -311,6 +311,17 @@ export default function YaziliProgramPage() {
     });
   };
 
+  /** Tarih aralığını değiştir: kaydet ve sınıf programını yeni aralıkla getir */
+  const aralikDegistir = (degisiklik: Partial<Pick<Ayar, 'baslangic' | 'bitis'>>) => {
+    if (!durum) return;
+    const yeni = { ...durum.ayar, ...degisiklik };
+    if (yeni.bitis < yeni.baslangic) yeni.bitis = yeni.baslangic;
+    void isle('aralik', async () => {
+      await post('save-settings', { ayar: yeni });
+      await yukle();
+    });
+  };
+
   const ayarKaydet = () =>
     isle('settings', async () => {
       if (!ayarTaslak) return;
@@ -394,9 +405,25 @@ export default function YaziliProgramPage() {
                 ))}
               </select>
             ) : null}
-            <span className="text-sm text-slate-600">
-              <CalendarCheck className="mr-1 inline h-4 w-4 text-indigo-700" />
-              {gunEtiketi(durum.ayar.baslangic, true)} – {gunEtiketi(durum.ayar.bitis, true)}
+            <span className="flex flex-wrap items-center gap-1 text-sm text-slate-700">
+              <CalendarCheck className="h-4 w-4 text-indigo-700" />
+              <input
+                type="date"
+                value={durum.ayar.baslangic}
+                onChange={(e) => e.target.value && aralikDegistir({ baslangic: e.target.value })}
+                className="rounded-lg border border-slate-300 px-2 py-1.5"
+                aria-label="Başlangıç tarihi"
+              />
+              –
+              <input
+                type="date"
+                value={durum.ayar.bitis}
+                min={durum.ayar.baslangic}
+                onChange={(e) => e.target.value && aralikDegistir({ bitis: e.target.value })}
+                className="rounded-lg border border-slate-300 px-2 py-1.5"
+                aria-label="Bitiş tarihi"
+              />
+              {mesgulIs === 'aralik' ? <Loader2 className="h-4 w-4 animate-spin text-slate-400" /> : null}
             </span>
             <button
               type="button"
@@ -565,78 +592,21 @@ export default function YaziliProgramPage() {
               })}
             </section>
 
-            {/* Gün gün program */}
-            <section className="space-y-3">
-              <h2 className="text-lg font-bold text-[#173b70]">Program</h2>
-              {gunler.map((gun) => {
-                const liste = durum.items
-                  .filter((i) => i.lesson_date === gun && (sinifSuzgec === 'all' || i.class_id === sinifSuzgec))
-                  .sort((a, b) => a.start_time.localeCompare(b.start_time) || (sinifAd.get(a.class_id) || '').localeCompare(sinifAd.get(b.class_id) || '', 'tr'));
-                const haftasonu = haftaGunu(gun) >= 6;
-                return (
-                  <div key={gun} className="rounded-xl border border-slate-200 bg-white">
-                    <div className={`flex items-center justify-between rounded-t-xl px-3 py-2 ${haftasonu ? 'bg-indigo-50' : 'bg-slate-50'}`}>
-                      <span className="font-semibold text-slate-800">{gunEtiketi(gun)}</span>
-                      <span className="text-xs text-slate-500">{liste.length ? `${liste.length} ders` : 'Ders yok'}</span>
-                    </div>
-                    {liste.length ? (
-                      <ul className="divide-y divide-slate-100">
-                        {liste.map((d) => {
-                          const s = sorunlar(d);
-                          return (
-                            <li key={d.id} className="flex flex-wrap items-start gap-2 px-3 py-2 text-sm">
-                              <span className="w-24 shrink-0 font-semibold tabular-nums text-slate-700">
-                                {d.start_time}–{d.end_time}
-                              </span>
-                              <span className="min-w-0 flex-1">
-                                <span className="font-medium text-slate-800">{sinifAd.get(d.class_id) || 'Sınıf'}</span>
-                                <span className="text-slate-600"> · {d.subject}</span>
-                                <span className="block text-xs text-slate-500">
-                                  {d.teacher_id ? ogretmenAd.get(d.teacher_id) || 'Öğretmen' : 'Öğretmen yok'}
-                                </span>
-                                {s.map((m) => (
-                                  <span key={m} className="mt-0.5 flex items-center gap-1 text-xs text-red-700">
-                                    <AlertTriangle className="h-3.5 w-3.5 shrink-0" /> {m}
-                                  </span>
-                                ))}
-                              </span>
-                              <span
-                                className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
-                                  d.status === 'published' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-800'
-                                }`}
-                              >
-                                {d.status === 'published' ? 'Yayında' : 'Taslak'}
-                              </span>
-                              <span className="flex gap-1">
-                                {d.status === 'draft' ? (
-                                  <button
-                                    type="button"
-                                    onClick={() => setPencere({ tur: 'duzenle', ders: d })}
-                                    className="rounded border border-slate-200 p-1 text-slate-600 hover:bg-slate-50"
-                                    aria-label="Düzenle"
-                                  >
-                                    <Pencil className="h-3.5 w-3.5" />
-                                  </button>
-                                ) : null}
-                                <button
-                                  type="button"
-                                  onClick={() => dersSil(d)}
-                                  disabled={mesgulIs === `sil-${d.id}`}
-                                  className="rounded border border-red-200 p-1 text-red-700 hover:bg-red-50"
-                                  aria-label="Kaldır"
-                                >
-                                  {mesgulIs === `sil-${d.id}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
-                                </button>
-                              </span>
-                            </li>
-                          );
-                        })}
-                      </ul>
-                    ) : null}
-                  </div>
-                );
-              })}
-            </section>
+            {/* Seçili sınıfın gerçek ders programı + hazırlık taslakları */}
+            <SinifProgrami
+              durum={durum}
+              gunler={gunler}
+              sinifId={sinifSuzgec}
+              setSinifId={setSinifSuzgec}
+              sinifAd={sinifAd}
+              ogretmenAd={ogretmenAd}
+              satirMap={satirMap}
+              sorunlarTaslak={sorunlar}
+              taslakDuzenle={(d) => setPencere({ tur: 'duzenle', ders: d })}
+              taslakSil={dersSil}
+              mesgulIs={mesgulIs}
+              yenile={yukle}
+            />
           </div>
 
           {pencere ? (
