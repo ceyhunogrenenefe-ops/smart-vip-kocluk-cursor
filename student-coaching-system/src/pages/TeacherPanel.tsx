@@ -4,7 +4,7 @@ import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import { userRoleTags } from '../config/rolePermissions';
 import { apiFetch } from '../lib/session';
-import { Users, Radio, CheckCircle2, Presentation } from 'lucide-react';
+import { Users, Radio, CheckCircle2, Presentation, FileText } from 'lucide-react';
 
 type ScopeStudent = {
   id: string;
@@ -98,6 +98,17 @@ export default function TeacherPanel() {
             <span className="text-sm">Canlı özel ders</span>
           </div>
           <p className="text-slate-700 text-sm">Ders oluştur / haftalık plan / tekrar / çakışma kontrolü</p>
+        </button>
+        <button
+          type="button"
+          onClick={() => navigate('/yazili-hazirlik')}
+          className="bg-white border border-slate-100 rounded-xl p-4 text-left hover:bg-slate-50"
+        >
+          <div className="flex items-center gap-2 text-[#173b70] mb-1">
+            <FileText className="w-4 h-4" />
+            <span className="text-sm">Yazılıya hazırlık</span>
+          </div>
+          <p className="text-slate-700 text-sm">1. ve 2. dönem yazılıları için 3 çalışma PDF’i yükleyin</p>
         </button>
         <button
           type="button"
