@@ -70,6 +70,7 @@ export const ROUTE_ALLOWED_ROLES = {
   '/teacher-panel': ['teacher'],
   '/yazili-hazirlik': ['super_admin', 'admin', 'coach', 'teacher', 'student'],
   '/yazili-hazirlik-takip': ['super_admin', 'admin'],
+  '/ders-saatleri-yeni-donem/yazili-hazirlik': ['super_admin', 'admin'],
   '/teacher-solution-appointments': ['teacher', 'super_admin', 'admin'],
   '/class-live-lessons': ['super_admin', 'admin', 'coach', 'teacher'],
   '/schedule-planner': ['super_admin', 'admin'],

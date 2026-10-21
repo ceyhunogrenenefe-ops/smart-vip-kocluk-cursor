@@ -20,6 +20,7 @@ import { useAuth } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
 import { userRoleTags } from '../config/rolePermissions';
 import { apiFetch } from '../lib/session';
+import PlannerSekmeleri from '../components/schedule/PlannerSekmeleri';
 import {
   PLATFORM_PRIMARY_INSTITUTION_ID,
   resolveInstitutionIdForActor
@@ -1533,6 +1534,7 @@ export default function SchedulePlannerPage({ mode = 'default' }: { mode?: 'defa
 
   return (
     <div className="flex h-[calc(100vh-4rem)] flex-col gap-3 p-3 md:p-4">
+      {isNewTerm ? <PlannerSekmeleri /> : null}
       <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-slate-900">
         <div className="flex items-center gap-2 text-slate-800 dark:text-slate-100">
           <CalendarDays className="h-5 w-5 text-indigo-600" />

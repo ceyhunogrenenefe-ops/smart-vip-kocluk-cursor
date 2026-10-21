@@ -72,6 +72,7 @@ import BbbGuestJoinPage from './pages/BbbGuestJoinPage';
 import TeacherPanel from './pages/TeacherPanel';
 import YaziliHazirlikPage from './pages/YaziliHazirlikPage';
 import YaziliHazirlikTakipPage from './pages/yaziliHazirlik/YaziliHazirlikTakipPage';
+import YaziliProgramPage from './pages/yaziliProgram/YaziliProgramPage';
 import TeacherSolutionAppointmentsPage from './pages/TeacherSolutionAppointmentsPage';
 import WeeklyPlannerPage from './pages/WeeklyPlannerPage';
 import MyProfilePage from './pages/MyProfilePage';
@@ -762,6 +763,14 @@ function App() {
               <ProtectedRoute allowedRoles={rolesForProtectedRoute('/schedule-planner')}>
                 <Layout>
                   <SchedulePlannerPage />
+                </Layout>
+              </ProtectedRoute>
+            } />
+
+            <Route path="/ders-saatleri-yeni-donem/yazili-hazirlik" element={
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/ders-saatleri-yeni-donem/yazili-hazirlik')}>
+                <Layout>
+                  <YaziliProgramPage />
                 </Layout>
               </ProtectedRoute>
             } />
