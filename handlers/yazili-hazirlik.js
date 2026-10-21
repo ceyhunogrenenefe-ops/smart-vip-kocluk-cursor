@@ -197,7 +197,10 @@ export default async function handler(req, res) {
       if (!subject) return res.status(400).json({ error: 'ders_gerekli' });
       if (!classId) return res.status(400).json({ error: 'sinif_gerekli' });
       if (fileSize > MAX_PDF_BYTES) {
-        return res.status(400).json({ error: 'pdf_too_large', hint: 'PDF en fazla 20 MB olabilir' });
+        return res.status(400).json({
+          error: 'pdf_too_large',
+          hint: `PDF en fazla ${Math.round(MAX_PDF_BYTES / (1024 * 1024))} MB olabilir`
+        });
       }
       const allowed = await assertClassAllowed(actor, roles, classId);
       if (!allowed) return res.status(403).json({ error: 'forbidden' });
