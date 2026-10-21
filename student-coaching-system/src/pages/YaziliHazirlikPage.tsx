@@ -83,7 +83,8 @@ export default function YaziliHazirlikPage() {
     setSiniflar(liste);
     setDersler(j.subjectsByClass || {});
     setDosyalar(Array.isArray(j.files) ? j.files : []);
-    setSinifId((onceki) => onceki || liste[0]?.id || '');
+    // Yönetici varsayılan olarak tüm sınıfları görür ('' = tüm sınıflar)
+    if (!j.canReport) setSinifId((onceki) => onceki || liste[0]?.id || '');
   };
 
   useEffect(() => {
@@ -103,12 +104,19 @@ export default function YaziliHazirlikPage() {
     };
   }, []);
 
-  const onerilenDersler = dersler[sinifId] || [];
+  const onerilenDersler = useMemo(() => {
+    if (sinifId) return dersler[sinifId] || [];
+    const set = new Set<string>();
+    for (const list of Object.values(dersler)) for (const d of list) set.add(d);
+    for (const d of dosyalar) set.add(d.subject);
+    return [...set].sort(trSirala);
+  }, [sinifId, dersler, dosyalar]);
   useEffect(() => {
-    if (!canUpload || konu) return;
+    // Yönetici ders süzgecini boş bırakabilir (tüm dersler); otomatik doldurma yalnız öğretmende
+    if (!canUpload || canReport || konu) return;
     const ilk = dersler[sinifId]?.[0];
     if (ilk) setKonu(ilk);
-  }, [canUpload, konu, sinifId, dersler]);
+  }, [canUpload, canReport, konu, sinifId, dersler]);
 
   /** Öğrenci için seçili sınıftaki dersler: yüklenmiş çalışması olanlar önce */
   const ogrDersleri = useMemo(() => {
@@ -139,6 +147,10 @@ export default function YaziliHazirlikPage() {
       return d.donem === donem;
     });
   }, [dosyalar, sinifId, canUpload, seciliDers, donem]);
+
+  /** Yönetici 'tüm sınıflar' / 'tüm dersler' görünümündeyken yükleme kapalı (hangi rafa gideceği belli değil) */
+  const yuklemeAcik = canUpload && Boolean(sinifId) && Boolean(konu.trim());
+  const tumGorunum = canReport && (!sinifId || !konu.trim());
 
   const rafta = (yazili: number, calisma: number) =>
     gorunen.filter((d) => d.yazili === yazili && d.calisma === calisma);
@@ -297,6 +309,7 @@ export default function YaziliHazirlikPage() {
             className="mt-1 block min-w-48 rounded-lg border border-slate-300 px-3 py-2"
           >
             {siniflar.length === 0 ? <option value="">Sınıf yok</option> : null}
+            {canReport && siniflar.length > 0 ? <option value="">Tüm sınıflar</option> : null}
             {siniflar.map((s) => (
               <option key={s.id} value={s.id}>
                 {s.name}
@@ -311,7 +324,7 @@ export default function YaziliHazirlikPage() {
               list="yazili-hazirlik-dersler"
               value={konu}
               onChange={(e) => setKonu(e.target.value)}
-              placeholder="Örn. Matematik"
+              placeholder={canReport ? 'Tüm dersler' : 'Örn. Matematik'}
               className="mt-1 block min-w-48 rounded-lg border border-slate-300 px-3 py-2"
             />
             <datalist id="yazili-hazirlik-dersler">
@@ -383,6 +396,13 @@ export default function YaziliHazirlikPage() {
             : 'Kayıtlı sınıfınız görünmüyor. Sınıfınız bağlandığında öğretmeninizin yüklediği çalışmalar burada durur.'}
         </p>
       ) : !canUpload && !seciliDers ? null : (
+        <>
+        {tumGorunum ? (
+          <p className="rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-sm text-indigo-950">
+            {sinifId ? 'Bu sınıfın' : 'Tüm sınıfların'} {donem}. dönem PDF'leri gösteriliyor ({gorunen.length} dosya).
+            {canUpload ? ' Yüklemek için bir sınıf seçip ders adını yazın.' : ''}
+          </p>
+        ) : null}
         <div className="grid gap-4 lg:grid-cols-2">
           {YAZILILAR.map((yazili) => (
             <section key={yazili} className="rounded-xl border border-slate-200 bg-white p-4">
@@ -398,7 +418,7 @@ export default function YaziliHazirlikPage() {
                     <div key={calisma} className="rounded-lg border border-slate-100 bg-slate-50 p-3">
                       <div className="mb-2 flex items-center justify-between gap-2">
                         <p className="font-semibold text-slate-800">{calisma}. çalışma</p>
-                        {canUpload ? (
+                        {yuklemeAcik ? (
                           <label className="inline-flex cursor-pointer items-center gap-1 rounded-lg bg-[#173b70] px-3 py-1.5 text-xs font-semibold text-white">
                             {mesgul === anahtar ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
                             PDF yükle
@@ -425,6 +445,7 @@ export default function YaziliHazirlikPage() {
                               <span className="flex min-w-0 items-center gap-2">
                                 <FileText className="h-4 w-4 shrink-0 text-indigo-700" />
                                 <span className="truncate">
+                                  {canUpload && !sinifId ? <span className="font-medium">{d.class_name} · </span> : null}
                                   {canUpload ? <span className="font-medium">{d.subject} · </span> : null}
                                   <span className={canUpload ? 'text-slate-500' : 'font-medium'}>{d.file_name}</span>
                                   {d.teacher_name ? <span className="text-slate-500"> · {d.teacher_name}</span> : null}
@@ -459,6 +480,7 @@ export default function YaziliHazirlikPage() {
             </section>
           ))}
         </div>
+        </>
       )}
       </>
       )}
