@@ -1,4 +1,5 @@
 import { requireAuth, hasInstitutionAccess } from '../api/_lib/auth.js';
+import { elevateUserManagerActor } from '../api/_lib/user-manager-scope.js';
 import { enrichStudentActor } from '../api/_lib/enrich-student-actor.js';
 import { errorMessage } from '../api/_lib/error-msg.js';
 import { runBulkUserImport } from '../api/_lib/user-bulk-import.js';
@@ -11,6 +12,7 @@ export default async function handler(req, res) {
   try {
     let actor = requireAuth(req);
     actor = await enrichStudentActor(actor);
+    actor = await elevateUserManagerActor(req, actor);
 
     if (!(actor.role === 'super_admin' || actor.role === 'admin')) {
       return res.status(403).json({ error: 'forbidden' });

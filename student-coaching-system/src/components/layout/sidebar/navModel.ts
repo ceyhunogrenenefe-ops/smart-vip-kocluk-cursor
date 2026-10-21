@@ -581,6 +581,10 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
   if (tags.includes('coach')) {
     merged = merged.filter((m) => m.path !== '/teacher-panel');
   }
+  // Kullanıcı Yönetimi yetkisi (yönetici olmayan personel): Kurum & Sistem altında tek sayfa
+  if ((tags as string[]).includes('user_manager') && !merged.some((m) => m.path === '/user-management')) {
+    merged = [...merged, { path: '/user-management', icon: UserCog, label: 'Kullanıcı Yönetimi' }];
+  }
   if (isCoachPanelUser) {
     merged = merged.filter((m) => !SETTINGS_PATHS.has(m.path));
     return merged;

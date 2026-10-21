@@ -1,4 +1,5 @@
 import { requireAuthenticatedActor, hasInstitutionAccess } from '../api/_lib/auth.js';
+import { elevateUserManagerActor } from '../api/_lib/user-manager-scope.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import {
   getInstitutionAdminUserId,
@@ -51,7 +52,9 @@ async function institutionSnapshot(institutionId, actorRole) {
 
 export default async function handler(req, res) {
   try {
-    const actor = requireAuthenticatedActor(req);
+    const baseActor = requireAuthenticatedActor(req);
+    // Kullanıcı Yönetimi yetkisi yalnız kota okumayı kapsar; kota ayarı yöneticide kalır
+    const actor = req.method === 'GET' ? await elevateUserManagerActor(req, baseActor) : baseActor;
 
     if (req.method === 'GET') {
       const adminLimitsFor =

@@ -1,4 +1,5 @@
 import { requireAuthenticatedActor, hasInstitutionAccess } from '../api/_lib/auth.js';
+import { elevateUserManagerActor } from '../api/_lib/user-manager-scope.js';
 import { supabaseAdmin, getSupabaseAdmin, hasSupabaseServiceRoleKey } from '../api/_lib/supabase-admin.js';
 import { normalizeUuidOrGenerate } from '../api/_lib/uuid.js';
 import { errorMessage } from '../api/_lib/error-msg.js';
@@ -108,7 +109,7 @@ async function provisionSupabaseAuthUser(userRow, passwordPlain) {
 export default async function handler(req, res) {
   let actor;
   try {
-    actor = requireAuthenticatedActor(req);
+    actor = await elevateUserManagerActor(req, requireAuthenticatedActor(req));
   } catch (e) {
     return res.status(401).json({ error: errorMessage(e) || 'missing_token' });
   }

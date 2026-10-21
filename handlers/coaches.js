@@ -1,4 +1,5 @@
 import { requireAuth, hasInstitutionAccess } from '../api/_lib/auth.js';
+import { elevateUserManagerActor } from '../api/_lib/user-manager-scope.js';
 import { enrichStudentActor } from '../api/_lib/enrich-student-actor.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { getTeacherPanelStudentScope } from '../api/_lib/teacher-class-scope.js';
@@ -87,6 +88,7 @@ export default async function handler(req, res) {
   try {
     let actor = requireAuth(req);
     actor = await enrichStudentActor(actor);
+    actor = await elevateUserManagerActor(req, actor);
 
     if (actor.role === 'teacher' && req.method !== 'GET') {
       return res.status(403).json({ error: 'forbidden' });

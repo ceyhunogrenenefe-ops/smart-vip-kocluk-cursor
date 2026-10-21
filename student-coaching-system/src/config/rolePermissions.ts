@@ -42,7 +42,8 @@ export const ROUTE_ALLOWED_ROLES = {
   '/academic-center': ['super_admin', 'admin', 'coach', 'student', 'teacher'],
   '/academic-center/bbb-join': ['super_admin', 'admin', 'coach', 'student', 'teacher'],
   '/super-admin': ['super_admin', 'admin'],
-  '/user-management': ['super_admin', 'admin'],
+  /** user_manager: yönetici olmayan personele yalnız bu sayfa (kurum kapsamı) */
+  '/user-management': ['super_admin', 'admin', 'user_manager'],
   '/private-lesson-assignments': ['super_admin', 'admin'],
   '/subscription': ['super_admin', 'admin'],
   '/system-management': ['super_admin', 'admin'],

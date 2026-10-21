@@ -1,5 +1,5 @@
 // Türkçe: Kullanıcı Yönetimi Sayfası - Super Admin Paneli
-import React, { useState, useEffect, useCallback, useMemo, startTransition } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useCallback, useMemo, startTransition } from 'react';
 import { useAuth, SystemUser } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -43,7 +43,7 @@ import {
   AppModalForm,
   AppModalHeader
 } from '../components/ui/AppModal';
-import { getAuthToken, apiFetch } from '../lib/session';
+import { getAuthToken, apiFetch, setApiRequestScope } from '../lib/session';
 import {
   userRowToSystemUser,
   findStudentForPlatformUser,
@@ -250,7 +250,7 @@ export default function UserManagement() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const {
-    user: currentUser,
+    user: authUser,
     isLoading: authLoading,
     impersonate,
     canImpersonate,
@@ -273,6 +273,27 @@ export default function UserManagement() {
     deleteStudent,
     deleteCoach
   } = useApp();
+
+  /**
+   * Kullanıcı Yönetimi yetkisi (`user_manager`): yönetici olmayan personel bu sayfada
+   * kendi kurumunun yöneticisi gibi çalışır. Sunucu aynı yetkiyi `X-Scs-Scope` başlığıyla doğrular.
+   */
+  const isUserManagerOnly = useMemo(
+    () =>
+      Boolean(authUser) &&
+      userHasAnyRole(authUser, ['user_manager']) &&
+      !userHasAnyRole(authUser, ['admin', 'super_admin']),
+    [authUser]
+  );
+  const currentUser = useMemo<SystemUser | null>(() => {
+    if (!authUser || !isUserManagerOnly) return authUser ?? null;
+    return { ...authUser, role: 'admin', roles: ['admin'] };
+  }, [authUser, isUserManagerOnly]);
+  useLayoutEffect(() => {
+    if (!isUserManagerOnly) return undefined;
+    setApiRequestScope('user-management');
+    return () => setApiRequestScope(null);
+  }, [isUserManagerOnly]);
 
   // Erişim: ProtectedRoute (/user-management) — burada yeniden navigate yok (auth yüklenirken yanlış / yönlendirmesini engeller)
 

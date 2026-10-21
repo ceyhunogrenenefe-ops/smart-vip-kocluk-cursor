@@ -15,6 +15,7 @@ interface ProtectedRouteProps {
     | 'student'
     | 'crm_agent'
     | 'vendor_admin'
+    | 'user_manager'
   )[];
 }
 

@@ -108,9 +108,18 @@ export async function fetchPublicPost(pathOrUrl: string, body: Record<string, un
 /** Aynı anda çoklu 401 → çoklu window.location Chrome’da "Throttling navigation" üretir; tek yönlendirme. */
 let authRedirectToLoginInProgress = false;
 
+/**
+ * Sayfa kapsamı (ör. Kullanıcı Yönetimi). Sunucu `user_manager` yetkisini yalnız bu başlıkla uygular.
+ */
+let apiRequestScope: string | null = null;
+export const setApiRequestScope = (scope: string | null) => {
+  apiRequestScope = scope;
+};
+
 export const apiFetch = async (url: string, options: RequestInit = {}) => {
   const token = getAuthToken();
   const headers = new Headers(options.headers || {});
+  if (apiRequestScope && !headers.has('X-Scs-Scope')) headers.set('X-Scs-Scope', apiRequestScope);
   const method = String(options.method || 'GET').toUpperCase();
   if (method !== 'GET' && method !== 'HEAD' && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');

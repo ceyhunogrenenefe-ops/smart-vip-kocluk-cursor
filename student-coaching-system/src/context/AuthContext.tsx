@@ -33,7 +33,7 @@ export interface SystemUser {
   phone?: string;
   role: 'super_admin' | 'admin' | 'coach' | 'teacher' | 'student' | 'crm_agent' | 'vendor_admin';
   /** Sunucuda `users.roles`; arayüzde çoklu yetki için (ör. öğretmen + koç) */
-  roles?: ('super_admin' | 'admin' | 'coach' | 'teacher' | 'student' | 'crm_agent' | 'vendor_admin')[];
+  roles?: ('super_admin' | 'admin' | 'coach' | 'teacher' | 'student' | 'crm_agent' | 'vendor_admin' | 'user_manager')[];
   studentId?: string;
   coachId?: string;
   institutionId?: string;

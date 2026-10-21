@@ -1,4 +1,5 @@
 import { requireAuth, hasInstitutionAccess } from '../api/_lib/auth.js';
+import { elevateUserManagerActor } from '../api/_lib/user-manager-scope.js';
 import { enrichStudentActor } from '../api/_lib/enrich-student-actor.js';
 import { getSupabaseAdmin, hasSupabaseServiceRoleKey, supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { normalizeUuidOrGenerate } from '../api/_lib/uuid.js';
@@ -62,6 +63,7 @@ async function queryStudentsList(applyQuery) {
 const normActorRole = (r) => String(r || '').trim().toLowerCase();
 
 async function actorRoleSet(actor) {
+  if (actor?.user_manager_elevated) return new Set(['admin']);
   const rs = await normalizedUserRolesFromDb(actor.sub);
   const set = new Set(rs.map(normActorRole));
   if (!set.size) set.add(normActorRole(actor.role));
@@ -288,6 +290,7 @@ export default async function handler(req, res) {
   try {
     let actor = requireAuth(req);
     actor = await enrichStudentActor(actor);
+    actor = await elevateUserManagerActor(req, actor);
 
     if (req.method === 'GET') {
       const rs = await actorRoleSet(actor);

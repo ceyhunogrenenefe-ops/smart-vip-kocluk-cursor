@@ -8,6 +8,7 @@ import { normalizeUuidOrGenerate, isUuid } from '../api/_lib/uuid.js';
 import { USER_LIST_COLUMNS, USER_LIST_OPTIONAL_COLUMNS } from '../api/_lib/list-query-columns.js';
 import { selectWithOptionalColumns } from '../api/_lib/supabase-optional-moderator.js';
 import { ensureTeacherProfileForUser } from '../api/_lib/teacher-profile.js';
+import { elevateUserManagerActor, rowIsAdminAccount, USER_MANAGER_ROLE } from '../api/_lib/user-manager-scope.js';
 
 const USER_ROLES = ['super_admin', 'admin', 'coach', 'teacher', 'student', 'crm_agent'];
 const normalizeRoles = (raw, fallbackRole = 'student') => {
@@ -232,13 +233,16 @@ async function resolveCreatedByFk(actor) {
 }
 
 /** Başka ekranlardan verilen, kullanıcı formunda gösterilmeyen yetkiler */
-const PRESERVED_EXTERNAL_ROLES = ['crm_agent', 'vendor_admin'];
+const PRESERVED_EXTERNAL_ROLES = ['crm_agent', 'vendor_admin', USER_MANAGER_ROLE];
 
 export default async function handler(req, res) {
   try {
     let actor = await enrichStudentActor(requireAuth(req));
-    const actorRoleTags = await normalizedUserRolesFromDb(actor.sub);
+    let actorRoleTags = await normalizedUserRolesFromDb(actor.sub);
     actor = { ...actor, role: actorPrivilegeForRoleAssignment(actor, actorRoleTags) };
+    // Kullanıcı Yönetimi yetkisi: bu sayfadan gelen isteklerde kurum yöneticisi gibi davran
+    actor = await elevateUserManagerActor(req, actor);
+    if (actor.user_manager_elevated) actorRoleTags = ['admin'];
 
     if (req.method === 'GET') {
       if (!(actor.role === 'super_admin' || actor.role === 'admin' || actor.role === 'teacher' || actor.role === 'coach')) {
@@ -545,6 +549,9 @@ export default async function handler(req, res) {
         return res.status(403).json({ error: 'forbidden' });
       }
 
+      if (actor.user_manager_elevated && rowIsAdminAccount(existing) && existing.id !== actor.sub) {
+        return res.status(403).json({ error: 'forbidden', hint: 'Yönetici hesapları yalnızca yönetici tarafından düzenlenebilir.' });
+      }
       const raw = req.body || {};
       if (targetIsSuperAdmin(existing) && actor.role !== 'super_admin') {
         return res.status(403).json({ error: 'forbidden' });
@@ -586,8 +593,13 @@ export default async function handler(req, res) {
         body.role = body.roles[0];
         // Kullanıcı Yönetimi formunda CRM temsilcisi / satıcı kutucuğu yok: kaydetme bu yetkileri silmesin
         // (kendi ekranlarından — CRM Temsilciler, Kitap Pazaryeri — yönetilir)
+        const priorRaw = Array.isArray(existing.roles)
+          ? existing.roles.map((r) => String(r || '').trim().toLowerCase())
+          : [];
         for (const kept of PRESERVED_EXTERNAL_ROLES) {
-          if (priorRoles.includes(kept) && !body.roles.includes(kept)) body.roles.push(kept);
+          if ((priorRoles.includes(kept) || priorRaw.includes(kept)) && !body.roles.includes(kept)) {
+            body.roles.push(kept);
+          }
         }
       }
 
@@ -639,6 +651,9 @@ export default async function handler(req, res) {
       }
       if (actor.role === 'teacher' && String(existing.role || '') !== 'student') {
         return res.status(403).json({ error: 'forbidden' });
+      }
+      if (actor.user_manager_elevated && (rowIsAdminAccount(existing) || existing.id === actor.sub)) {
+        return res.status(403).json({ error: 'forbidden', hint: 'Yönetici hesapları ve kendi hesabınız silinemez.' });
       }
 
       const { error } = await supabaseAdmin.from('users').delete().eq('id', id);
