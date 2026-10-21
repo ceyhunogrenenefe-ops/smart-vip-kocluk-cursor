@@ -77,6 +77,7 @@ export const routeLoaders = {
   'class-live-lessons': () => import('../handlers/class-live-lessons.js'),
   'class-lesson-topic-checkpoints': () => import('../handlers/class-lesson-topic-checkpoints.js'),
   'teacher-scope': () => import('../handlers/teacher-scope.js'),
+  'yazili-hazirlik': () => import('../handlers/yazili-hazirlik.js'),
   'teacher-private-lesson-assignments': () => import('../handlers/teacher-private-lesson-assignments.js'),
   'private-live-pro': () => import('../handlers/private-live-pro.js'),
   'class-schedule-plans': () => import('../handlers/class-schedule-plans.js'),

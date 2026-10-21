@@ -65,6 +65,7 @@ export const ROUTE_ALLOWED_ROLES = {
   '/canli-ozel-ders/gecmis': ['super_admin', 'admin', 'teacher', 'coach', 'student'],
   '/canli-ozel-ders/raporlar': ['super_admin', 'admin', 'teacher', 'coach'],
   '/teacher-panel': ['teacher'],
+  '/yazili-hazirlik': ['super_admin', 'admin', 'coach', 'teacher', 'student'],
   '/teacher-solution-appointments': ['teacher', 'super_admin', 'admin'],
   '/class-live-lessons': ['super_admin', 'admin', 'coach', 'teacher'],
   '/schedule-planner': ['super_admin', 'admin'],
