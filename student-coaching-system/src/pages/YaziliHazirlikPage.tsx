@@ -25,7 +25,8 @@ const DONEMLER = [
 ];
 const YAZILILAR = [1, 2];
 const CALISMALAR = [1, 2, 3];
-const MAX_BAYT = 20 * 1024 * 1024;
+const MAX_MB = 100;
+const MAX_BAYT = MAX_MB * 1024 * 1024;
 
 export default function YaziliHazirlikPage() {
   const [yukleniyor, setYukleniyor] = useState(true);
@@ -104,7 +105,7 @@ export default function YaziliHazirlikPage() {
       return;
     }
     if (file.size > MAX_BAYT) {
-      toast.error('PDF en fazla 20 MB olabilir.');
+      toast.error(`PDF en fazla ${MAX_MB} MB olabilir.`);
       return;
     }
     if (!sinifId || !konu.trim()) {
@@ -139,7 +140,13 @@ export default function YaziliHazirlikPage() {
         headers: { 'Content-Type': 'application/pdf', 'x-upsert': 'true' },
         body: file
       });
-      if (!put.ok) throw new Error('PDF depoya yazılamadı');
+      if (!put.ok) {
+        const detay = await put.text().catch(() => '');
+        if (/maximum|exceed|entity too large|payload/i.test(detay)) {
+          throw new Error('Depo bu boyutu kabul etmedi. Supabase Storage ayarında global dosya sınırını 100 MB yapın.');
+        }
+        throw new Error('PDF depoya yazılamadı');
+      }
       const kayit = await apiFetch('/api/yazili-hazirlik?op=commit', {
         method: 'POST',
         body: JSON.stringify({
