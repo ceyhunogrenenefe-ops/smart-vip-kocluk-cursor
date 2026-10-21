@@ -77,25 +77,28 @@ export const NOTIFICATION_DEFINITIONS = [
   {
     id: 'lesson_reminder',
     templateType: 'lesson_reminder',
-    nameTr: 'Birebir ders hatırlatma',
-    descriptionTr: 'Öğrenciye ilgili koçun WhatsApp gateway hesabından (~10 dk önce).',
+    nameTr: 'Özel ders hatırlatma — öğrenci',
+    descriptionTr:
+      'Özel ders başlamadan ~15 dk önce öğrenciye; koçun WhatsApp gateway hattından, hat bağlı değilse Meta şablonuyla.',
     sendChannel: SEND_CHANNELS.COACH_GATEWAY,
     mode: 'automatic',
     cronJobKey: 'lesson_reminders',
     coachScoped: true,
-    allowMetaFallback: false,
-    reminderMinutesBefore: 10
+    allowMetaFallback: true,
+    reminderMinutesBefore: 15
   },
   {
     id: 'lesson_reminder_parent',
     templateType: 'lesson_reminder_parent',
-    nameTr: 'Veli ders hatırlatma',
-    descriptionTr: 'Veliye ilgili koçun gateway hesabından.',
+    nameTr: 'Özel ders hatırlatma — veli',
+    descriptionTr:
+      'Özel ders başlamadan ~15 dk önce veliye; koçun WhatsApp gateway hattından, hat bağlı değilse Meta şablonuyla.',
     sendChannel: SEND_CHANNELS.COACH_GATEWAY,
     mode: 'automatic',
     cronJobKey: 'lesson_reminder_parent',
     coachScoped: true,
-    allowMetaFallback: false
+    allowMetaFallback: true,
+    reminderMinutesBefore: 15
   },
   {
     id: 'institution_event_invite',

@@ -3,9 +3,13 @@
  * narrow (varsayılan): ders başlamadan 7–13 dk arası (~10 dk, cron 5 dk ile uyumlu)
  * lead: ders başlamadan en fazla MAX dakika içinde (eski davranış)
  */
-export function parseReminderWindowConfig(envPrefix = 'LESSON_REMINDER') {
+export function parseReminderWindowConfig(envPrefix = 'LESSON_REMINDER', defaults = {}) {
+  // Kendi varsayılanı verilen iş (ör. özel ders 12–17 dk) genel LESSON_REMINDER_* ayarlarından etkilenmez
+  const ozel = defaults && (defaults.minMinutes != null || defaults.maxMinutes != null);
   const globalMode = String(process.env.LESSON_REMINDER_WINDOW_MODE || '').trim().toLowerCase();
-  const modeRaw = String(process.env[`${envPrefix}_WINDOW_MODE`] || globalMode || 'narrow').trim().toLowerCase();
+  const modeRaw = String(process.env[`${envPrefix}_WINDOW_MODE`] || (ozel ? '' : globalMode) || 'narrow')
+    .trim()
+    .toLowerCase();
 
   if (modeRaw === 'lead' || modeRaw === 'max_lead') {
     const maxMinutes = Math.max(
@@ -22,14 +26,22 @@ export function parseReminderWindowConfig(envPrefix = 'LESSON_REMINDER') {
     1,
     Math.min(
       55,
-      Number(process.env[`${envPrefix}_MIN_MINUTES`] || process.env.LESSON_REMINDER_MIN_MINUTES || 7) || 7
+      Number(
+        process.env[`${envPrefix}_MIN_MINUTES`] ||
+          (ozel ? defaults.minMinutes : process.env.LESSON_REMINDER_MIN_MINUTES) ||
+          7
+      ) || 7
     )
   );
   const maxMinutes = Math.max(
     minMinutes + 1,
     Math.min(
       120,
-      Number(process.env[`${envPrefix}_MAX_MINUTES`] || process.env.LESSON_REMINDER_MAX_MINUTES || 13) || 13
+      Number(
+        process.env[`${envPrefix}_MAX_MINUTES`] ||
+          (ozel ? defaults.maxMinutes : process.env.LESSON_REMINDER_MAX_MINUTES) ||
+          13
+      ) || 13
     )
   );
   return { mode: 'narrow', minMinutes, maxMinutes, label: `${minMinutes}–${maxMinutes} dk kala` };

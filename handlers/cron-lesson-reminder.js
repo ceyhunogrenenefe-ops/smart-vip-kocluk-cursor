@@ -17,8 +17,14 @@ import {
   studentAllowsWhatsappAutomation
 } from '../api/_lib/whatsapp-automation-eligibility.js';
 import { resolveGuestShareUrlForTeacherLesson } from '../api/_lib/guest-join-share-url.js';
+import { errorMessage } from '../api/_lib/error-msg.js';
 
-const LESSON_WINDOW = parseReminderWindowConfig('LESSON_REMINDER');
+/**
+ * Özel ders hatırlatma: ders başlamadan ~15 dk önce öğrenciye ve veliye.
+ * Cron 5 dk'da bir çalışır; 12–17 dk penceresi her dersi tam bir kez yakalar.
+ * PRIVATE_LESSON_REMINDER_MIN_MINUTES / _MAX_MINUTES ile değiştirilebilir.
+ */
+const LESSON_WINDOW = parseReminderWindowConfig('PRIVATE_LESSON_REMINDER', { minMinutes: 12, maxMinutes: 17 });
 
 export default async function handler(req, res) {
   if (req.method !== 'GET' && req.method !== 'POST') {
@@ -96,7 +102,7 @@ export default async function handler(req, res) {
       const { data: studentRows, error: stErr } = await supabaseAdmin
         .from('students')
         .select(
-          'id, name, phone, parent_phone, class_level, class_label, group_name, institution_id, whatsapp_automation_enabled, coach_id'
+          'id, name, phone, parent_phone, class_level, institution_id, whatsapp_automation_enabled, coach_id'
         )
         .in('id', studentIds);
       if (stErr) throw stErr;
@@ -146,8 +152,7 @@ export default async function handler(req, res) {
 
       const lessonLink = await resolveGuestShareUrlForTeacherLesson(lesson);
 
-      const classLabel =
-        String(student.class_level || student.class_label || student.group_name || '').trim() || 'Sınıf';
+      const classLabel = String(student.class_level || '').trim() || 'Sınıf';
 
       const baseVars = {
         student_name: student.name || 'Öğrenci',
@@ -236,7 +241,7 @@ export default async function handler(req, res) {
             if (isParentRecipient) parentSentFail += 1;
           }
         } catch (e) {
-          const errMsg = e instanceof Error ? e.message : String(e);
+          const errMsg = errorMessage(e);
           if (isParentRecipient) parentSentFail += 1;
           try {
             await supabaseAdmin.from('message_logs').insert({
@@ -310,7 +315,8 @@ export default async function handler(req, res) {
       note: 'class_group_reminders run via /api/cron/class-lesson-reminders only'
     });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = errorMessage(e);
+    console.error('[cron-lesson-reminder]', msg);
     await recordCronRun({ jobKey: 'lesson_reminders', ok: false, detail: { error: msg } });
     await recordCronRun({ jobKey: 'lesson_reminder_parent', ok: false, detail: { error: msg } });
     return res.status(500).json({
