@@ -3,6 +3,8 @@ import { AlertTriangle, Ban, Loader2, Pencil, Plus, Sparkles, Trash2, X } from '
 import { toast } from 'sonner';
 import { apiFetch } from '../../lib/session';
 import type { Ders, Durum, Mesgul, Satir } from './YaziliProgramPage';
+import { oturumOlustur, oturumTasi } from './oturumIslem';
+import ProgramCizelgesi from './ProgramCizelgesi';
 
 const GUN_ADI = ['Pazar', 'Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi'];
 const HAZIRLIK_EKI = ' (Yazılıya Hazırlık)';
@@ -26,7 +28,7 @@ const haftasonuMu = (iso: string) => [0, 6].includes(tarihNesne(iso).getUTCDay()
 const hazirlikMi = (subject: string) => /yazılıya hazırlık/i.test(subject || '');
 
 type Oturum = Mesgul & { id: string; lesson_date: string };
-type OturumPencere = { tur: 'duzenle'; oturum: Oturum } | { tur: 'ekle'; tarih: string };
+type OturumPencere = { tur: 'duzenle'; oturum: Oturum } | { tur: 'ekle'; tarih: string; bas?: string; bit?: string };
 
 async function istek(url: string, init?: RequestInit) {
   const res = await apiFetch(url, init);
@@ -54,7 +56,8 @@ export default function SinifProgrami({
   taslakDuzenle,
   taslakSil,
   mesgulIs,
-  yenile
+  yenile,
+  kurumQs = ''
 }: {
   durum: Durum;
   gunler: string[];
@@ -68,8 +71,24 @@ export default function SinifProgrami({
   taslakSil: (d: Ders) => void;
   mesgulIs: string | null;
   yenile: () => Promise<void>;
+  kurumQs?: string;
 }) {
   const [pencere, setPencere] = useState<OturumPencere | null>(null);
+  const [gorunum, setGorunum] = useState<'cizelge' | 'liste'>(() => {
+    try {
+      return localStorage.getItem('yazili-program-gorunum') === 'liste' ? 'liste' : 'cizelge';
+    } catch {
+      return 'cizelge';
+    }
+  });
+  const gorunumSec = (g: 'cizelge' | 'liste') => {
+    setGorunum(g);
+    try {
+      localStorage.setItem('yazili-program-gorunum', g);
+    } catch {
+      /* yok say */
+    }
+  };
   const [iptalEdilen, setIptalEdilen] = useState<string | null>(null);
   const tumSiniflar = sinifId === 'all';
 
@@ -132,7 +151,26 @@ export default function SinifProgrami({
           gösteriliyor.
         </p>
       ) : (
-        <div className="flex flex-wrap gap-3 text-xs text-slate-600">
+        <div className="flex flex-wrap items-center gap-3 text-xs text-slate-600">
+          <div className="flex gap-1 rounded-lg border border-slate-200 bg-white p-0.5 text-sm font-semibold" role="tablist">
+            {(
+              [
+                ['cizelge', 'Çizelge'],
+                ['liste', 'Liste']
+              ] as const
+            ).map(([k, ad]) => (
+              <button
+                key={k}
+                type="button"
+                role="tab"
+                aria-selected={gorunum === k}
+                onClick={() => gorunumSec(k)}
+                className={`rounded-md px-3 py-1 ${gorunum === k ? 'bg-[#173b70] text-white' : 'text-slate-600 hover:bg-slate-50'}`}
+              >
+                {ad}
+              </button>
+            ))}
+          </div>
           <span className="flex items-center gap-1">
             <span className="h-3 w-3 rounded bg-slate-200" /> Mevcut ders
           </span>
@@ -145,6 +183,20 @@ export default function SinifProgrami({
         </div>
       )}
 
+      {!tumSiniflar && gorunum === 'cizelge' ? (
+        <ProgramCizelgesi
+          durum={durum}
+          gunler={gunler}
+          sinifId={sinifId}
+          sinifAd={sinifAd}
+          ogretmenAd={ogretmenAd}
+          kurumQs={kurumQs}
+          onDuzenle={(o) => setPencere({ tur: 'duzenle', oturum: o as Oturum })}
+          onEkle={(tarih, bas, bit) => setPencere({ tur: 'ekle', tarih, bas, bit })}
+          yenile={yenile}
+        />
+      ) : (
+        <>
       {gunler.map((gun) => {
         const taslaklar = durum.items.filter((i) => i.lesson_date === gun && (tumSiniflar || i.class_id === sinifId));
         const gercek = oturumlar.filter((o) => o.lesson_date === gun);
@@ -283,6 +335,8 @@ export default function SinifProgrami({
           </div>
         );
       })}
+        </>
+      )}
 
       {pencere && !tumSiniflar ? (
         <OturumPenceresi
@@ -321,8 +375,8 @@ function OturumPenceresi({
 }) {
   const o = pencere.tur === 'duzenle' ? pencere.oturum : null;
   const [tarih, setTarih] = useState(o ? o.lesson_date : pencere.tur === 'ekle' ? pencere.tarih : '');
-  const [bas, setBas] = useState(o?.start_time || '');
-  const [bit, setBit] = useState(o?.end_time || '');
+  const [bas, setBas] = useState(o?.start_time || (pencere.tur === 'ekle' ? pencere.bas || '' : ''));
+  const [bit, setBit] = useState(o?.end_time || (pencere.tur === 'ekle' ? pencere.bit || '' : ''));
   const [ders, setDers] = useState(o?.subject || '');
   const [ogretmen, setOgretmen] = useState(o?.teacher_id || '');
   const [kaydediliyor, setKaydediliyor] = useState(false);
@@ -357,30 +411,32 @@ function OturumPenceresi({
     setHata(null);
     try {
       if (o) {
-        const patch: Record<string, string> = { id: o.id, apply_scope: 'single' };
-        if (tarih !== o.lesson_date) patch.lesson_date = tarih;
-        if (bas !== o.start_time) patch.start_time = bas;
-        if (bit !== o.end_time) patch.end_time = bit;
-        if (ders.trim() !== o.subject) patch.subject = ders.trim();
-        if (ogretmen && ogretmen !== (o.teacher_id || '')) patch.teacher_id = ogretmen;
-        if (Object.keys(patch).length === 2) {
+        const degisti =
+          tarih !== o.lesson_date ||
+          bas !== o.start_time ||
+          bit !== o.end_time ||
+          ders.trim() !== o.subject ||
+          (ogretmen && ogretmen !== (o.teacher_id || ''));
+        if (!degisti) {
           kapat();
           return;
         }
-        await istek('/api/class-live-lessons', { method: 'PATCH', body: JSON.stringify(patch) });
-        toast.success('Ders güncellendi.');
+        await oturumTasi(o, {
+          lesson_date: tarih,
+          start_time: bas,
+          end_time: bit,
+          subject: ders.trim(),
+          teacher_id: ogretmen || o.teacher_id
+        });
+        toast.success(tarih !== o.lesson_date ? 'Ders yeni güne taşındı.' : 'Ders güncellendi.');
       } else {
-        await istek('/api/class-live-lessons?op=create-session', {
-          method: 'POST',
-          body: JSON.stringify({
-            class_id: sinifId,
-            teacher_id: ogretmen,
-            lesson_date: tarih,
-            start_time: bas,
-            end_time: bit,
-            duration_minutes: dk(bit) - dk(bas),
-            subject: ders.trim()
-          })
+        await oturumOlustur({
+          class_id: sinifId,
+          teacher_id: ogretmen,
+          lesson_date: tarih,
+          start_time: bas,
+          end_time: bit,
+          subject: ders.trim()
         });
         toast.success('Ders eklendi.');
       }

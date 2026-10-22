@@ -12,6 +12,7 @@
  * POST ?op=clear-drafts     — tüm taslakları sil
  * POST ?op=suggest          — otomatik yerleştir (taslak oluşturur)
  * POST ?op=mark-published   — yayınlanan taslağa oturum id yaz
+ * POST ?op=sync-published   — çizelgede taşınan yayındaki dersin kaydını eşitle
  */
 import { requireAuthenticatedActor } from '../api/_lib/auth.js';
 import { actorRoleSet, roleSetHasAdmin, roleSetHasSuperAdmin } from '../api/_lib/actor-roles.js';
@@ -444,6 +445,26 @@ export default async function handler(req, res) {
         eklenen: yeni.length,
         yerlesmeyen: yerlesmeyen.map((y) => ({ ...y, class_name: sinifAd.get(y.class_id) || 'Sınıf' }))
       });
+    }
+
+    if (op === 'sync-published') {
+      // Yayındaki hazırlık dersi çizelgede taşındı: canlı ders zaten taşındı, kaydı eşitle
+      const id = String(body.id || '').trim();
+      const sessionId = String(body.session_id || '').trim();
+      const blok = blokCoz(`${saat(body.start_time)}-${saat(body.end_time)}`);
+      const lessonDate = String(body.lesson_date || '').slice(0, 10);
+      if (!id || !sessionId || !blok || !tarihMi(lessonDate)) return hata(res, 400, 'eksik_alan');
+      const { data: mevcut } = await supabaseAdmin.from(T_DERS).select('id,class_id,status').eq('id', id).eq('institution_id', kurumId).maybeSingle();
+      const { data: oturum } = await supabaseAdmin.from('class_sessions').select('id,class_id').eq('id', sessionId).maybeSingle();
+      if (!mevcut || mevcut.status !== 'published' || !oturum || oturum.class_id !== mevcut.class_id) {
+        return hata(res, 400, 'eslesmiyor');
+      }
+      const { error } = await supabaseAdmin
+        .from(T_DERS)
+        .update({ session_id: sessionId, lesson_date: lessonDate, start_time: blok.start, end_time: blok.end, updated_at: simdi })
+        .eq('id', id);
+      if (error) throw error;
+      return res.status(200).json({ ok: true });
     }
 
     if (op === 'mark-published') {

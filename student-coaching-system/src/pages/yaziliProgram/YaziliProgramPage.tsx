@@ -513,7 +513,14 @@ export default function YaziliProgramPage() {
             </div>
           ) : null}
 
-          <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+          {/* Sınıf seçiliyken çizelge tam genişlikte üstte, yazılı takvimi altta */}
+          <div
+            className={
+              sinifSuzgec === 'all'
+                ? 'grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]'
+                : 'flex flex-col-reverse gap-6'
+            }
+          >
             {/* Sınav takvimi */}
             <section className="space-y-3">
               <div className="flex flex-wrap items-end gap-3">
@@ -606,6 +613,7 @@ export default function YaziliProgramPage() {
               taslakSil={dersSil}
               mesgulIs={mesgulIs}
               yenile={yukle}
+              kurumQs={kurum ? `&institution_id=${encodeURIComponent(kurum)}` : ''}
             />
           </div>
 
