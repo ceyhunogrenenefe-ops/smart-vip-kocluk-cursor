@@ -120,10 +120,28 @@ export function ayariTemizle(input = {}) {
     haftaici: bloklar(input.haftaici, VARSAYILAN_AYAR.haftaici),
     gunlukEnFazla: sayi(input.gunlukEnFazla, VARSAYILAN_AYAR.gunlukEnFazla, 1, 8),
     dersBasinaHazirlik: sayi(input.dersBasinaHazirlik, VARSAYILAN_AYAR.dersBasinaHazirlik, 1, 4),
-    oncelik: input.oncelik === 'yakin' ? 'yakin' : 'haftasonu'
+    oncelik: input.oncelik === 'yakin' ? 'yakin' : 'haftasonu',
+    baglar: baglariTemizle(input.baglar)
   };
   if (a.bitis < a.baslangic) a.bitis = a.baslangic;
   return a;
+}
+
+/**
+ * Ortak program: tarih aralığında birlikte düzenlenen sınıflar (ör. 11A + 11B).
+ * Birinde yapılan taşıma / ekleme / iptal diğerine de uygulanır (planlayıcı ekranında).
+ */
+export function baglariTemizle(v) {
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const tarihMi = (x) => /^\d{4}-\d{2}-\d{2}$/.test(String(x || ''));
+  const out = [];
+  for (const b of Array.isArray(v) ? v.slice(0, 20) : []) {
+    const siniflar = [...new Set((Array.isArray(b?.siniflar) ? b.siniflar : []).map(String).filter((x) => uuid.test(x)))].slice(0, 6);
+    if (siniflar.length < 2 || !tarihMi(b?.baslangic) || !tarihMi(b?.bitis)) continue;
+    const [bas, bit] = b.baslangic <= b.bitis ? [b.baslangic, b.bitis] : [b.bitis, b.baslangic];
+    out.push({ siniflar, baslangic: bas, bitis: bit });
+  }
+  return out;
 }
 
 export function dakika(hhmm) {

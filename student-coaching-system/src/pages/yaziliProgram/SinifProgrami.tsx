@@ -3,7 +3,7 @@ import { AlertTriangle, Ban, Loader2, Pencil, Plus, Sparkles, Trash2, X } from '
 import { toast } from 'sonner';
 import { apiFetch } from '../../lib/session';
 import type { Ders, Durum, Mesgul, Satir } from './YaziliProgramPage';
-import { oturumOlustur, oturumTasi } from './oturumIslem';
+import { ortakIptal, ortakNotu, ortakOlustur, ortakTasi, siniftakiBaglar } from './ortak';
 import ProgramCizelgesi from './ProgramCizelgesi';
 
 const GUN_ADI = ['Pazar', 'Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi'];
@@ -115,8 +115,8 @@ export default function SinifProgrami({
     if (!window.confirm(`${gunEtiketi(o.lesson_date)} ${o.start_time} ${o.subject} dersi iptal edilsin mi?\nÖğrenciler bu dersi artık görmez.`)) return;
     setIptalEdilen(o.id);
     try {
-      await istek(`/api/class-live-lessons?session_id=${encodeURIComponent(o.id)}&apply_scope=single`, { method: 'DELETE' });
-      toast.success('Ders iptal edildi.');
+      const s = await ortakIptal(durum, o);
+      toast.success(`Ders iptal edildi.${ortakNotu(s, sinifAd)}`);
       await yenile();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'İptal edilemedi');
@@ -421,16 +421,16 @@ function OturumPenceresi({
           kapat();
           return;
         }
-        await oturumTasi(o, {
+        const s = await ortakTasi(durum, o, {
           lesson_date: tarih,
           start_time: bas,
           end_time: bit,
           subject: ders.trim(),
           teacher_id: ogretmen || o.teacher_id
         });
-        toast.success(tarih !== o.lesson_date ? 'Ders yeni güne taşındı.' : 'Ders güncellendi.');
+        toast.success(`${tarih !== o.lesson_date ? 'Ders yeni güne taşındı.' : 'Ders güncellendi.'}${ortakNotu(s, sinifAd)}`);
       } else {
-        await oturumOlustur({
+        const s = await ortakOlustur(durum, {
           class_id: sinifId,
           teacher_id: ogretmen,
           lesson_date: tarih,
@@ -438,7 +438,7 @@ function OturumPenceresi({
           end_time: bit,
           subject: ders.trim()
         });
-        toast.success('Ders eklendi.');
+        toast.success(`Ders eklendi.${ortakNotu(s, sinifAd)}`);
       }
       await kaydedildi();
     } catch (e) {

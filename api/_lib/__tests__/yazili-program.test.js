@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   ayariTemizle,
+  baglariTemizle,
   dersAnahtari,
   gunler,
   haftaGunu,
@@ -111,4 +112,18 @@ test('varsayilan oncelik: sinavdan onceki hafta sonu (en yakin hafta sonu once)'
   assert.equal(yeni.find((i) => i.class_id === 'a').lesson_date, '2026-11-01');
   assert.equal(yeni.find((i) => i.class_id === 'b').lesson_date, '2026-11-08');
   assert.equal(yeni.find((i) => i.class_id === 'a').start_time, '10:00');
+});
+
+test('ortak program baglari: gecersizler atilir, tarih sirasi duzeltilir', () => {
+  const A = '11111111-1111-4111-8111-111111111111';
+  const B = '22222222-2222-4222-8222-222222222222';
+  assert.deepEqual(
+    baglariTemizle([
+      { siniflar: [A, B, A], baslangic: '2026-11-13', bitis: '2026-10-31' },
+      { siniflar: [A], baslangic: '2026-10-31', bitis: '2026-11-13' },
+      { siniflar: [A, 'x'], baslangic: '2026-10-31', bitis: '2026-11-13' }
+    ]),
+    [{ siniflar: [A, B], baslangic: '2026-10-31', bitis: '2026-11-13' }]
+  );
+  assert.deepEqual(ayariTemizle({}).baglar, []);
 });

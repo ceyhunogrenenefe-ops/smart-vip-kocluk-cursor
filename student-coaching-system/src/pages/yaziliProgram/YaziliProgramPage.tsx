@@ -26,6 +26,7 @@ export type Ayar = {
   gunlukEnFazla: number;
   dersBasinaHazirlik: number;
   oncelik: 'haftasonu' | 'yakin';
+  baglar?: { siniflar: string[]; baslangic: string; bitis: string }[];
 };
 export type Sinif = { id: string; name: string; level: number | null; student_count: number };
 export type Ogretmen = { id: string; name: string };
@@ -463,7 +464,7 @@ export default function YaziliProgramPage() {
           </div>
 
           {ayarAcik && ayarTaslak ? (
-            <AyarPaneli ayar={ayarTaslak} setAyar={setAyarTaslak} kaydet={ayarKaydet} mesgul={mesgulIs === 'settings'} />
+            <AyarPaneli ayar={ayarTaslak} setAyar={setAyarTaslak} kaydet={ayarKaydet} mesgul={mesgulIs === 'settings'} siniflar={durum.classes} />
           ) : null}
 
           {/* Özet */}
@@ -731,14 +732,24 @@ function AyarPaneli({
   ayar,
   setAyar,
   kaydet,
-  mesgul
+  mesgul,
+  siniflar
 }: {
   ayar: Ayar;
   setAyar: (a: Ayar) => void;
   kaydet: () => void;
   mesgul: boolean;
+  siniflar: Sinif[];
 }) {
   const alan = 'mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2 text-sm';
+  const sinifAdi = (id: string) => siniflar.find((c) => c.id === id)?.name || 'Sınıf';
+  const [yeniBag, setYeniBag] = useState({ a: '', b: '' });
+  const baglar = ayar.baglar || [];
+  const bagEkle = () => {
+    if (!yeniBag.a || !yeniBag.b || yeniBag.a === yeniBag.b) return;
+    setAyar({ ...ayar, baglar: [...baglar, { siniflar: [yeniBag.a, yeniBag.b], baslangic: ayar.baslangic, bitis: ayar.bitis }] });
+    setYeniBag({ a: '', b: '' });
+  };
   return (
     <div className="grid gap-3 rounded-xl border border-slate-200 bg-white p-4 md:grid-cols-2 lg:grid-cols-4">
       <label className="text-sm text-slate-700">
@@ -800,6 +811,57 @@ function AyarPaneli({
           className={`${alan} font-mono`}
         />
       </label>
+      <div className="rounded-lg border border-emerald-200 bg-emerald-50/50 p-3 text-sm text-slate-700 md:col-span-2 lg:col-span-4">
+        <p className="font-semibold text-emerald-900">Ortak program (bağlı sınıflar)</p>
+        <p className="mb-2 text-xs text-slate-600">
+          Bağlı sınıflarda, tarih aralığı içinde bir sınıfta yapılan taşıma / ekleme / kaldırma diğerine de uygulanır.
+          Yeni bağlantı yukarıdaki başlangıç–bitiş tarihleriyle eklenir; programları önceden aynı olmalıdır.
+        </p>
+        {baglar.length ? (
+          <ul className="mb-2 space-y-1">
+            {baglar.map((b, i) => (
+              <li key={i} className="flex items-center justify-between gap-2 rounded bg-white px-2 py-1">
+                <span>
+                  {b.siniflar.map(sinifAdi).join(' + ')} · {b.baslangic} → {b.bitis}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setAyar({ ...ayar, baglar: baglar.filter((_, j) => j !== i) })}
+                  className="text-xs font-semibold text-red-700 hover:underline"
+                >
+                  Bağlantıyı kaldır
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        <div className="flex flex-wrap items-center gap-2">
+          {(['a', 'b'] as const).map((k) => (
+            <select
+              key={k}
+              value={yeniBag[k]}
+              onChange={(e) => setYeniBag((v) => ({ ...v, [k]: e.target.value }))}
+              className="rounded-lg border border-slate-300 bg-white px-2 py-1.5"
+              aria-label={k === 'a' ? 'Birinci sınıf' : 'İkinci sınıf'}
+            >
+              <option value="">Sınıf seçin</option>
+              {siniflar.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          ))}
+          <button
+            type="button"
+            onClick={bagEkle}
+            disabled={!yeniBag.a || !yeniBag.b || yeniBag.a === yeniBag.b}
+            className="rounded-lg border border-emerald-300 bg-white px-3 py-1.5 font-semibold text-emerald-800 disabled:opacity-50"
+          >
+            Bağla
+          </button>
+        </div>
+      </div>
       <div className="flex items-center gap-2 lg:col-span-4">
         <button
           type="button"

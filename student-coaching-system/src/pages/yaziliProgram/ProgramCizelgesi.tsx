@@ -4,7 +4,8 @@ import { toast } from 'sonner';
 import { apiFetch } from '../../lib/session';
 import { subjectTheme } from '../../lib/classScheduleBrandedPng';
 import { downloadDatedSchedulePng, ogretimYili } from '../../lib/datedSchedulePng';
-import { oturumIptal, oturumTasi } from './oturumIslem';
+import { oturumTasi } from './oturumIslem';
+import { ortakIptal, ortakNotu, ortakTasi, siniftakiBaglar, type OrtakSonuc } from './ortak';
 import type { Ders, Durum, Mesgul } from './YaziliProgramPage';
 
 const GUN_ADI = ['Pazar', 'Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi'];
@@ -129,6 +130,12 @@ export default function ProgramCizelgesi({
     kalemler.filter((k) => k.lesson_date === gun && satirAnahtar(k.start_time, k.end_time) === satir);
 
   /** Bir kalemi hedef tarih/saate taşır (tür ne olursa olsun) */
+  /** Bağlı sınıflara uygulananların özeti (toast'a eklenir) */
+  let ortakOzet: OrtakSonuc = { uygulanan: 0, eslesmeyen: [] };
+  const ozetEkle = (s: OrtakSonuc) => {
+    ortakOzet = { uygulanan: ortakOzet.uygulanan + s.uygulanan, eslesmeyen: [...ortakOzet.eslesmeyen, ...s.eslesmeyen] };
+  };
+
   const tasi = async (k: Kalem, lesson_date: string, start_time: string, end_time: string) => {
     if (k.tur === 'taslak' && k.ders) {
       await postProgram(kurumQs, 'update-item', { id: k.ders.id, lesson_date, start_time, end_time, teacher_id: k.ders.teacher_id });
@@ -151,7 +158,7 @@ export default function ProgramCizelgesi({
       await postProgram(kurumQs, 'sync-published', { id: k.ders.id, session_id: yeniId, lesson_date, start_time, end_time });
       return;
     }
-    if (k.oturum) await oturumTasi(k.oturum, { lesson_date, start_time, end_time });
+    if (k.oturum) ozetEkle(await ortakTasi(durum, k.oturum, { lesson_date, start_time, end_time }));
   };
 
   const birak = async (kaynakKey: string, gun: string, satir: string) => {
@@ -160,6 +167,7 @@ export default function ProgramCizelgesi({
     const [bas, bit] = satir.split('|');
     if (k.lesson_date === gun && k.start_time === bas && k.end_time === bit) return;
     const dolu = hucreKalemleri(gun, satir);
+    ortakOzet = { uygulanan: 0, eslesmeyen: [] };
     setMesgul(true);
     try {
       if (dolu.length === 1) {
@@ -183,12 +191,12 @@ export default function ProgramCizelgesi({
           await tasi({ ...k, lesson_date: gun, start_time: bas, end_time: bit }, k.lesson_date, k.start_time, k.end_time).catch(() => {});
           throw e;
         }
-        toast.success('Dersler yer değiştirdi.');
+        toast.success(`Dersler yer değiştirdi.${ortakNotu(ortakOzet, sinifAd)}`);
       } else {
         if (dolu.length > 1 && !window.confirm('Bu hücrede birden çok ders var. Yine de buraya taşınsın mı?')) return;
         await tasi(k, gun, bas, bit);
         toast.success(
-          `${k.subject.replace(HAZIRLIK_RE, '')} → ${tarihKisa(gun)} ${gunAdi(gun)} ${bas}${k.tur === 'taslak' ? ' (taslak)' : ''}`
+          `${k.subject.replace(HAZIRLIK_RE, '')} → ${tarihKisa(gun)} ${gunAdi(gun)} ${bas}${k.tur === 'taslak' ? ' (taslak)' : ''}${ortakNotu(ortakOzet, sinifAd)}`
         );
       }
       await yenile();
@@ -214,8 +222,9 @@ export default function ProgramCizelgesi({
     setMesgul(true);
     try {
       if (k.ders) await postProgram(kurumQs, 'delete-item', { id: k.ders.id });
-      else if (k.oturum) await oturumIptal(k.oturum.id);
-      toast.success(k.tur === 'taslak' ? 'Taslak silindi.' : 'Ders kaldırıldı.');
+      let not = '';
+      if (!k.ders && k.oturum) not = ortakNotu(await ortakIptal(durum, k.oturum), sinifAd);
+      toast.success(k.tur === 'taslak' ? 'Taslak silindi.' : `Ders kaldırıldı.${not}`);
       await yenile();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Kaldırılamadı');
@@ -276,9 +285,16 @@ export default function ProgramCizelgesi({
   };
 
   const seciliKalem = secili ? kalemler.find((k) => k.key === secili) : null;
+  const baglar = siniftakiBaglar(durum, sinifId);
 
   return (
     <div className="space-y-3">
+      {baglar.map((b, i) => (
+        <div key={i} className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-950">
+          <b>Ortak program:</b> {b.siniflar.map((c) => sinifAd.get(c) || 'Sınıf').join(' + ')} · {tarihKisa(b.baslangic)} –{' '}
+          {tarihKisa(b.bitis)}. Bu tarihlerde taşıdığınız, eklediğiniz ve kaldırdığınız dersler bağlı sınıflara da uygulanır.
+        </div>
+      ))}
       <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white p-3 text-sm">
         <span className="flex items-center gap-1 text-slate-600">
           <Move className="h-4 w-4 text-indigo-700" />
