@@ -293,6 +293,43 @@ function isSharedMultiClassSubject(subject) {
   return false;
 }
 
+/** Etüt dersleri (ETÜT, ETÜT & KİTAP OKUMA ...) öğretmensiz eklenebilir. */
+function isEtutSubject(subject) {
+  const s = String(subject || '').trim().toLocaleUpperCase('tr-TR');
+  return s.includes('ETÜT') || s.includes('ETUT');
+}
+
+const GUN_ADI = ['', 'Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi', 'Pazar'];
+
+/**
+ * Çakışan satırı okunur yaz: "Ceyhun Öğrenenefe bu saatte 11A · Matematik dersinde (10:00–10:40)".
+ * Hata olursa genel mesaja düşer.
+ */
+async function teacherConflictMessage({ teacherId, row, lessonDate = '', weekly = false, dayOfWeek = null }) {
+  try {
+    const [ad, cls] = await Promise.all([
+      teacherDisplayName(teacherId),
+      row?.class_id
+        ? supabaseAdmin.from('classes').select('name').eq('id', row.class_id).maybeSingle()
+        : Promise.resolve({ data: null })
+    ]);
+    const sinif = cls?.data?.name || 'başka bir sınıf';
+    const saat = `${String(row?.start_time || '').slice(0, 5)}–${String(row?.end_time || '').slice(0, 5)}`;
+    let zaman = '';
+    if (lessonDate) {
+      const [y, m, d] = String(lessonDate).split('-');
+      const dow = dowFromIsoDate(lessonDate);
+      zaman = `${d}.${m}.${y}${dow ? ` ${GUN_ADI[dow]}` : ''}, `;
+    } else if (dayOfWeek) {
+      zaman = `${GUN_ADI[dayOfWeek] || ''}, `;
+    }
+    const kaynak = weekly ? ' (haftalık programda)' : '';
+    return `Çakışma: ${ad} bu saatte ${sinif} · ${row?.subject || 'ders'} dersinde${kaynak} (${zaman}${saat}).`;
+  } catch {
+    return 'Aynı öğretmen aynı saatte farklı bir dersi var.';
+  }
+}
+
 /** yyyy-mm-dd ile gün ekler (UTC gün kökü – saat kayması yok) */
 function addDaysIsoDate(dateStr, days) {
   const s = String(dateStr || '').trim();
@@ -354,7 +391,11 @@ async function teacherTimeConflictOnDate({
     excludeIds: [...ex]
   });
   if (sessionHit) {
-    return { ok: false, reason: `Bu öğretmenin ${lessonDate} tarihinde çakışan bir oturumu var.` };
+    return {
+      ok: false,
+      reason: await teacherConflictMessage({ teacherId, row: sessionHit, lessonDate }),
+      conflict: sessionHit
+    };
   }
   const dow = dowFromIsoDate(lessonDate);
   if (dow == null) return { ok: true };
@@ -389,7 +430,11 @@ async function teacherTimeConflictOnDate({
       cancelledRows: cancelledRows || []
     });
     if (!freedByCancellation) {
-      return { ok: false, reason: `Bu öğretmenin aynı gün/saatte haftalık şablon dersi var (${lessonDate}).` };
+      return {
+        ok: false,
+        reason: await teacherConflictMessage({ teacherId, row: slotHit, lessonDate, weekly: true }),
+        conflict: slotHit
+      };
     }
   }
   return { ok: true };
@@ -2458,15 +2503,17 @@ export default async function handler(req, res) {
         return res.status(403).json({ error: 'forbidden' });
       }
       const teacherIdRaw = String(body.teacher_id || '').trim();
-      if (canAssignAnyClassTeacher(role, roleTags) && !teacherIdRaw) {
+      /** Etüt: öğretmen seçmek zorunlu değil (öğretmensiz ortak etüt). */
+      const etutOgretmensiz = isEtutSubject(body.subject);
+      if (canAssignAnyClassTeacher(role, roleTags) && !teacherIdRaw && !etutOgretmensiz) {
         return res.status(400).json({
           error: 'teacher_required',
           message: 'Öğretmen seçin. Sınıftaki ilk öğretmene otomatik atanmaz.'
         });
       }
-      const teacherId = canAssignAnyClassTeacher(role, roleTags) ? teacherIdRaw : actor.sub;
-      if (!teacherId) return res.status(400).json({ error: 'teacher_required' });
-      if (canAssignAnyClassTeacher(role, roleTags) && details.teacher_ids.length && !details.teacher_ids.includes(teacherId)) {
+      const teacherId = (canAssignAnyClassTeacher(role, roleTags) ? teacherIdRaw : actor.sub) || null;
+      if (!teacherId && !etutOgretmensiz) return res.status(400).json({ error: 'teacher_required' });
+      if (teacherId && canAssignAnyClassTeacher(role, roleTags) && details.teacher_ids.length && !details.teacher_ids.includes(teacherId)) {
         await ensureClassTeacherLink(classId, teacherId);
       }
       const date = String(body.lesson_date || '').trim();
@@ -2964,15 +3011,17 @@ export default async function handler(req, res) {
         return res.status(403).json({ error: 'forbidden' });
       }
       const teacherIdRaw = String(body.teacher_id || '').trim();
-      if (canAssignAnyClassTeacher(role, roleTags) && !teacherIdRaw) {
+      /** Etüt: öğretmen seçmek zorunlu değil (öğretmensiz ortak etüt). */
+      const etutOgretmensiz = isEtutSubject(body.subject);
+      if (canAssignAnyClassTeacher(role, roleTags) && !teacherIdRaw && !etutOgretmensiz) {
         return res.status(400).json({
           error: 'teacher_required',
           message: 'Öğretmen seçin. Sınıftaki ilk öğretmene otomatik atanmaz.'
         });
       }
-      const teacherId = canAssignAnyClassTeacher(role, roleTags) ? teacherIdRaw : actor.sub;
-      if (!teacherId) return res.status(400).json({ error: 'teacher_required' });
-      if (canAssignAnyClassTeacher(role, roleTags) && details.teacher_ids.length && !details.teacher_ids.includes(teacherId)) {
+      const teacherId = (canAssignAnyClassTeacher(role, roleTags) ? teacherIdRaw : actor.sub) || null;
+      if (!teacherId && !etutOgretmensiz) return res.status(400).json({ error: 'teacher_required' });
+      if (teacherId && canAssignAnyClassTeacher(role, roleTags) && details.teacher_ids.length && !details.teacher_ids.includes(teacherId)) {
         // Sınıfa atanmamış öğretmeni de seçebilir; class_teachers'a ekle
         await ensureClassTeacherLink(classId, teacherId);
       }
@@ -3011,11 +3060,13 @@ export default async function handler(req, res) {
       meetingLinkModerator = resolved.meetingLinkModerator;
       autoBbb = resolved.autoBbb;
 
-      const { data: sameTeacherSlots, error: cErr } = await supabaseAdmin
-        .from('class_weekly_slots')
-        .select('id,class_id,subject,start_time,end_time')
-        .eq('teacher_id', teacherId)
-        .eq('day_of_week', dayOfWeek);
+      const { data: sameTeacherSlots, error: cErr } = teacherId
+        ? await supabaseAdmin
+            .from('class_weekly_slots')
+            .select('id,class_id,subject,start_time,end_time')
+            .eq('teacher_id', teacherId)
+            .eq('day_of_week', dayOfWeek)
+        : { data: [], error: null };
       if (cErr) return res.status(500).json({ error: cErr.message });
       const slotHit = findBlockingTeacherRow({
         start,
@@ -3029,7 +3080,10 @@ export default async function handler(req, res) {
         !isSharedMultiClassSubject(subject) &&
         slotHit
       ) {
-        return res.status(409).json({ error: 'Aynı öğretmen aynı saatte farklı bir dersi var.', code: 'teacher_time_conflict' });
+        return res.status(409).json({
+          error: await teacherConflictMessage({ teacherId, row: slotHit, weekly: true, dayOfWeek }),
+          code: 'teacher_time_conflict'
+        });
       }
 
       const { data, error } = await insertOneOptionalModerator('class_weekly_slots', {
@@ -3063,15 +3117,17 @@ export default async function handler(req, res) {
         return res.status(403).json({ error: 'forbidden' });
       }
       const teacherIdRaw = String(body.teacher_id || '').trim();
-      if (canAssignAnyClassTeacher(role, roleTags) && !teacherIdRaw) {
+      /** Etüt: öğretmen seçmek zorunlu değil (öğretmensiz ortak etüt). */
+      const etutOgretmensiz = isEtutSubject(body.subject);
+      if (canAssignAnyClassTeacher(role, roleTags) && !teacherIdRaw && !etutOgretmensiz) {
         return res.status(400).json({
           error: 'teacher_required',
           message: 'Öğretmen seçin. Sınıftaki ilk öğretmene otomatik atanmaz.'
         });
       }
-      const teacherId = canAssignAnyClassTeacher(role, roleTags) ? teacherIdRaw : actor.sub;
-      if (!teacherId) return res.status(400).json({ error: 'teacher_required' });
-      if (canAssignAnyClassTeacher(role, roleTags) && details.teacher_ids.length && !details.teacher_ids.includes(teacherId)) {
+      const teacherId = (canAssignAnyClassTeacher(role, roleTags) ? teacherIdRaw : actor.sub) || null;
+      if (!teacherId && !etutOgretmensiz) return res.status(400).json({ error: 'teacher_required' });
+      if (teacherId && canAssignAnyClassTeacher(role, roleTags) && details.teacher_ids.length && !details.teacher_ids.includes(teacherId)) {
         await ensureClassTeacherLink(classId, teacherId);
       }
 
@@ -3522,12 +3578,14 @@ export default async function handler(req, res) {
       const start = String((patch.start_time || session.start_time) || '');
       const end = String((patch.end_time || session.end_time) || '');
       const subjectForCheck = String((patch.subject ?? session.subject) || '');
-      const { data: sameTeacherSlots, error: cErr } = await supabaseAdmin
-        .from('class_weekly_slots')
-        .select('id,class_id,subject,start_time,end_time')
-        .eq('teacher_id', teacherId)
-        .eq('day_of_week', dayOfWeek)
-        .neq('id', rowId);
+      const { data: sameTeacherSlots, error: cErr } = teacherId
+        ? await supabaseAdmin
+            .from('class_weekly_slots')
+            .select('id,class_id,subject,start_time,end_time')
+            .eq('teacher_id', teacherId)
+            .eq('day_of_week', dayOfWeek)
+            .neq('id', rowId)
+        : { data: [], error: null };
       if (cErr) return res.status(500).json({ error: cErr.message });
       const slotHit = findBlockingTeacherRow({
         start,
@@ -3542,7 +3600,10 @@ export default async function handler(req, res) {
         !isSharedMultiClassSubject(subjectForCheck) &&
         slotHit
       ) {
-        return res.status(409).json({ error: 'Aynı öğretmen aynı saatte farklı bir dersi var.', code: 'teacher_time_conflict' });
+        return res.status(409).json({
+          error: await teacherConflictMessage({ teacherId, row: slotHit, weekly: true, dayOfWeek }),
+          code: 'teacher_time_conflict'
+        });
       }
     }
 

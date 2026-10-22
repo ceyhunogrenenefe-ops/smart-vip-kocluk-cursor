@@ -74,7 +74,7 @@ export async function ortakIptal(durum: Durum, o: OturumKaynak): Promise<OrtakSo
 /** Yeni ders ekler; bağlı sınıflara da aynı dersi ekler (ortak ders: aynı öğretmen, saat, ders). */
 export async function ortakOlustur(
   durum: Durum,
-  p: { class_id: string; teacher_id: string; subject: string; lesson_date: string; start_time: string; end_time: string }
+  p: { class_id: string; teacher_id: string | null; subject: string; lesson_date: string; start_time: string; end_time: string }
 ): Promise<OrtakSonuc> {
   await oturumOlustur(p);
   const sonuc: OrtakSonuc = { uygulanan: 0, eslesmeyen: [] };

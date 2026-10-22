@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import { apiFetch } from '../../lib/session';
 import type { Ders, Durum, Mesgul, Satir } from './YaziliProgramPage';
 import { ortakIptal, ortakNotu, ortakOlustur, ortakTasi, siniftakiBaglar } from './ortak';
+import { etutMu } from './oturumIslem';
 import ProgramCizelgesi from './ProgramCizelgesi';
 
 const GUN_ADI = ['Pazar', 'Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi'];
@@ -432,7 +433,7 @@ function OturumPenceresi({
       } else {
         const s = await ortakOlustur(durum, {
           class_id: sinifId,
-          teacher_id: ogretmen,
+          teacher_id: ogretmen || null,
           lesson_date: tarih,
           start_time: bas,
           end_time: bit,
@@ -512,7 +513,7 @@ function OturumPenceresi({
         <label className="mt-3 block text-sm text-slate-700">
           Öğretmen
           <select value={ogretmen} onChange={(e) => setOgretmen(e.target.value)} className={alan}>
-            <option value="">{o ? 'Değiştirme' : 'Öğretmen seçin'}</option>
+            <option value="">{o ? 'Değiştirme' : etutMu(ders) ? 'Öğretmen yok (etüt)' : 'Öğretmen seçin'}</option>
             {durum.teachers.map((t) => (
               <option key={t.id} value={t.id}>
                 {t.name}
@@ -537,7 +538,7 @@ function OturumPenceresi({
           </button>
           <button
             type="button"
-            disabled={!gecerli || kaydediliyor || (!o && !ogretmen)}
+            disabled={!gecerli || kaydediliyor || (!o && !ogretmen && !etutMu(ders))}
             onClick={() => void kaydet()}
             className="inline-flex items-center gap-1 rounded-lg bg-[#173b70] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
           >

@@ -17,6 +17,9 @@ export type OturumKaynak = {
   end_time: string;
 };
 
+/** Etüt dersleri öğretmensiz olabilir. */
+export const etutMu = (ders: string) => /ET[ÜU]T/.test(String(ders || '').toLocaleUpperCase('tr-TR'));
+
 const dk = (t: string) => {
   const m = String(t || '').match(/^(\d{1,2}):(\d{2})/);
   return m ? Number(m[1]) * 60 + Number(m[2]) : NaN;
@@ -35,7 +38,7 @@ async function istek<T = Record<string, unknown>>(url: string, init?: RequestIni
 /** Yeni canlı ders oluşturur (öğretmen çakışması sunucuda kontrol edilir). Oturum id döner. */
 export async function oturumOlustur(p: {
   class_id: string;
-  teacher_id: string;
+  teacher_id: string | null;
   subject: string;
   lesson_date: string;
   start_time: string;
@@ -45,6 +48,7 @@ export async function oturumOlustur(p: {
     method: 'POST',
     body: JSON.stringify({
       ...p,
+      teacher_id: p.teacher_id || undefined,
       duration_minutes: dk(p.end_time) - dk(p.start_time),
       repeat_interval_days: 0,
       occurrences: 1
@@ -80,10 +84,10 @@ export async function oturumTasi(o: OturumKaynak, h: OturumHedef): Promise<strin
     }
     return o.id;
   }
-  if (!teacherId) throw new Error('Bu dersin öğretmeni yok; başka güne taşımak için önce öğretmen seçin.');
+  if (!teacherId && !etutMu(subject)) throw new Error('Bu dersin öğretmeni yok; başka güne taşımak için önce öğretmen seçin.');
   const yeniId = await oturumOlustur({
     class_id: o.class_id,
-    teacher_id: teacherId,
+    teacher_id: teacherId || null,
     subject,
     lesson_date: h.lesson_date,
     start_time: h.start_time,

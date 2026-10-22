@@ -199,6 +199,10 @@ function liveAttendanceNote(live: { provider?: string; running?: boolean; note?:
   return `${from} odasındaki katılım ve kamera dolduruldu. İzinli ve sizin işaretledikleriniz duruyor. Ortak Zoom’da başka sınıf görünürse misafir işaretini kaldırın. Mesaj, onaydan sonra gider.`;
 }
 
+
+/** Etüt dersleri öğretmen seçmeden eklenebilir. */
+const etutDersiMi = (ders: string) => /ET[ÜU]T/.test(String(ders || '').toLocaleUpperCase('tr-TR'));
+
 export default function ClassLiveLessons() {
   const { effectiveUser } = useAuth();
   const { students, teacherScopeStudents, institution, activeInstitutionId, coaches } = useApp();
@@ -1350,7 +1354,7 @@ export default function ClassLiveLessons() {
       return;
     }
     const teacherId = effectiveSlotTeacherId;
-    if (!teacherId) {
+    if (!teacherId && !etutDersiMi(slotSubject)) {
       alert('Öğretmen seçin.');
       return;
     }
@@ -1371,7 +1375,7 @@ export default function ClassLiveLessons() {
       });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) {
-        const errText = [j.error, j.code === 'bbb_create_failed' ? 'BBB sunucusu yanıt vermedi.' : '', j.code === 'subject_meeting_link_required' ? 'BBB API tanımlı değil veya link zorunlu.' : '', j.code === 'teacher_time_conflict' ? 'Aynı öğretmen o saatte başka bir dersi veriyor. Aynı dersi farklı sınıfa ekleyebilirsiniz.' : ''].filter(Boolean).join(' ');
+        const errText = [j.error, j.code === 'bbb_create_failed' ? 'BBB sunucusu yanıt vermedi.' : '', j.code === 'subject_meeting_link_required' ? 'BBB API tanımlı değil veya link zorunlu.' : ''].filter(Boolean).join(' ');
         setError(errText || 'Ders şablonu eklenemedi');
         toast.error(errText || 'Ders şablonu eklenemedi');
         return;
@@ -1399,7 +1403,7 @@ export default function ClassLiveLessons() {
       return;
     }
     const teacherId = effectiveSlotTeacherId;
-    if (!teacherId) {
+    if (!teacherId && !etutDersiMi(slotSubject)) {
       alert('Öğretmen seçin.');
       return;
     }
@@ -1416,14 +1420,14 @@ export default function ClassLiveLessons() {
           start_time: start,
           duration_minutes: slotDurationMinutes,
           subject: slotSubject.trim(),
-          teacher_id: teacherId,
+          teacher_id: teacherId || undefined,
           meeting_link: slotMeetingLink.trim() || undefined
         })
       });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) {
         const dateHint = j.lesson_date ? ` Tarih: ${j.lesson_date}.` : '';
-        const errText = [j.error, j.reason, dateHint, j.code === 'bbb_create_failed' ? 'BBB sunucusu yanıt vermedi.' : '', j.code === 'subject_meeting_link_required' ? 'BBB API (Vercel) tanımlı değil; link girin veya BBB_API_ENDPOINT + BBB_API_SECRET ekleyin.' : '', j.code === 'teacher_time_conflict' ? 'Aynı öğretmen o saatte başka bir dersi veriyor. Aynı dersi (ör. Fen) 8A ile 8C’ye aynı anda ekleyebilirsiniz.' : ''].filter(Boolean).map(String).join(' — ');
+        const errText = [j.error, j.reason, dateHint, j.code === 'bbb_create_failed' ? 'BBB sunucusu yanıt vermedi.' : '', j.code === 'subject_meeting_link_required' ? 'BBB API (Vercel) tanımlı değil; link girin veya BBB_API_ENDPOINT + BBB_API_SECRET ekleyin.' : ''].filter(Boolean).map(String).join(' — ');
         setError(errText || 'Oturumlar oluşturulamadı');
         return;
       }
@@ -1437,7 +1441,9 @@ export default function ClassLiveLessons() {
       await loadBatchSessionsPool();
       const skipNote =
         skipped.length > 0
-          ? ` ${skipped.length} tarih atlandı (çakışma): ${skipped.map((s: { lesson_date?: string }) => s.lesson_date).filter(Boolean).join(', ')}.`
+          ? `\n\n${skipped.length} tarih atlandı:\n${skipped
+              .map((s: { lesson_date?: string; reason?: string }) => `• ${s.lesson_date || ''}: ${s.reason || 'Çakışma'}`)
+              .join('\n')}\n`
           : '';
       alert(`${n} adet tarihli oturum kaydedildi.${skipNote} Hatırlatma ve tamamlanan ders özeti bu kayıtlara göre çalışır.`);
     } finally {
@@ -2387,7 +2393,7 @@ export default function ClassLiveLessons() {
                 className="w-full border border-slate-200 rounded px-3 py-2 text-sm"
                 disabled={!canPickAnyTeacher}
               >
-                <option value="">Öğretmen seçin</option>
+                <option value="">{etutDersiMi(slotSubject) ? 'Öğretmen yok (etüt)' : 'Öğretmen seçin'}</option>
                 {addLessonTeacherOptions.map((t) => (
                   <option key={t.id} value={t.id}>{t.name}</option>
                 ))}
