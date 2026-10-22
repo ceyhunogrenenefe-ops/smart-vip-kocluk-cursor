@@ -1,25 +1,21 @@
 /**
- * Tarihli ders programı PNG'si — Ders Program Planlayıcısı PNG'si ile aynı görünüm
- * (logo, başlık, renkli gün başlıkları, ders renkleri, açıklama), sütunlar tarih.
+ * Tarihli ders programı PNG'si — haftalık kart düzeni.
+ * Her satır bir hafta (aralığın ilk gününden başlayan 7 gün), her gün bir kart, dersler kartta alt alta.
+ * Sütun sayısı 7'de sabit kaldığı için uzun aralıklarda da yazılar küçülmez.
  */
 import { subjectTheme } from './classScheduleBrandedPng';
 import { rasterizeHtmlElementForPdf } from './pdfLiveWeekGrid';
 
 const BRAND_NAVY = '#1F478F';
-const BRAND_RED = '#FC3232';
-const BRAND_NAVY_SOFT = '#E9F0FB';
-const BORDER = '#B9C4DA';
-const DAY_COLORS = ['#2563EB', '#059669', '#D97706', '#DC2626', '#7C3AED', '#DB2777', '#0891B2', '#65A30D'];
 
 export type DatedPngDay = { iso: string; title: string; subtitle: string };
-export type DatedPngRow = { key: string; time: string };
 export type DatedPngLesson = {
   dayIso: string;
-  rowKey: string;
   subject: string;
-  teacher?: string | null;
   time: string;
-  badge?: string | null;
+  /** Sıralama için başlangıç (HH:MM) */
+  start: string;
+  teacher?: string | null;
 };
 
 function esc(s: string): string {
@@ -37,12 +33,12 @@ async function fontlariYukle(): Promise<void> {
     link.id = id;
     link.rel = 'stylesheet';
     link.href =
-      'https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Fraunces:opsz,wght@9..144,600&display=swap';
+      'https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Fraunces:opsz,wght@9..144,600&display=swap';
     document.head.appendChild(link);
   }
   try {
-    await document.fonts?.load('600 30px Fraunces');
-    await document.fonts?.load('600 14px Inter');
+    await document.fonts?.load('700 14px Inter');
+    await document.fonts?.load('800 22px Inter');
     await document.fonts?.ready;
   } catch {
     /* sistem fontu */
@@ -57,113 +53,95 @@ function resimBekle(img: HTMLImageElement): Promise<void> {
   });
 }
 
+/** Eylül ve sonrası yeni öğretim yılı: 2026-10-24 → "2026-2027" */
+export function ogretimYili(iso: string): string {
+  const [y, m] = iso.split('-').map(Number);
+  return m >= 9 ? `${y}-${y + 1}` : `${y - 1}-${y}`;
+}
+
 export async function downloadDatedSchedulePng(opts: {
+  /** Ör. "5A | Yazılıya Hazırlık Ders Programı" */
   title: string;
-  subtitle: string;
   rangeLabel: string;
+  termLabel: string;
   days: DatedPngDay[];
-  rows: DatedPngRow[];
   lessons: DatedPngLesson[];
   filename: string;
+  showTeacher?: boolean;
   logoUrl?: string | null;
 }): Promise<void> {
-  const { days, rows, lessons } = opts;
-  if (!days.length || !rows.length || !lessons.length) throw new Error('PNG için ders yok.');
+  const { days, lessons } = opts;
+  if (!days.length || !lessons.length) throw new Error('PNG için ders yok.');
   await fontlariYukle();
 
-  const hucre = (dayIso: string, rowKey: string) =>
-    lessons
-      .filter((l) => l.dayIso === dayIso && l.rowKey === rowKey)
-      .map((l) => {
-        const t = subjectTheme(l.subject);
-        return `<div class="lchip" style="background:${t.bg};border-left-color:${t.bd};color:${t.fg}">
-          <span class="subj">${esc(l.subject)}</span>
-          ${l.badge ? `<span class="badge" style="border-color:${t.bd}">${esc(l.badge)}</span>` : ''}
-          <span class="ptime">${esc(l.time)}</span>
-          ${l.teacher ? `<span class="tch">${esc(l.teacher)}</span>` : ''}
-        </div>`;
-      })
-      .join('');
+  const haftalar: DatedPngDay[][] = [];
+  for (let i = 0; i < days.length; i += 7) haftalar.push(days.slice(i, i + 7));
 
-  const satirlar = rows
-    .map(
-      (r) => `<tr>
-        <td class="pcol"><div class="pt">${esc(r.time)}</div></td>
-        ${days
-          .map((d) => {
-            const ic = hucre(d.iso, r.key);
-            return ic ? `<td class="cellh lcell">${ic}</td>` : `<td class="cellh ecell"></td>`;
+  const kart = (d: DatedPngDay) => {
+    const liste = lessons
+      .filter((l) => l.dayIso === d.iso)
+      .sort((a, b) => a.start.localeCompare(b.start));
+    const govde = liste.length
+      ? liste
+          .map((l) => {
+            const t = subjectTheme(l.subject);
+            return `<div class="ders" style="background:${t.bg};border-left-color:${t.bd};color:${t.fg}">
+              <div class="ad">${esc(l.subject)}</div>
+              <div class="saat">${esc(l.time)}</div>
+              ${opts.showTeacher && l.teacher ? `<div class="ogr">${esc(l.teacher)}</div>` : ''}
+            </div>`;
           })
-          .join('')}
-      </tr>`
+          .join('')
+      : `<div class="bos">Ders belirtilmemiş</div>`;
+    return `<div class="gun">
+      <div class="gb"><div class="g1">${esc(d.title)}</div><div class="g2">${esc(d.subtitle)}</div></div>
+      <div class="gg">${govde}</div>
+    </div>`;
+  };
+
+  const govde = haftalar
+    .map(
+      (h) =>
+        `<div class="hafta">${h.map(kart).join('')}${Array.from({ length: 7 - h.length })
+          .map(() => '<div class="gun yok"></div>')
+          .join('')}</div>`
     )
     .join('');
 
-  const dersler = [...new Set(lessons.map((l) => l.subject.trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'tr'));
-  const legend = dersler.length
-    ? `<div class="legend">${dersler
-        .map((s) => {
-          const t = subjectTheme(s);
-          return `<span style="background:${t.bg};color:${t.fg};border:2px solid ${t.bd}">${esc(s)}</span>`;
-        })
-        .join('')}</div>`
-    : '';
-
-  const sheetW = Math.max(1112, 120 + days.length * 165);
+  const W = 1180;
   const logoSrc = String(opts.logoUrl || '').trim() || `${window.location.origin}/ders-program-planner/logo.png`;
   const stage = document.createElement('div');
   // html2canvas sayfa dışına (left:-100000px) konan düğümü bulamıyor; transform ile gizle
-  stage.style.cssText = `position:fixed;left:0;top:0;transform:translate(-12000px,0);background:#fff;width:${sheetW + 68}px;z-index:0;pointer-events:none;`;
+  stage.style.cssText = `position:fixed;left:0;top:0;transform:translate(-12000px,0);background:#fff;width:${W}px;z-index:0;pointer-events:none;`;
   stage.innerHTML = `
     <style>
-      .png-sheet{font-family:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#1A1D26;background:#fff;width:${sheetW + 68}px;padding:34px;box-sizing:border-box}
-      .png-sheet .topbar{height:10px;border-radius:6px;margin-bottom:22px;background:linear-gradient(90deg,#3B82F6 0%,#10B981 20%,#F59E0B 40%,#EF4444 60%,#8B5CF6 80%,#EC4899 100%)}
-      .png-sheet .ph{text-align:center;margin-bottom:18px;padding-bottom:14px;border-bottom:3px solid ${BRAND_RED}}
-      .png-sheet .ph img{height:88px;width:auto;max-width:320px;margin:0 auto 12px;display:block;object-fit:contain}
-      .png-sheet .ph .tt{font-family:"Fraunces",Georgia,serif;font-size:30px;font-weight:600;color:${BRAND_NAVY};line-height:1.2}
-      .png-sheet .ph .sb{color:${BRAND_RED};font-weight:700;text-transform:uppercase;letter-spacing:.05em;font-size:15px;margin-top:6px}
-      .png-sheet .ph .rg{color:#475569;font-weight:600;font-size:14px;margin-top:4px}
-      .png-sheet table{width:100%;border-collapse:collapse;table-layout:fixed;overflow-wrap:anywhere}
-      .png-sheet th,.png-sheet td{border:1px solid ${BORDER};padding:9px 11px;font-size:14px;text-align:left;vertical-align:top}
-      .png-sheet .pcol{width:120px;background:${BRAND_NAVY_SOFT}}
-      .png-sheet thead th.pcol{background:${BRAND_NAVY_SOFT};color:${BRAND_NAVY};font-weight:700}
-      .png-sheet .pcol .pt{font-weight:700;color:${BRAND_NAVY};font-size:13px}
-      .png-sheet thead th.dayh{text-align:center;color:#fff;border:2px solid #fff;padding:8px 6px}
-      .png-sheet thead th.dayh .d1{display:block;font-size:15px;font-weight:700}
-      .png-sheet thead th.dayh .d2{display:block;font-size:12px;font-weight:600;opacity:.9;margin-top:1px}
-      .png-sheet .cellh{height:54px;background:#fff}
-      .png-sheet td.lcell{padding:5px}
-      .png-sheet td.ecell{background:#F8FAFC}
-      .png-sheet .lchip{border-radius:10px;padding:8px 10px;border-left:6px solid;min-height:40px}
-      .png-sheet .lchip + .lchip{margin-top:5px}
-      .png-sheet .lchip .subj{display:block;color:inherit;font-size:15px;font-weight:700}
-      .png-sheet .lchip .badge{display:inline-block;margin-top:3px;padding:1px 7px;border:1.5px solid;border-radius:999px;font-size:11px;font-weight:700;background:#fff}
-      .png-sheet .lchip .ptime{display:block;font-size:12px;font-weight:600;margin-top:3px;opacity:.85}
-      .png-sheet .lchip .tch{display:block;color:#334155;font-size:12px;margin-top:2px}
-      .png-sheet .legend{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px;justify-content:center}
-      .png-sheet .legend span{display:inline-block;padding:6px 12px;border-radius:999px;font-size:13px;font-weight:700}
+      .ps{font-family:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#1A1D26;background:#fff;width:${W}px;padding:26px 28px 30px;box-sizing:border-box}
+      .ps .bas{display:flex;align-items:center;gap:22px;margin-bottom:20px}
+      .ps .bas img{height:58px;width:auto;object-fit:contain}
+      .ps .bas .tt{flex:1;font-size:26px;font-weight:800;color:${BRAND_NAVY};letter-spacing:-0.01em}
+      .ps .bas .sag{text-align:right}
+      .ps .bas .donem{font-size:15px;font-weight:800;color:#1E293B;letter-spacing:.02em}
+      .ps .bas .aralik{font-size:14px;font-weight:600;color:#475569;margin-top:4px}
+      .ps .hafta{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:8px;margin-bottom:12px}
+      .ps .gun{border:1.5px solid #B9C4DA;border-radius:6px;overflow:hidden;background:#fff;min-height:150px;display:flex;flex-direction:column}
+      .ps .gun.yok{border:none;background:transparent}
+      .ps .gb{background:#D6E4F2;padding:8px 10px 7px;border-bottom:1.5px solid #B9C4DA}
+      .ps .g1{font-size:14px;font-weight:700;color:#1E293B}
+      .ps .g2{font-size:16px;font-weight:800;color:${BRAND_NAVY};margin-top:1px}
+      .ps .gg{padding:6px;display:flex;flex-direction:column;gap:4px;flex:1}
+      .ps .ders{border-radius:3px;border-left:4px solid;padding:5px 7px}
+      .ps .ders .ad{font-size:12.5px;font-weight:800;line-height:1.2;color:inherit}
+      .ps .ders .saat{font-size:12px;font-weight:700;color:#1E293B;margin-top:1px}
+      .ps .ders .ogr{font-size:11px;font-weight:500;color:#334155;margin-top:1px}
+      .ps .bos{color:#64748B;font-size:12px;padding:16px 4px 0}
     </style>
-    <div class="png-sheet">
-      <div class="topbar"></div>
-      <div class="ph">
+    <div class="ps">
+      <div class="bas">
         <img src="${esc(logoSrc)}" alt="" crossorigin="anonymous" />
         <div class="tt">${esc(opts.title)}</div>
-        <div class="sb">${esc(opts.subtitle)}</div>
-        <div class="rg">${esc(opts.rangeLabel)}</div>
+        <div class="sag"><div class="donem">${esc(opts.termLabel)}</div><div class="aralik">${esc(opts.rangeLabel)}</div></div>
       </div>
-      <table>
-        <thead><tr>
-          <th class="pcol">Saat</th>
-          ${days
-            .map(
-              (d, i) =>
-                `<th class="dayh" style="background:${DAY_COLORS[i % DAY_COLORS.length]}"><span class="d1">${esc(d.title)}</span><span class="d2">${esc(d.subtitle)}</span></th>`
-            )
-            .join('')}
-        </tr></thead>
-        <tbody>${satirlar}</tbody>
-      </table>
-      ${legend}
+      ${govde}
     </div>`;
   document.body.appendChild(stage);
   try {
@@ -174,7 +152,7 @@ export async function downloadDatedSchedulePng(opts: {
     }
     await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
     await new Promise((r) => setTimeout(r, 100));
-    const sheet = stage.querySelector('.png-sheet') as HTMLElement | null;
+    const sheet = stage.querySelector('.ps') as HTMLElement | null;
     if (!sheet) throw new Error('PNG şablonu oluşturulamadı');
     const canvas = await rasterizeHtmlElementForPdf(sheet, 2);
     if (!canvas.width || !canvas.height) throw new Error('PNG boş üretildi');

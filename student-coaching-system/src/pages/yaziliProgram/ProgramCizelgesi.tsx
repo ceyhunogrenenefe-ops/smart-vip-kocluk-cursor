@@ -3,7 +3,7 @@ import { Download, Loader2, Move, Plus, Trash2, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiFetch } from '../../lib/session';
 import { subjectTheme } from '../../lib/classScheduleBrandedPng';
-import { downloadDatedSchedulePng } from '../../lib/datedSchedulePng';
+import { downloadDatedSchedulePng, ogretimYili } from '../../lib/datedSchedulePng';
 import { oturumIptal, oturumTasi } from './oturumIslem';
 import type { Ders, Durum, Mesgul } from './YaziliProgramPage';
 
@@ -22,6 +22,12 @@ const dk = (t: string) => {
   return m ? Number(m[1]) * 60 + Number(m[2]) : NaN;
 };
 const satirAnahtar = (bas: string, bit: string) => `${bas}|${bit}`;
+/** "ÖDEV SAATİ" → "Ödev Saati" (PNG'de okunaklı) */
+const basHarfBuyuk = (s: string) =>
+  s
+    .trim()
+    .toLocaleLowerCase('tr')
+    .replace(/(^|[\s&(/-])(\S)/gu, (_, a: string, b: string) => a + b.toLocaleUpperCase('tr'));
 
 type Oturum = Mesgul & { id: string; lesson_date: string };
 type Kalem = {
@@ -77,7 +83,7 @@ export default function ProgramCizelgesi({
   const [ekSatirlar, setEkSatirlar] = useState<string[]>([]);
   const [yeniSaat, setYeniSaat] = useState({ bas: '', bit: '' });
   const [pngTaslak, setPngTaslak] = useState(true);
-  const [pngBosGun, setPngBosGun] = useState(false);
+  const [pngOgretmen, setPngOgretmen] = useState(false);
   const [pngIndiriliyor, setPngIndiriliyor] = useState(false);
 
   const kalemler = useMemo<Kalem[]>(() => {
@@ -231,8 +237,6 @@ export default function ProgramCizelgesi({
 
   const pngIndir = async () => {
     const pngKalem = kalemler.filter((k) => pngTaslak || k.tur !== 'taslak');
-    const pngGunler = pngBosGun ? gunler : gunler.filter((g) => pngKalem.some((k) => k.lesson_date === g));
-    const pngSatirlar = satirlar.filter((s) => pngKalem.some((k) => satirAnahtar(k.start_time, k.end_time) === s));
     if (!pngKalem.length) {
       toast.error('PNG için bu aralıkta ders yok.');
       return;
@@ -240,20 +244,27 @@ export default function ProgramCizelgesi({
     setPngIndiriliyor(true);
     try {
       const ad = sinifAd.get(sinifId) || 'Sınıf';
+      // "5A 2026-2027 DÖNEM" / "2026-2027 10 A SINIFI" → "5A" / "10 A"; dönem sağ üstte ayrıca yazılı
+      const kisaAd =
+        ad
+          .replace(/\b20\d{2}\s*[-–]\s*20\d{2}\b/g, ' ')
+          .replace(/\b(DÖNEM|DONEM|SINIFI)\b/giu, ' ')
+          .replace(/\s+/g, ' ')
+          .trim() || ad;
+      const yil = (iso: string) => tarihNesne(iso).getUTCFullYear();
       await downloadDatedSchedulePng({
-        title: ad,
-        subtitle: 'Yazılıya Hazırlık Ders Programı',
-        rangeLabel: `${tarihKisa(gunler[0])} – ${tarihKisa(gunler[gunler.length - 1])}`,
-        days: pngGunler.map((g) => ({ iso: g, title: gunAdi(g), subtitle: tarihKisa(g) })),
-        rows: pngSatirlar.map((s) => ({ key: s, time: s.replace('|', '–') })),
+        title: `${kisaAd} | Yazılıya Hazırlık Ders Programı`,
+        termLabel: `${ogretimYili(gunler[0])} DÖNEMİ`,
+        rangeLabel: `${tarihKisa(gunler[0])} - ${tarihKisa(gunler[gunler.length - 1])} ${yil(gunler[gunler.length - 1])}`,
+        days: gunler.map((g) => ({ iso: g, title: gunAdi(g), subtitle: tarihKisa(g) })),
         lessons: pngKalem.map((k) => ({
           dayIso: k.lesson_date,
-          rowKey: satirAnahtar(k.start_time, k.end_time),
-          subject: k.subject.replace(HAZIRLIK_RE, ''),
-          teacher: k.teacher_id ? ogretmenAd.get(k.teacher_id) || '' : '',
-          time: `${k.start_time}–${k.end_time}`,
-          badge: k.hazirlik ? 'Yazılıya hazırlık' : null
+          subject: basHarfBuyuk(k.subject.replace(HAZIRLIK_RE, '')),
+          start: k.start_time,
+          time: `${k.start_time}-${k.end_time}`,
+          teacher: k.teacher_id ? ogretmenAd.get(k.teacher_id) || '' : ''
         })),
+        showTeacher: pngOgretmen,
         filename: `${ad.replace(/[\\/:*?"<>|]+/g, ' ').trim()} - yazililara hazirlik programi.png`
       });
       toast.success('PNG indirildi.');
@@ -279,7 +290,7 @@ export default function ProgramCizelgesi({
             <input type="checkbox" checked={pngTaslak} onChange={(e) => setPngTaslak(e.target.checked)} /> Taslaklar PNG'de olsun
           </label>
           <label className="flex items-center gap-1.5 text-slate-700">
-            <input type="checkbox" checked={pngBosGun} onChange={(e) => setPngBosGun(e.target.checked)} /> Boş günler PNG'de olsun
+            <input type="checkbox" checked={pngOgretmen} onChange={(e) => setPngOgretmen(e.target.checked)} /> Öğretmen adları PNG'de olsun
           </label>
           <button
             type="button"
