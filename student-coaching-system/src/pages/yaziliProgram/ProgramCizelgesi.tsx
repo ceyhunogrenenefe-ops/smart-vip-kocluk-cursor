@@ -1,10 +1,10 @@
 import React, { useMemo, useState } from 'react';
-import { Download, Loader2, Move, Plus, X } from 'lucide-react';
+import { Download, Loader2, Move, Plus, Trash2, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiFetch } from '../../lib/session';
 import { subjectTheme } from '../../lib/classScheduleBrandedPng';
 import { downloadDatedSchedulePng } from '../../lib/datedSchedulePng';
-import { oturumTasi } from './oturumIslem';
+import { oturumIptal, oturumTasi } from './oturumIslem';
 import type { Ders, Durum, Mesgul } from './YaziliProgramPage';
 
 const GUN_ADI = ['Pazar', 'Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi'];
@@ -197,6 +197,28 @@ export default function ProgramCizelgesi({
     }
   };
 
+  /** Dersi kaldırır: canlı ders iptal edilir, hazırlık taslağı silinir */
+  const kaldir = async (k: Kalem) => {
+    const ad = k.subject.replace(HAZIRLIK_RE, '');
+    const ne =
+      k.tur === 'taslak'
+        ? 'Taslak hazırlık dersi silinecek.'
+        : 'Ders iptal edilecek; öğrenciler ve öğretmen artık bu dersi görmez.';
+    if (!window.confirm(`${tarihKisa(k.lesson_date)} ${gunAdi(k.lesson_date)} ${k.start_time} · ${ad}\n\n${ne}\nDevam edilsin mi?`)) return;
+    setMesgul(true);
+    try {
+      if (k.ders) await postProgram(kurumQs, 'delete-item', { id: k.ders.id });
+      else if (k.oturum) await oturumIptal(k.oturum.id);
+      toast.success(k.tur === 'taslak' ? 'Taslak silindi.' : 'Ders kaldırıldı.');
+      await yenile();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Kaldırılamadı');
+    } finally {
+      setMesgul(false);
+      setSecili(null);
+    }
+  };
+
   const satirEkle = () => {
     if (!(dk(yeniSaat.bit) > dk(yeniSaat.bas))) {
       toast.error('Geçerli bir başlangıç ve bitiş saati girin.');
@@ -250,6 +272,7 @@ export default function ProgramCizelgesi({
         <span className="flex items-center gap-1 text-slate-600">
           <Move className="h-4 w-4 text-indigo-700" />
           Dersi sürükleyip bırakın ya da derse tıklayıp hedef hücreye tıklayın. Dolu hücreye bırakırsanız iki ders yer değiştirir.
+          Kaldırmak için dersin üzerindeki çöp kutusuna basın.
         </span>
         <div className="ml-auto flex flex-wrap items-center gap-2">
           <label className="flex items-center gap-1.5 text-slate-700">
@@ -272,11 +295,20 @@ export default function ProgramCizelgesi({
       {seciliKalem ? (
         <div className="flex items-center justify-between rounded-lg bg-indigo-50 px-3 py-2 text-sm text-indigo-950">
           <span>
-            <b>{seciliKalem.subject.replace(HAZIRLIK_RE, '')}</b> seçildi — taşımak istediğiniz hücreye tıklayın.
+            <b>{seciliKalem.subject.replace(HAZIRLIK_RE, '')}</b> seçildi — taşımak istediğiniz hücreye tıklayın ya da kaldırın.
           </span>
-          <button type="button" onClick={() => setSecili(null)} aria-label="Seçimi bırak">
-            <X className="h-4 w-4" />
-          </button>
+          <span className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => void kaldir(seciliKalem)}
+              className="inline-flex items-center gap-1 rounded-lg border border-red-200 bg-white px-2.5 py-1 text-xs font-semibold text-red-700 hover:bg-red-50"
+            >
+              <Trash2 className="h-3.5 w-3.5" /> Dersi kaldır
+            </button>
+            <button type="button" onClick={() => setSecili(null)} aria-label="Seçimi bırak">
+              <X className="h-4 w-4" />
+            </button>
+          </span>
         </div>
       ) : null}
 
@@ -376,10 +408,25 @@ export default function ProgramCizelgesi({
                               }}
                               title={k.oturum ? 'Sürükleyin · tıklayıp seçin · çift tıklayıp düzenleyin' : 'Sürükleyin · tıklayıp seçin'}
                               style={{ background: t.bg, borderLeftColor: t.bd, color: t.fg }}
-                              className={`mb-1 cursor-grab select-none rounded-lg border-l-4 px-2 py-1.5 last:mb-0 active:cursor-grabbing ${
+                              className={`group/chip relative mb-1 cursor-grab select-none rounded-lg border-l-4 px-2 py-1.5 pr-6 last:mb-0 active:cursor-grabbing ${
                                 sec ? 'ring-2 ring-[#173b70] ring-offset-1' : ''
                               } ${k.tur === 'taslak' ? 'border-dashed opacity-80' : ''}`}
                             >
+                              <button
+                                type="button"
+                                draggable={false}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  void kaldir(k);
+                                }}
+                                className={`absolute right-1 top-1 rounded p-0.5 text-red-700 hover:bg-white/80 ${
+                                  sec ? 'block' : 'hidden group-hover/chip:block'
+                                }`}
+                                aria-label={`${k.subject.replace(HAZIRLIK_RE, '')} dersini kaldır`}
+                                title="Dersi kaldır"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
                               <span className="block text-[13px] font-bold leading-tight">{k.subject.replace(HAZIRLIK_RE, '')}</span>
                               <span className="block text-[11px] leading-tight text-slate-600">
                                 {k.teacher_id ? ogretmenAd.get(k.teacher_id) || 'Öğretmen' : 'Öğretmen yok'}
