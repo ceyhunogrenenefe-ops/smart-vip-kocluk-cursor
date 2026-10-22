@@ -139,33 +139,36 @@ async function durumOku(kurumId) {
 
   // Program aralığındaki tarihli oturumlar (kendi yayınladıklarımız hariç — onlar items'ta)
   const sessions = [];
+  const gorulen = new Set();
   const oturumEkle = (rows) => {
     for (const s of rows || []) {
-      if (yayinliOturum.has(s.id) || sessions.some((x) => x.id === s.id)) continue;
+      if (yayinliOturum.has(s.id) || gorulen.has(s.id)) continue;
+      gorulen.add(s.id);
       sessions.push({ ...s, start_time: saat(s.start_time), end_time: saat(s.end_time) });
     }
   };
   const oturumSec = 'id,class_id,teacher_id,subject,lesson_date,start_time,end_time,status';
-  if (classIds.length) {
-    const { data } = await supabaseAdmin
-      .from('class_sessions')
-      .select(oturumSec)
-      .in('class_id', classIds)
-      .gte('lesson_date', ayar.baslangic)
-      .lte('lesson_date', ayar.bitis)
-      .neq('status', 'cancelled');
-    oturumEkle(data);
-  }
-  if (teacherIds.length) {
-    const { data } = await supabaseAdmin
-      .from('class_sessions')
-      .select(oturumSec)
-      .in('teacher_id', teacherIds)
-      .gte('lesson_date', ayar.baslangic)
-      .lte('lesson_date', ayar.bitis)
-      .neq('status', 'cancelled');
-    oturumEkle(data);
-  }
+  /** Supabase tek sorguda en fazla 1000 satır döndürür; aralık uzunsa sonraki günler kesilmesin diye sayfalı okunur. */
+  const sayfaliOturumlar = async (alan, degerler) => {
+    const SAYFA = 1000;
+    for (let bas = 0; bas < 50000; bas += SAYFA) {
+      const { data, error } = await supabaseAdmin
+        .from('class_sessions')
+        .select(oturumSec)
+        .in(alan, degerler)
+        .gte('lesson_date', ayar.baslangic)
+        .lte('lesson_date', ayar.bitis)
+        .neq('status', 'cancelled')
+        .order('lesson_date')
+        .order('id')
+        .range(bas, bas + SAYFA - 1);
+      if (error) throw error;
+      oturumEkle(data);
+      if (!data || data.length < SAYFA) break;
+    }
+  };
+  if (classIds.length) await sayfaliOturumlar('class_id', classIds);
+  if (teacherIds.length) await sayfaliOturumlar('teacher_id', teacherIds);
   const sessionsSade = sessions.map(({ id, class_id, teacher_id, subject, lesson_date, start_time, end_time }) => ({
     id,
     class_id,

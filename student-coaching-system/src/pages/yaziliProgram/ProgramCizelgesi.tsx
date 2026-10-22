@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Download, Loader2, Move, Plus, Trash2, X } from 'lucide-react';
+import { AlertTriangle, Download, Loader2, Move, Plus, Trash2, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiFetch } from '../../lib/session';
 import { subjectTheme } from '../../lib/classScheduleBrandedPng';
@@ -7,6 +7,7 @@ import { downloadDatedSchedulePng, ogretimYili } from '../../lib/datedSchedulePn
 import { oturumTasi } from './oturumIslem';
 import { ortakIptal, ortakNotu, ortakTasi, siniftakiBaglar, type OrtakSonuc } from './ortak';
 import type { Ders, Durum, Mesgul } from './YaziliProgramPage';
+import { cakismalar } from './cakisma';
 
 const GUN_ADI = ['Pazar', 'Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi'];
 const HAZIRLIK_RE = /\s*\(yazılıya hazırlık\)\s*$/i;
@@ -120,11 +121,66 @@ export default function ProgramCizelgesi({
     return out.filter((k) => gunler.includes(k.lesson_date));
   }, [durum.sessions, durum.items, sinifId, gunler]);
 
+  /** Her dersin çakışmaları (öğretmen / sınıf) — çizelgede kırmızı gösterilir */
+  const kalemCakisma = useMemo(() => {
+    const m = new Map<string, string[]>();
+    for (const k of kalemler) {
+      const c = cakismalar(
+        durum,
+        {
+          id: k.oturum?.id || k.ders?.id,
+          class_id: sinifId,
+          teacher_id: k.teacher_id,
+          subject: k.subject,
+          lesson_date: k.lesson_date,
+          start_time: k.start_time,
+          end_time: k.end_time
+        },
+        sinifAd,
+        ogretmenAd
+      );
+      if (c.length) m.set(k.key, c);
+    }
+    return m;
+  }, [kalemler, durum, sinifId, sinifAd, ogretmenAd]);
+
   const satirlar = useMemo(() => {
     const set = new Set<string>(ekSatirlar);
     for (const k of kalemler) set.add(satirAnahtar(k.start_time, k.end_time));
     return [...set].sort((a, b) => dk(a.split('|')[0]) - dk(b.split('|')[0]) || dk(a.split('|')[1]) - dk(b.split('|')[1]));
   }, [kalemler, ekSatirlar]);
+
+  /**
+   * Bir ders seçiliyken / sürüklenirken: öğretmeninin başka sınıfta dersi olduğu hücreler.
+   * anahtar "gün|bas|bit" → "Öğretmen çakışması: ..." cümlesi
+   */
+  const tasinan = surukle || secili;
+  const doluHucreler = useMemo(() => {
+    const m = new Map<string, string>();
+    const k = tasinan ? kalemler.find((x) => x.key === tasinan) : null;
+    if (!k || !k.teacher_id) return m;
+    for (const gun of gunler) {
+      for (const satir of satirlar) {
+        const [bas, bit] = satir.split('|');
+        const c = cakismalar(
+          durum,
+          {
+            id: k.oturum?.id || k.ders?.id,
+            class_id: sinifId,
+            teacher_id: k.teacher_id,
+            subject: k.subject,
+            lesson_date: gun,
+            start_time: bas,
+            end_time: bit
+          },
+          sinifAd,
+          ogretmenAd
+        ).find((x) => x.startsWith('Öğretmen'));
+        if (c) m.set(`${gun}|${satir}`, c);
+      }
+    }
+    return m;
+  }, [tasinan, kalemler, gunler, durum, sinifId, sinifAd, ogretmenAd, satirlar]);
 
   const hucreKalemleri = (gun: string, satir: string) =>
     kalemler.filter((k) => k.lesson_date === gun && satirAnahtar(k.start_time, k.end_time) === satir);
@@ -299,7 +355,7 @@ export default function ProgramCizelgesi({
         <span className="flex items-center gap-1 text-slate-600">
           <Move className="h-4 w-4 text-indigo-700" />
           Dersi sürükleyip bırakın ya da derse tıklayıp hedef hücreye tıklayın. Dolu hücreye bırakırsanız iki ders yer değiştirir.
-          Kaldırmak için dersin üzerindeki çöp kutusuna basın.
+          Kaldırmak için dersin üzerindeki çöp kutusuna basın. Ders seçiliyken öğretmenin başka sınıfta dersi olan saatler kırmızı görünür.
         </span>
         <div className="ml-auto flex flex-wrap items-center gap-2">
           <label className="flex items-center gap-1.5 text-slate-700">
@@ -318,6 +374,28 @@ export default function ProgramCizelgesi({
           </button>
         </div>
       </div>
+
+      {kalemCakisma.size ? (
+        <details className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900" open={kalemCakisma.size <= 6}>
+          <summary className="cursor-pointer font-semibold">
+            <AlertTriangle className="mr-1 inline h-4 w-4" />
+            {kalemCakisma.size} derste çakışma var (kırmızı çerçeveli dersler)
+          </summary>
+          <ul className="mt-1 space-y-0.5">
+            {kalemler
+              .filter((k) => kalemCakisma.has(k.key))
+              .sort((a, b) => a.lesson_date.localeCompare(b.lesson_date) || dk(a.start_time) - dk(b.start_time))
+              .map((k) => (
+                <li key={k.key}>
+                  <b>
+                    {tarihKisa(k.lesson_date)} {gunAdi(k.lesson_date)} {k.start_time} · {k.subject.replace(HAZIRLIK_RE, '')}
+                  </b>
+                  : {kalemCakisma.get(k.key)!.join(' · ')}
+                </li>
+              ))}
+          </ul>
+        </details>
+      ) : null}
 
       {seciliKalem ? (
         <div className="flex items-center justify-between rounded-lg bg-indigo-50 px-3 py-2 text-sm text-indigo-950">
@@ -384,6 +462,7 @@ export default function ProgramCizelgesi({
                     const hk = `${gun}|${satir}`;
                     const icerik = hucreKalemleri(gun, satir);
                     const hedef = hedefUstu === hk;
+                    const ogrDolu = doluHucreler.get(hk);
                     return (
                       <td
                         key={gun}
@@ -401,13 +480,29 @@ export default function ProgramCizelgesi({
                         onClick={() => {
                           if (secili) void birak(secili, gun, satir);
                         }}
+                        title={ogrDolu || undefined}
                         className={`group h-16 min-w-[150px] border border-slate-200 p-1 align-top ${
-                          hedef ? 'bg-indigo-100 outline outline-2 outline-indigo-400' : secili ? 'cursor-pointer hover:bg-indigo-50' : ''
+                          hedef
+                            ? ogrDolu
+                              ? 'bg-red-100 outline outline-2 outline-red-500'
+                              : 'bg-indigo-100 outline outline-2 outline-indigo-400'
+                            : ogrDolu
+                              ? 'bg-red-50'
+                              : secili
+                                ? 'cursor-pointer hover:bg-indigo-50'
+                                : ''
                         }`}
                       >
+                        {ogrDolu ? (
+                          <span className="mb-1 flex items-start gap-0.5 rounded bg-red-100 px-1 py-0.5 text-[10px] font-semibold leading-tight text-red-800">
+                            <AlertTriangle className="mt-px h-3 w-3 shrink-0" />
+                            {ogrDolu.replace(/^Öğretmen çakışması: /, '')}
+                          </span>
+                        ) : null}
                         {icerik.map((k) => {
                           const t = subjectTheme(k.subject.replace(HAZIRLIK_RE, ''));
                           const sec = secili === k.key;
+                          const cak = kalemCakisma.get(k.key);
                           return (
                             <div
                               key={k.key}
@@ -433,10 +528,13 @@ export default function ProgramCizelgesi({
                                 e.stopPropagation();
                                 if (k.oturum) onDuzenle(k.oturum);
                               }}
-                              title={k.oturum ? 'Sürükleyin · tıklayıp seçin · çift tıklayıp düzenleyin' : 'Sürükleyin · tıklayıp seçin'}
+                              title={
+                                (cak ? `${cak.join('\n')}\n\n` : '') +
+                                (k.oturum ? 'Sürükleyin · tıklayıp seçin · çift tıklayıp düzenleyin' : 'Sürükleyin · tıklayıp seçin')
+                              }
                               style={{ background: t.bg, borderLeftColor: t.bd, color: t.fg }}
                               className={`group/chip relative mb-1 cursor-grab select-none rounded-lg border-l-4 px-2 py-1.5 pr-6 last:mb-0 active:cursor-grabbing ${
-                                sec ? 'ring-2 ring-[#173b70] ring-offset-1' : ''
+                                sec ? 'ring-2 ring-[#173b70] ring-offset-1' : cak ? 'ring-2 ring-red-500' : ''
                               } ${k.tur === 'taslak' ? 'border-dashed opacity-80' : ''}`}
                             >
                               <button
@@ -458,6 +556,14 @@ export default function ProgramCizelgesi({
                               <span className="block text-[11px] leading-tight text-slate-600">
                                 {k.teacher_id ? ogretmenAd.get(k.teacher_id) || 'Öğretmen' : 'Öğretmen yok'}
                               </span>
+                              {cak ? (
+                                <span className="mt-0.5 flex items-start gap-0.5 text-[10px] font-semibold leading-tight text-red-700">
+                                  <AlertTriangle className="mt-px h-3 w-3 shrink-0" />
+                                  {cak[0].replace(/^(Öğretmen çakışması|Sınıfın bu saatte başka dersi var): ?/, (_, a: string) =>
+                                    a.startsWith('Öğretmen') ? 'Çakışma: ' : 'Sınıfta: '
+                                  )}
+                                </span>
+                              ) : null}
                               {k.hazirlik ? (
                                 <span
                                   className={`mt-0.5 inline-block rounded-full px-1.5 text-[10px] font-bold ${

@@ -5,6 +5,7 @@ import { apiFetch } from '../../lib/session';
 import type { Ders, Durum, Mesgul, Satir } from './YaziliProgramPage';
 import { ortakIptal, ortakNotu, ortakOlustur, ortakTasi, siniftakiBaglar } from './ortak';
 import { etutMu } from './oturumIslem';
+import { cakismalar } from './cakisma';
 import ProgramCizelgesi from './ProgramCizelgesi';
 
 const GUN_ADI = ['Pazar', 'Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi'];
@@ -13,8 +14,6 @@ const dk = (t: string) => {
   const m = String(t || '').match(/^(\d{1,2}):(\d{2})/);
   return m ? Number(m[1]) * 60 + Number(m[2]) : NaN;
 };
-const cakisir = (a: { start_time: string; end_time: string }, b: { start_time: string; end_time: string }) =>
-  dk(a.start_time) < dk(b.end_time) && dk(b.start_time) < dk(a.end_time);
 const tarihNesne = (iso: string) => {
   const [y, m, d] = iso.split('-').map(Number);
   return new Date(Date.UTC(y, m - 1, d));
@@ -98,19 +97,8 @@ export default function SinifProgrami({
     [durum.sessions, sinifId, tumSiniflar]
   );
 
-  /** Gerçek dersin çakışmaları: aynı gün başka oturum / hazırlık dersi (öğretmen veya sınıf) */
-  const oturumSorunlari = (o: Oturum) => {
-    const out: string[] = [];
-    const ayniGun = (durum.sessions as Oturum[]).filter((x) => x.id !== o.id && x.lesson_date === o.lesson_date && cakisir(x, o));
-    const taslak = durum.items.filter((x) => x.lesson_date === o.lesson_date && cakisir(x, o));
-    const sinif = [...ayniGun, ...taslak].find((x) => x.class_id === o.class_id);
-    if (sinif) out.push(`Sınıfın aynı saatte başka dersi var (${sinif.subject})`);
-    if (o.teacher_id) {
-      const ogr = [...ayniGun, ...taslak].find((x) => x.teacher_id === o.teacher_id);
-      if (ogr) out.push(`Öğretmenin aynı saatte dersi var (${sinifAd.get(ogr.class_id) || 'başka sınıf'} · ${ogr.subject})`);
-    }
-    return out;
-  };
+  /** Gerçek dersin çakışmaları (öğretmen / sınıf; farklı sınıfta aynı ders = ortak ders, çakışma değil) */
+  const oturumSorunlari = (o: Oturum) => cakismalar(durum, o, sinifAd, ogretmenAd);
 
   const iptalEt = async (o: Oturum) => {
     if (!window.confirm(`${gunEtiketi(o.lesson_date)} ${o.start_time} ${o.subject} dersi iptal edilsin mi?\nÖğrenciler bu dersi artık görmez.`)) return;
@@ -399,6 +387,25 @@ function OturumPenceresi({
   }, [durum.rows, durum.sessions, sinifId]);
 
   const gecerli = /^\d{4}-\d{2}-\d{2}$/.test(tarih) && dk(bit) > dk(bas) && ders.trim().length > 0;
+  /** Seçilen tarih/saat/öğretmen için canlı çakışma kontrolü (kaydetmeden önce görünür) */
+  const canliCakisma = useMemo(() => {
+    if (!gecerli) return [] as string[];
+    const ad = new Map(durum.teachers.map((t) => [t.id, t.name]));
+    return cakismalar(
+      durum,
+      {
+        id: o?.id,
+        class_id: sinifId,
+        teacher_id: ogretmen || o?.teacher_id || null,
+        subject: ders.trim(),
+        lesson_date: tarih,
+        start_time: bas,
+        end_time: bit
+      },
+      sinifAd,
+      ad
+    );
+  }, [gecerli, durum, o, sinifId, ogretmen, ders, tarih, bas, bit, sinifAd]);
   const hazirlikSatiri = [...satirMap.values()].find(
     (r) => r.class_id === sinifId && hazirlikMi(ders) && ders.toLocaleLowerCase('tr').startsWith(r.subject.toLocaleLowerCase('tr'))
   );
@@ -522,6 +529,15 @@ function OturumPenceresi({
           </select>
         </label>
 
+        {canliCakisma.length ? (
+          <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-2 text-xs text-red-900">
+            {canliCakisma.map((c) => (
+              <p key={c} className="flex items-start gap-1">
+                <AlertTriangle className="mt-px h-3.5 w-3.5 shrink-0" /> {c}
+              </p>
+            ))}
+          </div>
+        ) : null}
         {uyari ? (
           <p className="mt-3 flex items-center gap-1 rounded-lg bg-amber-50 p-2 text-xs text-amber-900">
             <AlertTriangle className="h-3.5 w-3.5 shrink-0" /> {uyari}
