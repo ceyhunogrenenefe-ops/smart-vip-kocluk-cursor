@@ -39,6 +39,7 @@ import { copyAcademicStudyGuestJoinShareText } from '../lib/bbbGuestJoin';
 import { AppModal } from '../components/ui/AppModal';
 import { VirtualOpticInfoModal } from '../components/academic/VirtualOpticInfoModal';
 import StudentEdesisExamPanel from '../components/edesis/StudentEdesisExamPanel';
+import { EtutTopluYoklama } from '../components/academic/EtutTopluYoklama';
 
 type TabKey = 'study' | 'exam' | 'pool';
 
@@ -556,6 +557,9 @@ export default function AcademicCenter() {
                             {guestBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
                             Davet linki
                           </button>
+                        ) : null}
+                        {!isStudent ? (
+                          <EtutTopluYoklama room={x.key} label={x.label} institutionId={institutionId} />
                         ) : null}
                       </div>
                     </div>
