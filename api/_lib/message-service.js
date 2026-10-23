@@ -16,6 +16,24 @@ import { sendWhatsAppUsingTemplateRow } from './whatsapp-outbound.js';
 import { sendMetaTextMessage, metaWhatsAppConfigured } from './meta-whatsapp.js';
 
 /**
+ * Alıcı, gönderen hattın kendi numarası mı?
+ *
+ * Gateway hattı kendi numarasına mesaj gönderince WhatsApp mesajı telefonda
+ * açamıyor ve "Mesaj bekleniyor" gösteriyor (ör. koçun numarası test
+ * öğrencisinin telefonu olarak kayıtlı). linkedPhone, gateway'in bildirdiği
+ * hat numarasıdır; sonunda cihaz eki (":12") rakam olarak kalabildiği için
+ * önek olarak karşılaştırılır.
+ * @param {string} recipientPhone E.164 ya da rakamlar
+ * @param {string|null|undefined} linkedPhone gateway status.linkedPhone
+ */
+export function isSelfRecipient(recipientPhone, linkedPhone) {
+  const alici = String(recipientPhone || '').replace(/\D/g, '');
+  const hat = String(linkedPhone || '').split(/[:@]/)[0].replace(/\D/g, '');
+  if (alici.length < 10 || hat.length < 10) return false;
+  return hat === alici || (hat.startsWith(alici) && hat.length - alici.length <= 3);
+}
+
+/**
  * Koç gateway oturum id (users.id) — coaches.id üzerinden.
  * @param {string|null|undefined} coachId coaches.id
  * @param {string|null|undefined} coachUserId doğrudan users.id (opsiyonel)
@@ -152,6 +170,26 @@ async function sendViaCoachGateway({
       sid: null,
       gateway_message_id: null,
       meta_template_name: 'gateway_plain'
+    };
+  }
+
+  if (isSelfRecipient(phone, health.raw?.linkedPhone)) {
+    if (metaWhatsAppConfigured() && templateRow) {
+      const meta = await sendViaMetaApi({ phone, text, templateRow, vars, notificationType });
+      return { ...meta, fallback_from: 'coach_gateway_self_recipient' };
+    }
+    return {
+      ok: false,
+      channel: SEND_CHANNELS.COACH_GATEWAY,
+      error:
+        'Alıcı numara, mesajı gönderen WhatsApp hattının kendisi; WhatsApp kendine gönderilen mesajı "Mesaj bekleniyor" olarak gösterir. Öğrenci/veli telefonunu düzeltin.',
+      errorCode: 'SENDER_IS_RECIPIENT',
+      bodyPreview: text.slice(0, 800),
+      sid: null,
+      gateway_message_id: null,
+      meta_template_name: 'gateway_plain',
+      coach_session_id: sessionId,
+      logCode: 'SENDER_IS_RECIPIENT'
     };
   }
 
