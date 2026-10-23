@@ -54,6 +54,35 @@ export default function YaziliHatirlatmaPaneli() {
   const [gonderiliyor, setGonderiliyor] = useState(false);
   const [sonuclar, setSonuclar] = useState<Sonuc[] | null>(null);
   const [ilerleme, setIlerleme] = useState<{ bitti: number; toplam: number } | null>(null);
+  const [sinif, setSinif] = useState('all');
+
+  const sinifSecenek = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const t of liste || []) for (const e of t.eksikler) if (!m.has(e.class_id)) m.set(e.class_id, e.class_name);
+    return [...m.entries()]
+      .map(([id, ad]) => ({ id, ad }))
+      .sort((a, b) => a.ad.localeCompare(b.ad, 'tr', { numeric: true }));
+  }, [liste]);
+
+  // Sınıf seçiliyse yalnız o sınıfta PDF'i eksik öğretmenler ve o sınıfın satırları
+  const gorunen = useMemo(
+    () =>
+      (liste || [])
+        .map((t) => (sinif === 'all' ? t : { ...t, eksikler: t.eksikler.filter((e) => e.class_id === sinif) }))
+        .filter((t) => t.eksikler.length),
+    [liste, sinif]
+  );
+  const gorunenId = useMemo(() => new Set(gorunen.map((t) => t.teacher_id)), [gorunen]);
+  const seciliGorunen = useMemo(() => [...secili].filter((id) => gorunenId.has(id)), [secili, gorunenId]);
+
+  const sinifDegistir = (v: string) => {
+    setSinif(v);
+    const yeni = (liste || []).filter(
+      (t) => t.phone_ok && (v === 'all' || t.eksikler.some((e) => e.class_id === v))
+    );
+    setSecili(new Set(yeni.map((t) => t.teacher_id)));
+    setSonuclar(null);
+  };
 
   const getir = async () => {
     setHata(null);
@@ -75,6 +104,7 @@ export default function YaziliHatirlatmaPaneli() {
         return kayitli || j.template || '';
       });
       setSecili(new Set(teachers.filter((t) => t.phone_ok).map((t) => t.teacher_id)));
+      setSinif((v) => (v === 'all' || teachers.some((t) => t.eksikler.some((e) => e.class_id === v)) ? v : 'all'));
     } catch (e) {
       setHata(e instanceof Error ? e.message : 'Liste alınamadı');
     }
@@ -85,9 +115,9 @@ export default function YaziliHatirlatmaPaneli() {
   }, []);
 
   const ornek = useMemo(() => {
-    const ilk = liste?.find((t) => secili.has(t.teacher_id)) || liste?.[0];
+    const ilk = gorunen.find((t) => secili.has(t.teacher_id)) || gorunen[0];
     return metin.replace(/\{\{\s*ogretmen_adi\s*\}\}/g, ilk ? adBicimle(ilk.teacher_name) : 'Öğretmen Adı');
-  }, [metin, liste, secili]);
+  }, [metin, gorunen, secili]);
 
   const degistir = (id: string) =>
     setSecili((s) => {
@@ -108,7 +138,7 @@ export default function YaziliHatirlatmaPaneli() {
   };
 
   const gonder = async () => {
-    const ids = [...secili];
+    const ids = seciliGorunen;
     if (!ids.length) return;
     if (!metin.includes('{{ogretmen_adi}}') && !window.confirm('Metinde {{ogretmen_adi}} yok; mesajda öğretmenin adı geçmeyecek. Devam edilsin mi?')) return;
     if (!window.confirm(`${ids.length} öğretmene WhatsApp hatırlatması gönderilecek. Onaylıyor musunuz?`)) return;
@@ -200,6 +230,27 @@ export default function YaziliHatirlatmaPaneli() {
             </div>
           </div>
 
+          <div className="flex flex-wrap items-end gap-3">
+            <label className="text-sm text-slate-700">
+              Sınıf
+              <select
+                value={sinif}
+                onChange={(e) => sinifDegistir(e.target.value)}
+                className="mt-1 block w-full min-w-56 rounded-lg border border-slate-300 bg-white px-3 py-2"
+              >
+                <option value="all">Tüm sınıflar ({liste.length} öğretmen)</option>
+                {sinifSecenek.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.ad} ({(liste || []).filter((t) => t.eksikler.some((e) => e.class_id === c.id)).length} öğretmen)
+                  </option>
+                ))}
+              </select>
+            </label>
+            <span className="pb-2 text-sm text-slate-600">
+              {gorunen.length} öğretmen gösteriliyor · {seciliGorunen.length} seçili
+            </span>
+          </div>
+
           <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
             <table className="w-full min-w-[640px] text-sm">
               <thead className="bg-slate-50 text-left text-xs font-semibold text-slate-600">
@@ -208,9 +259,9 @@ export default function YaziliHatirlatmaPaneli() {
                     <input
                       type="checkbox"
                       aria-label="Tümünü seç"
-                      checked={liste.filter((t) => t.phone_ok).every((t) => secili.has(t.teacher_id))}
+                      checked={gorunen.filter((t) => t.phone_ok).every((t) => secili.has(t.teacher_id))}
                       onChange={(e) =>
-                        setSecili(e.target.checked ? new Set(liste.filter((t) => t.phone_ok).map((t) => t.teacher_id)) : new Set())
+                        setSecili(e.target.checked ? new Set(gorunen.filter((t) => t.phone_ok).map((t) => t.teacher_id)) : new Set())
                       }
                     />
                   </th>
@@ -220,7 +271,7 @@ export default function YaziliHatirlatmaPaneli() {
                 </tr>
               </thead>
               <tbody>
-                {liste.map((t) => (
+                {gorunen.map((t) => (
                   <tr key={t.teacher_id} className="border-t border-slate-100 align-top">
                     <td className="px-3 py-2">
                       <input
@@ -253,14 +304,14 @@ export default function YaziliHatirlatmaPaneli() {
           <div className="flex flex-wrap items-center gap-3">
             <button
               type="button"
-              disabled={gonderiliyor || !secili.size || !metin.trim()}
+              disabled={gonderiliyor || !seciliGorunen.length || !metin.trim()}
               onClick={() => void gonder()}
               className="inline-flex items-center gap-2 rounded-lg bg-[#173b70] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
             >
               {gonderiliyor ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
               {gonderiliyor
                 ? `Gönderiliyor… ${ilerleme ? `${ilerleme.bitti}/${ilerleme.toplam}` : ''}`
-                : `${secili.size} öğretmene WhatsApp gönder`}
+                : `${seciliGorunen.length} öğretmene WhatsApp gönder`}
             </button>
             <span className="text-xs text-slate-500">
               Mesaj, öğretmen ders hatırlatmalarının gittiği WhatsApp hattından gönderilir. Etüt, deneme, rehberlik ve ödev
