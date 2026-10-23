@@ -3,10 +3,17 @@ import { ClipboardList, Loader2 } from 'lucide-react';
 import { AppModal, AppModalBody, AppModalFooter, AppModalHeader } from '../ui/AppModal';
 import { apiFetch } from '../../lib/session';
 import { todayYmd } from '../../lib/etutSession';
-import { buSaattekiEtutler, type EtutOturum, type EtutSinif } from '../../lib/etutTopluYoklama';
+import {
+  acikDilimSira,
+  bugununEtutleri,
+  etutDilimleri,
+  type EtutDilim,
+  type EtutOturum,
+  type EtutSinif
+} from '../../lib/etutTopluYoklama';
 import type { StudyEntryKey } from '../../lib/academicCenterLinks';
 
-type Durum = 'present' | 'absent' | 'late';
+type Durum = 'present' | 'absent' | 'late' | 'excused';
 
 type Satir = {
   session_id: string;
@@ -14,6 +21,7 @@ type Satir = {
   student_name: string;
   className: string;
   saat: string;
+  dilim: number;
   status: Durum;
   camera_status: 'on' | 'off' | null;
 };
@@ -21,13 +29,19 @@ type Satir = {
 function durumYap(st: string): Durum {
   if (st === 'absent') return 'absent';
   if (st === 'late') return 'late';
+  if (st === 'excused') return 'excused';
   return 'present';
 }
 
 function kameraYap(status: Durum, raw: string): 'on' | 'off' | null {
-  if (status === 'absent') return null;
+  if (status === 'absent' || status === 'excused') return null;
   if (raw === 'off' || raw === 'closed') return 'off';
   return 'on';
+}
+
+function kameraDurumu(status: Durum, mevcut: 'on' | 'off' | null): 'on' | 'off' | null {
+  if (status === 'absent' || status === 'excused') return null;
+  return mevcut === 'off' ? 'off' : 'on';
 }
 
 export function EtutTopluYoklama({
@@ -45,6 +59,9 @@ export function EtutTopluYoklama({
   const [hata, setHata] = useState<string | null>(null);
   const [bilgi, setBilgi] = useState<string | null>(null);
   const [satirlar, setSatirlar] = useState<Satir[]>([]);
+  const [dilimler, setDilimler] = useState<EtutDilim[]>([]);
+  const [seciliDilim, setSeciliDilim] = useState(1);
+  const [sinif, setSinif] = useState('');
   const [arama, setArama] = useState('');
 
   const kapat = () => {
@@ -58,6 +75,9 @@ export function EtutTopluYoklama({
     setHata(null);
     setBilgi(null);
     setSatirlar([]);
+    setDilimler([]);
+    setSeciliDilim(1);
+    setSinif('');
     setArama('');
     try {
       const today = todayYmd();
@@ -81,17 +101,24 @@ export function EtutTopluYoklama({
       }
       const siniflar = (Array.isArray(sinifJson.data) ? sinifJson.data : []) as EtutSinif[];
       const oturumlar = (Array.isArray(oturumJson.data) ? oturumJson.data : []) as EtutOturum[];
-      const simdi = new Date();
-      const secilen = buSaattekiEtutler({
+      const secilen = bugununEtutleri({
         room,
         sessions: oturumlar,
         classes: siniflar,
-        today,
-        nowMinutes: simdi.getHours() * 60 + simdi.getMinutes()
+        today
       });
+      const dilimListe = etutDilimleri(secilen);
+      setDilimler(dilimListe);
+      const simdi = new Date();
+      const acik = acikDilimSira(dilimListe, simdi.getHours() * 60 + simdi.getMinutes());
+      setSeciliDilim(acik);
       if (!secilen.length) {
-        setBilgi('Bu saatte bu etüt grubunda canlı ders yok. Yoklama, o saatte etüdü olan sınıfların listesinden gelir.');
+        setBilgi('Bugün bu etüt grubunda canlı etüt yok. Yoklama, o gün etüdü olan sınıfların listesinden gelir.');
         return;
+      }
+      const dilimNo = new Map<string, number>();
+      for (const d of dilimListe) {
+        for (const o of d.oturumlar) dilimNo.set(o.id, d.sira);
       }
       const parcalar = await Promise.all(
         secilen.map(async (oturum) => {
@@ -122,6 +149,7 @@ export function EtutTopluYoklama({
                 student_name: String(row.student_name || '').trim() || 'Öğrenci',
                 className: oturum.className,
                 saat,
+                dilim: dilimNo.get(oturum.id) || 1,
                 status,
                 camera_status: kameraYap(status, kamera.get(id) || '')
               } satisfies Satir;
@@ -131,10 +159,8 @@ export function EtutTopluYoklama({
       );
       const liste = parcalar.flat().sort((a, b) => a.student_name.localeCompare(b.student_name, 'tr'));
       setSatirlar(liste);
-      const gruplar = [...new Set(secilen.map((s) => `${s.className} ${String(s.start_time).slice(0, 5)}`))];
-      setBilgi(gruplar.length ? gruplar.join(' · ') : null);
       if (!liste.length) {
-        setBilgi('Bu saatteki etütlerde yoklama listesinde öğrenci yok.');
+        setBilgi('Bugünkü etütlerde yoklama listesinde öğrenci yok.');
       }
     } catch {
       setHata('Yoklama listesi açılamadı.');
@@ -143,23 +169,34 @@ export function EtutTopluYoklama({
     }
   };
 
+  const siniflar = useMemo(() => {
+    const adlar = new Set(satirlar.filter((s) => s.dilim === seciliDilim).map((s) => s.className));
+    return [...adlar].sort((a, b) => a.localeCompare(b, 'tr'));
+  }, [satirlar, seciliDilim]);
+
   const gorunen = useMemo(() => {
     const q = arama.trim().toLocaleLowerCase('tr-TR');
-    if (!q) return satirlar;
-    return satirlar.filter((s) => `${s.student_name} ${s.className}`.toLocaleLowerCase('tr-TR').includes(q));
-  }, [arama, satirlar]);
+    return satirlar.filter((s) => {
+      if (s.dilim !== seciliDilim) return false;
+      if (sinif && s.className !== sinif) return false;
+      if (!q) return true;
+      return `${s.student_name} ${s.className}`.toLocaleLowerCase('tr-TR').includes(q);
+    });
+  }, [arama, satirlar, seciliDilim, sinif]);
 
   const ozet = useMemo(() => {
     let present = 0;
     let late = 0;
     let absent = 0;
-    for (const s of satirlar) {
+    let excused = 0;
+    for (const s of gorunen) {
       if (s.status === 'present') present += 1;
       else if (s.status === 'late') late += 1;
+      else if (s.status === 'excused') excused += 1;
       else absent += 1;
     }
-    return { total: satirlar.length, present, late, absent };
-  }, [satirlar]);
+    return { total: gorunen.length, present, late, absent, excused };
+  }, [gorunen]);
 
   const durumSec = (sessionId: string, studentId: string, status: Durum) => {
     setSatirlar((prev) =>
@@ -168,7 +205,7 @@ export function EtutTopluYoklama({
           ? {
               ...s,
               status,
-              camera_status: status === 'absent' ? null : s.camera_status === 'off' ? 'off' : 'on'
+              camera_status: kameraDurumu(status, s.camera_status)
             }
           : s
       )
@@ -185,11 +222,11 @@ export function EtutTopluYoklama({
 
   const tumunu = (status: Durum) => {
     setSatirlar((prev) =>
-      prev.map((s) => ({
-        ...s,
-        status,
-        camera_status: status === 'absent' ? null : s.camera_status === 'off' ? 'off' : 'on'
-      }))
+      prev.map((s) => {
+        if (s.dilim !== seciliDilim) return s;
+        if (sinif && s.className !== sinif) return s;
+        return { ...s, status, camera_status: kameraDurumu(status, s.camera_status) };
+      })
     );
   };
 
@@ -199,7 +236,7 @@ export function EtutTopluYoklama({
     setHata(null);
     try {
       const gruplar = new Map<string, Satir[]>();
-      for (const s of satirlar) {
+      for (const s of satirlar.filter((row) => row.dilim === seciliDilim)) {
         const arr = gruplar.get(s.session_id) || [];
         arr.push(s);
         gruplar.set(s.session_id, arr);
@@ -214,7 +251,7 @@ export function EtutTopluYoklama({
                 student_id: row.student_id,
                 student_name: row.student_name,
                 status: row.status,
-                camera_status: row.status === 'absent' ? 'n_a' : row.camera_status || 'on'
+                camera_status: row.status === 'absent' || row.status === 'excused' ? 'n_a' : row.camera_status || 'on'
               }))
             })
           });
@@ -249,7 +286,7 @@ export function EtutTopluYoklama({
             <div>
               <h3 className="font-semibold text-slate-900">{label} yoklaması</h3>
               <p className="mt-0.5 text-xs text-slate-600">
-                Bu saatteki etütler tek listede. Kayıt, her öğrencinin kendi sınıf dersine yazılır.
+                1. etüt ve 2. etüt ayrı. Kayıt, açık etütteki her öğrencinin kendi sınıf dersine yazılır.
               </p>
             </div>
             <button type="button" className="shrink-0 text-sm text-slate-500 hover:text-slate-800" onClick={kapat}>
@@ -271,11 +308,44 @@ export function EtutTopluYoklama({
                 ) : null}
                 {satirlar.length ? (
                   <>
-                    <div className="grid grid-cols-2 gap-x-3 gap-y-1 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700 sm:grid-cols-4">
+                    <div className="flex flex-wrap gap-1.5">
+                      {dilimler.map((d) => (
+                        <button
+                          key={d.sira}
+                          type="button"
+                          onClick={() => {
+                            setSeciliDilim(d.sira);
+                            setSinif('');
+                          }}
+                          className={`min-h-[36px] rounded-lg border px-3 text-xs font-semibold ${
+                            seciliDilim === d.sira
+                              ? 'border-indigo-600 bg-indigo-600 text-white'
+                              : 'border-slate-200 bg-white text-slate-700'
+                          }`}
+                        >
+                          {d.sira}. Etüt · {d.baslangic}–{d.bitis}
+                        </button>
+                      ))}
+                    </div>
+                    <select
+                      value={sinif}
+                      onChange={(e) => setSinif(e.target.value)}
+                      aria-label="Sınıf süz"
+                      className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                    >
+                      <option value="">Tüm sınıflar</option>
+                      {siniflar.map((ad) => (
+                        <option key={ad} value={ad}>
+                          {ad}
+                        </option>
+                      ))}
+                    </select>
+                    <div className="grid grid-cols-2 gap-x-3 gap-y-1 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700 sm:grid-cols-5">
                       <span>{ozet.total} öğrenci</span>
                       <span>{ozet.present} katıldı</span>
                       <span>{ozet.late} geç</span>
                       <span>{ozet.absent} katılmadı</span>
+                      <span>{ozet.excused} izinli</span>
                     </div>
                     <div className="flex flex-wrap gap-1.5">
                       <button
@@ -310,12 +380,13 @@ export function EtutTopluYoklama({
                             {row.className} · {row.saat}
                           </p>
                         </div>
-                        <div className="grid grid-cols-3 gap-1.5">
+                        <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
                           {(
                             [
                               { v: 'present' as const, label: 'Katıldı', active: 'bg-emerald-600 text-white border-emerald-600' },
                               { v: 'absent' as const, label: 'Katılmadı', active: 'bg-rose-600 text-white border-rose-600' },
-                              { v: 'late' as const, label: 'Geç', active: 'bg-amber-600 text-white border-amber-600' }
+                              { v: 'late' as const, label: 'Geç', active: 'bg-amber-600 text-white border-amber-600' },
+                              { v: 'excused' as const, label: 'İzinli', active: 'bg-violet-600 text-white border-violet-600' }
                             ] as const
                           ).map((opt) => (
                             <button
@@ -330,7 +401,7 @@ export function EtutTopluYoklama({
                             </button>
                           ))}
                         </div>
-                        {row.status !== 'absent' ? (
+                        {row.status === 'present' || row.status === 'late' ? (
                           <div className="grid grid-cols-2 gap-1.5">
                             <button
                               type="button"
@@ -373,7 +444,7 @@ export function EtutTopluYoklama({
             </button>
             <button
               type="button"
-              disabled={yukleniyor || kaydediyor || satirlar.length === 0}
+              disabled={yukleniyor || kaydediyor || gorunen.length === 0}
               className="min-h-[44px] flex-1 rounded-lg bg-amber-600 text-sm font-semibold text-white disabled:opacity-50"
               onClick={() => void kaydet()}
             >
