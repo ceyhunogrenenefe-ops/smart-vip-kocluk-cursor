@@ -64,3 +64,28 @@ test('ad biçimi ve mesaj', () => {
   assert.ok(m.startsWith('Değerli Öğretmenimiz Huri Balcı,\n'));
   assert.ok(m.endsWith('Online VIP Dershane Yönetimi'));
 });
+
+test('haftalık program dersleri de sayılır, yazılısız dersler atlanır', () => {
+  const liste = hatirlatmaListesi({
+    sessions: [
+      { class_id: 'c9', teacher_id: 't1', subject: 'MATEMATİK', lesson_date: null },
+      { class_id: 'c9', teacher_id: 't2', subject: 'ETÜT', lesson_date: null },
+      { class_id: 'c9', teacher_id: 't2', subject: 'DENEME SINAVI SÖZEL', lesson_date: null },
+      { class_id: 'c11a', teacher_id: 't2', subject: 'REHBERLİK', lesson_date: null },
+      { class_id: 'c11b', teacher_id: 't2', subject: 'ÖDEV & KİTAP OKUMA', lesson_date: null },
+      { class_id: 'c11a', teacher_id: 't1', subject: 'Matematik (Yazılıya Hazırlık)', lesson_date: '2026-11-01' },
+      { class_id: 'c11a', teacher_id: 't1', subject: 'MATEMATİK', lesson_date: null }
+    ],
+    files: [],
+    classes,
+    users
+  });
+  assert.deepEqual(liste.map((t) => t.teacher_id), ['t1']);
+  assert.deepEqual(
+    liste[0].eksikler.map((e) => [e.class_name, e.ilk_ders]),
+    [
+      ['11 A', '2026-11-01'],
+      ['9-A', null]
+    ]
+  );
+});

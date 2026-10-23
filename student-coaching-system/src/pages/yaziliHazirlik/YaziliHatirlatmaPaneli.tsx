@@ -14,6 +14,7 @@ type Ogretmen = {
 type Sonuc = { teacher_id: string; teacher_name?: string; ok: boolean; error?: string };
 
 const METIN_ANAHTARI = 'yazili_hatirlatma_metni_v1';
+const GRUP = 10;
 
 function gun(t: string | null) {
   if (!t) return '';
@@ -52,6 +53,7 @@ export default function YaziliHatirlatmaPaneli() {
   const [secili, setSecili] = useState<Set<string>>(new Set());
   const [gonderiliyor, setGonderiliyor] = useState(false);
   const [sonuclar, setSonuclar] = useState<Sonuc[] | null>(null);
+  const [ilerleme, setIlerleme] = useState<{ bitti: number; toplam: number } | null>(null);
 
   const getir = async () => {
     setHata(null);
@@ -112,27 +114,37 @@ export default function YaziliHatirlatmaPaneli() {
     if (!window.confirm(`${ids.length} öğretmene WhatsApp hatırlatması gönderilecek. Onaylıyor musunuz?`)) return;
     setGonderiliyor(true);
     setSonuclar(null);
+    setIlerleme({ bitti: 0, toplam: ids.length });
+    const tumu: Sonuc[] = [];
     try {
-      const res = await apiFetch('/api/yazili-hazirlik?op=reminder-send', {
-        method: 'POST',
-        body: JSON.stringify({ teacher_ids: ids, message: metin })
-      });
-      const j = (await res.json().catch(() => ({}))) as {
-        gonderilen?: number;
-        basarisiz?: number;
-        sonuclar?: Sonuc[];
-        hint?: string;
-        error?: string;
-      };
-      if (!res.ok) throw new Error(j.hint || j.error || 'Gönderilemedi');
-      setSonuclar(j.sonuclar || []);
-      if (j.gonderilen) toast.success(`${j.gonderilen} öğretmene hatırlatma gönderildi.`);
-      if (j.basarisiz) toast.error(`${j.basarisiz} öğretmene gönderilemedi; ayrıntı panelde.`);
+      // Sunucu süresini aşmamak için 10'arlı gruplar hâlinde gönderilir
+      for (let i = 0; i < ids.length; i += GRUP) {
+        const grup = ids.slice(i, i + GRUP);
+        const res = await apiFetch('/api/yazili-hazirlik?op=reminder-send', {
+          method: 'POST',
+          body: JSON.stringify({ teacher_ids: grup, message: metin })
+        });
+        const j = (await res.json().catch(() => ({}))) as { sonuclar?: Sonuc[]; hint?: string; error?: string };
+        if (!res.ok) {
+          const neden = j.hint || j.error || 'Gönderilemedi';
+          if (!tumu.length) throw new Error(neden);
+          tumu.push(...grup.map((id) => ({ teacher_id: id, ok: false, error: neden })));
+        } else {
+          tumu.push(...(j.sonuclar || []));
+        }
+        setIlerleme({ bitti: Math.min(ids.length, i + grup.length), toplam: ids.length });
+        setSonuclar([...tumu]);
+      }
+      const ok = tumu.filter((s) => s.ok).length;
+      const hatali = tumu.length - ok;
+      if (ok) toast.success(`${ok} öğretmene hatırlatma gönderildi.`);
+      if (hatali) toast.error(`${hatali} öğretmene gönderilemedi; ayrıntı panelde.`);
       await getir();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Gönderilemedi');
     } finally {
       setGonderiliyor(false);
+      setIlerleme(null);
     }
   };
 
@@ -153,8 +165,8 @@ export default function YaziliHatirlatmaPaneli() {
           <span className="block font-semibold text-slate-900">PDF hatırlatması</span>
           <span className="block text-sm text-slate-600">
             {liste.length
-              ? `Yazılıya hazırlık dersi planlı olup PDF yüklemeyen ${liste.length} öğretmen var.`
-              : 'Yazılıya hazırlık dersi planlı tüm öğretmenler PDF yüklemiş.'}
+              ? `Ders programındaki sınıflarından en az birine PDF yüklememiş ${liste.length} öğretmen var.`
+              : 'Ders programındaki tüm öğretmenler PDF yüklemiş.'}
           </span>
         </span>
         {liste.length ? (acik ? <ChevronUp className="h-5 w-5 text-slate-500" /> : <ChevronDown className="h-5 w-5 text-slate-500" />) : null}
@@ -246,9 +258,14 @@ export default function YaziliHatirlatmaPaneli() {
               className="inline-flex items-center gap-2 rounded-lg bg-[#173b70] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
             >
               {gonderiliyor ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-              {gonderiliyor ? 'Gönderiliyor…' : `${secili.size} öğretmene WhatsApp gönder`}
+              {gonderiliyor
+                ? `Gönderiliyor… ${ilerleme ? `${ilerleme.bitti}/${ilerleme.toplam}` : ''}`
+                : `${secili.size} öğretmene WhatsApp gönder`}
             </button>
-            <span className="text-xs text-slate-500">Mesaj, öğretmen ders hatırlatmalarının gittiği WhatsApp hattından gönderilir.</span>
+            <span className="text-xs text-slate-500">
+              Mesaj, öğretmen ders hatırlatmalarının gittiği WhatsApp hattından gönderilir. Etüt, deneme, rehberlik ve ödev
+              saati gibi yazılısı olmayan dersler listeye alınmaz.
+            </span>
           </div>
 
           {sonuclar ? (

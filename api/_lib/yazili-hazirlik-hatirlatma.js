@@ -1,8 +1,11 @@
 /**
  * Yazılıya hazırlık — PDF yüklemeyen öğretmene WhatsApp hatırlatması.
  *
- * Kimlere: yazılıya hazırlık dersi planlanmış (canlı derste "(Yazılıya Hazırlık)"
- * eki olan, bugün veya sonrası) ve o sınıfa henüz hiç PDF yüklememiş öğretmenler.
+ * Kimlere: haftalık ders programında bir sınıfa dersi olan (takip tablosuyla aynı
+ * kaynak) veya o sınıfa yazılıya hazırlık dersi planlanmış ("(Yazılıya Hazırlık)" ekli,
+ * bugün veya sonrası) ve o sınıfa henüz hiç PDF yüklememiş öğretmenler.
+ * Yazılısı olmayan dersler (etüt, deneme, rehberlik, ödev saati, kitap okuma,
+ * kodlama) hesaba katılmaz.
  * Ders adı eşleşmesi aranmaz: öğretmen o sınıfa herhangi bir PDF yüklediyse
  * hatırlatma gitmez (ör. "Edebiyat" dersi "Türk Dili ve Edebiyatı" olarak yüklenmiş olabilir).
  *
@@ -44,6 +47,21 @@ export function ogretmenAdiBicimle(ad) {
     .join(' ');
 }
 
+/** Yazılı sınavı olmayan program dersleri — bunlar için PDF beklenmez. */
+export function yaziliDisiDers(subject) {
+  const s = String(subject || '')
+    .toLocaleLowerCase('tr')
+    .replace(/ı/g, 'i')
+    .replace(/ş/g, 's')
+    .replace(/ç/g, 'c')
+    .replace(/ğ/g, 'g')
+    .replace(/ö/g, 'o')
+    .replace(/ü/g, 'u')
+    .trim();
+  if (!s) return true;
+  return ['etut', 'etud', 'deneme', 'rehberlik', 'odev', 'kitap okuma', 'kodlama'].some((k) => s.includes(k));
+}
+
 export function dersAdi(subject) {
   return String(subject || '')
     .replace(HAZIRLIK_EKI, '')
@@ -65,6 +83,7 @@ export function hatirlatmaListesi({ sessions, files, classes, users, sonGonderim
     const tid = String(s.teacher_id || '').trim();
     const cid = String(s.class_id || '').trim();
     if (!tid || !cid || !sinif.has(cid)) continue;
+    if (yaziliDisiDers(dersAdi(s.subject))) continue;
     const u = kullanici.get(tid);
     if (!u || u.is_active === false) continue;
     if (yukleyen.has(`${cid}::${tid}`)) continue;
@@ -95,15 +114,16 @@ export function hatirlatmaListesi({ sessions, files, classes, users, sonGonderim
       ...o,
       eksikler: [...o.eksikler.values()].sort(
         (a, b) =>
-          String(a.ilk_ders || '').localeCompare(String(b.ilk_ders || '')) ||
-          a.class_name.localeCompare(b.class_name, 'tr', { numeric: true })
+          String(a.ilk_ders || '9999').localeCompare(String(b.ilk_ders || '9999')) ||
+          a.class_name.localeCompare(b.class_name, 'tr', { numeric: true }) ||
+          a.ders.localeCompare(b.ders, 'tr')
       )
     }))
-    .sort(
-      (a, b) =>
-        String(a.eksikler[0]?.ilk_ders || '').localeCompare(String(b.eksikler[0]?.ilk_ders || '')) ||
-        a.teacher_name.localeCompare(b.teacher_name, 'tr')
-    );
+    .sort((a, b) => {
+      const ta = a.eksikler.find((e) => e.ilk_ders)?.ilk_ders || '9999';
+      const tb = b.eksikler.find((e) => e.ilk_ders)?.ilk_ders || '9999';
+      return ta.localeCompare(tb) || a.teacher_name.localeCompare(b.teacher_name, 'tr');
+    });
 }
 
 async function sonGonderimleri(teacherIds) {
@@ -139,6 +159,7 @@ export async function yaziliHatirlatmaListesi({ institutionId = null, allInstitu
 
   const bugun = getIstanbulDateString();
   const sessions = [];
+  const slots = [];
   const files = [];
   for (let i = 0; i < classIds.length; i += 300) {
     const grup = classIds.slice(i, i + 300);
@@ -151,6 +172,12 @@ export async function yaziliHatirlatmaListesi({ institutionId = null, allInstitu
       .gte('lesson_date', bugun);
     if (se) throw se;
     sessions.push(...(s || []));
+    const { data: sl, error: sle } = await supabaseAdmin
+      .from('class_weekly_slots')
+      .select('class_id,teacher_id,subject')
+      .in('class_id', grup);
+    if (sle) throw sle;
+    slots.push(...(sl || []));
     const { data: f, error: fe } = await supabaseAdmin
       .from(YAZILI_HAZIRLIK_TABLE)
       .select('class_id,teacher_user_id')
@@ -159,7 +186,9 @@ export async function yaziliHatirlatmaListesi({ institutionId = null, allInstitu
     files.push(...(f || []));
   }
 
-  const teacherIds = [...new Set(sessions.map((s) => String(s.teacher_id || '')).filter(Boolean))];
+  // Haftalık programdaki dersler tarihsiz, planlı yazılıya hazırlık dersleri tarihli gelir
+  const tumDersler = [...sessions, ...slots.map((sl) => ({ ...sl, lesson_date: null }))];
+  const teacherIds = [...new Set(tumDersler.map((s) => String(s.teacher_id || '')).filter(Boolean))];
   const users = [];
   for (let i = 0; i < teacherIds.length; i += 300) {
     const { data, error } = await supabaseAdmin
@@ -178,7 +207,7 @@ export async function yaziliHatirlatmaListesi({ institutionId = null, allInstitu
 
   const sonGonderim = await sonGonderimleri(teacherIds);
   const teachers = hatirlatmaListesi({
-    sessions: sessions.map((s) => ({ ...s, class_id: String(s.class_id), teacher_id: String(s.teacher_id || '') })),
+    sessions: tumDersler.map((s) => ({ ...s, class_id: String(s.class_id), teacher_id: String(s.teacher_id || '') })),
     files: files.map((f) => ({ class_id: String(f.class_id), teacher_user_id: String(f.teacher_user_id) })),
     classes: classes || [],
     users,
