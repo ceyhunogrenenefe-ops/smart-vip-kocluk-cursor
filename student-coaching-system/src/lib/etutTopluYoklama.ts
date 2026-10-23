@@ -34,26 +34,77 @@ export function etutSaatindeMi(start: string, end: string, simdi: number): boole
   return simdi >= a - 15 && simdi <= b + 20;
 }
 
-export function buSaattekiEtutler(input: {
+/** Ardışık başlangıçlar bu kadar dakikadan açıksa ayrı etüt sayılır. */
+const ETUT_DILIM_ARALIGI_DK = 40;
+
+export type SinifliEtut = EtutOturum & { className: string };
+
+export type EtutDilim = {
+  sira: number;
+  baslangic: string;
+  bitis: string;
+  oturumlar: SinifliEtut[];
+};
+
+export function bugununEtutleri(input: {
   room: StudyEntryKey;
   sessions: EtutOturum[];
   classes: EtutSinif[];
   today: string;
-  nowMinutes: number;
-}): Array<EtutOturum & { className: string }> {
+}): SinifliEtut[] {
   const byId = new Map(input.classes.map((c) => [c.id, c]));
-  const out: Array<EtutOturum & { className: string }> = [];
+  const out: SinifliEtut[] = [];
   for (const s of input.sessions) {
     if (String(s.lesson_date || '').slice(0, 10) !== input.today) continue;
     if (String(s.status || '') === 'cancelled') continue;
     if (!isEtutSubject(s.subject)) continue;
-    if (!etutSaatindeMi(s.start_time, s.end_time, input.nowMinutes)) continue;
     const cls = byId.get(s.class_id);
     if (!cls) continue;
     const rooms = studyRoomsForClassLevel(cls.class_level, cls.name);
     if (!rooms?.includes(input.room)) continue;
     out.push({ ...s, className: cls.name || 'Sınıf' });
   }
-  out.sort((a, b) => a.className.localeCompare(b.className, 'tr') || a.start_time.localeCompare(b.start_time));
+  out.sort((a, b) => a.start_time.localeCompare(b.start_time) || a.className.localeCompare(b.className, 'tr'));
   return out;
+}
+
+/** Günün etütlerini saate göre 1. etüt, 2. etüt diye ayırır. */
+export function etutDilimleri(oturumlar: SinifliEtut[]): EtutDilim[] {
+  const sorted = [...oturumlar].sort((a, b) => a.start_time.localeCompare(b.start_time));
+  const gruplar: SinifliEtut[][] = [];
+  let onceki: number | null = null;
+  for (const s of sorted) {
+    const bas = saatDakika(s.start_time);
+    const sonGrup = gruplar[gruplar.length - 1];
+    if (!sonGrup || bas == null || onceki == null || bas - onceki >= ETUT_DILIM_ARALIGI_DK) {
+      gruplar.push([s]);
+    } else {
+      sonGrup.push(s);
+    }
+    if (bas != null) onceki = bas;
+  }
+  return gruplar.map((grup, i) => {
+    const baslar = grup.map((s) => saatDakika(s.start_time)).filter((n): n is number => n != null);
+    const bitisler = grup.map((s) => saatDakika(s.end_time)).filter((n): n is number => n != null);
+    const ilk = Math.min(...baslar);
+    const son = Math.max(...bitisler);
+    const yaz = (dk: number) => `${String(Math.floor(dk / 60)).padStart(2, '0')}:${String(dk % 60).padStart(2, '0')}`;
+    return {
+      sira: i + 1,
+      baslangic: Number.isFinite(ilk) ? yaz(ilk) : String(grup[0].start_time).slice(0, 5),
+      bitis: Number.isFinite(son) ? yaz(son) : String(grup[0].end_time).slice(0, 5),
+      oturumlar: grup
+    };
+  });
+}
+
+export function acikDilimSira(dilimler: EtutDilim[], simdi: number): number {
+  for (const d of dilimler) {
+    if (d.oturumlar.some((o) => etutSaatindeMi(o.start_time, o.end_time, simdi))) return d.sira;
+  }
+  for (const d of dilimler) {
+    const bas = saatDakika(d.baslangic);
+    if (bas != null && bas > simdi) return d.sira;
+  }
+  return dilimler[dilimler.length - 1]?.sira ?? 1;
 }
