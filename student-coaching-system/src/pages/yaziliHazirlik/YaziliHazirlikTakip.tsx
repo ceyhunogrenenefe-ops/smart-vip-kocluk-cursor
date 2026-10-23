@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ChevronDown, ChevronRight, Loader2, RefreshCw, Search, X } from 'lucide-react';
 import { apiFetch } from '../../lib/session';
+import YaziliHatirlatmaPaneli from './YaziliHatirlatmaPaneli';
 
 type SlotKey = '1-1' | '1-2' | '2-1' | '2-2';
 type TakipSatir = {
@@ -179,6 +180,7 @@ export default function YaziliHazirlikTakip({ superAdmin }: { superAdmin: boolea
 
   return (
     <div className="space-y-4">
+      <YaziliHatirlatmaPaneli />
       <div className="grid gap-3 rounded-xl border border-slate-200 bg-white p-4 sm:grid-cols-2 lg:grid-cols-4">
         {kurumlarGoster ? (
           <label className="text-sm text-slate-700">

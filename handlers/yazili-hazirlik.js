@@ -6,6 +6,8 @@
  * GET  ?op=download&id=       — öğrenci / öğretmen indirme bağlantısı
  * DELETE ?id=                 — öğretmen kendi dosyasını kaldırır
  * GET  ?op=report             — yönetici: öğretmen bazında yükleme takibi
+ * GET  ?op=reminder-list      — yönetici: planlı dersi olup PDF yüklemeyen öğretmenler
+ * POST ?op=reminder-send      — yönetici: seçilenlere WhatsApp hatırlatması
  */
 import { requireAuthenticatedActor } from '../api/_lib/auth.js';
 import { actorRoleSet, roleSetHasAdmin, roleSetHasSuperAdmin } from '../api/_lib/actor-roles.js';
@@ -14,6 +16,11 @@ import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { errorMessage } from '../api/_lib/error-msg.js';
 import { getTeacherPanelClassIds } from '../api/_lib/teacher-class-scope.js';
 import { yaziliHazirlikRaporu } from '../api/_lib/yazili-hazirlik-rapor.js';
+import {
+  VARSAYILAN_METIN,
+  yaziliHatirlatmaGonder,
+  yaziliHatirlatmaListesi
+} from '../api/_lib/yazili-hazirlik-hatirlatma.js';
 import {
   ensureYaziliHazirlikBucket,
   ensureYaziliHazirlikSchema,
@@ -169,6 +176,31 @@ export default async function handler(req, res) {
       if (!superAdmin && !kurumId) return res.status(200).json({ institutions: [], teachers: [], files: [] });
       const rapor = await yaziliHazirlikRaporu({ institutionId: kurumId, allInstitutions: superAdmin && !kurumId });
       return res.status(200).json(rapor);
+    }
+
+    if (op === 'reminder-list' || op === 'reminder-send') {
+      const yonetici = roleSetHasAdmin(roles) || roleSetHasSuperAdmin(roles);
+      if (!yonetici) return res.status(403).json({ error: 'forbidden' });
+      const superAdmin = roleSetHasSuperAdmin(roles);
+      const kurumId = superAdmin ? null : String(actor.institution_id || '').trim();
+      if (!superAdmin && !kurumId) return res.status(200).json({ teachers: [], template: VARSAYILAN_METIN });
+      const kapsam = { institutionId: kurumId, allInstitutions: superAdmin };
+
+      if (req.method === 'GET' && op === 'reminder-list') {
+        return res.status(200).json(await yaziliHatirlatmaListesi(kapsam));
+      }
+      if (req.method === 'POST' && op === 'reminder-send') {
+        const body = parseBody(req);
+        const sonuc = await yaziliHatirlatmaGonder({
+          ...kapsam,
+          teacherIds: Array.isArray(body?.teacher_ids) ? body.teacher_ids : [],
+          metin: body?.message,
+          gonderenId: actor.sub || null
+        });
+        if (!sonuc.ok) return res.status(400).json({ error: 'send_failed', hint: sonuc.error });
+        return res.status(200).json(sonuc);
+      }
+      return res.status(405).json({ error: 'method_not_allowed' });
     }
 
     if (req.method === 'GET' && op === 'download') {

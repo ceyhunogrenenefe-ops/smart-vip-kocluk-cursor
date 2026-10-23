@@ -1,0 +1,275 @@
+import React, { useEffect, useMemo, useState } from 'react';
+import { BellRing, CheckCircle2, ChevronDown, ChevronUp, Loader2, Send, XCircle } from 'lucide-react';
+import { toast } from 'sonner';
+import { apiFetch } from '../../lib/session';
+
+type Eksik = { class_id: string; class_name: string; ders: string; ilk_ders: string | null };
+type Ogretmen = {
+  teacher_id: string;
+  teacher_name: string;
+  phone_ok: boolean;
+  eksikler: Eksik[];
+  last_sent: string | null;
+};
+type Sonuc = { teacher_id: string; teacher_name?: string; ok: boolean; error?: string };
+
+const METIN_ANAHTARI = 'yazili_hatirlatma_metni_v1';
+
+function gun(t: string | null) {
+  if (!t) return '';
+  try {
+    return new Date(`${t.slice(0, 10)}T12:00:00`).toLocaleDateString('tr-TR', { day: 'numeric', month: 'short' });
+  } catch {
+    return t;
+  }
+}
+function zaman(t: string | null) {
+  if (!t) return '';
+  try {
+    return new Date(t).toLocaleString('tr-TR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  } catch {
+    return '';
+  }
+}
+function adBicimle(ad: string) {
+  return ad
+    .trim()
+    .split(/\s+/)
+    .map((k) => {
+      const kucuk = k.toLocaleLowerCase('tr');
+      return kucuk.charAt(0).toLocaleUpperCase('tr') + kucuk.slice(1);
+    })
+    .join(' ');
+}
+
+/** Yazılıya hazırlık dersi planlı olup PDF yüklemeyen öğretmenlere WhatsApp hatırlatması. */
+export default function YaziliHatirlatmaPaneli() {
+  const [liste, setListe] = useState<Ogretmen[] | null>(null);
+  const [varsayilan, setVarsayilan] = useState('');
+  const [metin, setMetin] = useState('');
+  const [hata, setHata] = useState<string | null>(null);
+  const [acik, setAcik] = useState(false);
+  const [secili, setSecili] = useState<Set<string>>(new Set());
+  const [gonderiliyor, setGonderiliyor] = useState(false);
+  const [sonuclar, setSonuclar] = useState<Sonuc[] | null>(null);
+
+  const getir = async () => {
+    setHata(null);
+    try {
+      const res = await apiFetch('/api/yazili-hazirlik?op=reminder-list');
+      const j = (await res.json().catch(() => ({}))) as { teachers?: Ogretmen[]; template?: string; hint?: string; error?: string };
+      if (!res.ok) throw new Error(j.hint || j.error || 'Liste alınamadı');
+      const teachers = j.teachers || [];
+      setListe(teachers);
+      setVarsayilan(j.template || '');
+      setMetin((m) => {
+        if (m) return m;
+        let kayitli = '';
+        try {
+          kayitli = localStorage.getItem(METIN_ANAHTARI) || '';
+        } catch {
+          kayitli = '';
+        }
+        return kayitli || j.template || '';
+      });
+      setSecili(new Set(teachers.filter((t) => t.phone_ok).map((t) => t.teacher_id)));
+    } catch (e) {
+      setHata(e instanceof Error ? e.message : 'Liste alınamadı');
+    }
+  };
+
+  useEffect(() => {
+    void getir();
+  }, []);
+
+  const ornek = useMemo(() => {
+    const ilk = liste?.find((t) => secili.has(t.teacher_id)) || liste?.[0];
+    return metin.replace(/\{\{\s*ogretmen_adi\s*\}\}/g, ilk ? adBicimle(ilk.teacher_name) : 'Öğretmen Adı');
+  }, [metin, liste, secili]);
+
+  const degistir = (id: string) =>
+    setSecili((s) => {
+      const y = new Set(s);
+      if (y.has(id)) y.delete(id);
+      else y.add(id);
+      return y;
+    });
+
+  const metniKaydet = (v: string) => {
+    setMetin(v);
+    try {
+      if (v.trim() && v !== varsayilan) localStorage.setItem(METIN_ANAHTARI, v);
+      else localStorage.removeItem(METIN_ANAHTARI);
+    } catch {
+      /* tarayıcı depolaması kapalı olabilir */
+    }
+  };
+
+  const gonder = async () => {
+    const ids = [...secili];
+    if (!ids.length) return;
+    if (!metin.includes('{{ogretmen_adi}}') && !window.confirm('Metinde {{ogretmen_adi}} yok; mesajda öğretmenin adı geçmeyecek. Devam edilsin mi?')) return;
+    if (!window.confirm(`${ids.length} öğretmene WhatsApp hatırlatması gönderilecek. Onaylıyor musunuz?`)) return;
+    setGonderiliyor(true);
+    setSonuclar(null);
+    try {
+      const res = await apiFetch('/api/yazili-hazirlik?op=reminder-send', {
+        method: 'POST',
+        body: JSON.stringify({ teacher_ids: ids, message: metin })
+      });
+      const j = (await res.json().catch(() => ({}))) as {
+        gonderilen?: number;
+        basarisiz?: number;
+        sonuclar?: Sonuc[];
+        hint?: string;
+        error?: string;
+      };
+      if (!res.ok) throw new Error(j.hint || j.error || 'Gönderilemedi');
+      setSonuclar(j.sonuclar || []);
+      if (j.gonderilen) toast.success(`${j.gonderilen} öğretmene hatırlatma gönderildi.`);
+      if (j.basarisiz) toast.error(`${j.basarisiz} öğretmene gönderilemedi; ayrıntı panelde.`);
+      await getir();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Gönderilemedi');
+    } finally {
+      setGonderiliyor(false);
+    }
+  };
+
+  if (hata) return <p className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-950">Hatırlatma listesi: {hata}</p>;
+  if (!liste) return null;
+
+  const adIle = new Map(liste.map((t) => [t.teacher_id, t.teacher_name]));
+
+  return (
+    <div className="rounded-xl border border-amber-200 bg-amber-50/60">
+      <button
+        type="button"
+        onClick={() => setAcik((a) => !a)}
+        className="flex w-full items-center gap-3 px-4 py-3 text-left"
+      >
+        <BellRing className="h-5 w-5 shrink-0 text-amber-700" />
+        <span className="min-w-0 flex-1">
+          <span className="block font-semibold text-slate-900">PDF hatırlatması</span>
+          <span className="block text-sm text-slate-600">
+            {liste.length
+              ? `Yazılıya hazırlık dersi planlı olup PDF yüklemeyen ${liste.length} öğretmen var.`
+              : 'Yazılıya hazırlık dersi planlı tüm öğretmenler PDF yüklemiş.'}
+          </span>
+        </span>
+        {liste.length ? (acik ? <ChevronUp className="h-5 w-5 text-slate-500" /> : <ChevronDown className="h-5 w-5 text-slate-500" />) : null}
+      </button>
+
+      {acik && liste.length ? (
+        <div className="space-y-4 border-t border-amber-200 px-4 pb-4 pt-3">
+          <div className="grid gap-4 lg:grid-cols-2">
+            <label className="block text-sm text-slate-700">
+              Mesaj
+              <textarea
+                value={metin}
+                onChange={(e) => metniKaydet(e.target.value)}
+                rows={6}
+                className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+              />
+              <span className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                {'{{ogretmen_adi}}'} her öğretmenin adıyla değişir.
+                {metin !== varsayilan ? (
+                  <button type="button" className="font-semibold text-[#173b70] underline" onClick={() => metniKaydet(varsayilan)}>
+                    Varsayılan metne dön
+                  </button>
+                ) : null}
+              </span>
+            </label>
+            <div className="text-sm text-slate-700">
+              Önizleme
+              <div className="mt-1 whitespace-pre-wrap rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-slate-800">
+                {ornek}
+              </div>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
+            <table className="w-full min-w-[640px] text-sm">
+              <thead className="bg-slate-50 text-left text-xs font-semibold text-slate-600">
+                <tr>
+                  <th className="w-10 px-3 py-2">
+                    <input
+                      type="checkbox"
+                      aria-label="Tümünü seç"
+                      checked={liste.filter((t) => t.phone_ok).every((t) => secili.has(t.teacher_id))}
+                      onChange={(e) =>
+                        setSecili(e.target.checked ? new Set(liste.filter((t) => t.phone_ok).map((t) => t.teacher_id)) : new Set())
+                      }
+                    />
+                  </th>
+                  <th className="px-3 py-2">Öğretmen</th>
+                  <th className="px-3 py-2">PDF yüklenmeyen sınıflar</th>
+                  <th className="px-3 py-2">Son hatırlatma</th>
+                </tr>
+              </thead>
+              <tbody>
+                {liste.map((t) => (
+                  <tr key={t.teacher_id} className="border-t border-slate-100 align-top">
+                    <td className="px-3 py-2">
+                      <input
+                        type="checkbox"
+                        disabled={!t.phone_ok}
+                        checked={secili.has(t.teacher_id)}
+                        onChange={() => degistir(t.teacher_id)}
+                        aria-label={`${t.teacher_name} seç`}
+                      />
+                    </td>
+                    <td className="px-3 py-2 font-medium text-slate-800">
+                      {adBicimle(t.teacher_name)}
+                      {!t.phone_ok ? <span className="block text-xs font-normal text-red-600">Telefon kayıtlı değil</span> : null}
+                    </td>
+                    <td className="px-3 py-2 text-slate-700">
+                      {t.eksikler.map((e) => (
+                        <span key={`${e.class_id}-${e.ders}`} className="block">
+                          {e.class_name} · {e.ders}
+                          {e.ilk_ders ? <span className="text-xs text-slate-500"> · ilk ders {gun(e.ilk_ders)}</span> : null}
+                        </span>
+                      ))}
+                    </td>
+                    <td className="px-3 py-2 text-xs text-slate-500">{t.last_sent ? zaman(t.last_sent) : '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              disabled={gonderiliyor || !secili.size || !metin.trim()}
+              onClick={() => void gonder()}
+              className="inline-flex items-center gap-2 rounded-lg bg-[#173b70] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+            >
+              {gonderiliyor ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+              {gonderiliyor ? 'Gönderiliyor…' : `${secili.size} öğretmene WhatsApp gönder`}
+            </button>
+            <span className="text-xs text-slate-500">Mesaj, öğretmen ders hatırlatmalarının gittiği WhatsApp hattından gönderilir.</span>
+          </div>
+
+          {sonuclar ? (
+            <ul className="space-y-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+              {sonuclar.map((s) => (
+                <li key={s.teacher_id} className="flex items-start gap-2">
+                  {s.ok ? (
+                    <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+                  ) : (
+                    <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-600" />
+                  )}
+                  <span>
+                    {adBicimle(s.teacher_name || adIle.get(s.teacher_id) || 'Öğretmen')}
+                    {s.ok ? ' — gönderildi' : ` — ${s.error || 'gönderilemedi'}`}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}

@@ -148,7 +148,7 @@ export async function resolveTeacherReminderSession(settings) {
  * değilse Meta API'ye SESSİZCE düşülmez — hangi hattın gittiği belli olmalı;
  * hata log'a yazılır ve yönetici panelde görür.
  */
-async function dispatchTeacherReminder({ phone, text, settings }) {
+export async function dispatchTeacherReminder({ phone, text, settings }) {
   if (settings.channel === 'meta') {
     const r = await sendNotification({
       notificationType: TEACHER_LESSON_REMINDER_KIND,
@@ -198,7 +198,7 @@ async function loadReminderTemplateContent() {
   return DEFAULT_TEMPLATE;
 }
 
-async function loadTeachersById(ids) {
+export async function loadTeachersById(ids) {
   const uniq = [...new Set(ids.map((x) => String(x || '').trim()).filter(Boolean))];
   if (!uniq.length) return new Map();
   const { data, error } = await supabaseAdmin.from('users').select('id,name,phone,email').in('id', uniq);
