@@ -464,6 +464,9 @@ export async function patchParentSignKayitOnly(body: {
     force_sync?: boolean;
   };
   taksit_vade_update?: { index: number; vade_tarihi: string };
+  /** İmza sonrası plan: ödenmiş taksitler sunucuda kilitli kalır */
+  taksit_plan_update?: { tutar_tl: number; vade_tarihi: string }[];
+  taksit_plan_notu?: string;
 }): Promise<ParentSignContractRow> {
   const res = await apiFetch('/api/parent-sign-contracts', {
     method: 'PATCH',
@@ -471,7 +474,19 @@ export async function patchParentSignKayitOnly(body: {
     body: JSON.stringify(body)
   });
   const j = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error((j as { error?: string }).error || `API ${res.status}`);
+  if (!res.ok) {
+    const kod = String((j as { error?: string }).error || '');
+    const sira = (j as { index?: number }).index;
+    const n = typeof sira === 'number' ? `${sira + 1}. taksit: ` : '';
+    const anlam: Record<string, string> = {
+      odenmis_taksit_silinemez: 'ödenmiş taksit silinemez.',
+      taksit_tutari_gecersiz: 'tutar 0’dan büyük olmalı.',
+      vade_tarihi_invalid: 'vade tarihi geçersiz.',
+      taksit_plani_bos: 'en az bir taksit olmalı.',
+      taksit_sayisi_fazla: 'en fazla 48 taksit olabilir.'
+    };
+    throw new Error(anlam[kod] ? `${n}${anlam[kod]}` : kod || `API ${res.status}`);
+  }
   return (j as { data: ParentSignContractRow }).data;
 }
 

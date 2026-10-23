@@ -1,3 +1,4 @@
+import { imzaSonrasiTaksitPlani, planToplami } from '../api/_lib/parent-sign-taksit-plan-edit.js';
 import { requireAuthenticatedActor, hasInstitutionAccess } from '../api/_lib/auth.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { errorMessage } from '../api/_lib/error-msg.js';
@@ -1167,6 +1168,50 @@ export default async function handler(req, res) {
           }
         }
         return res.status(200).json({ data: updM, payment_sync: paymentSync });
+      }
+
+      // İmza sonrası taksit planı düzenleme (imzalı metin değişmez, ödenmişler kilitli)
+      if (Array.isArray(body.taksit_plan_update)) {
+        const kjP = existing.kayit_formu_json && typeof existing.kayit_formu_json === 'object' ? { ...existing.kayit_formu_json } : {};
+        const eskiKartlar = Array.isArray(kjP.taksit_kartlari) ? kjP.taksit_kartlari : [];
+        const plan = imzaSonrasiTaksitPlani(eskiKartlar, body.taksit_plan_update);
+        if (!plan.ok) return res.status(400).json({ error: plan.error, index: plan.index });
+        const nowP = new Date().toISOString();
+        const gecmis = Array.isArray(kjP.taksit_plan_degisiklikleri) ? kjP.taksit_plan_degisiklikleri : [];
+        kjP.taksit_kartlari = plan.kartlar;
+        kjP.taksit_plan_degisiklikleri = [
+          ...gecmis,
+          {
+            at: nowP,
+            by: String(actor?.sub || actor?.id || '') || null,
+            by_name: String(actor?.name || '').slice(0, 120) || null,
+            imzali: existingSigned,
+            eski: eskiKartlar.map((k) => ({ tutar_tl: k?.tutar_tl ?? null, vade_tarihi: k?.vade_tarihi || '', odendi: Boolean(k?.odendi) })),
+            eski_toplam: planToplami(eskiKartlar),
+            yeni_toplam: planToplami(plan.kartlar),
+            not: String(body.taksit_plan_notu || '').trim().slice(0, 300)
+          }
+        ].slice(-50);
+        const updateP = {
+          kayit_formu_json: kjP,
+          taksit_sayisi: plan.kartlar.length,
+          updated_at: nowP
+        };
+        if (!existingSigned && Number(existing.ucret) > 0) {
+          try {
+            updateP.merged_html = await rebuildContractMergedHtml(existing, kjP);
+          } catch (rebuildErr) {
+            console.warn('[parent-sign-contracts] merged_html rebuild on taksit_plan_update', errorMessage(rebuildErr));
+          }
+        }
+        const { data: updP, error: uErrP } = await supabaseAdmin
+          .from('parent_sign_contracts')
+          .update(updateP)
+          .eq('id', id)
+          .select()
+          .single();
+        if (uErrP) throw uErrP;
+        return res.status(200).json({ data: updP });
       }
 
       const kjm = body.kayit_json_merge;

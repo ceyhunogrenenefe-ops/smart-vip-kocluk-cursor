@@ -650,11 +650,20 @@ export default async function handler(req, res) {
   try {
     const actor = requireAuthenticatedActor(req);
     const roleSet = await actorRoleSet(actor);
+    const op = typeof req.query?.op === 'string' ? req.query.op.trim() : '';
+
     if (!actorIsAdminLike(actor, roleSet)) {
+      // Koç, veli onay / e-imzada taksiti "ödendi" işaretlerken paranın girdiği
+      // hesabı seçmek zorunda. Hesap listesi kapalıyken pencere boş kalıyor ve
+      // ödeme hiç işaretlenemiyordu. Koça yalnız kendi kurumunun AKTİF hesapları,
+      // salt okunur verilir; ödeme kayıtları ve hesap yönetimi yöneticide kalır.
+      const koc = roleSet.has('coach') && Boolean(actor.institution_id);
+      if (koc && req.method === 'GET' && op === 'accounts') {
+        req.query = { ...(req.query || {}), include_inactive: '0' };
+        return handleGetAccounts(req, res, actor, roleSet);
+      }
       return jsonError(res, 403, 'forbidden');
     }
-
-    const op = typeof req.query?.op === 'string' ? req.query.op.trim() : '';
 
     if (req.method === 'GET') {
       if (op === 'accounts') return handleGetAccounts(req, res, actor, roleSet);
