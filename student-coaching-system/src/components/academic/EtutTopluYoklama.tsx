@@ -5,13 +5,14 @@ import { apiFetch } from '../../lib/session';
 import { todayYmd } from '../../lib/etutSession';
 import {
   acikDilimSira,
+  bugununDenemeleri,
   bugununEtutleri,
   etutDilimleri,
   type EtutDilim,
   type EtutOturum,
   type EtutSinif
 } from '../../lib/etutTopluYoklama';
-import type { StudyEntryKey } from '../../lib/academicCenterLinks';
+import type { ExamEntryKey, StudyEntryKey } from '../../lib/academicCenterLinks';
 
 type Durum = 'present' | 'absent' | 'late' | 'excused';
 
@@ -47,12 +48,17 @@ function kameraDurumu(status: Durum, mevcut: 'on' | 'off' | null): 'on' | 'off' 
 export function EtutTopluYoklama({
   room,
   label,
-  institutionId
+  institutionId,
+  tur = 'etut'
 }: {
-  room: StudyEntryKey;
+  room: StudyEntryKey | ExamEntryKey;
   label: string;
   institutionId?: string | null;
+  tur?: 'etut' | 'deneme';
 }) {
+  const deneme = tur === 'deneme';
+  const ad = deneme ? 'deneme' : 'etüt';
+  const Ad = deneme ? 'Deneme' : 'Etüt';
   const [acik, setAcik] = useState(false);
   const [yukleniyor, setYukleniyor] = useState(false);
   const [kaydediyor, setKaydediyor] = useState(false);
@@ -96,24 +102,35 @@ export function EtutTopluYoklama({
       const sinifJson = await sinifRes.json().catch(() => ({}));
       const oturumJson = await oturumRes.json().catch(() => ({}));
       if (!sinifRes.ok || !oturumRes.ok) {
-        setHata('Sınıf veya etüt listesi alınamadı.');
+        setHata(`Sınıf veya ${ad} listesi alınamadı.`);
         return;
       }
       const siniflar = (Array.isArray(sinifJson.data) ? sinifJson.data : []) as EtutSinif[];
       const oturumlar = (Array.isArray(oturumJson.data) ? oturumJson.data : []) as EtutOturum[];
-      const secilen = bugununEtutleri({
-        room,
-        sessions: oturumlar,
-        classes: siniflar,
-        today
-      });
+      const secilen = deneme
+        ? bugununDenemeleri({
+            room: room as ExamEntryKey,
+            sessions: oturumlar,
+            classes: siniflar,
+            today
+          })
+        : bugununEtutleri({
+            room: room as StudyEntryKey,
+            sessions: oturumlar,
+            classes: siniflar,
+            today
+          });
       const dilimListe = etutDilimleri(secilen);
       setDilimler(dilimListe);
       const simdi = new Date();
       const acik = acikDilimSira(dilimListe, simdi.getHours() * 60 + simdi.getMinutes());
       setSeciliDilim(acik);
       if (!secilen.length) {
-        setBilgi('Bugün bu etüt grubunda canlı etüt yok. Yoklama, o gün etüdü olan sınıfların listesinden gelir.');
+        setBilgi(
+          deneme
+            ? 'Bugün bu deneme grubunda canlı deneme yok. Yoklama, o gün denemesi olan sınıfların listesinden gelir.'
+            : 'Bugün bu etüt grubunda canlı etüt yok. Yoklama, o gün etüdü olan sınıfların listesinden gelir.'
+        );
         return;
       }
       const dilimNo = new Map<string, number>();
@@ -160,7 +177,7 @@ export function EtutTopluYoklama({
       const liste = parcalar.flat().sort((a, b) => a.student_name.localeCompare(b.student_name, 'tr'));
       setSatirlar(liste);
       if (!liste.length) {
-        setBilgi('Bugünkü etütlerde yoklama listesinde öğrenci yok.');
+        setBilgi(`Bugünkü ${ad}lerde yoklama listesinde öğrenci yok.`);
       }
     } catch {
       setHata('Yoklama listesi açılamadı.');
@@ -274,7 +291,10 @@ export function EtutTopluYoklama({
     <>
       <button
         type="button"
-        onClick={() => void ac()}
+        onClick={(e) => {
+          e.stopPropagation();
+          void ac();
+        }}
         className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-xl border border-amber-300 bg-amber-50 px-4 py-2.5 text-sm font-semibold text-amber-900 shadow-sm transition hover:bg-amber-100"
       >
         <ClipboardList className="h-4 w-4" />
@@ -286,7 +306,9 @@ export function EtutTopluYoklama({
             <div>
               <h3 className="font-semibold text-slate-900">{label} yoklaması</h3>
               <p className="mt-0.5 text-xs text-slate-600">
-                1. etüt ve 2. etüt ayrı. Kayıt, açık etütteki her öğrencinin kendi sınıf dersine yazılır.
+                {deneme
+                  ? '1. deneme ve 2. deneme ayrı. Kayıt, açık denemedeki her öğrencinin kendi sınıf dersine yazılır.'
+                  : '1. etüt ve 2. etüt ayrı. Kayıt, açık etütteki her öğrencinin kendi sınıf dersine yazılır.'}
               </p>
             </div>
             <button type="button" className="shrink-0 text-sm text-slate-500 hover:text-slate-800" onClick={kapat}>
@@ -323,7 +345,7 @@ export function EtutTopluYoklama({
                               : 'border-slate-200 bg-white text-slate-700'
                           }`}
                         >
-                          {d.sira}. Etüt · {d.baslangic}–{d.bitis}
+                          {d.sira}. {Ad} · {d.baslangic}–{d.bitis}
                         </button>
                       ))}
                     </div>

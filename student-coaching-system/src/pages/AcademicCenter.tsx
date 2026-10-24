@@ -60,6 +60,7 @@ function PortalActionCard(props: {
   buttonClassName?: string;
   /** Tüm karta tıklanınca da aksiyon tetiklensin (deneme sınıfları). */
   clickableCard?: boolean;
+  footer?: React.ReactNode;
 }) {
   const {
     accent,
@@ -71,7 +72,8 @@ function PortalActionCard(props: {
     disabled,
     busy,
     buttonClassName = 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white hover:brightness-110',
-    clickableCard = false
+    clickableCard = false,
+    footer
   } = props;
 
   const canAct = !disabled && !busy;
@@ -107,19 +109,22 @@ function PortalActionCard(props: {
         <div className="flex min-w-0 flex-1 flex-col">
           <p className="text-base font-semibold text-slate-900">{title}</p>
           <div className="mt-2 flex-1 text-sm leading-relaxed text-slate-600">{description}</div>
-          <button
-            type="button"
-            disabled={!canAct}
-            onClick={(e) => {
-              e.stopPropagation();
-              trigger();
-            }}
-            className={`mt-4 inline-flex min-h-[44px] w-full touch-manipulation items-center justify-center gap-2 rounded-2xl px-4 py-2.5 text-sm font-semibold shadow-md transition disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto ${buttonClassName}`}
-          >
-            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-            {buttonLabel}
-            {!busy ? <ExternalLink className="h-4 w-4" /> : null}
-          </button>
+          <div className="mt-4 flex flex-wrap gap-2" onClick={(e) => e.stopPropagation()}>
+            <button
+              type="button"
+              disabled={!canAct}
+              onClick={(e) => {
+                e.stopPropagation();
+                trigger();
+              }}
+              className={`inline-flex min-h-[44px] w-full touch-manipulation items-center justify-center gap-2 rounded-2xl px-4 py-2.5 text-sm font-semibold shadow-md transition disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto ${buttonClassName}`}
+            >
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              {buttonLabel}
+              {!busy ? <ExternalLink className="h-4 w-4" /> : null}
+            </button>
+            {footer}
+          </div>
         </div>
       </div>
     </div>
@@ -637,6 +642,16 @@ export default function AcademicCenter() {
                         busy={busy}
                         clickableCard
                         onAction={() => requestExamClassJoin(x.key, x.label)}
+                        footer={
+                          !isStudent && x.key === 'lise' ? (
+                            <EtutTopluYoklama
+                              tur="deneme"
+                              room="lise"
+                              label={x.label}
+                              institutionId={institutionId}
+                            />
+                          ) : null
+                        }
                       />
                     );
                   })}
