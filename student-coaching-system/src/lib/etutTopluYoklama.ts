@@ -1,5 +1,11 @@
-import { studyRoomsForClassLevel, type StudyEntryKey } from './academicCenterLinks';
+import {
+  examRoomsForClassLevel,
+  studyRoomsForClassLevel,
+  type ExamEntryKey,
+  type StudyEntryKey
+} from './academicCenterLinks';
 import { isEtutSubject } from './etutSession';
+import { isDenemeJoinSubject } from './primary4567Zoom';
 
 export type EtutSinif = {
   id: string;
@@ -46,26 +52,51 @@ export type EtutDilim = {
   oturumlar: SinifliEtut[];
 };
 
-export function bugununEtutleri(input: {
-  room: StudyEntryKey;
+function bugununOturumlari(input: {
   sessions: EtutOturum[];
   classes: EtutSinif[];
   today: string;
+  konu: (subject?: string | null) => boolean;
+  oda: (cls: EtutSinif) => boolean;
 }): SinifliEtut[] {
   const byId = new Map(input.classes.map((c) => [c.id, c]));
   const out: SinifliEtut[] = [];
   for (const s of input.sessions) {
     if (String(s.lesson_date || '').slice(0, 10) !== input.today) continue;
     if (String(s.status || '') === 'cancelled') continue;
-    if (!isEtutSubject(s.subject)) continue;
+    if (!input.konu(s.subject)) continue;
     const cls = byId.get(s.class_id);
-    if (!cls) continue;
-    const rooms = studyRoomsForClassLevel(cls.class_level, cls.name);
-    if (!rooms?.includes(input.room)) continue;
+    if (!cls || !input.oda(cls)) continue;
     out.push({ ...s, className: cls.name || 'Sınıf' });
   }
   out.sort((a, b) => a.start_time.localeCompare(b.start_time) || a.className.localeCompare(b.className, 'tr'));
   return out;
+}
+
+export function bugununEtutleri(input: {
+  room: StudyEntryKey;
+  sessions: EtutOturum[];
+  classes: EtutSinif[];
+  today: string;
+}): SinifliEtut[] {
+  return bugununOturumlari({
+    ...input,
+    konu: (subject) => isEtutSubject(subject),
+    oda: (cls) => Boolean(studyRoomsForClassLevel(cls.class_level, cls.name)?.includes(input.room))
+  });
+}
+
+export function bugununDenemeleri(input: {
+  room: ExamEntryKey;
+  sessions: EtutOturum[];
+  classes: EtutSinif[];
+  today: string;
+}): SinifliEtut[] {
+  return bugununOturumlari({
+    ...input,
+    konu: (subject) => isDenemeJoinSubject(subject),
+    oda: (cls) => Boolean(examRoomsForClassLevel(cls.class_level, cls.name)?.includes(input.room))
+  });
 }
 
 /** Günün etütlerini saate göre 1. etüt, 2. etüt diye ayırır. */
