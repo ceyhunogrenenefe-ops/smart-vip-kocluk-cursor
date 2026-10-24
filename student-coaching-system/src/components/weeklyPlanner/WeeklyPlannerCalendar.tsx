@@ -160,6 +160,7 @@ export function WeeklyPlannerCalendar({
     institutions,
     getTopics,
     getTopicsByClass,
+    getTopicsForStudent,
     markTopicCompleted,
     getStudentTopicProgress,
     refreshTopicProgress,
@@ -237,9 +238,31 @@ export function WeeklyPlannerCalendar({
     studentStudyLogUi || selfCoachingMode ? 'Haftalık hedeflerin' : 'Koç hedefleri';
 
   /** Öğrenci sınıfına göre konu havuzunda tanımlı dersler */
+  /**
+   * Bir dersin konuları — öğrencinin TÜM programlarından birleşik.
+   * Öğrenci yoksa eski davranış (yalnız sınıf seviyesi) korunur.
+   */
+  const ogrenciKonulari = useCallback(
+    (subject: string): string[] => {
+      const ders = String(subject || '').trim();
+      if (!ders) return [];
+      if (!studentId) {
+        return classLevel != null ? getTopics(ders, classLevel) : [];
+      }
+      const tb = getTopicsForStudent(studentId);
+      return tb.regular[ders] || tb.tytSubjects[ders] || tb.aytSubjects[ders] || [];
+    },
+    [studentId, classLevel, getTopics, getTopicsForStudent]
+  );
+
   const poolSubjects = useMemo(() => {
     if (classLevel === undefined || classLevel === null) return [] as string[];
-    const tb = getTopicsByClass(classLevel);
+    /**
+     * Öğrencinin kendi sınıfı + tanımlı EK konu programları.
+     * 11. sınıf öğrencisine TYT-Maarif eklenmişse TYT dersleri de listelenir.
+     * Ek program yoksa sonuç getTopicsByClass ile birebir aynıdır.
+     */
+    const tb = studentId ? getTopicsForStudent(studentId) : getTopicsByClass(classLevel);
     if (tb.isYKS) {
       const list = [
         ...Object.keys(tb.tytSubjects),
@@ -249,7 +272,7 @@ export function WeeklyPlannerCalendar({
       return sortSubjectsWithStudyTracks(list);
     }
     return sortSubjectsWithStudyTracks(Object.keys(tb.regular));
-  }, [classLevel, getTopicsByClass]);
+  }, [classLevel, studentId, getTopicsByClass, getTopicsForStudent]);
 
   const [anchor, setAnchor] = useState(() => new Date());
   const [haftaAktarAcik, setHaftaAktarAcik] = useState(false);
@@ -285,7 +308,7 @@ export function WeeklyPlannerCalendar({
 
   const newGoalTopicOptions = useMemo(() => {
     if (classLevel === undefined || classLevel === null || !newGoalSubject) return [];
-    return getTopics(newGoalSubject, classLevel);
+    return ogrenciKonulari(newGoalSubject);
   }, [classLevel, newGoalSubject, getTopics]);
 
   const [formGoalId, setFormGoalId] = useState<string | null>(null);
@@ -295,7 +318,7 @@ export function WeeklyPlannerCalendar({
 
   const modalTopicOptions = useMemo(() => {
     if (classLevel === undefined || classLevel === null || !formSubject.trim()) return [];
-    return getTopics(formSubject.trim(), classLevel);
+    return ogrenciKonulari(formSubject.trim());
   }, [classLevel, formSubject, getTopics]);
 
   /** Havuzda olmayan eski kayıtları düzenlerken seçenek listesinde tut */
@@ -1206,7 +1229,7 @@ export function WeeklyPlannerCalendar({
           const sub = entry.subject?.trim() || 'Genel';
           const top = entry.title?.trim() || sub;
           const sid = entry.student_id;
-          const pool = classLevel != null ? getTopics(sub, classLevel) : [];
+          const pool = ogrenciKonulari(sub);
           const resolvedTop = resolveTopicLabelForTracking(top, pool);
           const already = isTopicMarkedCompleted(
             getStudentTopicProgress(sid),

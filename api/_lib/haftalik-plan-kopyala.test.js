@@ -2,7 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   cakismalariAyikla,
+  gorevleriHedeflereBagla,
   gunFarki,
+  hedefKopyasiUret,
   haftaBasi,
   planKopyasiUret,
   tarihKaydir,
@@ -143,4 +145,87 @@ test('gecersiz hedef hafta reddedilir', () => {
   const r = planKopyasiUret(KAYNAK, { hedefHaftaBasi: 'bozuk' });
   assert.equal(r.hata, 'hedef_hafta_gecersiz');
   assert.equal(r.kopyalar.length, 0);
+});
+
+/* ---------- Koç haftalık hedefleri ---------- */
+
+const HEDEFLER = [
+  {
+    id: 'cwg-1', student_id: 's1', coach_id: 'c1', institution_id: 'k1',
+    subject: 'MATEMATİK', title: 'Üslü İfadeler', target_quantity: 210, quantity_unit: 'soru',
+    week_start_date: '2026-10-12', goal_start_date: '2026-10-19', goal_end_date: '2026-10-26',
+    homework_id: 'hw-1'
+  },
+  {
+    id: 'cwg-2', student_id: 's1', coach_id: 'c1', institution_id: 'k1',
+    subject: 'FİZİK', title: 'Basınç', target_quantity: 50, quantity_unit: 'soru',
+    week_start_date: '2026-10-12', goal_start_date: '2026-10-12', goal_end_date: '2026-10-18',
+    homework_id: null
+  }
+];
+const HSEC = { kaynakHaftaBasi: '2026-10-12', hedefHaftaBasi: '2026-10-19' };
+
+test('hedefler hedef haftaya kopyalanir', () => {
+  const r = hedefKopyasiUret(HEDEFLER, { ...HSEC, idUret: (() => { let n = 0; return () => `yeni-${++n}`; })() });
+  assert.equal(r.kopyalar.length, 2);
+  assert.equal(r.kopyalar[0].week_start_date, '2026-10-19');
+  assert.equal(r.kopyalar[0].subject, 'MATEMATİK');
+  assert.equal(r.kopyalar[0].target_quantity, 210);
+  assert.equal(r.kopyalar[0].quantity_unit, 'soru');
+});
+
+test('hedef tarih araligi AYNI gun farkiyla kaydirilir', () => {
+  const r = hedefKopyasiUret(HEDEFLER, { ...HSEC, idUret: () => 'x' });
+  // week 12->19 (+7); goal 19->26, 26->2 Kasim
+  assert.equal(r.kopyalar[0].goal_start_date, '2026-10-26');
+  assert.equal(r.kopyalar[0].goal_end_date, '2026-11-02');
+  // Haftayla ayni olan hedef de ayni farkla kayar
+  assert.equal(r.kopyalar[1].goal_start_date, '2026-10-19');
+  assert.equal(r.kopyalar[1].goal_end_date, '2026-10-25');
+});
+
+test('hedef kopyasi odev bagini TASIMAZ ve YENI kimlik alir', () => {
+  const r = hedefKopyasiUret(HEDEFLER, { ...HSEC, idUret: () => 'yeni-1' });
+  assert.equal(r.kopyalar[0].homework_id, null);
+  assert.equal(r.kopyalar[0].id, 'yeni-1');
+  assert.notEqual(r.kopyalar[0].id, 'cwg-1');
+});
+
+test('hedef haftada AYNI hedef varsa yenisi acilmaz, ona baglanilir', () => {
+  const r = hedefKopyasiUret(HEDEFLER, {
+    ...HSEC,
+    idUret: () => 'yeni-1',
+    mevcutHedefler: [{ id: 'var-1', subject: 'matematik', title: 'üslü i̇fadeler', quantity_unit: 'soru' }]
+  });
+  // Buyuk/kucuk farki yok sayilmali
+  assert.equal(r.kopyalar.length, 1, 'yalniz FIZIK kopyalanmali');
+  assert.equal(r.kimlikEslesmesi.get('cwg-1'), 'var-1', 'mevcut hedefe baglanmali');
+});
+
+test('gorevler KOPYALANAN hedefe baglanir, eskisine degil', () => {
+  const kaynakGorevler = [
+    { id: 'wpe-a', coach_goal_id: 'cwg-1' },
+    { id: 'wpe-b', coach_goal_id: null }
+  ];
+  const h = hedefKopyasiUret(HEDEFLER, { ...HSEC, idUret: () => 'yeni-1' });
+  const kopyalar = [
+    { id: 'k1', _kaynak_id: 'wpe-a', coach_goal_id: null },
+    { id: 'k2', _kaynak_id: 'wpe-b', coach_goal_id: null }
+  ];
+  const bagli = gorevleriHedeflereBagla(kopyalar, h.kimlikEslesmesi, kaynakGorevler);
+  assert.equal(bagli[0].coach_goal_id, 'yeni-1', 'yeni hedefe baglanmali');
+  assert.notEqual(bagli[0].coach_goal_id, 'cwg-1', 'eski hedefe baglanmamali');
+  assert.equal(bagli[1].coach_goal_id, null, 'hedefsiz gorev hedefsiz kalmali');
+});
+
+test('hedefsiz gorev bosta kalmaz, kaynak hedefler degismez', () => {
+  const girdi = JSON.parse(JSON.stringify(HEDEFLER));
+  hedefKopyasiUret(girdi, { ...HSEC, idUret: () => 'x' });
+  assert.deepEqual(girdi, HEDEFLER, 'girdi mutasyona ugramamali');
+});
+
+test('gecersiz hafta hedef kopyalamaz', () => {
+  const r = hedefKopyasiUret(HEDEFLER, { kaynakHaftaBasi: 'bozuk', hedefHaftaBasi: '2026-10-19' });
+  assert.equal(r.kopyalar.length, 0);
+  assert.equal(r.atlanan, 2);
 });

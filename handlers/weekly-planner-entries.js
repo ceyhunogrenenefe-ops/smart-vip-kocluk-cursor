@@ -10,7 +10,9 @@ import {
 
 import {
   cakismalariAyikla,
+  gorevleriHedeflereBagla,
   haftaBasi,
+  hedefKopyasiUret,
   planKopyasiUret,
   tarihKaydir,
   yazimIcinSadele
@@ -120,8 +122,12 @@ export default async function handler(req, res) {
       const kaynakSon = tarihKaydir(kaynakHafta, 6);
       const hedefSon = tarihKaydir(hedefHafta, 6);
 
-      const [{ data: kaynakSatirlar, error: kErr }, { data: hedefSatirlar, error: hErr }] =
-        await Promise.all([
+      const [
+        { data: kaynakSatirlar, error: kErr },
+        { data: hedefSatirlar, error: hErr },
+        { data: kaynakHedefler },
+        { data: mevcutHedefler }
+      ] = await Promise.all([
           supabaseAdmin
             .from('weekly_planner_entries')
             .select('*')
@@ -135,7 +141,18 @@ export default async function handler(req, res) {
             .eq('student_id', sid)
             .gte('planner_date', hedefHafta)
             .lte('planner_date', hedefSon)
-            .order('planner_date', { ascending: true })
+            .order('planner_date', { ascending: true }),
+          // Koç haftalık hedefleri: görevlerle birlikte aktarılır
+          supabaseAdmin
+            .from('coach_weekly_goals')
+            .select('*')
+            .eq('student_id', sid)
+            .eq('week_start_date', kaynakHafta),
+          supabaseAdmin
+            .from('coach_weekly_goals')
+            .select('*')
+            .eq('student_id', sid)
+            .eq('week_start_date', hedefHafta)
         ]);
       if (kErr) throw kErr;
       if (hErr) throw hErr;
@@ -150,6 +167,19 @@ export default async function handler(req, res) {
       });
       if (uretim.hata) return res.status(400).json({ error: uretim.hata });
 
+      // Hedefler: hedef haftada aynısı varsa yenisi açılmaz, ona bağlanılır
+      const hedefUretim = hedefKopyasiUret(kaynakHedefler || [], {
+        kaynakHaftaBasi: kaynakHafta,
+        hedefHaftaBasi: hedefHafta,
+        mevcutHedefler: mevcutHedefler || []
+      });
+      // Görevler ESKİ hedefe değil KOPYALANAN hedefe bağlanır
+      uretim.kopyalar = gorevleriHedeflereBagla(
+        uretim.kopyalar,
+        hedefUretim.kimlikEslesmesi,
+        kaynakSatirlar || []
+      );
+
       const mevcutSayi = (hedefSatirlar || []).length;
       const { eklenecek, cakisan } = cakismalariAyikla(uretim.kopyalar, hedefSatirlar || []);
 
@@ -161,7 +191,12 @@ export default async function handler(req, res) {
         copy_count: uretim.kopyalar.length,
         skipped_invalid: uretim.atlanan,
         conflict_count: cakisan.length,
-        mergeable_count: eklenecek.length
+        mergeable_count: eklenecek.length,
+        goal_source_count: (kaynakHedefler || []).length,
+        goal_copy_count: hedefUretim.kopyalar.length,
+        goal_reused_count:
+          (kaynakHedefler || []).length - hedefUretim.kopyalar.length - hedefUretim.atlanan,
+        goal_existing_count: (mevcutHedefler || []).length
       };
 
       if (op === 'copy-week-preview') {
@@ -178,7 +213,15 @@ export default async function handler(req, res) {
               existing_start: c.mevcut.start_time,
               existing_end: c.mevcut.end_time
             })),
-            existing: hedefSatirlar || []
+            existing: hedefSatirlar || [],
+            goals_preview: hedefUretim.kopyalar.map((g) => ({
+              subject: g.subject,
+              title: g.title,
+              target_quantity: g.target_quantity,
+              quantity_unit: g.quantity_unit,
+              goal_start_date: g.goal_start_date,
+              goal_end_date: g.goal_end_date
+            }))
           }
         });
       }
@@ -216,8 +259,31 @@ export default async function handler(req, res) {
         }
       }
 
+      /**
+       * Hedefler ÖNCE yazılır: görevler bu kimliklere bağlanacak.
+       * Hedefler hiçbir kipte SİLİNMEZ — bir hedef başka haftalardaki
+       * görevler tarafından da kullanılıyor olabilir; silmek o haftaların
+       * raporunu bozardı. 'degistir' kipi yalnız plan satırlarını siler.
+       */
+      let hedefEklenen = 0;
+      if (hedefUretim.kopyalar.length) {
+        const now0 = new Date().toISOString();
+        const hedefSatirlariYazim = hedefUretim.kopyalar.map((g) => {
+          const { _kaynak_id, ...temiz } = g;
+          return { ...temiz, created_at: now0, updated_at: now0 };
+        });
+        const { data: hEklenen, error: hInsErr } = await supabaseAdmin
+          .from('coach_weekly_goals')
+          .insert(hedefSatirlariYazim)
+          .select('id');
+        if (hInsErr) throw hInsErr;
+        hedefEklenen = (hEklenen || []).length;
+      }
+
       if (!yazilacak.length) {
-        return res.status(200).json({ data: { ...ozet, inserted: 0, deleted: silinen, mode } });
+        return res.status(200).json({
+          data: { ...ozet, inserted: 0, goals_inserted: hedefEklenen, deleted: silinen, mode }
+        });
       }
 
       const now = new Date().toISOString();
@@ -236,7 +302,14 @@ export default async function handler(req, res) {
       if (iErr) throw iErr;
 
       return res.status(200).json({
-        data: { ...ozet, inserted: (eklenen || []).length, deleted: silinen, mode, entries: eklenen || [] }
+        data: {
+          ...ozet,
+          inserted: (eklenen || []).length,
+          goals_inserted: hedefEklenen,
+          deleted: silinen,
+          mode,
+          entries: eklenen || []
+        }
       });
     }
 

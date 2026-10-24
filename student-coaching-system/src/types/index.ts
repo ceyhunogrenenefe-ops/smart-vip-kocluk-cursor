@@ -105,6 +105,12 @@ export interface Student {
   parentPhone: string;
   /** DB’de yoksa veya parse edilemezse undefined — asla yanlış varsayılan sınıf uydurma */
   classLevel?: ClassLevel;
+  /**
+   * Sınıf seviyesine EK konu programları (ör. 11. sınıf öğrencisi TYT
+   * Maarif konularını da çalışsın). Sınıf seviyesi değişmez; konular
+   * birleştirilir.
+   */
+  extraTopicLevels?: string[];
   school?: string;
   parentName?: string;
   coachId?: string; // Koç ID'si

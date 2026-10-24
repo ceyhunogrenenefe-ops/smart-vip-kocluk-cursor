@@ -1,5 +1,9 @@
 // Türkçe: Uygulama genel durum yönetimi - Supabase Gerçek Veritabanı ile
 import React, { createContext, useContext, useState, useEffect, useCallback, useLayoutEffect, ReactNode } from 'react';
+import {
+  konuHaritalariniBirlestir,
+  ogrencininKonuSeviyeleri,
+} from '../lib/ogrenciKonuProgramlari';
 import { isUuid } from '../utils/uuid';
 import {
   Student,
@@ -217,6 +221,18 @@ interface AppState {
     tytSubjects: Record<string, string[]>;
     aytSubjects: Record<string, string[]>;
     isYKS: boolean;
+  };
+  /**
+   * Öğrencinin konuları: kendi sınıfı + tanımlı EK programlar.
+   * 11. sınıf öğrencisine TYT-Maarif eklenince ikisinin konuları birleşir;
+   * sınıf seviyesi değişmediği için sınıf raporları etkilenmez.
+   */
+  getTopicsForStudent: (studentId: string | undefined | null) => {
+    regular: Record<string, string[]>;
+    tytSubjects: Record<string, string[]>;
+    aytSubjects: Record<string, string[]>;
+    isYKS: boolean;
+    levels: string[];
   };
 
   // Konu Takibi
@@ -1048,6 +1064,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           school: student.school ?? null,
           parent_name: student.parentName ?? null,
           parent_phone: student.parentPhone ?? null,
+          extra_topic_levels: student.extraTopicLevels ?? [],
           coach_id: student.coachId || null,
           institution_id: resolvedInstitutionId,
           program_id: student.programId || inferProgramName(student.classLevel),
@@ -1089,6 +1106,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (updatedStudent.school !== undefined) patch.school = updatedStudent.school;
     if (updatedStudent.parentName !== undefined) patch.parent_name = updatedStudent.parentName;
     if (updatedStudent.parentPhone !== undefined) patch.parent_phone = updatedStudent.parentPhone;
+    if (updatedStudent.extraTopicLevels !== undefined)
+      patch.extra_topic_levels = updatedStudent.extraTopicLevels;
     /** `coachId: undefined` ile çağrıda `'coachId' in obj` true olurdu → coach_id null yazılıyordu */
     if (updatedStudent.coachId !== undefined) patch.coach_id = updatedStudent.coachId ?? null;
     if (updatedStudent.institutionId !== undefined)
@@ -1687,6 +1706,44 @@ export function AppProvider({ children }: { children: ReactNode }) {
       aytSubjects: {},
       isYKS
     };
+  };
+
+  /**
+   * Öğrencinin tüm konu havuzu: sınıf seviyesi + tanımlı EK programlar.
+   * Aynı ders iki programda da varsa konular tek listede birleşir.
+   * Ek program yoksa sonuç getTopicsByClass ile birebir aynıdır.
+   */
+  const getTopicsForStudent = (studentId: string | undefined | null) => {
+    const bos = {
+      regular: {} as Record<string, string[]>,
+      tytSubjects: {} as Record<string, string[]>,
+      aytSubjects: {} as Record<string, string[]>,
+      isYKS: false,
+      levels: [] as string[],
+    };
+    const sid = String(studentId || '').trim();
+    if (!sid) return bos;
+    const ogrenci = students.find((x) => x.id === sid);
+    if (!ogrenci) return bos;
+
+    const seviyeler = ogrencininKonuSeviyeleri(
+      (ogrenci.classLevel ?? '') as string | number,
+      ogrenci.extraTopicLevels
+    );
+    if (!seviyeler.length) return bos;
+
+    let regular: Record<string, string[]> = {};
+    let tytSubjects: Record<string, string[]> = {};
+    let aytSubjects: Record<string, string[]> = {};
+    let isYKS = false;
+    for (const seviye of seviyeler) {
+      const r = getTopicsByClass(seviye);
+      regular = konuHaritalariniBirlestir(regular, r.regular);
+      tytSubjects = konuHaritalariniBirlestir(tytSubjects, r.tytSubjects);
+      aytSubjects = konuHaritalariniBirlestir(aytSubjects, r.aytSubjects);
+      isYKS = isYKS || r.isYKS;
+    }
+    return { regular, tytSubjects, aytSubjects, isYKS, levels: seviyeler };
   };
 
   const mergeTopicProgressRows = (
@@ -3275,6 +3332,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       getTopics,
       addTopic,
       getTopicsByClass,
+      getTopicsForStudent,
       topicProgress: scopedTopicProgress,
       markTopicCompleted,
       unmarkTopicCompleted,
