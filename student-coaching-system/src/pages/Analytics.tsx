@@ -48,6 +48,7 @@ import {
   Pencil,
   Trash2,
 } from 'lucide-react';
+import { formatDurationFromMinutes } from '../lib/studyInsightMetrics';
 import {
   BarChart,
   Bar,
@@ -458,7 +459,7 @@ export default function Analytics() {
   }, [selectedStudentId, writtenExamScores, getWrittenExamSubjectsForStudent, writtenExamSubjectsByStudent]);
 
   // Ders bazlı başarı analizi (koç hedefi: günlere oransal kota + birime göre gerçekleşen)
-  const subjectAnalysis = useMemo(() => {
+  const subjectAnalysisAll = useMemo(() => {
     if (
       selectedStudentId &&
       !useAllTime &&
@@ -472,7 +473,8 @@ export default function Analytics() {
         coachRangeYmd.rangeTo,
         plannerEntriesForAnalytics
       ).map((row) => ({
-        subject: row.subject,
+        subject: row.kind === 'dakika' ? row.subject.replace(/ \(süre\)$/, '') : row.subject,
+        süre: row.kind === 'dakika',
         başarı: row.successPct,
         hedef: row.target,
         çözülen: row.completed,
@@ -511,6 +513,7 @@ export default function Analytics() {
       hedef: stats.target,
       çözülen: stats.solved,
       birim: 'Soru',
+      süre: false,
       gerçekleşme: stats.target > 0 ? Math.round((stats.solved / stats.target) * 100) : 0,
       doğru: stats.correct,
       yanlış: stats.wrong,
@@ -527,8 +530,19 @@ export default function Analytics() {
     scopedEntries,
   ]);
 
-  // En zayıf dersler
-  const weakSubjects = subjectAnalysis.slice(-3);
+  /** Soru (ve sayfa) satırları: grafikler, zayıf dersler — süre (dk) buraya karışmaz */
+  const subjectAnalysis = useMemo(
+    () => subjectAnalysisAll.filter((r) => !(r as { süre?: boolean }).süre),
+    [subjectAnalysisAll]
+  );
+  /** Süre hedefi verilen dersler: hedef dk / çalışılan dk */
+  const durationSubjectAnalysis = useMemo(
+    () => subjectAnalysisAll.filter((r) => (r as { süre?: boolean }).süre),
+    [subjectAnalysisAll]
+  );
+
+  // En zayıf dersler (yalnız soru çözülen dersler)
+  const weakSubjects = subjectAnalysis.filter((r) => r.doğru + r.yanlış + r.boş > 0).slice(-3);
 
   const yosAnalytics = useMemo(() => {
     if (!selectedStudent || selectedStudent.classLevel !== 'YOS') return null;
@@ -690,6 +704,9 @@ export default function Analytics() {
             : null,
           coachAgg.sayfa.target > 0 || coachAgg.sayfa.completed > 0
             ? `• Kitap/sayfa: ${coachAgg.sayfa.completed}/${coachAgg.sayfa.target} (%${coachAgg.sayfa.realizationPct})`
+            : null,
+          coachAgg.dakika.target > 0 || coachAgg.dakika.completed > 0
+            ? `• Süre — hedef: ${coachAgg.dakika.target} dk, çalışılan: ${coachAgg.dakika.completed} dk (%${coachAgg.dakika.realizationPct})`
             : null,
         ]
           .filter(Boolean)
@@ -1269,6 +1286,13 @@ export default function Analytics() {
               completed: coachGoalAnalytics.questionCompleted,
             },
             {
+              key: 'dakika',
+              label: 'Çalışma süresi',
+              unit: 'dk',
+              target: coachGoalAnalytics.dakika.target,
+              completed: coachGoalAnalytics.dakika.completed,
+            },
+            {
               key: 'paragraf',
               label: 'Paragraf',
               unit: 'paragraf',
@@ -1298,6 +1322,7 @@ export default function Analytics() {
       {subjectAnalysis.length > 0 && (
         <SubjectGoalProgressList
           rangeLabel={rangeLabel}
+          title="Soru hedefi ve doğruluk"
           rows={subjectAnalysis.map((row) => ({
             subject: row.subject,
             unit: (row as { birim?: string }).birim ?? 'Soru',
@@ -1307,6 +1332,25 @@ export default function Analytics() {
             correct: Number(row.doğru) || 0,
             wrong: Number(row.yanlış) || 0,
             blank: Number(row.boş) || 0,
+          }))}
+        />
+      )}
+
+      {durationSubjectAnalysis.length > 0 && (
+        <SubjectGoalProgressList
+          rangeLabel={rangeLabel}
+          title="Süre hedefi — çalışılan süre"
+          eyebrow="Ders bazında süre"
+          valueSuffix=" dk"
+          rows={durationSubjectAnalysis.map((row) => ({
+            subject: row.subject,
+            unit: 'Süre (dk)',
+            target: Number(row.hedef) || 0,
+            completed: Number(row.çözülen) || 0,
+            successPct: 0,
+            correct: 0,
+            wrong: 0,
+            blank: 0,
           }))}
         />
       )}
@@ -1361,9 +1405,41 @@ export default function Analytics() {
               </div>
               <p className="text-2xl font-bold text-slate-800">%{coachGoalAnalytics.questionRealizationPct}</p>
               <p className="text-xs text-gray-500 mt-1">
-                {coachGoalAnalytics.questionCompleted} / {coachGoalAnalytics.questionTarget}
+                {coachGoalAnalytics.questionCompleted} / {coachGoalAnalytics.questionTarget} soru
               </p>
             </div>
+            {coachGoalAnalytics.dakika.target > 0 || coachGoalAnalytics.dakika.completed > 0 ? (
+              <>
+                <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Clock className="w-5 h-5 text-indigo-600" />
+                    <span className="text-sm text-gray-500">Süre hedefi ({rangeLabel})</span>
+                  </div>
+                  <p className="text-2xl font-bold text-slate-800">
+                    {formatDurationFromMinutes(coachGoalAnalytics.dakika.target)}
+                  </p>
+                </div>
+                <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Clock className="w-5 h-5 text-teal-600" />
+                    <span className="text-sm text-gray-500">Çalışılan süre</span>
+                  </div>
+                  <p className="text-2xl font-bold text-teal-700">
+                    {formatDurationFromMinutes(coachGoalAnalytics.dakika.completed)}
+                  </p>
+                </div>
+                <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+                  <div className="flex items-center gap-2 mb-2">
+                    <TrendingUp className="w-5 h-5 text-indigo-600" />
+                    <span className="text-sm text-gray-500">Süreye uyum</span>
+                  </div>
+                  <p className="text-2xl font-bold text-slate-800">%{coachGoalAnalytics.dakika.realizationPct}</p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    {coachGoalAnalytics.dakika.completed} / {coachGoalAnalytics.dakika.target} dk
+                  </p>
+                </div>
+              </>
+            ) : null}
           </>
         ) : (
           <>

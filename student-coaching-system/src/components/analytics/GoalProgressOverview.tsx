@@ -208,7 +208,20 @@ function successTone(pct: number): string {
   return 'bg-rose-50 text-rose-700 ring-rose-200';
 }
 
-export function SubjectGoalProgressList({ rows, rangeLabel }: { rows: SubjectGoalProgressRow[]; rangeLabel: string }) {
+export function SubjectGoalProgressList({
+  rows,
+  rangeLabel,
+  title = 'Hedef gerçekleşme ve doğruluk',
+  eyebrow = 'Ders bazında',
+  valueSuffix = '',
+}: {
+  rows: SubjectGoalProgressRow[];
+  rangeLabel: string;
+  title?: string;
+  eyebrow?: string;
+  /** Örn. " dk" — süre listesinde değerlerin yanına birim */
+  valueSuffix?: string;
+}) {
   const visible = rows.filter((r) => r.target > 0 || r.completed > 0);
   if (!visible.length) return null;
 
@@ -222,8 +235,8 @@ export function SubjectGoalProgressList({ rows, rangeLabel }: { rows: SubjectGoa
     <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
       <header className="mb-4 flex flex-wrap items-end justify-between gap-2">
         <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-indigo-600">Ders bazında</p>
-          <h3 className="text-lg font-semibold text-slate-900">Hedef gerçekleşme ve doğruluk</h3>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-indigo-600">{eyebrow}</p>
+          <h3 className="text-lg font-semibold text-slate-900">{title}</h3>
         </div>
         <p className="text-xs text-slate-500">{rangeLabel} · geride kalan dersler üstte</p>
       </header>
@@ -245,6 +258,7 @@ export function SubjectGoalProgressList({ rows, rangeLabel }: { rows: SubjectGoa
                 <ProgressBar completed={row.completed} target={row.target} status={status} />
                 <p className="text-[11px] tabular-nums text-slate-500">
                   {row.completed} / {row.target > 0 ? row.target : '—'}
+                  {valueSuffix}
                   {row.completed > row.target && row.target > 0 ? (
                     <span className="ml-1 font-semibold text-violet-700">(+{row.completed - row.target})</span>
                   ) : null}
