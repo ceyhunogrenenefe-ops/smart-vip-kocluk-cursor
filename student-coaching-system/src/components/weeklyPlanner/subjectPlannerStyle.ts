@@ -7,6 +7,9 @@ export function subjectPlannerStyle(subject: string, quantityUnit?: string) {
   if (u === 'dakika' || /dakika|süre|sure/.test(s)) {
     return { bar: 'bg-cyan-200 border-cyan-600 text-cyan-950', chip: 'bg-cyan-100 border-cyan-500' };
   }
+  if (/deneme\s*analiz/i.test(s)) {
+    return { bar: 'bg-indigo-200 border-indigo-600 text-indigo-950', chip: 'bg-indigo-100 border-indigo-500' };
+  }
   if (/paragraf\s*çözme/i.test(s)) {
     return { bar: 'bg-fuchsia-200 border-fuchsia-600 text-fuchsia-950', chip: 'bg-fuchsia-100 border-fuchsia-500' };
   }

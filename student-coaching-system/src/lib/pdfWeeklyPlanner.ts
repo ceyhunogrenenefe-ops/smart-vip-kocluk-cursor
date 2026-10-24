@@ -47,6 +47,9 @@ function subjectPdfStyle(subject: string, quantityUnit?: string): { bg: string; 
   if (u === 'dakika' || /dakika|süre|sure/.test(s)) {
     return { bg: '#cffafe', border: '#0891b2', text: '#083344' };
   }
+  if (/deneme\s*analiz/i.test(s)) {
+    return { bg: '#e0e7ff', border: '#4f46e5', text: '#312e81' };
+  }
   if (/paragraf\s*çözme/i.test(s)) {
     return { bg: '#fae8ff', border: '#c026d3', text: '#701a75' };
   }

@@ -1,9 +1,17 @@
 /**
- * Paragraf çözme, problem çözme, kitap okuma ve deneme sınavı — ders havuzundan bağımsız,
+ * Paragraf çözme, problem çözme, kitap okuma, deneme sınavı ve deneme analizi — ders havuzundan bağımsız,
  * her kademede ayrı "ders" satırı olarak listelenir (konu havuzuna dokunulmaz).
  */
 
-export const STUDY_TRACK_SUBJECTS = ['Paragraf Çözme', 'Problem Çözme', 'Kitap Okuma', 'Deneme Sınavı'] as const;
+export const STUDY_TRACK_SUBJECTS = [
+  'Paragraf Çözme',
+  'Problem Çözme',
+  'Kitap Okuma',
+  'Deneme Sınavı',
+  'Deneme Analizi'
+] as const;
+
+export const DENEME_ANALIZI_SUBJECT: StudyTrackSubjectName = 'Deneme Analizi';
 
 export type StudyTrackSubjectName = (typeof STUDY_TRACK_SUBJECTS)[number];
 
@@ -12,8 +20,19 @@ const TRACK_TOPICS: Record<StudyTrackSubjectName, string[]> = {
   'Problem Çözme': ['Günlük problem', 'Haftalık problem hedefi', 'Konu testi / tekrar'],
   'Kitap Okuma': ['Sayfa hedefi', 'Kitap bitirme', 'Günlük okuma'],
   // Öğrenci çözdüğü denemenin doğru / yanlış / boş sayısını girer (soru birimi)
-  'Deneme Sınavı': ['Genel deneme', 'Branş denemesi', 'Deneme tekrarı / analiz']
+  'Deneme Sınavı': ['Genel deneme', 'Branş denemesi', 'Deneme tekrarı / analiz'],
+  // Deneme sonrası: yanlış/boş soruları yeniden çözme ve eksik konu tespiti (soru birimi)
+  'Deneme Analizi': [
+    'Yanlış / boş soru analizi',
+    'Hata karnesi çıkarma',
+    'Eksik konu tekrarı',
+    'Benzer soru çözümü'
+  ]
 };
+
+export function isDenemeAnaliziSubject(subject: string | null | undefined): boolean {
+  return String(subject || '').trim() === DENEME_ANALIZI_SUBJECT;
+}
 
 export function isStudyTrackSubject(subject: string): boolean {
   return (STUDY_TRACK_SUBJECTS as readonly string[]).includes(subject);
@@ -53,9 +72,10 @@ export function studyTracksForClassLevel(
   const out: Record<string, string[]> = {};
   const n = numericGrade(classLevel as number | string);
 
-  // Kitap okuma ve deneme sınavı: tüm kademeler
+  // Kitap okuma, deneme sınavı ve deneme analizi: tüm kademeler
   out['Kitap Okuma'] = [...TRACK_TOPICS['Kitap Okuma']];
   out['Deneme Sınavı'] = [...TRACK_TOPICS['Deneme Sınavı']];
+  out['Deneme Analizi'] = [...TRACK_TOPICS['Deneme Analizi']];
 
   const isLgs = key === 'LGS';
   const isYks = key.startsWith('YKS-');

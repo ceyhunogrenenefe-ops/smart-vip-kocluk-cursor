@@ -10,7 +10,7 @@ import {
 } from '../../lib/weeklyPlannerApi';
 import { useApp } from '../../context/AppContext';
 import { completedQuantityForGoalUnit, goalUnitLabel, normalizeGoalUnit } from '../../lib/coachGoalUnits';
-import { isKitapOkumaContext } from '../../lib/studyTrackSubjects';
+import { isDenemeAnaliziSubject, isKitapOkumaContext } from '../../lib/studyTrackSubjects';
 import {
   isTopicMarkedCompleted,
   resolveTopicLabelForTracking
@@ -59,6 +59,8 @@ export function WeeklyPlannerStudyModal({
     isKitapOkumaContext(subject, plannerEntry.title) || goalUnit === 'sayfa';
   /** Koç süre hedefi verdiyse öğrenci soru sayısının yanında çalıştığı süreyi de girer */
   const isDurationGoal = goalUnit === 'dakika' && !isKitapMode;
+  /** Deneme Analizi bloğu: yanlış/boş soruları yeniden çözme kaydı */
+  const isDenemeAnalizi = isDenemeAnaliziSubject(subject);
   const linked = plannerEntry.weekly_entry_id
     ? weeklyEntries.find((e) => e.id === plannerEntry.weekly_entry_id)
     : undefined;
@@ -541,8 +543,15 @@ export function WeeklyPlannerStudyModal({
             )}
             {!isKitapMode ? (
               <>
+                {isDenemeAnalizi ? (
+                  <div className="mb-3 rounded-lg border border-indigo-200 bg-indigo-50/80 px-3 py-2 text-[11px] leading-relaxed text-indigo-900 dark:border-indigo-800/60 dark:bg-indigo-950/40 dark:text-indigo-200">
+                    Denemedeki yanlış ve boş soruları yeniden çöz. Bu kez doğru yaptıklarını{' '}
+                    <strong>Doğru</strong>&apos;ya, hâlâ yapamadıklarını <strong>Yanlış</strong>&apos;a yaz.
+                    Eksik çıkan konuları aşağıdaki nota ekle; koçun tekrar planını buna göre yapar.
+                  </div>
+                ) : null}
                 <p className="text-xs font-semibold text-slate-600 dark:text-slate-300 mb-2">
-                  Soru sayısı
+                  {isDenemeAnalizi ? 'Analiz edilen soru' : 'Soru sayısı'}
                 </p>
                 <div className="grid grid-cols-3 gap-2">
                   <label className="block">
@@ -579,7 +588,9 @@ export function WeeklyPlannerStudyModal({
                     />
                   </label>
                 </div>
-                <p className="text-xs text-slate-500 mt-2">Çözülen toplam: {solvedPreview}</p>
+                <p className="text-xs text-slate-500 mt-2">
+                  {isDenemeAnalizi ? 'Analiz edilen toplam' : 'Çözülen toplam'}: {solvedPreview}
+                </p>
               </>
             ) : null}
             {isDurationGoal ? (
