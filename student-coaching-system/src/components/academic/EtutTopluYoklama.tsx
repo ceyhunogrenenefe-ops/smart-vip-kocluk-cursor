@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { toast } from 'sonner';
 import { ClipboardList, Loader2 } from 'lucide-react';
 import { AppModal, AppModalBody, AppModalFooter, AppModalHeader } from '../ui/AppModal';
 import { apiFetch } from '../../lib/session';
@@ -25,13 +26,17 @@ type Satir = {
   dilim: number;
   status: Durum;
   camera_status: 'on' | 'off' | null;
+  /** Öğretmen bu satıra dokunduysa Kaydet’e girer. */
+  dirty: boolean;
 };
 
-function durumYap(st: string): Durum {
-  if (st === 'absent') return 'absent';
-  if (st === 'late') return 'late';
-  if (st === 'excused') return 'excused';
-  return 'present';
+function durumYap(st: string, varsayilan: Durum): Durum {
+  const s = String(st || '').trim().toLowerCase();
+  if (s === 'absent') return 'absent';
+  if (s === 'late') return 'late';
+  if (s === 'excused') return 'excused';
+  if (s === 'present') return 'present';
+  return varsayilan;
 }
 
 function kameraYap(status: Durum, raw: string): 'on' | 'off' | null {
@@ -59,6 +64,7 @@ export function EtutTopluYoklama({
   const deneme = tur === 'deneme';
   const ad = deneme ? 'deneme' : 'etüt';
   const Ad = deneme ? 'Deneme' : 'Etüt';
+  const varsayilanDurum: Durum = deneme ? 'absent' : 'present';
   const [acik, setAcik] = useState(false);
   const [yukleniyor, setYukleniyor] = useState(false);
   const [kaydediyor, setKaydediyor] = useState(false);
@@ -159,7 +165,8 @@ export function EtutTopluYoklama({
             .map((row: { student_id?: string; student_name?: string }) => {
               const id = String(row.student_id || '').trim();
               if (!id) return null;
-              const status = durumYap(durum.get(id) || '');
+              const status = durumYap(durum.get(id) || '', varsayilanDurum);
+              const camera_status = kameraYap(status, kamera.get(id) || '');
               return {
                 session_id: oturum.id,
                 student_id: id,
@@ -168,7 +175,8 @@ export function EtutTopluYoklama({
                 saat,
                 dilim: dilimNo.get(oturum.id) || 1,
                 status,
-                camera_status: kameraYap(status, kamera.get(id) || '')
+                camera_status,
+                dirty: false
               } satisfies Satir;
             })
             .filter((row: Satir | null): row is Satir => Boolean(row));
@@ -215,6 +223,11 @@ export function EtutTopluYoklama({
     return { total: gorunen.length, present, late, absent, excused };
   }, [gorunen]);
 
+  const kaydedilecek = useMemo(
+    () => satirlar.filter((s) => s.dilim === seciliDilim && s.dirty),
+    [satirlar, seciliDilim]
+  );
+
   const durumSec = (sessionId: string, studentId: string, status: Durum) => {
     setSatirlar((prev) =>
       prev.map((s) =>
@@ -222,7 +235,8 @@ export function EtutTopluYoklama({
           ? {
               ...s,
               status,
-              camera_status: kameraDurumu(status, s.camera_status)
+              camera_status: kameraDurumu(status, s.camera_status),
+              dirty: true
             }
           : s
       )
@@ -232,7 +246,7 @@ export function EtutTopluYoklama({
   const kameraSec = (sessionId: string, studentId: string, camera: 'on' | 'off') => {
     setSatirlar((prev) =>
       prev.map((s) =>
-        s.session_id === sessionId && s.student_id === studentId ? { ...s, camera_status: camera } : s
+        s.session_id === sessionId && s.student_id === studentId ? { ...s, camera_status: camera, dirty: true } : s
       )
     );
   };
@@ -242,18 +256,21 @@ export function EtutTopluYoklama({
       prev.map((s) => {
         if (s.dilim !== seciliDilim) return s;
         if (sinif && s.className !== sinif) return s;
-        return { ...s, status, camera_status: kameraDurumu(status, s.camera_status) };
+        return { ...s, status, camera_status: kameraDurumu(status, s.camera_status), dirty: true };
       })
     );
   };
 
   const kaydet = async () => {
-    if (!satirlar.length) return;
+    if (!kaydedilecek.length) {
+      toast.message('Kaydedilecek değişiklik yok. Önce öğrencilerin durumunu işaretleyin.');
+      return;
+    }
     setKaydediyor(true);
     setHata(null);
     try {
       const gruplar = new Map<string, Satir[]>();
-      for (const s of satirlar.filter((row) => row.dilim === seciliDilim)) {
+      for (const s of kaydedilecek) {
         const arr = gruplar.get(s.session_id) || [];
         arr.push(s);
         gruplar.set(s.session_id, arr);
@@ -279,6 +296,14 @@ export function EtutTopluYoklama({
         setHata('Bazı sınıfların yoklaması kaydedilemedi. Listeyi yenileyip tekrar deneyin.');
         return;
       }
+      const savedKeys = new Set(kaydedilecek.map((s) => `${s.session_id}:${s.student_id}`));
+      setSatirlar((prev) =>
+        prev.map((s) => {
+          if (!savedKeys.has(`${s.session_id}:${s.student_id}`)) return s;
+          return { ...s, dirty: false };
+        })
+      );
+      toast.success('Yoklama kaydedildi');
       setAcik(false);
     } catch {
       setHata('Yoklama kaydedilemedi.');
@@ -307,8 +332,8 @@ export function EtutTopluYoklama({
               <h3 className="font-semibold text-slate-900">{label} yoklaması</h3>
               <p className="mt-0.5 text-xs text-slate-600">
                 {deneme
-                  ? '1. deneme ve 2. deneme ayrı. Kayıt, açık denemedeki her öğrencinin kendi sınıf dersine yazılır.'
-                  : '1. etüt ve 2. etüt ayrı. Kayıt, açık etütteki her öğrencinin kendi sınıf dersine yazılır.'}
+                  ? '1. deneme ve 2. deneme ayrı. Kayıtsız öğrenci katılmadı sayılır; katılanları işaretleyin. Yalnız değiştirdiğiniz satırlar kaydedilir.'
+                  : '1. etüt ve 2. etüt ayrı. Kayıt, açık etütteki her öğrencinin kendi sınıf dersine yazılır. Yalnız değiştirdiğiniz satırlar kaydedilir.'}
               </p>
             </div>
             <button type="button" className="shrink-0 text-sm text-slate-500 hover:text-slate-800" onClick={kapat}>
@@ -466,7 +491,7 @@ export function EtutTopluYoklama({
             </button>
             <button
               type="button"
-              disabled={yukleniyor || kaydediyor || gorunen.length === 0}
+              disabled={yukleniyor || kaydediyor || kaydedilecek.length === 0}
               className="min-h-[44px] flex-1 rounded-lg bg-amber-600 text-sm font-semibold text-white disabled:opacity-50"
               onClick={() => void kaydet()}
             >
