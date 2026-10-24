@@ -72,6 +72,11 @@ export function WeeklyPlannerStudyModal({
     : undefined;
 
   const targetQuestions = Math.max(0, Number(plannerEntry.planned_quantity || 0));
+  /**
+   * Günlük kayda yazılan soru hedefi: süre (dk) ve sayfa hedeflerinde 0.
+   * Aksi halde dakikalar analizde soru hedefine karışıyordu.
+   */
+  const entryQuestionTarget = goalUnit === 'dakika' || goalUnit === 'sayfa' || isKitapMode ? 0 : targetQuestions;
 
   const [correct, setCorrect] = useState(0);
   const [wrong, setWrong] = useState(0);
@@ -313,7 +318,7 @@ export function WeeklyPlannerStudyModal({
             subject,
             topic,
             date: plannerEntry.planner_date,
-            target_questions: targetQuestions,
+            target_questions: entryQuestionTarget,
             solved_questions: solved,
             correct: correctToSave,
             wrong: wrongToSave,
@@ -334,7 +339,7 @@ export function WeeklyPlannerStudyModal({
         const created = await submitPlannerDailyLog(plannerEntry.id, {
           subject,
           topic,
-          target_questions: targetQuestions,
+          target_questions: entryQuestionTarget,
           correct: correctToSave,
           wrong: wrongToSave,
           blank: blankToSave,
@@ -366,7 +371,7 @@ export function WeeklyPlannerStudyModal({
             date: plannerEntry.planner_date,
             subject,
             topic,
-            targetQuestions,
+            targetQuestions: entryQuestionTarget,
             solvedQuestions: solved,
             correctAnswers: correctToSave,
             wrongAnswers: wrongToSave,

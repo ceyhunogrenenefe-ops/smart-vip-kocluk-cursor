@@ -38,7 +38,8 @@ import {
   patchWeeklyPlannerEntry,
 } from '../../lib/weeklyPlannerApi';
 import { COACH_GOAL_QUANTITY_UNITS } from '../../lib/coachGoalUnits';
-import { plannerBlockDoneQuantity, attributeCoachGoalCompletions } from '../../lib/coachGoalAnalytics';
+import { computePlannerWeekTotals,
+  plannerBlockDoneQuantity, attributeCoachGoalCompletions } from '../../lib/coachGoalAnalytics';
 import {
   defaultGoalUnitForSubject,
   isBransDenemesiTitle,
@@ -819,18 +820,15 @@ export function WeeklyPlannerCalendar({
     setMobileCreateSlotIdx(freeIdx >= 0 ? freeIdx : Math.max(0, fallbackIdx));
   }, [mobileDayDate, showMobileDayView, entries, timeSlots]);
 
+  /** Soru, süre (dk) ve sayfa hedefleri ayrı: dakika soru toplamına karışmaz */
   const weekStats = useMemo(() => {
-    let planned = 0;
-    let done = 0;
     let minutes = 0;
     for (const e of entries) {
       if (e.planner_date < weekStartStr || e.planner_date > weekEndStr) continue;
-      planned += Number(e.planned_quantity || 0);
-      done += plannerBlockDoneQuantity(e, goals, studentWeeklyEntries);
       minutes += slotMinutes(e.start_time, e.end_time);
     }
-    const pct = planned > 0 ? Math.round((done / planned) * 100) : 0;
-    return { planned, done, minutes, pct };
+    const totals = computePlannerWeekTotals(goals, entries, studentWeeklyEntries, weekStartStr, weekEndStr);
+    return { ...totals, minutes };
   }, [entries, weekStartStr, weekEndStr, goals, studentWeeklyEntries]);
 
   const openCreate = (date: string, slot: PlannerTimeSlot) => {
@@ -1700,7 +1698,7 @@ export function WeeklyPlannerCalendar({
         </div>
       ) : null}
 
-      {/* Özet */}
+      {/* Özet — soru ve süre hedefleri ayrı */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-2 lg:grid-cols-4 sm:gap-4">
         <div className="group relative overflow-hidden rounded-2xl border border-emerald-100/90 bg-gradient-to-br from-emerald-50/95 via-white to-teal-50/50 p-5 shadow-sm transition hover:shadow-md dark:border-emerald-900/40 dark:from-emerald-950/35 dark:via-slate-900 dark:to-slate-900">
           <div className="absolute -right-6 -top-6 h-24 w-24 rounded-full bg-emerald-400/10 blur-2xl transition group-hover:bg-emerald-400/20" aria-hidden />
@@ -1708,16 +1706,26 @@ export function WeeklyPlannerCalendar({
             <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-100 text-emerald-700 shadow-sm dark:bg-emerald-950/80 dark:text-emerald-300">
               <Target className="h-5 w-5" />
             </span>
-            <div>
+            <div className="min-w-0">
               <p className="text-[11px] font-semibold uppercase tracking-wide text-emerald-700/90 dark:text-emerald-400/90">
-                Haftalık tamamlanma
+                Soru hedefi
               </p>
               <p className="mt-1 font-mono text-3xl font-bold tabular-nums text-emerald-700 dark:text-emerald-400">
-                {weekStats.pct}%
+                {weekStats.soru.target > 0 ? `${weekStats.soru.pct}%` : '—'}
               </p>
               <p className="mt-1 text-xs font-medium text-slate-600 dark:text-slate-400">
-                {weekStats.done} / {weekStats.planned} birim
+                {weekStats.soru.target > 0
+                  ? `${weekStats.soru.done} / ${weekStats.soru.target} soru çözüldü`
+                  : weekStats.soru.done > 0
+                    ? `${weekStats.soru.done} soru çözüldü · hedef yok`
+                    : 'Bu hafta soru hedefi yok'}
               </p>
+              {weekStats.sayfa.target > 0 || weekStats.sayfa.done > 0 ? (
+                <p className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+                  Kitap: {weekStats.sayfa.done} / {weekStats.sayfa.target} sayfa
+                  {weekStats.sayfa.target > 0 ? ` (%${weekStats.sayfa.pct})` : ''}
+                </p>
+              ) : null}
             </div>
           </div>
         </div>
@@ -1727,14 +1735,21 @@ export function WeeklyPlannerCalendar({
             <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-100 text-indigo-700 shadow-sm dark:bg-indigo-950/80 dark:text-indigo-300">
               <Clock className="h-5 w-5" />
             </span>
-            <div>
+            <div className="min-w-0">
               <p className="text-[11px] font-semibold uppercase tracking-wide text-indigo-700/90 dark:text-indigo-400/90">
-                Planlanan süre
+                Süre hedefi
               </p>
               <p className="mt-1 font-mono text-3xl font-bold tabular-nums text-slate-900 dark:text-slate-50">
-                {weekStats.minutes}
+                {weekStats.dakika.target > 0 ? `${weekStats.dakika.pct}%` : '—'}
               </p>
-              <p className="mt-1 text-xs font-medium text-slate-600 dark:text-slate-400">dakika</p>
+              <p className="mt-1 text-xs font-medium text-slate-600 dark:text-slate-400">
+                {weekStats.dakika.target > 0
+                  ? `${weekStats.dakika.done} / ${weekStats.dakika.target} dk çalışıldı`
+                  : 'Bu hafta süre hedefi yok'}
+              </p>
+              <p className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+                Takvimde ayrılan: {weekStats.minutes} dk
+              </p>
             </div>
           </div>
         </div>

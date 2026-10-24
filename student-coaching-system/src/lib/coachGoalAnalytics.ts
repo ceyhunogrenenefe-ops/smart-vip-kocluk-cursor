@@ -339,9 +339,9 @@ function plannedFromPlannerForGoal(
   );
 }
 
-type GoalAmountType = 'soru' | 'sayfa' | 'dakika';
+export type GoalAmountType = 'soru' | 'sayfa' | 'dakika';
 
-function amountTypeForGoal(g: CoachWeeklyGoalRow): GoalAmountType {
+export function amountTypeForGoal(g: CoachWeeklyGoalRow): GoalAmountType {
   const kind = coachGoalUnitKind(g);
   if (kind === 'sayfa') return 'sayfa';
   if (kind === 'dakika') return 'dakika';
@@ -697,10 +697,17 @@ export function coachSubjectProgressInRange(
   for (const g of activeGoals) {
     const sub = String(g.subject || '').trim() || 'Diğer';
     const kind = coachGoalUnitKind(g);
-    const prev = bySubject.get(sub) || { kind, target: 0, completed: 0 };
+    // Aynı derste soru ve süre hedefi ayrı satır: dakika soru toplamına karışmasın
+    const key = `${sub}::${amountTypeForGoal(g)}`;
+    const prev = bySubject.get(key) || { kind, target: 0, completed: 0 };
     prev.target += coachTargetInAnalysisRange(g, rf, rt);
     prev.completed += doneByGoal.get(g.id) ?? 0;
-    bySubject.set(sub, prev);
+    bySubject.set(key, prev);
+  }
+  const typesPerSubject = new Map<string, number>();
+  for (const key of bySubject.keys()) {
+    const sub = key.slice(0, key.lastIndexOf('::'));
+    typesPerSubject.set(sub, (typesPerSubject.get(sub) || 0) + 1);
   }
 
   const entryStats: Record<string, { correct: number; wrong: number; blank: number; solved: number }> =
@@ -726,8 +733,25 @@ export function coachSubjectProgressInRange(
   }
 
   return [...bySubject.entries()]
-    .map(([subject, row]) => {
-      const st = entryStats[subject] || { correct: 0, wrong: 0, blank: 0, solved: 0 };
+    .map(([key, row]) => {
+      const sep = key.lastIndexOf('::');
+      const baseSubject = key.slice(0, sep);
+      const amountType = key.slice(sep + 2) as GoalAmountType;
+      const isQuestionRow = amountType === 'soru';
+      const suffix =
+        (typesPerSubject.get(baseSubject) || 0) > 1 && !isQuestionRow
+          ? amountType === 'dakika'
+            ? ' (süre)'
+            : ' (sayfa)'
+          : '';
+      const subject = `${baseSubject}${suffix}`;
+      // Doğru/yanlış/boş yalnız soru satırında; süre/sayfa satırında soru istatistiği yok
+      const st = (isQuestionRow ? entryStats[baseSubject] : undefined) || {
+        correct: 0,
+        wrong: 0,
+        blank: 0,
+        solved: 0
+      };
       const target = Math.round(row.target);
       const completed = Math.round(row.completed);
       return {
@@ -831,4 +855,68 @@ export function entriesPagesInYmdRange(entries: WeeklyEntry[], ymdFrom: string, 
     if (d >= a && d <= b) return s + effectivePagesRead(e);
     return s;
   }, 0);
+}
+
+export type PlannerAmountTotals = { target: number; done: number; pct: number };
+
+export type PlannerWeekTotals = {
+  soru: PlannerAmountTotals;
+  dakika: PlannerAmountTotals;
+  sayfa: PlannerAmountTotals;
+};
+
+/** Koç hedefi olmayan blok için birim: kitap okuma → sayfa, diğerleri → soru */
+function freeBlockAmountType(row: WeeklyPlannerEntryRow): GoalAmountType {
+  const sub = String(row.subject || '').trim();
+  if (sub === 'Kitap Okuma' || /kitap|okuma/i.test(sub)) return 'sayfa';
+  return 'soru';
+}
+
+/**
+ * Haftalık plan özeti: soru, süre (dk) ve sayfa ayrı ayrı.
+ * Hedef = koç hedeflerinin kotası + hedefsiz blokların planlanan miktarı;
+ * gerçekleşen = analiz sayfasıyla aynı paylaştırma (çift sayım yok).
+ */
+export function computePlannerWeekTotals(
+  goals: CoachWeeklyGoalRow[],
+  plannerEntries: WeeklyPlannerEntryRow[],
+  weeklyEntries: WeeklyEntry[],
+  rangeFrom: string,
+  rangeTo: string
+): PlannerWeekTotals {
+  const rf = clipYmd(rangeFrom);
+  const rt = clipYmd(rangeTo);
+  const acc: Record<GoalAmountType, { target: number; done: number }> = {
+    soru: { target: 0, done: 0 },
+    dakika: { target: 0, done: 0 },
+    sayfa: { target: 0, done: 0 }
+  };
+
+  const activeGoals = dedupeCoachGoalsForAnalytics(goals, rf, rt);
+  const doneByGoal = attributeCoachGoalCompletions(activeGoals, weeklyEntries, rf, rt, plannerEntries);
+  for (const g of activeGoals) {
+    const t = amountTypeForGoal(g);
+    acc[t].target += coachTargetInAnalysisRange(g, rf, rt);
+    acc[t].done += doneByGoal.get(g.id) ?? 0;
+  }
+
+  const allGoalIds = new Set(goals.map((g) => g.id));
+  for (const row of plannerEntries) {
+    const d = clipYmd(row.planner_date);
+    if (d < rf || d > rt) continue;
+    // Koç hedefine bağlı bloklar yukarıda hedef üzerinden sayıldı
+    if (row.coach_goal_id && allGoalIds.has(row.coach_goal_id)) continue;
+    if (isAutoSyncedPlannerRow(row)) continue;
+    const t = freeBlockAmountType(row);
+    const planned = Math.max(0, Number(row.planned_quantity || 0));
+    acc[t].target += planned;
+    acc[t].done += plannerBlockDoneQuantity(row, goals, weeklyEntries);
+  }
+
+  const fin = (t: GoalAmountType): PlannerAmountTotals => {
+    const target = Math.round(acc[t].target);
+    const done = Math.round(acc[t].done);
+    return { target, done, pct: pct(done, target) };
+  };
+  return { soru: fin('soru'), dakika: fin('dakika'), sayfa: fin('sayfa') };
 }
