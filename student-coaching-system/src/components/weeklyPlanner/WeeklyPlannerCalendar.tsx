@@ -39,7 +39,12 @@ import {
 } from '../../lib/weeklyPlannerApi';
 import { COACH_GOAL_QUANTITY_UNITS } from '../../lib/coachGoalUnits';
 import { plannerBlockDoneQuantity, attributeCoachGoalCompletions } from '../../lib/coachGoalAnalytics';
-import { defaultGoalUnitForSubject, sortSubjectsWithStudyTracks } from '../../lib/studyTrackSubjects';
+import {
+  defaultGoalUnitForSubject,
+  isBransDenemesiTitle,
+  sortSubjectsWithStudyTracks,
+  withBransDenemesiTopic
+} from '../../lib/studyTrackSubjects';
 import {
   isTopicMarkedCompleted,
   resolveTopicLabelForTracking
@@ -285,7 +290,7 @@ export function WeeklyPlannerCalendar({
 
   const newGoalTopicOptions = useMemo(() => {
     if (classLevel === undefined || classLevel === null || !newGoalSubject) return [];
-    return getTopics(newGoalSubject, classLevel);
+    return withBransDenemesiTopic(newGoalSubject, getTopics(newGoalSubject, classLevel));
   }, [classLevel, newGoalSubject, getTopics]);
 
   const [formGoalId, setFormGoalId] = useState<string | null>(null);
@@ -295,7 +300,7 @@ export function WeeklyPlannerCalendar({
 
   const modalTopicOptions = useMemo(() => {
     if (classLevel === undefined || classLevel === null || !formSubject.trim()) return [];
-    return getTopics(formSubject.trim(), classLevel);
+    return withBransDenemesiTopic(formSubject.trim(), getTopics(formSubject.trim(), classLevel));
   }, [classLevel, formSubject, getTopics]);
 
   /** Havuzda olmayan eski kayıtları düzenlerken seçenek listesinde tut */
@@ -1202,7 +1207,8 @@ export function WeeklyPlannerCalendar({
           status: nextDone ? 'completed' : 'planned',
           completed_quantity: nextDone ? plannedN : 0,
         });
-        if (nextDone) {
+        // Branş denemesi bir müfredat konusu değil; Konu Takibi'ne işlenmez
+        if (nextDone && !isBransDenemesiTitle(entry.title)) {
           const sub = entry.subject?.trim() || 'Genel';
           const top = entry.title?.trim() || sub;
           const sid = entry.student_id;

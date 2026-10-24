@@ -10,7 +10,11 @@ import {
 } from '../../lib/weeklyPlannerApi';
 import { useApp } from '../../context/AppContext';
 import { completedQuantityForGoalUnit, goalUnitLabel, normalizeGoalUnit } from '../../lib/coachGoalUnits';
-import { isDenemeAnaliziSubject, isKitapOkumaContext } from '../../lib/studyTrackSubjects';
+import {
+  isBransDenemesiTitle,
+  isDenemeAnaliziSubject,
+  isKitapOkumaContext
+} from '../../lib/studyTrackSubjects';
 import {
   isTopicMarkedCompleted,
   resolveTopicLabelForTracking
@@ -61,6 +65,8 @@ export function WeeklyPlannerStudyModal({
   const isDurationGoal = goalUnit === 'dakika' && !isKitapMode;
   /** Deneme Analizi bloğu: yanlış/boş soruları yeniden çözme kaydı */
   const isDenemeAnalizi = isDenemeAnaliziSubject(subject);
+  /** Branş denemesi: soru kaydı tutulur ama Konu Takibi'ne işlenmez */
+  const isBransDenemesi = isBransDenemesiTitle(plannerEntry.title);
   const linked = plannerEntry.weekly_entry_id
     ? weeklyEntries.find((e) => e.id === plannerEntry.weekly_entry_id)
     : undefined;
@@ -225,8 +231,8 @@ export function WeeklyPlannerStudyModal({
       setMarkTopicFinished(false);
       return;
     }
-    if (topicGoalMet) setMarkTopicFinished(true);
-  }, [topicAlreadyDone, topicGoalMet]);
+    if (topicGoalMet && !isBransDenemesi) setMarkTopicFinished(true);
+  }, [topicAlreadyDone, topicGoalMet, isBransDenemesi]);
 
   const submit = async () => {
     setSaving(true);
@@ -280,6 +286,7 @@ export function WeeklyPlannerStudyModal({
       const today = new Date().toISOString().split('T')[0];
 
       const shouldMarkTopic =
+        !isBransDenemesi &&
         !topicAlreadyDone &&
         topic.trim() &&
         (markTopicFinished || topicGoalMet);
@@ -517,7 +524,11 @@ export function WeeklyPlannerStudyModal({
               <CheckCircle2 className="w-4 h-4 shrink-0" />
               Konu takibi
             </p>
-            {topicAlreadyDone ? (
+            {isBransDenemesi ? (
+              <p className="text-xs text-violet-800 dark:text-violet-300 mb-4 rounded-lg border border-violet-200 dark:border-violet-800/60 bg-violet-50/80 dark:bg-violet-950/40 px-3 py-2">
+                Branş denemesi: denemedeki doğru, yanlış ve boş sayını gir. Bu kayıt net takibine girer, Konu Takibi&apos;nde bir konuyu bitmiş saymaz.
+              </p>
+            ) : topicAlreadyDone ? (
               <p className="text-sm text-violet-800 dark:text-violet-300 mb-4 rounded-lg border border-violet-200 dark:border-violet-800/60 bg-violet-50/80 dark:bg-violet-950/40 px-3 py-2">
                 Bu konu Konu Takibi sayfasında zaten <strong>tamamlandı</strong> olarak işaretli.
               </p>

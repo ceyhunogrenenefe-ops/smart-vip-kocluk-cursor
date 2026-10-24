@@ -6,7 +6,7 @@ import { userRoleTags } from '../config/rolePermissions';
 import { useApp } from '../context/AppContext';
 import { WeeklyEntry, Book, formatClassLevelLabel } from '../types';
 import { MAARIF_SUBJECT_ORDER } from '../data/tytMaarifTopicPool';
-import { sortSubjectsWithStudyTracks } from '../lib/studyTrackSubjects';
+import { sortSubjectsWithStudyTracks, withBransDenemesiTopic } from '../lib/studyTrackSubjects';
 import {
   Calendar,
   Plus,
@@ -210,11 +210,8 @@ export default function Tracking() {
 
     const classLevel = selectedStudent.classLevel;
 
-    if (typeof classLevel === 'string' && classLevel.startsWith('YKS-')) {
-      return getTopics(formData.subject, classLevel);
-    }
     if (classLevel !== undefined && classLevel !== null) {
-      return getTopics(formData.subject, classLevel);
+      return withBransDenemesiTopic(formData.subject, getTopics(formData.subject, classLevel));
     }
     return [];
   };

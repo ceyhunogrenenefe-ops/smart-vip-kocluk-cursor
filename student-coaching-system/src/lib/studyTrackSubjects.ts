@@ -117,3 +117,40 @@ export function mergeStudyTracksIntoSubjects(
   if (!Object.keys(tracks).length) return subjects;
   return { ...subjects, ...tracks };
 }
+
+/** Konu başlıklarında kısaltma olarak kalacak kelimeler (TYT, AYT, LGS…) */
+const KEEP_UPPER_WORDS = new Set(['TYT', 'AYT', 'LGS', 'YKS', 'YÖS', 'YOS', 'MEB', 'AP', 'IB']);
+
+function subjectDisplayName(subject: string): string {
+  return subject
+    .trim()
+    .split(/\s+/)
+    .map((w) => {
+      if (KEEP_UPPER_WORDS.has(w.toLocaleUpperCase('tr-TR'))) return w.toLocaleUpperCase('tr-TR');
+      const lower = w.toLocaleLowerCase('tr-TR');
+      return lower.charAt(0).toLocaleUpperCase('tr-TR') + lower.slice(1);
+    })
+    .join(' ');
+}
+
+/** Ders adına göre branş denemesi konusu: "TYT FİZİK" → "TYT Fizik Branş Denemesi" */
+export function bransDenemesiTopic(subject: string): string {
+  return `${subjectDisplayName(subject)} Branş Denemesi`;
+}
+
+/** Planlayıcı başlığı branş denemesi mi? (Konu Takibi'ne işlenmez) */
+export function isBransDenemesiTitle(title: string | null | undefined): boolean {
+  return /branş\s*denemesi|brans\s*denemesi/i.test(String(title || ''));
+}
+
+/**
+ * Ders konu listesinin sonuna o dersin branş denemesini ekler.
+ * Çalışma alanları (Deneme Sınavı, Kitap Okuma…), etüt/rehberlik ve konusu olmayan dersler hariç.
+ */
+export function withBransDenemesiTopic(subject: string, topics: string[]): string[] {
+  const sub = String(subject || '').trim();
+  if (!sub || !topics.length || isStudyTrackSubject(sub)) return topics;
+  if (/etüt|etut|rehberlik|kitap okuma/i.test(sub)) return topics;
+  if (topics.some((t) => isBransDenemesiTitle(t))) return topics;
+  return [...topics, bransDenemesiTopic(sub)];
+}
