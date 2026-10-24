@@ -28,6 +28,15 @@ export type AktarimCakisma = {
   existing_end: string;
 };
 
+export type AktarimHedefi = {
+  subject: string;
+  title: string;
+  target_quantity: number;
+  quantity_unit: string | null;
+  goal_start_date: string | null;
+  goal_end_date: string | null;
+};
+
 export type AktarimOzeti = {
   source_week: string;
   target_week: string;
@@ -37,15 +46,22 @@ export type AktarimOzeti = {
   skipped_invalid: number;
   conflict_count: number;
   mergeable_count: number;
+  /** Koç haftalık hedefleri */
+  goal_source_count?: number;
+  goal_copy_count?: number;
+  goal_reused_count?: number;
+  goal_existing_count?: number;
 };
 
 export type AktarimOnizleme = AktarimOzeti & {
   preview: AktarimOnizlemeGorev[];
   conflicts: AktarimCakisma[];
+  goals_preview?: AktarimHedefi[];
 };
 
 export type AktarimSonucu = AktarimOzeti & {
   inserted: number;
+  goals_inserted?: number;
   deleted: number;
   mode: AktarimKipi;
 };
