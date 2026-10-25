@@ -6,14 +6,9 @@ import {
   assertStudentPlannerWrite,
   buildAccessContext
 } from '../api/_lib/student-access-gate.js';
+import { resolvePlannerEntryTitle } from '../api/_lib/planner-entry-title.js';
 
 const padDate = (v) => String(v || '').trim().slice(0, 10);
-
-function plannerTitleFromTopic(subject, topic) {
-  const sub = String(subject || '').trim() || 'Genel';
-  const t = String(topic || '').trim();
-  return t ? `Günlük kayıt: ${t}` : `Günlük kayıt: ${sub}`;
-}
 
 function normalizeGoalUnit(raw) {
   const u = String(raw || 'soru')
@@ -181,7 +176,7 @@ export default async function handler(req, res) {
       entryPayload.target_questions,
       completedAmount
     );
-    const title = plannerTitleFromTopic(subject, entryPayload.topic);
+    const title = resolvePlannerEntryTitle(planner.title, subject, entryPayload.topic);
 
     const { data: inserted, error: insErr } = await supabaseAdmin
       .from('weekly_entries')

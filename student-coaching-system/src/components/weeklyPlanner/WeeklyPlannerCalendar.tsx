@@ -36,6 +36,7 @@ import {
   fetchWeeklyPlannerEntries,
   patchCoachWeeklyGoal,
   patchWeeklyPlannerEntry,
+  plannerCardDisplayTitle,
 } from '../../lib/weeklyPlannerApi';
 import { COACH_GOAL_QUANTITY_UNITS } from '../../lib/coachGoalUnits';
 import { computePlannerWeekTotals,
@@ -2392,7 +2393,9 @@ export function WeeklyPlannerCalendar({
                                 <div className="flex items-start gap-1">
                                   {canEditPlan ? <GripVertical className="w-3.5 h-3.5 text-slate-400/90 flex-shrink-0 mt-0.5" /> : null}
                                   <div className="min-w-0 flex-1">
-                                    <div className="font-bold truncate text-slate-900/95 dark:text-slate-100">{en.title}</div>
+                                    <div className="font-bold truncate text-slate-900/95 dark:text-slate-100">
+                                      {plannerCardDisplayTitle(en.title, en.subject)}
+                                    </div>
                                     <div className="mt-0.5 text-[10px] font-medium opacity-85">
                                       {plannedN} plan · {doneQty} yap
                                     </div>
