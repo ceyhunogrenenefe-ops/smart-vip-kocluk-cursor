@@ -78,9 +78,17 @@ workflows:
           agvtool new-version -all $NEXT
       - name: IPA üret
         script: |
-          xcode-project build-ipa \
+          # Arşiv düşerse asıl Xcode hatası yalnız artefakt zip'inde kalıyordu;
+          # sebebi ekranda görmek için günlüğün hata satırlarını yazdır.
+          if ! xcode-project build-ipa \
             --project "$CM_BUILD_DIR/$XCODE_PROJECT" \
-            --scheme "$XCODE_SCHEME"
+            --scheme "$XCODE_SCHEME"; then
+            echo "===== Xcode hata satırları ====="
+            grep -hE "error:|Provisioning profile|doesn't include|Signing certificate|No signing certificate|requires a provisioning" /tmp/xcodebuild_logs/*.log | sort -u | head -n 40 || true
+            echo "===== Xcode günlüğünün sonu ====="
+            tail -n 60 /tmp/xcodebuild_logs/*.log || true
+            exit 1
+          fi
     artifacts:
       - build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
