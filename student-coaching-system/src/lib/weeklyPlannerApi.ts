@@ -58,9 +58,16 @@ function unwrap<T>(payload: unknown): T {
 function plannerHttpError(res: Response, payload: unknown): Error {
   const err = (payload as { error?: string })?.error;
   if (res.status === 409 && err === 'time_conflict') {
-    return new Error(
-      'Bu tarih ve saatte zaten bir plan var. Aynı saate ikinci blok eklenemez; başka bir saat seçin veya mevcut bloğu düzenleyin/taşıyın.'
-    );
+    const c = (payload as { conflicting?: { id?: string; title?: string; start_time?: string; end_time?: string } })
+      ?.conflicting;
+    const which = c?.start_time
+      ? `${c.start_time}–${c.end_time} arasında "${c.title || 'Plan'}" planı var.`
+      : 'Bu tarih ve saatte zaten bir plan var.';
+    const e = new Error(
+      `${which} Aynı saate ikinci blok eklenemez; başka bir saat seçin ya da o planı düzenleyin/taşıyın.`
+    ) as Error & { conflictingId?: string };
+    e.conflictingId = c?.id || (payload as { conflicting_id?: string })?.conflicting_id;
+    return e;
   }
   return new Error(err || `API (${res.status})`);
 }

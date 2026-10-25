@@ -47,7 +47,7 @@ async function findOverlapConflict(studentId, plannerDate, startTime, endTime, e
 
   const { data, error } = await supabaseAdmin
     .from('weekly_planner_entries')
-    .select('id,start_time,end_time')
+    .select('id,start_time,end_time,title,subject')
     .eq('student_id', studentId)
     .eq('planner_date', plannerDate);
   if (error) throw error;
@@ -57,7 +57,17 @@ async function findOverlapConflict(studentId, plannerDate, startTime, endTime, e
     const cb = toPlannerMinutes(row.end_time);
     if (ca == null || cb == null) continue;
     if (cb <= ca) continue;
-    if (timeRangesOverlap(a1, b1, ca, cb)) return { conflictingId: row.id };
+    if (timeRangesOverlap(a1, b1, ca, cb)) {
+      return {
+        conflictingId: row.id,
+        conflicting: {
+          id: row.id,
+          title: row.title || row.subject || 'Plan',
+          start_time: String(row.start_time || '').slice(0, 5),
+          end_time: String(row.end_time || '').slice(0, 5)
+        }
+      };
+    }
   }
   return null;
 }
@@ -269,7 +279,11 @@ export default async function handler(req, res) {
 
       const clash = await findOverlapConflict(sid, plannerDate, startTime, endTime, null);
       if (clash?.error) return res.status(400).json({ error: clash.error });
-      if (clash?.conflictingId) return res.status(409).json({ error: 'time_conflict', conflicting_id: clash.conflictingId });
+      if (clash?.conflictingId) {
+        return res
+          .status(409)
+          .json({ error: 'time_conflict', conflicting_id: clash.conflictingId, conflicting: clash.conflicting });
+      }
 
       const institutionId =
         body.institution_id ?? mutate.student?.institution_id ?? actor.institution_id ?? null;
@@ -337,7 +351,11 @@ export default async function handler(req, res) {
 
       const clash = await findOverlapConflict(existing.student_id, nextDate, nextStart, nextEnd, id);
       if (clash?.error) return res.status(400).json({ error: clash.error });
-      if (clash?.conflictingId) return res.status(409).json({ error: 'time_conflict', conflicting_id: clash.conflictingId });
+      if (clash?.conflictingId) {
+        return res
+          .status(409)
+          .json({ error: 'time_conflict', conflicting_id: clash.conflictingId, conflicting: clash.conflicting });
+      }
 
       const patch = { ...(req.body || {}), updated_at: new Date().toISOString() };
       if (merged.plannerDate !== undefined || merged.planner_date !== undefined || merged.date !== undefined) {

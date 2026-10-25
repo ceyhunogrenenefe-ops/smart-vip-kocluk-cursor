@@ -1171,6 +1171,21 @@ export function WeeklyPlannerCalendar({
         }
         // Hedefin fazlası planlanabilir; hedef kartı aşımı ayrıca gösterir.
       }
+      // Sunucuya gitmeden çakışmayı söyle: hangi plan, hangi saatte
+      const a = timeToPlannerMinutes(start) ?? 0;
+      const b = timeToPlannerMinutes(end) ?? 0;
+      const clash = entries.find((en) => {
+        if (en.planner_date !== slotContext.date) return false;
+        const ea = timeToPlannerMinutes(en.start_time);
+        const eb = timeToPlannerMinutes(en.end_time);
+        return ea != null && eb != null && eb > ea && a < eb && ea < b;
+      });
+      if (clash) {
+        alert(
+          `${String(clash.start_time).slice(0, 5)}–${String(clash.end_time).slice(0, 5)} arasında "${plannerCardDisplayTitle(clash.title, clash.subject)}" planı var. Başka bir saat seçin ya da o planı düzenleyin.`
+        );
+        return;
+      }
       try {
         await createWeeklyPlannerEntry({
           student_id: studentId,
@@ -1188,6 +1203,8 @@ export function WeeklyPlannerCalendar({
         await reload();
       } catch (e) {
         alert(e instanceof Error ? e.message : 'Kayıt eklenemedi');
+        // Ekran eski kalmış olabilir (başka cihazda silinen/eklenen plan): yenile
+        if ((e as { conflictingId?: string })?.conflictingId) void reload({ silent: true });
       }
     });
   };
@@ -1461,6 +1478,41 @@ export function WeeklyPlannerCalendar({
   const cellEntries = useCallback(
     (date: string, slot: PlannerTimeSlot) => entriesByCellKey.get(`${date}:${slot.start}`) ?? [],
     [entriesByCellKey]
+  );
+
+  /**
+   * Başka bir hücrede başlayıp bu hücreye taşan planlar (ör. 30 dk görünümde 14:00–15:00
+   * planının 14:30 hücresi). Eskiden bu hücreler boş görünüyordu; tıklayıp plan eklenince
+   * sunucu "bu saatte plan var" diyordu.
+   */
+  const coveringByCellKey = useMemo(() => {
+    const map = new Map<string, WeeklyPlannerEntryRow[]>();
+    for (const e of entries) {
+      const a = timeToPlannerMinutes(e.start_time);
+      const b = timeToPlannerMinutes(e.end_time);
+      if (a == null || b == null || b <= a) continue;
+      for (const slot of timeSlots) {
+        if (a >= slot.startMinutes && a < slot.endMinutes) continue; // başladığı hücre
+        if (slot.startMinutes < b && a < slot.endMinutes) {
+          const key = `${e.planner_date}:${slot.start}`;
+          const arr = map.get(key) ?? [];
+          arr.push(e);
+          map.set(key, arr);
+        }
+      }
+    }
+    return map;
+  }, [entries, timeSlots]);
+
+  const coveringEntries = useCallback(
+    (date: string, slot: PlannerTimeSlot) => coveringByCellKey.get(`${date}:${slot.start}`) ?? [],
+    [coveringByCellKey]
+  );
+
+  const slotTaken = useCallback(
+    (date: string, slot: PlannerTimeSlot) =>
+      cellEntries(date, slot).length > 0 || coveringEntries(date, slot).length > 0,
+    [cellEntries, coveringEntries]
   );
 
   const pastSlot = (dateStr: string, slotStart: string) => {
@@ -2072,6 +2124,7 @@ export function WeeklyPlannerCalendar({
                 <ul className="space-y-1.5">
                   {timeSlots.map((slot, slotIdx) => {
                     const slotList = cellEntries(mobileDayDate, slot);
+                    const slotCont = coveringEntries(mobileDayDate, slot);
                     const isPast = pastSlot(mobileDayDate, slot.start);
                     return (
                       <li key={`${slot.start}-${slot.end}`} className="flex gap-2">
@@ -2084,7 +2137,18 @@ export function WeeklyPlannerCalendar({
                           {slot.label}
                         </div>
                         <div className="min-w-0 flex-1 space-y-1.5">
-                          {slotList.length === 0 ? (
+                          {slotList.length === 0 && slotCont.length > 0 ? (
+                            slotCont.map((en) => (
+                              <button
+                                key={`cont-${en.id}`}
+                                type="button"
+                                onClick={() => canEditPlan && openPlannerBlock(en)}
+                                className="block w-full truncate rounded-xl border border-dashed border-slate-300 bg-slate-100/80 px-3 py-2 text-left text-xs text-slate-500 dark:border-slate-600 dark:bg-slate-800/60 dark:text-slate-400"
+                              >
+                                ↳ {plannerCardDisplayTitle(en.title, en.subject)} · {String(en.end_time).slice(0, 5)}&apos;e kadar
+                              </button>
+                            ))
+                          ) : slotList.length === 0 ? (
                             canEditPlan ? (
                               <button
                                 type="button"
@@ -2190,7 +2254,7 @@ export function WeeklyPlannerCalendar({
                     <p className="text-xs font-semibold text-slate-700 dark:text-slate-200">Yeni görev — saat seç</p>
                     <div className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-0.5">
                       {timeSlots.map((slot, slotIdx) => {
-                        const taken = cellEntries(mobileDayDate, slot).length > 0;
+                        const taken = slotTaken(mobileDayDate, slot);
                         return (
                           <button
                             key={`${slot.start}-${slot.end}`}
@@ -2303,6 +2367,7 @@ export function WeeklyPlannerCalendar({
                     </div>
                     {dayDates.map((date, colIdx) => {
                       const list = cellEntries(date, slot);
+                      const cont = coveringEntries(date, slot);
                       const isPast = pastSlot(date, slot.start);
                       return (
                         <div
@@ -2335,7 +2400,8 @@ export function WeeklyPlannerCalendar({
                               toggleCellSelection(date, slot);
                               return;
                             }
-                            if (list.length === 0) openCreate(date, slot);
+                            if (list.length === 0 && cont.length === 0) openCreate(date, slot);
+                            else if (list.length === 0 && cont[0]) openPlannerBlock(cont[0]);
                           }}
                           onDragOver={(e) => {
                             if (!canEditPlan) return;
@@ -2348,6 +2414,27 @@ export function WeeklyPlannerCalendar({
                             if (id) void handleDropOnCell(id, date, slot);
                           }}
                         >
+                          {list.length === 0
+                            ? cont.map((en) => (
+                                <button
+                                  key={`cont-${en.id}`}
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (!canEditPlan) return;
+                                    if (cellSelectMode) {
+                                      toggleCellSelection(date, slot);
+                                      return;
+                                    }
+                                    openPlannerBlock(en);
+                                  }}
+                                  title={`${String(en.start_time).slice(0, 5)}–${String(en.end_time).slice(0, 5)} planının devamı`}
+                                  className="mb-1 block w-full truncate rounded-lg border border-dashed border-slate-300 bg-slate-100/80 px-2 py-1 text-left text-[10px] font-medium text-slate-500 dark:border-slate-600 dark:bg-slate-800/60 dark:text-slate-400"
+                                >
+                                  ↳ {plannerCardDisplayTitle(en.title, en.subject)} · {String(en.end_time).slice(0, 5)}&apos;e kadar
+                                </button>
+                              ))
+                            : null}
                           {list.map((en) => {
                             const linkedGoal = goals.find((g) => g.id === en.coach_goal_id);
                             const st = subjectPlannerStyle(en.subject, linkedGoal?.quantity_unit);
