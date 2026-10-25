@@ -74,6 +74,19 @@
           "value": "public, max-age=300, must-revalidate"
         }
       ]
+    },
+    {
+      "source": "/appstore/(.*)",
+      "headers": [
+        {
+          "key": "Access-Control-Allow-Origin",
+          "value": "https://appstoreconnect.apple.com"
+        },
+        {
+          "key": "Cross-Origin-Resource-Policy",
+          "value": "cross-origin"
+        }
+      ]
     }
   ],
   "crons": [
@@ -187,10 +200,26 @@
     }
   ],
   "redirects": [
-    { "source": "/gizlilik", "destination": "/gizlilik.html", "permanent": true },
-    { "source": "/kullanici", "destination": "/kullanici.html", "permanent": true },
-    { "source": "/veri-silme", "destination": "/veri-silme.html", "permanent": true },
-    { "source": "/hesap-silme", "destination": "/veri-silme.html", "permanent": true },
+    {
+      "source": "/gizlilik",
+      "destination": "/gizlilik.html",
+      "permanent": true
+    },
+    {
+      "source": "/kullanici",
+      "destination": "/kullanici.html",
+      "permanent": true
+    },
+    {
+      "source": "/veri-silme",
+      "destination": "/veri-silme.html",
+      "permanent": true
+    },
+    {
+      "source": "/hesap-silme",
+      "destination": "/veri-silme.html",
+      "permanent": true
+    },
     {
       "source": "/:path*",
       "has": [
