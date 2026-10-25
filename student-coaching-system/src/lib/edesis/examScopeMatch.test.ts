@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { examMatchesStudentScope, examProgramGroup, studentProgramGroup } from './examScopeMatch';
+import {
+  examClassLabel,
+  examClassOptions,
+  examMatchesStudentScope,
+  examProgramGroup,
+  studentProgramGroup
+} from './examScopeMatch';
 
 const yks = { classLevel: '11', gradeName: '11. Sınıf', programKeys: ['tyt', 'ayt'] };
 const lgs = { classLevel: 'LGS', gradeName: '8. Sınıf', programKeys: ['lgs'] };
@@ -65,5 +71,28 @@ describe('AYT yalnızca 12. sınıf ve mezun', () => {
 
   it('TYT-AYT karma deneme AYT sayılmaz', () => {
     expect(examMatchesStudentScope({ name: 'TYT-AYT Genel Deneme', examType: 'TYT-AYT' }, onbir)).toBe(true);
+  });
+});
+
+
+describe('examClassLabel', () => {
+  it('reads explicit class numbers before exam families', () => {
+    expect(examClassLabel({ name: '7.SINIF OKYANUS CLASSMATE 1' })).toBe('7. sınıf');
+    expect(examClassLabel({ name: '11 SINIF PARAF MAARİF MODEL TYT-1' })).toBe('11. sınıf');
+    expect(examClassLabel({ name: '10. Sınıf Deneme' })).toBe('10. sınıf');
+  });
+  it('falls back to LGS / TYT / AYT', () => {
+    expect(examClassLabel({ name: 'LGS ULTİ STS 1' })).toBe('LGS');
+    expect(examClassLabel({ name: 'FORMAT MAARIF TYT-1' })).toBe('TYT');
+    expect(examClassLabel({ name: 'AYT Deneme 2' })).toBe('AYT');
+    expect(examClassLabel({ name: 'GALATA DENEME-2' })).toBe('Diğer');
+  });
+  it('orders options by class', () => {
+    const opts = examClassOptions([{ name: 'TYT 1' }, { name: '7.SINIF A' }, { name: 'LGS X' }, { name: '7.SINIF B' }]);
+    expect(opts).toEqual([
+      { label: '7. sınıf', count: 2 },
+      { label: 'LGS', count: 1 },
+      { label: 'TYT', count: 1 }
+    ]);
   });
 });

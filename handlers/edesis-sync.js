@@ -86,7 +86,13 @@ import {
   findStudentMatchPreview,
   EDESIS_MATCHING_GUIDE
 } from '../api/_lib/edesis-student-match.js';
-import { enrollPlatformStudentsBatch, EDESIS_AUTO_ENROLL_MARKER, EDESIS_AUTO_ENROLL_INSTITUTION_ID } from '../api/_lib/edesis-auto-enroll.js';
+import {
+  enrollPlatformStudentsBatch,
+  provisionEdesisStudent,
+  EDESIS_AUTO_ENROLL_MARKER,
+  EDESIS_AUTO_ENROLL_INSTITUTION_ID
+} from '../api/_lib/edesis-auto-enroll.js';
+import { buildStudentSyncReport } from '../api/_lib/edesis-student-sync-report.js';
 import {
   syncEdesisExamCatalogToDb,
   listSyncedEdesisExams,
@@ -374,11 +380,14 @@ async function loadAvailableEdesisExamsForStudent({
       institutionId: actor?.institution_id || null
     })
   );
-  // Kadro filtresi VARSAYILAN KAPALI: Edesis'te tanımlanan kurum denemesi öğrencide doğrudan
-  // görünsün (eski davranış). Açıldığında, kadrosu dolu ve öğrencinin olmadığı denemeler gizlenir.
-  // Açmak için: EDESIS_OPEN_ONLINE_ROSTER_FILTER=1
-  const rosterFilterEnabled = String(process.env.EDESIS_OPEN_ONLINE_ROSTER_FILTER || '').trim() === '1';
+  // Kadro filtresi VARSAYILAN AÇIK: öğrenci yalnız Edesis'te kendisine (veya şubesine) atanmış
+  // denemeleri görür. Eskiden kapalıydı ve kurumdaki tüm açık denemeler her öğrencide görünüyordu.
+  // Kadrosu okunamayan (boş / erişilemeyen) deneme de gösterilmez: atandığı doğrulanamıyor.
+  // Koçun platformdan yaptığı atamalar (Deneme Atama) bundan etkilenmez, ayrıca eklenir.
+  // Eski davranışa dönmek için: EDESIS_OPEN_ONLINE_ROSTER_FILTER=0
+  const rosterFilterEnabled = String(process.env.EDESIS_OPEN_ONLINE_ROSTER_FILTER ?? '').trim() !== '0';
   let openOnlineRosterHidden = 0;
+  let openOnlineRosterUnknown = 0;
   if (rosterFilterEnabled && !items.length && openOnline.length) {
     const kept = [];
     // Önbellek sayesinde eş zamanlı istek sayısı artırılabiliyor; Edesis'e
@@ -390,8 +399,8 @@ async function loadAvailableEdesisExamsForStudent({
       );
       batch.forEach((it, j) => {
         const roster = rosters[j];
-        const rosterKnown = Array.isArray(roster) && roster.length > 0;
-        if (rosterKnown && !examRosterIncludesStudent(roster, edesisStudentId)) {
+        if (!Array.isArray(roster)) openOnlineRosterUnknown += 1;
+        if (!examRosterIncludesStudent(Array.isArray(roster) ? roster : [], edesisStudentId)) {
           openOnlineRosterHidden += 1;
           return;
         }
@@ -460,6 +469,7 @@ async function loadAvailableEdesisExamsForStudent({
       expiredExamIds: expired.map((x) => x.examId).slice(0, 40),
       openOnlineCount: openOnline.length,
       openOnlineRosterHidden,
+      openOnlineRosterUnknown,
       rosterFilterEnabled,
       totalMs: Date.now() - t0
     }
@@ -1391,17 +1401,18 @@ export default async function handler(req, res) {
       const students = filterStudentsForActor(await loadStudentsForMatching(), actor, tags);
       const wantFull = String(req.query?.full || req.body?.full || '') === '1';
       if (!wantFull) {
+        // Edesis numarası olmayan öğrenciler de listelenir (bağlı değil olarak); eskiden
+        // filtrelenip hiç görünmüyorlardı. Gerçek senkron durumu: op=student-sync-report
         const items = students
-          .filter((s) => s.edesis_ogrenci_id)
           .map((s) => ({
-            edesisId: s.edesis_ogrenci_id,
+            edesisId: s.edesis_ogrenci_id || null,
             name: s.name,
             email: s.email,
             schoolNo: null,
             platformStudentId: s.id,
             platformStudentName: s.name,
-            matchMethod: 'edesis_ogrenci_id',
-            linked: true,
+            matchMethod: s.edesis_ogrenci_id ? 'edesis_ogrenci_id' : null,
+            linked: Boolean(s.edesis_ogrenci_id),
             parent_phone: s.parent_phone || null,
             class_level: s.class_level || null
           }));
@@ -3060,6 +3071,134 @@ export default async function handler(req, res) {
       }
     }
 
+    /**
+     * Edesis ↔ sistem öğrenci senkron raporu (personel).
+     * Her öğrenci: bağlı / Edesis'te silinmiş / Edesis no yok / yalnız Edesis'te / sistemde pasif.
+     */
+    if (op === 'student-sync-report') {
+      if (!isStaff) return res.status(403).json({ error: 'forbidden' });
+      const cfg = getEdesisConfig();
+      if (!cfg.apiKey) return res.status(400).json({ error: 'EDESIS_API_KEY_missing' });
+      const base = filterStudentsForActor(await loadStudentsForMatching(), actor, tags);
+      const ids = base.map((s) => s.id);
+      const extra = new Map();
+      for (let i = 0; i < ids.length; i += 400) {
+        const { data } = await supabaseAdmin
+          .from('students')
+          .select('id, deleted_at, enrollment_status')
+          .in('id', ids.slice(i, i + 400));
+        for (const r of data || []) extra.set(r.id, r);
+      }
+      const students = base.map((s) => ({ ...s, ...(extra.get(s.id) || {}) }));
+
+      const listed = await fetchEdesisStudentsList(cfg, {});
+      const rows = listed.rows || [];
+      if (!rows.length) {
+        return res.status(502).json({
+          error: 'edesis_student_list_unavailable',
+          hint: 'Edesis öğrenci listesi alınamadı; karşılaştırma yapılmadı (kimse silinmiş sayılmadı).',
+          detail: listed.error || null
+        });
+      }
+      const listedIds = new Set(
+        rows.map((r) => String(studentMatchKeysFromEdesisRow(r).edesisStudentId || '').trim()).filter(Boolean)
+      );
+      // Listede olmayan Edesis no'larını tek tek sor: başka dönemdeyse silinmiş sayılmaz
+      const missing = [
+        ...new Set(
+          students
+            .map((s) => String(s.edesis_ogrenci_id || '').trim())
+            .filter((id) => id && !listedIds.has(id))
+        )
+      ].slice(0, 80);
+      const lookedUp = new Map();
+      for (let i = 0; i < missing.length; i += 8) {
+        const batch = missing.slice(i, i + 8);
+        const found = await Promise.all(
+          batch.map((id) => fetchEdesisStudentByOgrenciId(id, cfg).catch(() => undefined))
+        );
+        batch.forEach((id, j) => {
+          const f = found[j];
+          if (f === undefined) return; // sorgu hata verdi: karar verme
+          const real = f && (f.gradeName || f.className || f.classroomId);
+          lookedUp.set(id, real ? f : null);
+        });
+      }
+      const coachScoped = Boolean(actor?.coach_id) && actorIsCoach(actor, tags) && !actorIsSuper(actor, tags);
+      const report = buildStudentSyncReport({
+        students,
+        edesisRows: rows,
+        keysOf: studentMatchKeysFromEdesisRow,
+        suggest: findStudentMatchPreview,
+        lookedUp,
+        includeEdesisOnly: !coachScoped
+      });
+      return res.status(200).json({
+        ok: true,
+        generatedAt: new Date().toISOString(),
+        edesisListCount: rows.length,
+        platformCount: students.length,
+        ...report
+      });
+    }
+
+    /**
+     * Senkron düzeltme (personel): add = Edesis'e ekle/bağla, unlink = Edesis bağlantısını kaldır.
+     * body: { action, platformStudentId }
+     */
+    if (op === 'student-sync-fix' && req.method === 'POST') {
+      if (!isStaff) return res.status(403).json({ error: 'forbidden' });
+      const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : req.body || {};
+      const action = String(body.action || '').trim();
+      const platformStudentId = String(body.platformStudentId || '').trim();
+      if (!platformStudentId) return res.status(400).json({ error: 'platformStudentId_required' });
+      let st;
+      try {
+        st = await assertStudentAccess(actor, tags, platformStudentId);
+      } catch (e) {
+        return res.status(403).json({ error: errorMessage(e) });
+      }
+      if (action === 'unlink') {
+        const { error } = await supabaseAdmin
+          .from('students')
+          .update({ edesis_ogrenci_id: null })
+          .eq('id', platformStudentId);
+        if (error) throw error;
+        return res.status(200).json({ ok: true, action, previousEdesisId: st.edesis_ogrenci_id || null });
+      }
+      if (action === 'add') {
+        const stale = String(st.edesis_ogrenci_id || '').trim();
+        if (stale && body.replaceStale) {
+          // Edesis'te silinmiş kayda bağlı: bağlantıyı kaldırıp yeniden bul/oluştur
+          await supabaseAdmin.from('students').update({ edesis_ogrenci_id: null }).eq('id', platformStudentId);
+        }
+        const result = await provisionEdesisStudent({
+          platformStudentId,
+          institutionId: st.institution_id || actor?.institution_id || null
+        });
+        if (result?.ok === false || (result?.skipped && !result?.edesisStudentId)) {
+          if (stale && body.replaceStale) {
+            await supabaseAdmin.from('students').update({ edesis_ogrenci_id: stale }).eq('id', platformStudentId);
+          }
+          return res.status(422).json({
+            ok: false,
+            action,
+            error: result?.error || result?.reason || 'edesis_add_failed',
+            result
+          });
+        }
+        return res.status(200).json({
+          ok: true,
+          action,
+          created: Boolean(result?.created),
+          edesisStudentId: result?.edesisStudentId || null,
+          matchMethod: result?.matchMethod || null,
+          classroom: result?.classroom || null
+        });
+      }
+      return res.status(400).json({ error: 'unknown_action', allowed: ['add', 'unlink'] });
+    }
+
     if (op === 'enroll-platform-students' && (req.method === 'POST' || req.method === 'GET')) {
       if (!(actor.role === 'super_admin' || actor.role === 'admin')) {
         return res.status(403).json({ error: 'admin_required' });
@@ -3100,6 +3239,8 @@ export default async function handler(req, res) {
         'exam-structure',
         'exam-booklet-pdf',
         'exam-booklet-debug',
+        'student-sync-report',
+        'student-sync-fix',
         'debug-fetch',
         'exam-subjects',
         'exam-results-lessons',

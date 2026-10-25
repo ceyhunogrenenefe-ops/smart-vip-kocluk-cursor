@@ -88,3 +88,36 @@ export function examMatchesStudentScope(exam?: ScopeExam | null, scope?: ExamSco
   if (student === 'lise' && examIsAyt(exam) && !studentTakesAyt(scope)) return false;
   return true;
 }
+
+/**
+ * "Sınava gir" sınıf süzgeci etiketi. Deneme adı/türünden sınıf çıkarılır:
+ * "7.SINIF OKYANUS" → "7. sınıf", "LGS ULTİ" → "LGS", "PARAF TYT-1" → "TYT".
+ * Belirli sınıf numarası, LGS/TYT/AYT etiketinden önce gelir (ör. "11 SINIF … TYT-1" → "11. sınıf").
+ */
+export function examClassLabel(exam?: ScopeExam | null): string {
+  const blob = norm(`${exam?.name || ''} ${exam?.examType || ''}`);
+  const sinif = blob.match(/(?:^|[^\d])(1[0-2]|[1-9])\s*\.?\s*(?:sinif|sinifi|snf)\b/);
+  if (sinif) return `${Number(sinif[1])}. sınıf`;
+  if (/\bmezun\b/.test(blob)) return 'Mezun';
+  if (/\bayt\b/.test(blob) && !/\btyt\b/.test(blob)) return 'AYT';
+  if (/\b(tyt|yks)\b/.test(blob)) return 'TYT';
+  if (/\blgs\b/.test(blob)) return 'LGS';
+  return 'Diğer';
+}
+
+const CLASS_LABEL_ORDER = [
+  '1. sınıf', '2. sınıf', '3. sınıf', '4. sınıf', '5. sınıf', '6. sınıf', '7. sınıf', '8. sınıf', 'LGS',
+  '9. sınıf', '10. sınıf', '11. sınıf', '12. sınıf', 'TYT', 'AYT', 'Mezun', 'Diğer'
+];
+
+/** Listede bulunan sınıf etiketleri, sınıf sırasıyla ve adetleriyle */
+export function examClassOptions(exams: ScopeExam[]): { label: string; count: number }[] {
+  const counts = new Map<string, number>();
+  for (const ex of exams || []) {
+    const label = examClassLabel(ex);
+    counts.set(label, (counts.get(label) || 0) + 1);
+  }
+  return [...counts.entries()]
+    .map(([label, count]) => ({ label, count }))
+    .sort((a, b) => CLASS_LABEL_ORDER.indexOf(a.label) - CLASS_LABEL_ORDER.indexOf(b.label));
+}

@@ -22,6 +22,7 @@ import { toast } from 'sonner';
 import { useAuth } from '../context/AuthContext';
 import { sortByFirstName } from '../lib/personNameSort';
 import EdesisSyncPanel from '../components/settings/EdesisSyncPanel';
+import EdesisStudentSyncPanel from '../components/edesis/EdesisStudentSyncPanel';
 import EdesisExamAssignPanel from '../components/edesis/EdesisExamAssignPanel';
 import EdesisGroupClassSyncPanel from '../components/edesis/EdesisGroupClassSyncPanel';
 import {
@@ -54,7 +55,7 @@ import {
 } from '../lib/edesis/edesisApi';
 import { shareEdesisKarneWithParent } from '../lib/edesis/shareEdesisKarneWhatsApp';
 
-type HubView = 'dosya' | 'atama';
+type HubView = 'dosya' | 'atama' | 'senkron';
 type DossierTab = 'girecek' | 'girdi' | 'kurum' | 'araclar';
 
 function fmtDate(raw?: string | null) {
@@ -676,9 +677,21 @@ export default function EdesisPage() {
           <UserPlus className="h-4 w-4" />
           Deneme Atama
         </button>
+        <button
+          type="button"
+          onClick={() => setHubView('senkron')}
+          className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold ${
+            hubView === 'senkron' ? 'bg-indigo-600 text-white' : 'border border-slate-200 bg-white text-slate-700'
+          }`}
+        >
+          <RefreshCw className="h-4 w-4" />
+          Senkron durumu
+        </button>
       </div>
 
-      {hubView === 'atama' ? (
+      {hubView === 'senkron' ? (
+        <EdesisStudentSyncPanel />
+      ) : hubView === 'atama' ? (
         <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
           <EdesisExamAssignPanel />
         </section>
@@ -1035,12 +1048,20 @@ export default function EdesisPage() {
                     {hubStudents
                       .filter((s) => s.platformStudentId === selectedPlatformId || s.edesisId === selectedEdesisId)
                       .map((item) => (
-                        <div key={String(item.edesisId)} className="flex flex-wrap items-center gap-3 text-sm">
+                        <div key={String(item.edesisId || item.platformStudentId)} className="flex flex-wrap items-center gap-3 text-sm">
                           <span>
-                            {item.name} · {item.edesisId}
+                            {item.name} · {item.edesisId || '—'}
                           </span>
                           {item.linked ? (
                             <span className="text-emerald-700">Bağlı</span>
+                          ) : !item.edesisId ? (
+                            <button
+                              type="button"
+                              onClick={() => setHubView('senkron')}
+                              className="text-amber-700 underline"
+                            >
+                              Edesis&apos;e bağlı değil — Senkron durumu sekmesinden ekleyin
+                            </button>
                           ) : (
                             <select
                               defaultValue=""

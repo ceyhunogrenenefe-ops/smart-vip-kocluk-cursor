@@ -54,10 +54,9 @@ function padAnswers(raw: string, questionCount: number, allowed: readonly string
   return out.join('');
 }
 
-function readSaved(storageKey: string): Record<string, string> {
-  if (!storageKey) return {};
+function readSavedOne(key: string): Record<string, string> {
   try {
-    const raw = localStorage.getItem(storageKey);
+    const raw = localStorage.getItem(key);
     if (!raw) return {};
     const parsed = JSON.parse(raw) as unknown;
     return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
@@ -66,6 +65,60 @@ function readSaved(storageKey: string): Record<string, string> {
   } catch {
     return {};
   }
+}
+
+/**
+ * Kayıtlı cevaplar. Eskiden anahtar kitapçık harfini içeriyordu (…:A / …:B);
+ * öğrenci kitapçık değiştirince ekrandaki işaretler siliniyordu. Artık tek
+ * anahtar kullanılır; eski harfli kayıtlar varsa birleştirilerek okunur.
+ */
+function readSaved(storageKey: string): Record<string, string> {
+  if (!storageKey) return {};
+  const current = readSavedOne(storageKey);
+  if (Object.keys(current).length) return current;
+  const merged: Record<string, string> = {};
+  for (const letter of ['A', 'B', 'C', 'D']) {
+    const old = readSavedOne(`${storageKey}:${letter}`);
+    for (const [k, v] of Object.entries(old)) {
+      if (!merged[k] || String(v || '').trim().length > String(merged[k] || '').trim().length) merged[k] = v;
+    }
+  }
+  return merged;
+}
+
+/**
+ * Kitapçık değişince (A → B) cevapları yeni kitapçığın derslerine taşır.
+ * B kitapçığında ders / grup kimlikleri A'dan farklı olabildiği için anahtar
+ * tutmayınca ders adı + soru sayısıyla, o da yoksa aynı sıradaki ve aynı soru
+ * sayısındaki dersle eşleştirilir. Öğrencinin işaretleri kaybolmaz.
+ */
+export function carryAnswersToLessons(
+  answers: Record<string, string>,
+  prevLessons: EdesisExamStructureLesson[],
+  nextLessons: EdesisExamStructureLesson[]
+): Record<string, string> {
+  const keyOf = (l: EdesisExamStructureLesson) => `${l.lessonId}:${l.dersGrupId}`;
+  const out = { ...answers };
+  const used = new Set<string>();
+  for (const l of nextLessons) {
+    if (String(out[keyOf(l)] || '').trim()) used.add(keyOf(l));
+  }
+  nextLessons.forEach((l, i) => {
+    const key = keyOf(l);
+    if (String(out[key] || '').trim()) return;
+    const name = foldLessonName(l.lessonName || '');
+    const sameSize = (p: EdesisExamStructureLesson) => p.questionCount === l.questionCount;
+    const source =
+      prevLessons.find(
+        (p) => !used.has(keyOf(p)) && name && foldLessonName(p.lessonName || '') === name && sameSize(p)
+      ) || (prevLessons[i] && !used.has(keyOf(prevLessons[i])) && sameSize(prevLessons[i]) ? prevLessons[i] : null);
+    if (!source) return;
+    const val = answers[keyOf(source)];
+    if (!String(val || '').trim()) return;
+    out[key] = val;
+    used.add(keyOf(source));
+  });
+  return out;
 }
 
 function foldLessonName(s: string): string {
@@ -373,6 +426,25 @@ export default function EdesisOpticalSheet({
   useEffect(() => {
     setAnswers(readSaved(storageKey));
   }, [storageKey]);
+
+  // Kitapçık değişince işaretleri yeni kitapçığın derslerine taşı
+  const prevLessonsRef = useRef<EdesisExamStructureLesson[]>(orderedLessons);
+  useEffect(() => {
+    const prev = prevLessonsRef.current;
+    prevLessonsRef.current = orderedLessons;
+    if (prev === orderedLessons || !prev.length) return;
+    setAnswers((cur) => carryAnswersToLessons(cur, prev, orderedLessons));
+  }, [orderedLessons]);
+
+  // Her işaret anında kaydedilir; sayfa yenilense ya da kitapçık değişse de kaybolmaz
+  useEffect(() => {
+    if (!storageKey) return;
+    try {
+      if (Object.keys(answers).length) localStorage.setItem(storageKey, JSON.stringify(answers));
+    } catch {
+      /* depolama kapalı olabilir */
+    }
+  }, [answers, storageKey]);
 
   const lessonKey = (lesson: EdesisExamStructureLesson) => `${lesson.lessonId}:${lesson.dersGrupId}`;
 
