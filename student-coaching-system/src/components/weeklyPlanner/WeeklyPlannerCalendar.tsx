@@ -91,6 +91,11 @@ import {
 export { subjectPlannerStyle };
 
 const DAY_LABELS = ['Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi', 'Pazar'];
+/**
+ * Kısa gün adları. Eskiden tam adın ilk 3 harfi alınıyordu: Pazartesi ve Pazar ikisi
+ * de "Paz", Cuma ve Cumartesi ikisi de "Cum" görünüyordu.
+ */
+const DAY_SHORT = ['Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt', 'Paz'];
 
 /** Hedef kartında gösterilecek okunaklı aralık (ör. tek gün Cumartesi veya 6–8 Şubat) */
 function formatGoalRangeLabel(startYmd: string, endYmd: string) {
@@ -2093,7 +2098,7 @@ export function WeeklyPlannerCalendar({
                       )}
                     >
                       <div className="text-[9px] font-bold uppercase tracking-wide opacity-90">
-                        {DAY_LABELS[(parseISO(date).getDay() + 6) % 7].slice(0, 3)}
+                        {DAY_SHORT[(parseISO(date).getDay() + 6) % 7]}
                       </div>
                       <div className="text-base font-bold tabular-nums leading-none">
                         {format(parseISO(date), 'd', { locale: tr })}
@@ -2310,7 +2315,7 @@ export function WeeklyPlannerCalendar({
                       </span>
                     ) : null}
                     <span className="hidden text-[13px] font-bold text-slate-800 dark:text-slate-100 sm:inline">{d}</span>
-                    <span className="text-[12px] font-bold text-slate-800 dark:text-slate-100 sm:hidden">{d.slice(0, 3)}</span>
+                    <span className="text-[12px] font-bold text-slate-800 dark:text-slate-100 sm:hidden">{DAY_SHORT[Math.max(0, DAY_LABELS.indexOf(d))]}</span>
                     <span className="mt-0.5 inline-flex items-center rounded-md bg-white/85 px-1.5 py-0 text-[11px] font-semibold tabular-nums text-slate-600 shadow-sm ring-1 ring-slate-200/80 dark:bg-slate-800/90 dark:text-slate-400 dark:ring-slate-600/80">
                       {format(parseISO(date), 'd MMM', { locale: tr })}
                     </span>
