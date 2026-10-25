@@ -93,6 +93,7 @@ import {
   EDESIS_AUTO_ENROLL_INSTITUTION_ID
 } from '../api/_lib/edesis-auto-enroll.js';
 import { buildStudentSyncReport } from '../api/_lib/edesis-student-sync-report.js';
+import { filterExamsToSeason, wantsAllSeasons } from '../api/_lib/academic-season.js';
 import {
   syncEdesisExamCatalogToDb,
   listSyncedEdesisExams,
@@ -1719,7 +1720,9 @@ export default async function handler(req, res) {
       // Öğrencinin kendi Edesis sonuçlarını programla süzme.
       // Atanmış çapraz program denemeleri (ör. sınıf 12/YKS iken YÖS SARMAL)
       // ingest sonrası Sonuçlarım’da kayboluyordu.
-      const exams = mappedExams;
+      // Yalnız geçerli sezon (2026-2027, yaz kampı dahil); ?season=all tümü
+      const seasonCut = filterExamsToSeason(mappedExams, { all: wantsAllSeasons(req) });
+      const exams = seasonCut.items;
 
       return res.status(200).json({
         ok: true,
@@ -1729,6 +1732,7 @@ export default async function handler(req, res) {
         parent_phone: parentPhone || null,
         parent_phone_source: 'coaching_system',
         count: exams.length,
+        season: { ...seasonCut.season, hiddenCount: seasonCut.hiddenCount, all: wantsAllSeasons(req) },
         fetchMode: fetchResult.fetchMode,
         autoLinked,
         matchMethod,
@@ -2590,12 +2594,16 @@ export default async function handler(req, res) {
         studentHint: matched || studentHint,
         cfg
       });
-      const taken = mapHubResultExams(
-        loaded.resultRows || [],
-        platformId,
-        edesisStudentId,
-        actor?.institution_id || matched?.institution_id || null
+      const takenSeason = filterExamsToSeason(
+        mapHubResultExams(
+          loaded.resultRows || [],
+          platformId,
+          edesisStudentId,
+          actor?.institution_id || matched?.institution_id || null
+        ),
+        { all: wantsAllSeasons(req) }
       );
+      const taken = takenSeason.items;
       const takeable = (loaded.items || []).filter((x) => x.canTake && !x.hasStudentResult);
       return res.status(200).json({
         ok: true,
@@ -2617,6 +2625,7 @@ export default async function handler(req, res) {
         },
         takeable,
         taken,
+        season: { ...takenSeason.season, hiddenCount: takenSeason.hiddenCount },
         openOnline: loaded.openOnline || [],
         counts: {
           takeable: takeable.length,

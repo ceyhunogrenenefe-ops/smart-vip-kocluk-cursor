@@ -317,6 +317,7 @@ export default function StudentEdesisAnalysisPanel({ exams, studentId, edesisStu
                 <option value="last10">Son 10</option>
                 <option value="all">Tümü</option>
               </select>
+              <span className="mt-1 block text-xs font-normal text-slate-500">2026-2027 denemeleri (yaz kampı dahil)</span>
             </label>
             <button
               type="button"
