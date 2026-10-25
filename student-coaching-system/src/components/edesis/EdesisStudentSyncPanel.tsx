@@ -44,12 +44,30 @@ function fold(s: string) {
   return String(s || '').toLocaleLowerCase('tr-TR');
 }
 
+/** Süzgeç için öğrencinin sınıfı: sistemdeki sınıf, yoksa Edesis'teki sınıf/şube */
+function itemClass(i: EdesisSyncItem): string {
+  const raw = String(i.classLevel || i.edesis?.gradeName || i.edesis?.className || '').trim();
+  if (!raw) return 'Sınıfı yok';
+  return /^\d{1,2}$/.test(raw) ? `${Number(raw)}. sınıf` : raw;
+}
+
+function classSortKey(label: string): [number, string] {
+  const n = label.match(/\d+/);
+  if (n) return [Number(n[0]), label];
+  if (/lgs/i.test(label)) return [8.5, label];
+  if (/mezun|yks|tyt|ayt/i.test(label)) return [12.5, label];
+  if (/y[oö]s/i.test(label)) return [13, label];
+  if (label === 'Sınıfı yok') return [999, label];
+  return [100, label];
+}
+
 export default function EdesisStudentSyncPanel() {
   const [report, setReport] = useState<EdesisSyncReport | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [filter, setFilter] = useState<EdesisSyncStatus | 'issues'>('issues');
   const [q, setQ] = useState('');
+  const [classFilter, setClassFilter] = useState('');
   const [busyKey, setBusyKey] = useState('');
   const [linkPick, setLinkPick] = useState<Record<string, string>>({});
 
@@ -82,8 +100,44 @@ export default function EdesisStudentSyncPanel() {
     [report]
   );
 
+  /** Sınıf seçenekleri: o sınıfta kaç öğrenci ve kaçında düzeltme gerektiği */
+  const classOptions = useMemo(() => {
+    const map = new Map<string, { total: number; issues: number }>();
+    for (const i of report?.items || []) {
+      const c = itemClass(i);
+      const cur = map.get(c) || { total: 0, issues: 0 };
+      cur.total += 1;
+      if (['deleted_in_edesis', 'not_linked', 'edesis_only'].includes(i.status)) cur.issues += 1;
+      map.set(c, cur);
+    }
+    return [...map.entries()]
+      .map(([label, v]) => ({ label, ...v }))
+      .sort((a, b) => {
+        const [na, la] = classSortKey(a.label);
+        const [nb, lb] = classSortKey(b.label);
+        return na - nb || la.localeCompare(lb, 'tr');
+      });
+  }, [report]);
+
+  /** Durum sayıları seçili sınıfa göre */
+  const classCounts = useMemo(() => {
+    const c: Record<EdesisSyncStatus, number> = {
+      ok: 0,
+      deleted_in_edesis: 0,
+      not_linked: 0,
+      edesis_only: 0,
+      passive_in_system: 0
+    };
+    for (const i of report?.items || []) {
+      if (classFilter && itemClass(i) !== classFilter) continue;
+      c[i.status] += 1;
+    }
+    return c;
+  }, [report, classFilter]);
+  const classIssueCount = classCounts.deleted_in_edesis + classCounts.not_linked + classCounts.edesis_only;
+
   const shown = useMemo(() => {
-    const items = report?.items || [];
+    const items = (report?.items || []).filter((i) => !classFilter || itemClass(i) === classFilter);
     const byStatus =
       filter === 'issues'
         ? items.filter((i) => ['deleted_in_edesis', 'not_linked', 'edesis_only'].includes(i.status))
@@ -103,7 +157,7 @@ export default function EdesisStudentSyncPanel() {
         ORDER.indexOf(a.status) - ORDER.indexOf(b.status) ||
         (a.platformName || a.edesis?.name || '').localeCompare(b.platformName || b.edesis?.name || '', 'tr')
     );
-  }, [report, filter, q]);
+  }, [report, filter, q, classFilter]);
 
   const run = async (key: string, fn: () => Promise<string>) => {
     setBusyKey(key);
@@ -193,7 +247,7 @@ export default function EdesisStudentSyncPanel() {
                 filter === 'issues' ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-200 bg-white text-slate-700'
               }`}
             >
-              Düzeltilecekler ({issueCount})
+              Düzeltilecekler ({classIssueCount})
             </button>
             {ORDER.map((st) => (
               <button
@@ -205,22 +259,39 @@ export default function EdesisStudentSyncPanel() {
                   filter === st ? 'border-slate-900 bg-slate-900 text-white' : STATUS_META[st].tone
                 }`}
               >
-                {STATUS_META[st].label} ({report.counts[st] || 0})
+                {STATUS_META[st].label} ({classCounts[st] || 0})
               </button>
             ))}
           </div>
 
           {filter !== 'issues' ? <p className="text-xs text-slate-500">{STATUS_META[filter].hint}</p> : null}
 
-          <label className="flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2">
-            <Search className="h-4 w-4 text-slate-400" />
-            <input
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="Öğrenci adı, sınıf veya Edesis no"
-              className="w-full bg-transparent text-sm outline-none"
-            />
-          </label>
+          <div className="flex flex-wrap gap-2">
+            <select
+              value={classFilter}
+              onChange={(e) => setClassFilter(e.target.value)}
+              aria-label="Sınıf süzgeci"
+              className={`rounded-xl border px-3 py-2 text-sm ${
+                classFilter ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-200 bg-white text-slate-700'
+              }`}
+            >
+              <option value="">Tüm sınıflar ({report.items.length})</option>
+              {classOptions.map((o) => (
+                <option key={o.label} value={o.label}>
+                  {o.label} ({o.total}{o.issues ? ` · ${o.issues} düzeltilecek` : ''})
+                </option>
+              ))}
+            </select>
+            <label className="flex min-w-[14rem] flex-1 items-center gap-2 rounded-xl border border-slate-200 px-3 py-2">
+              <Search className="h-4 w-4 text-slate-400" />
+              <input
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder="Öğrenci adı, sınıf veya Edesis no"
+                className="w-full bg-transparent text-sm outline-none"
+              />
+            </label>
+          </div>
 
           <div className="overflow-x-auto">
             <table className="w-full min-w-[640px] text-sm">
