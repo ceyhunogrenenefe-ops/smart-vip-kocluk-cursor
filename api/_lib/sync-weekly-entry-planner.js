@@ -1,5 +1,6 @@
 import { supabaseAdmin } from './supabase-admin.js';
 import { findPlannerOverlapConflict } from './planner-slot-conflict.js';
+import { resolvePlannerEntryTitle } from './planner-entry-title.js';
 
 function padPlannerHour(h) {
   return `${String(h).padStart(2, '0')}:00`;
@@ -189,7 +190,7 @@ export async function syncWeeklyEntryPlannerRow(entry, opts = {}) {
 
   const topic = String(entry.topic || '').trim();
   const subject = String(entry.subject || '').trim() || 'Genel';
-  const title = topic ? `📝 Günlük: ${topic}` : `📝 Günlük: ${subject}`;
+  const title = resolvePlannerEntryTitle(existing?.title, subject, topic);
 
   const dateChanged = existing && padDate(existing.planner_date) !== plannerDate;
   const preferredStart =

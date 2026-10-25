@@ -19,6 +19,16 @@ export interface CoachWeeklyGoalRow {
   updated_at: string;
 }
 
+/** Takvim kartında gösterilecek konu (eski «Günlük kayıt: …» öneklerini temizler). */
+export function plannerCardDisplayTitle(title: string, subject?: string): string {
+  let t = String(title || '').trim();
+  t = t.replace(/^[📝\s]*günlük\s*kayıt\s*:\s*/iu, '').trim();
+  t = t.replace(/^[📝\s]*günlük\s*:\s*/iu, '').trim();
+  if (t) return t;
+  const sub = String(subject || '').trim();
+  return sub || 'Görev';
+}
+
 export interface WeeklyPlannerEntryRow {
   id: string;
   student_id: string;
