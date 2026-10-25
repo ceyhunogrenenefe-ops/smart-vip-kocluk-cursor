@@ -1060,3 +1060,59 @@ export async function applyEdesisGroupClassSync(limit = 12): Promise<EdesisGroup
   if (!res.ok) throw new Error(j.error || j.message || res.statusText);
   return j as EdesisGroupSyncApplyResult;
 }
+
+/** Edesis ↔ sistem öğrenci senkron raporu */
+export type EdesisSyncStatus = 'ok' | 'deleted_in_edesis' | 'not_linked' | 'edesis_only' | 'passive_in_system';
+
+export type EdesisSyncItem = {
+  platformStudentId: string | null;
+  platformName: string;
+  classLevel: string | null;
+  email: string | null;
+  edesisId: string | null;
+  active: boolean | null;
+  status: EdesisSyncStatus;
+  verified?: boolean;
+  edesis: {
+    edesisId: string;
+    name: string;
+    className: string | null;
+    gradeName: string | null;
+    termName?: string | null;
+    otherTerm?: boolean;
+  } | null;
+  suggestion?: { platformStudentId: string; name: string; method: string | null } | null;
+};
+
+export type EdesisSyncReport = {
+  ok: boolean;
+  generatedAt: string;
+  edesisListCount: number;
+  platformCount: number;
+  edesisCount: number;
+  inSync: boolean;
+  counts: Record<EdesisSyncStatus, number>;
+  items: EdesisSyncItem[];
+};
+
+export async function fetchEdesisStudentSyncReport(): Promise<EdesisSyncReport> {
+  const res = await apiFetch('/api/edesis-sync?op=student-sync-report');
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(j.hint || j.error || res.statusText);
+  return j;
+}
+
+export async function fixEdesisStudentSync(params: {
+  action: 'add' | 'unlink';
+  platformStudentId: string;
+  replaceStale?: boolean;
+}): Promise<{ ok: boolean; created?: boolean; edesisStudentId?: string | null; error?: string }> {
+  const res = await apiFetch('/api/edesis-sync?op=student-sync-fix', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params)
+  });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(j.error || j.hint || res.statusText);
+  return j;
+}

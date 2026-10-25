@@ -31,7 +31,12 @@ import {
   type EdesisStudentResultsExam
 } from '../../lib/edesis/edesisApi';
 import { firstPublicBookletViewerUrl } from '../../lib/edesis/googleDrivePdf';
-import { examMatchesStudentScope, type ExamScope } from '../../lib/edesis/examScopeMatch';
+import {
+  examClassLabel,
+  examClassOptions,
+  examMatchesStudentScope,
+  type ExamScope
+} from '../../lib/edesis/examScopeMatch';
 
 function formatExamDurationLabel(seconds?: number | null) {
   const s = Number(seconds) || 0;
@@ -477,6 +482,15 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
       toast.error('Sınav ders yapısı yüklenemedi. Sayfayı yenileyip tekrar deneyin.');
       return;
     }
+    // Kitapçık varsayılan A gelir; B kitapçığı olan öğrenci fark etmeden A ile
+    // gönderirse cevaplar A anahtarıyla puanlanır. Göndermeden önce teyit al.
+    const harf = String(kitapcik).toUpperCase();
+    const sayHarf = String(kitapcikSayisal || kitapcik).toUpperCase();
+    const dualMode = bookletMode === 'dual-sozel-sayisal' || examFamily === 'lgs';
+    const teyit = dualMode && sayHarf !== harf
+      ? `Sözel ${harf}, sayısal ${sayHarf} kitapçığı ile gönderilecek ve bu kitapçıkların cevap anahtarıyla puanlanacak.\n\nElinizdeki kitapçıklar bunlar mı?`
+      : `${harf} kitapçığı ile gönderilecek ve ${harf} cevap anahtarıyla puanlanacak.\n\nElinizdeki kitapçık ${harf} mi? Değilse "İptal"e basıp üstten doğru kitapçığı seçin; işaretleriniz silinmez.`;
+    if (!window.confirm(teyit)) return;
     setSubmitBusy(true);
     try {
       const r = await submitEdesisStudentExam({
@@ -614,13 +628,16 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
     [takeableAll, studentScope]
   );
   const scopeFilterUseful = takeableMyClass.length !== takeableAll.length;
+  const [takeClassFilter, setTakeClassFilter] = useState('');
+  const classOptions = useMemo(() => examClassOptions(takeableAll), [takeableAll]);
   const takeableByDate = takeDateFilter === 'thisWeek' ? takeableThisWeek : takeableAll;
   const takeable = useMemo(
     () =>
-      takeScopeFilter === 'myClass'
+      (takeScopeFilter === 'myClass'
         ? takeableByDate.filter((exam) => examMatchesStudentScope(exam, studentScope))
-        : takeableByDate,
-    [takeableByDate, takeScopeFilter, studentScope]
+        : takeableByDate
+      ).filter((exam) => !takeClassFilter || examClassLabel(exam) === takeClassFilter),
+    [takeableByDate, takeScopeFilter, studentScope, takeClassFilter]
   );
   const tabOn = 'bg-slate-900 text-white shadow-sm';
   const tabOff = 'border border-slate-200/80 bg-white text-slate-700 hover:bg-slate-50';
@@ -649,8 +666,9 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
         </div>
         {kitapcikTanimsiz ? (
           <p className="bg-amber-100 px-3 py-1.5 text-[11px] font-medium text-amber-900">
-            {kitapcikTanimsiz} kitapçığı bu denemede tanımlı görünmüyor. Seçiminiz değiştirilmedi;
-            gönderdiğinizde Edesis kabul etmezse uyarı alırsınız. Yanlış kodladıysanız düzeltin.
+            {kitapcikTanimsiz} kitapçığının cevap anahtarı bu denemede Edesis&apos;te görünmüyor. Seçiminiz
+            değiştirilmedi ve işaretleriniz kaydediliyor. Gönderim kabul edilmezse koçunuza bildirin; anahtar
+            girilince aynı cevaplarla yeniden gönderebilirsiniz.
           </p>
         ) : null}
         <div className="flex min-h-0 flex-1 flex-col">
@@ -669,7 +687,7 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
             bookletMode={bookletMode}
             choiceCount={choiceCount}
             remainingSeconds={remainingSeconds}
-            storageKey={`edesis-optic:${studentId}:${activeExam.examId}:${kitapcik || 'A'}`}
+            storageKey={`edesis-optic:${studentId}:${activeExam.examId}`}
             busy={submitBusy}
             submitLabel="Bitir"
             pdfUrl={pdfUrl}
@@ -765,6 +783,21 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
                 <span className="ml-1 tabular-nums opacity-90">({takeableMyClass.length})</span>
               </button>
             ) : null}
+            {classOptions.length > 1 ? (
+              <select
+                value={takeClassFilter}
+                onChange={(e) => setTakeClassFilter(e.target.value)}
+                aria-label="Sınıf süzgeci"
+                className={`rounded-md px-2 py-1.5 text-xs font-semibold ${takeClassFilter ? filterOn : filterOff}`}
+              >
+                <option value="">Tüm sınıflar ({takeableAll.length})</option>
+                {classOptions.map((o) => (
+                  <option key={o.label} value={o.label}>
+                    {o.label} ({o.count})
+                  </option>
+                ))}
+              </select>
+            ) : null}
           </div>
         ) : null}
         <button
@@ -852,7 +885,12 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
                 </div>
               </div>
             ))}
-            {!takeable.length && takeableAll.length && takeDateFilter === 'thisWeek' ? (
+            {!takeable.length && takeableAll.length && takeClassFilter ? (
+              <p className="rounded-3xl border border-slate-200 bg-slate-50 p-5 text-sm text-slate-600 xl:col-span-2">
+                {takeClassFilter} için girilecek deneme yok. Sınıf süzgecini <strong>Tüm sınıflar</strong> yapın.
+              </p>
+            ) : null}
+            {!takeable.length && takeableAll.length && !takeClassFilter && takeDateFilter === 'thisWeek' ? (
               <p className="rounded-3xl border border-slate-200 bg-slate-50 p-5 text-sm text-slate-600 xl:col-span-2">
                 Bu haftaya ait girilecek deneme yok. Filtreyi <strong>Tümü</strong> yaparak diğer tanımlı
                 denemelere bakabilirsiniz.
