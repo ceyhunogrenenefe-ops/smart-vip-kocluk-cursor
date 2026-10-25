@@ -10,6 +10,7 @@ import { errorMessage } from '../api/_lib/error-msg.js';
 import { normalizedUserRolesFromDb } from '../api/_lib/user-roles-fetch.js';
 import { isMissingTableError } from '../api/_lib/supabase-schema.js';
 import { studentIdsForTeacher } from '../api/_lib/student-teacher-scope.js';
+import { currentSeason, filterExamsToSeason, wantsAllSeasons } from '../api/_lib/academic-season.js';
 import {
   generateEdesisExamReport,
   pollEdesisReportJob,
@@ -144,7 +145,14 @@ async function assertCanAccessStudent(actor, tags, student) {
   }
 }
 
-async function loadStudentExams(studentId) {
+async function loadStudentExams(studentId, { allSeasons = false } = {}) {
+  const all = await loadStudentExamsAllSeasons(studentId);
+  // 5'li / 10'lu karne ve analiz yalnız geçerli sezonla (2026-2027, yaz kampı dahil)
+  const cut = filterExamsToSeason(all, { all: allSeasons });
+  return Object.assign(cut.items, { seasonInfo: { ...cut.season, hiddenCount: cut.hiddenCount } });
+}
+
+async function loadStudentExamsAllSeasons(studentId) {
   const { data, error } = await supabaseAdmin
     .from('exam_results')
     .select('id, student_id, exam_name, date, net_score, correct, wrong, blank, app_payload, institution_id, created_at, updated_at')
@@ -278,7 +286,11 @@ function changedFields(prev, next) {
 }
 
 async function dashboardFor(actor, tags) {
-  let q = supabaseAdmin.from('exam_results').select('id, student_id, date, net_score, institution_id');
+  // Düşen / yükselen öğrenci panosu da yalnız geçerli sezonla
+  let q = supabaseAdmin
+    .from('exam_results')
+    .select('id, student_id, date, net_score, institution_id')
+    .gte('date', currentSeason().start);
   if (!isSuper(tags) && actor.institution_id) q = q.eq('institution_id', actor.institution_id);
   const { data: exams, error } = await q.limit(3000);
   if (error) throw error;
@@ -454,7 +466,7 @@ export default async function handler(req, res) {
     await assertCanAccessStudent(actor, tags, student);
 
     if (op === 'student-analysis') {
-      const exams = await loadStudentExams(studentId);
+      const exams = await loadStudentExams(studentId, { allSeasons: wantsAllSeasons(req) });
       const requestedFamily = String(req.query?.family || req.body?.family || '').trim();
       const family =
         !requestedFamily || requestedFamily === 'all' || requestedFamily === 'hepsi'
@@ -489,6 +501,7 @@ export default async function handler(req, res) {
           parentPhone: student.parent_phone
         },
         analysis,
+        season: { ...(exams.seasonInfo || {}), all: wantsAllSeasons(req) },
         inferredFamily: family,
         teacherBranch,
         statusLabels: ANALYSIS_STATUS_LABELS

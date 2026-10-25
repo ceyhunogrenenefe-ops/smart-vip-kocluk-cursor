@@ -86,6 +86,7 @@ export default function EdesisExamAnalysisPage() {
   const [studentId, setStudentId] = useState(ownStudentId || visibleStudents[0]?.id || '');
   const [family, setFamily] = useState('all');
   const [windowKey, setWindowKey] = useState('last10');
+  const [allSeasons, setAllSeasons] = useState(false);
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [busy, setBusy] = useState(false);
@@ -117,7 +118,8 @@ export default function EdesisExamAnalysisPage() {
         family,
         window: windowKey,
         from: dateFrom || undefined,
-        to: dateTo || undefined
+        to: dateTo || undefined,
+        season: allSeasons ? 'all' : ''
       });
       setPayload(j);
       const draft = (j.analysis?.draft || {}) as Record<string, string>;
@@ -133,7 +135,7 @@ export default function EdesisExamAnalysisPage() {
     } finally {
       setBusy(false);
     }
-  }, [studentId, family, windowKey, dateFrom, dateTo]);
+  }, [studentId, family, windowKey, dateFrom, dateTo, allSeasons]);
 
   useEffect(() => {
     if (!studentId && visibleStudents[0]?.id) {
@@ -361,6 +363,16 @@ export default function EdesisExamAnalysisPage() {
             <option value="last10">Son 10 deneme</option>
             <option value="all">Tüm denemeler</option>
           </select>
+          <span className="mt-1 flex items-center gap-1.5 text-xs font-normal text-slate-500">
+            <input type="checkbox" checked={allSeasons} onChange={(e) => setAllSeasons(e.target.checked)} />
+            Geçmiş yılları da göster
+            {(() => {
+              const se = (payload as { season?: { label?: string; hiddenCount?: number } } | null)?.season;
+              return !allSeasons && se?.hiddenCount
+                ? ` (şu an yalnız ${se.label || '2026-2027'}; ${se.hiddenCount} eski sonuç hariç)`
+                : '';
+            })()}
+          </span>
         </label>
         <label className="text-sm font-semibold text-slate-700">
           Başlangıç

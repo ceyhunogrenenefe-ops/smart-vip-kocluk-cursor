@@ -9,8 +9,11 @@ export async function fetchEdesisStudentAnalysis(params: {
   from?: string;
   to?: string;
   examIds?: string[];
+  /** 'all' = geçmiş yıllar dahil; boş = yalnız geçerli sezon (2026-2027) */
+  season?: 'all' | '';
 }) {
   const qs = new URLSearchParams({ op: 'student-analysis', studentId: params.studentId });
+  if (params.season) qs.set('season', params.season);
   if (params.family) qs.set('family', params.family);
   if (params.window) qs.set('window', params.window);
   if (params.from) qs.set('from', params.from);
