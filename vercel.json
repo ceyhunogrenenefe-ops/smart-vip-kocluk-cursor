@@ -74,19 +74,6 @@
           "value": "public, max-age=300, must-revalidate"
         }
       ]
-    },
-    {
-      "source": "/appstore/(.*)",
-      "headers": [
-        {
-          "key": "Access-Control-Allow-Origin",
-          "value": "https://appstoreconnect.apple.com"
-        },
-        {
-          "key": "Cross-Origin-Resource-Policy",
-          "value": "cross-origin"
-        }
-      ]
     }
   ],
   "crons": [
