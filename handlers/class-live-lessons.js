@@ -1110,6 +1110,38 @@ export default async function handler(req, res) {
     if (getOp === 'guest-join-link') {
       return handleClassGuestJoinLink(req, res, actor, role);
     }
+    /**
+     * Sinif uyesi secici: kurumdaki aktif ogrenciler (yalniz ad / seviye / sube).
+     * Koc, kendi kocluk ogrencileriyle sinirli /api/students listesini gorur; sinifa
+     * baska koclarin ogrencilerini ekleyemiyor ve duzenleme kaydinda listede olmayan
+     * mevcut uyeler siliniyordu. Sinif yonetebilen herkes (admin/koc) kurum listesini alir.
+     */
+    if (getOp === 'class-student-candidates') {
+      if (!isAdminRole(role)) return res.status(403).json({ error: 'forbidden' });
+      let instId = institutionId;
+      if (role === 'super_admin') {
+        instId = String(req.query.institution_id || '').trim() || institutionId;
+      }
+      if (!instId) return res.status(200).json({ data: [] });
+      const { data, error } = await supabaseAdmin
+        .from('students')
+        .select('id, name, class_level, school, institution_id, enrollment_status, deleted_at')
+        .eq('institution_id', instId)
+        .order('name', { ascending: true })
+        .limit(5000);
+      if (error) return res.status(500).json({ error: error.message });
+      const inactive = new Set(['withdrawn', 'cancelled', 'canceled', 'inactive', 'passive', 'archived']);
+      const rows = (data || [])
+        .filter((s) => !s.deleted_at && !inactive.has(String(s.enrollment_status || '').trim().toLowerCase()))
+        .map((s) => ({
+          id: s.id,
+          name: s.name || '',
+          class_level: s.class_level ?? null,
+          school: s.school ?? null,
+          institution_id: s.institution_id ?? null
+        }));
+      return res.status(200).json({ data: rows });
+    }
     /** Silinen (arsivlenen) grup siniflari — geri alinabilir olanlar */
     if (getOp === 'deleted-classes') {
       if (!canDeleteClass(role, roleTags)) return res.status(403).json({ error: 'forbidden' });

@@ -6,6 +6,7 @@ import HomeworkCheckModal from '../features/homework/HomeworkCheckModal';
 import { useAuth } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
 import { apiFetch } from '../lib/session';
+import type { Student } from '../types';
 import { resolveStudentRecordId } from '../lib/coachResolve';
 import {
   guestSourceLabel,
@@ -222,6 +223,54 @@ export default function ClassLiveLessons() {
   const canManageSlots = canManageClasses || role === 'teacher' || userHasAnyRole(effectiveUser, ['teacher']);
   const isTeacherView = userHasAnyRole(effectiveUser, ['teacher']);
   const canViewPaymentSummary = role === 'admin' || role === 'super_admin';
+
+  /**
+   * Sınıf üye seçici: koç, /api/students'ta yalnız kendi öğrencilerini görür. Sınıfa
+   * diğer öğrencileri ekleyebilmesi (ve düzenlerken listede görünmeyen mevcut üyelerin
+   * silinmemesi) için kurumdaki aktif öğrenciler ayrıca yüklenir.
+   */
+  const needsInstitutionPicker =
+    canManageClasses && !userHasAnyRole(effectiveUser, ['admin', 'super_admin']);
+  const [pickerExtraStudents, setPickerExtraStudents] = useState<Student[]>([]);
+  useEffect(() => {
+    if (!needsInstitutionPicker) {
+      setPickerExtraStudents([]);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await apiFetch('/api/class-live-lessons?op=class-student-candidates');
+        if (!res.ok) return;
+        const j = (await res.json().catch(() => ({}))) as {
+          data?: { id: string; name: string; class_level: string | null; school: string | null; institution_id: string | null }[];
+        };
+        if (cancelled) return;
+        setPickerExtraStudents(
+          (j.data || []).map(
+            (r) =>
+              ({
+                id: r.id,
+                name: r.name,
+                classLevel: r.class_level ?? '',
+                school: r.school ?? '',
+                institutionId: r.institution_id ?? undefined
+              }) as unknown as Student
+          )
+        );
+      } catch {
+        /* liste yüklenemezse mevcut kapsam kullanılır */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [needsInstitutionPicker]);
+  const classManagerStudents = useMemo(() => {
+    if (!pickerExtraStudents.length) return safeStudents;
+    const seen = new Set(safeStudents.map((s) => s.id));
+    return [...safeStudents, ...pickerExtraStudents.filter((s) => !seen.has(s.id))];
+  }, [safeStudents, pickerExtraStudents]);
   const isStudentView = role.toLowerCase() === 'student';
   const canShareGuestInvite = userHasAnyRole(effectiveUser, ['super_admin', 'admin', 'coach', 'teacher']);
   const studentMobileShell = useStudentMobileShell();
@@ -2229,7 +2278,7 @@ export default function ClassLiveLessons() {
         classes={classes}
         selectedClassId={selectedClassId}
         onSelectClass={setSelectedClassId}
-        students={safeStudents}
+        students={classManagerStudents}
         teacherOptions={teacherCandidates}
         canManageClasses={canManageClasses}
         isStudentView={isStudentView}
