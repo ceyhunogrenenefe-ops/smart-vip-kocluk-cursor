@@ -173,6 +173,10 @@ export async function syncWeeklyEntryPlannerRow(entry, opts = {}) {
     if (goalRow?.quantity_unit) goalUnit = goalRow.quantity_unit;
     else if (matchedGoal?.quantity_unit) goalUnit = matchedGoal.quantity_unit;
   }
+  // Hedefsiz Kitap Okuma kaydı: ilerleme okunan sayfadan (soru 0 kalıyordu)
+  if (normalizeGoalUnit(goalUnit) === 'soru' && /kitap|okuma/i.test(String(entry.subject || '').toLocaleLowerCase('tr'))) {
+    goalUnit = 'sayfa';
+  }
 
   const completedQty = completedAmountForUnit(goalUnit, entry);
   const plannedQty =

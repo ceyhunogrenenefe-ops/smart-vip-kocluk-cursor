@@ -21,6 +21,10 @@ function normalizeGoalUnit(raw) {
   return u;
 }
 
+function isKitapOkumaText(text) {
+  return /kitap|okuma/i.test(String(text || '').toLocaleLowerCase('tr'));
+}
+
 function completedAmountForUnit(unit, { solved, pagesRead, screenTimeMin, studyMin }) {
   const u = normalizeGoalUnit(unit);
   if (u === 'sayfa') return Math.max(0, Number(pagesRead) || 0);
@@ -118,6 +122,10 @@ export default async function handler(req, res) {
         .eq('id', planner.coach_goal_id)
         .maybeSingle();
       if (goalRow?.quantity_unit) goalUnit = goalRow.quantity_unit;
+    }
+    // Hedefsiz (veya birimsiz) Kitap Okuma bloğu: ilerleme okunan sayfadan
+    if (normalizeGoalUnit(goalUnit) === 'soru' && isKitapOkumaText(`${planner.subject || ''} ${planner.title || ''} ${subject}`)) {
+      goalUnit = 'sayfa';
     }
 
     const pagesVal =

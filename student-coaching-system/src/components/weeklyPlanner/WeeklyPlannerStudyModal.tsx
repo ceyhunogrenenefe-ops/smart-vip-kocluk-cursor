@@ -56,8 +56,11 @@ export function WeeklyPlannerStudyModal({
     refreshBooks,
     mergeWeeklyEntries
   } = useApp();
-  const goalUnit = normalizeGoalUnit(quantityUnit);
   const subject = plannerEntry.subject?.trim() || 'Genel';
+  const rawGoalUnit = normalizeGoalUnit(quantityUnit);
+  /** Koç hedefine bağlı olmayan Kitap Okuma bloğu: birim sayfa (soru değil) */
+  const goalUnit =
+    rawGoalUnit === 'soru' && isKitapOkumaContext(subject, plannerEntry.title) ? 'sayfa' : rawGoalUnit;
   /** Kitap Okuma hedefi: yalnız kitap alanları; diğer hedefler: soru + ekran süresi */
   const isKitapMode =
     isKitapOkumaContext(subject, plannerEntry.title) || goalUnit === 'sayfa';
