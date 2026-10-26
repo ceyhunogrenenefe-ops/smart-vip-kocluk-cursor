@@ -149,12 +149,19 @@ export const NAV_YAZILI_HAZIRLIK_TAKIP: FlatNavItem = {
   label: 'Yazılı Hazırlık Takibi'
 };
 
+export const NAV_VIDEO_SOLUTION_CENTER: FlatNavItem = {
+  path: '/video-cozum-merkezi',
+  icon: Video,
+  label: 'Video Çözüm Merkezi'
+};
+
 const PANEL_PATHS = new Set([
   '/dashboard',
   '/coach-dashboard',
   '/teacher-panel',
   '/yazili-hazirlik',
   '/yazili-hazirlik-takip',
+  '/video-cozum-merkezi',
   '/student-dashboard',
   /** Koc/ogretmen vitrin profili — panel satirinda (rest'e dusmesin) */
   '/profilimi-duzenle',
@@ -383,6 +390,7 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
       { path: '/dashboard', icon: LayoutDashboard, label: 'Ana Panel' },
       NAV_YAZILI_HAZIRLIK,
       NAV_YAZILI_HAZIRLIK_TAKIP,
+      NAV_VIDEO_SOLUTION_CENTER,
       { path: '/weekly-planner', icon: Calendar, label: 'Haftalık plan' },
       { path: '/attendance-report', icon: ClipboardList, label: 'Yoklama raporu' },
       { path: '/class-lesson-topic-progress', icon: MapPin, label: 'Grup dersi konu ilerlemesi' },
@@ -472,6 +480,7 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
     { path: '/dashboard', icon: LayoutDashboard, label: 'Ana Panel' },
     NAV_YAZILI_HAZIRLIK,
     NAV_YAZILI_HAZIRLIK_TAKIP,
+    NAV_VIDEO_SOLUTION_CENTER,
     ...privateLiveNavForRoles(['admin']),
     { path: '/private-lesson-assignments', icon: UserCheck, label: 'Özel ders atamaları' },
     { path: '/class-live-lessons', icon: Calendar, label: 'Canlı Grup Dersi' },
@@ -530,6 +539,7 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
   const MENU_TEACHER: FlatNavItem[] = [
     { path: '/teacher-panel', icon: LayoutDashboard, label: 'Öğretmen Paneli' },
     NAV_YAZILI_HAZIRLIK,
+    NAV_VIDEO_SOLUTION_CENTER,
     NAV_TEACHER_VITRINE_PROFILE,
     NAV_TEACHER_AVAILABILITY,
     { path: '/teacher-solution-appointments', icon: Calendar, label: 'Bugünkü Randevular' },
@@ -552,6 +562,7 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
   const MENU_COACH: FlatNavItem[] = [
     { path: '/coach-dashboard', icon: LayoutDashboard, label: 'Koç Paneli' },
     NAV_YAZILI_HAZIRLIK,
+    NAV_VIDEO_SOLUTION_CENTER,
     { path: '/coach-kilavuz', icon: ScrollText, label: 'Kullanım kılavuzu' },
     { path: '/class-live-lessons', icon: Calendar, label: 'Canlı Grup Dersi' },
     { path: '/edu-panel', icon: Presentation, label: EDU_HOMEWORK_ANIMATIONS_LABEL },
@@ -668,7 +679,8 @@ export function structureNavFromFlat(flat: FlatNavItem[]): StructuredNav {
           it.path === NAV_TEACHER_VITRINE_PROFILE.path ||
           it.path === NAV_TEACHER_AVAILABILITY.path ||
           it.path === NAV_YAZILI_HAZIRLIK.path ||
-          it.path === NAV_YAZILI_HAZIRLIK_TAKIP.path
+          it.path === NAV_YAZILI_HAZIRLIK_TAKIP.path ||
+          it.path === NAV_VIDEO_SOLUTION_CENTER.path
             ? it.icon
             : LayoutDashboard,
         label: it.label
