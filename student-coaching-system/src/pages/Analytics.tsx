@@ -541,6 +541,24 @@ export default function Analytics() {
     [subjectAnalysisAll]
   );
 
+  /**
+   * Doğru / yanlış / boş toplamları ders listesiyle aynı kaynaktan: koç hedefi
+   * görünümünde veriler haftalık plan kayıtlarından gelir; günlük kayıt (scopedEntries)
+   * boş olduğu için kartlar herkeste 0 görünüyordu.
+   */
+  const answerTotals = useMemo(
+    () =>
+      subjectAnalysis.reduce(
+        (acc, r) => ({
+          correct: acc.correct + (Number(r.doğru) || 0),
+          wrong: acc.wrong + (Number(r.yanlış) || 0),
+          blank: acc.blank + (Number(r.boş) || 0),
+        }),
+        { correct: 0, wrong: 0, blank: 0 }
+      ),
+    [subjectAnalysis]
+  );
+
   // En zayıf dersler (yalnız soru çözülen dersler)
   const weakSubjects = subjectAnalysis.filter((r) => r.doğru + r.yanlış + r.boş > 0).slice(-3);
 
@@ -1502,27 +1520,21 @@ export default function Analytics() {
             <Award className="w-5 h-5 text-green-600" />
             <span className="text-sm text-gray-500">Toplam Doğru</span>
           </div>
-          <p className="text-2xl font-bold text-green-600">
-            {scopedEntries.reduce((sum, e) => sum + e.correctAnswers, 0)}
-          </p>
+          <p className="text-2xl font-bold text-green-600">{answerTotals.correct}</p>
         </div>
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
           <div className="flex items-center gap-2 mb-2">
             <AlertTriangle className="w-5 h-5 text-red-600" />
             <span className="text-sm text-gray-500">Toplam Yanlış</span>
           </div>
-          <p className="text-2xl font-bold text-red-600">
-            {scopedEntries.reduce((sum, e) => sum + e.wrongAnswers, 0)}
-          </p>
+          <p className="text-2xl font-bold text-red-600">{answerTotals.wrong}</p>
         </div>
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
           <div className="flex items-center gap-2 mb-2">
             <Clock className="w-5 h-5 text-gray-600" />
             <span className="text-sm text-gray-500">Toplam Boş</span>
           </div>
-          <p className="text-2xl font-bold text-gray-600">
-            {scopedEntries.reduce((sum, e) => sum + e.blankAnswers, 0)}
-          </p>
+          <p className="text-2xl font-bold text-gray-600">{answerTotals.blank}</p>
         </div>
       </div>
 
