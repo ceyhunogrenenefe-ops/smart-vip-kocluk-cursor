@@ -71,6 +71,11 @@ import BbbPortalJoinPage from './pages/BbbPortalJoinPage';
 import BbbGuestJoinPage from './pages/BbbGuestJoinPage';
 import TeacherPanel from './pages/TeacherPanel';
 import YaziliHazirlikPage from './pages/YaziliHazirlikPage';
+import VideoSolutionCenterPage from './pages/videoSolution/VideoSolutionCenterPage';
+import VideoSolutionPublicHome from './pages/videoSolution/public/VideoSolutionPublicHome';
+import VideoSolutionSetPage from './pages/videoSolution/public/VideoSolutionSetPage';
+import VideoSolutionQuestionPage from './pages/videoSolution/public/VideoSolutionQuestionPage';
+import { isVideoSolutionHost } from './lib/videoSolutionPublicApi';
 import YaziliHazirlikTakipPage from './pages/yaziliHazirlik/YaziliHazirlikTakipPage';
 import YaziliProgramPage from './pages/yaziliProgram/YaziliProgramPage';
 import TeacherSolutionAppointmentsPage from './pages/TeacherSolutionAppointmentsPage';
@@ -148,6 +153,7 @@ function HomeRedirect() {
    * Capacitor kabuğunda eski davranış korunur.
    */
   if (!effectiveUser) {
+    if (isVideoSolutionHost()) return <Navigate to="/c" replace />;
     return isNativeApp() ? <Navigate to="/login" replace /> : <Landing />;
   }
   const tags = userRoleTags(effectiveUser);
@@ -207,6 +213,11 @@ function App() {
               <Route path="/d/:code" element={<BbbGuestJoinPage />} />
               <Route path="/misafir-katil/:slug" element={<BbbGuestJoinPage />} />
               <Route path="/misafir-katil" element={<BbbGuestJoinPage />} />
+
+              {/* Video çözüm — oturum yok; cozum.onlinevipdershane.com */}
+              <Route path="/c" element={<VideoSolutionPublicHome />} />
+              <Route path="/c/:slug" element={<VideoSolutionSetPage />} />
+              <Route path="/c/:slug/s/:questionNumber" element={<VideoSolutionQuestionPage />} />
 
             {/* Ana sayfa yönlendirmesi */}
             <Route path="/" element={<HomeRedirect />} />
@@ -731,6 +742,14 @@ function App() {
               <ProtectedRoute allowedRoles={rolesForProtectedRoute('/yazili-hazirlik')}>
                 <Layout>
                   <YaziliHazirlikPage />
+                </Layout>
+              </ProtectedRoute>
+            } />
+
+            <Route path="/video-cozum-merkezi" element={
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/video-cozum-merkezi')}>
+                <Layout>
+                  <VideoSolutionCenterPage />
                 </Layout>
               </ProtectedRoute>
             } />

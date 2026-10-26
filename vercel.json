@@ -228,6 +228,28 @@
       ],
       "destination": "https://www.onlinevipdershane.com/:path*",
       "permanent": true
+    },
+    {
+      "source": "/",
+      "has": [
+        {
+          "type": "host",
+          "value": "cozum.onlinevipdershane.com"
+        }
+      ],
+      "destination": "/c",
+      "permanent": false
+    },
+    {
+      "source": "/",
+      "has": [
+        {
+          "type": "host",
+          "value": "www.cozum.onlinevipdershane.com"
+        }
+      ],
+      "destination": "/c",
+      "permanent": false
     }
   ],
   "rewrites": [
