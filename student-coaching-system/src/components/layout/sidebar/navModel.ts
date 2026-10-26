@@ -613,7 +613,6 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
     { path: '/topic-tracking', icon: CheckSquare, label: 'Konu Takibi' },
     { path: '/analytics', icon: BarChart3, label: 'Analiz Paneli' },
     { path: '/coach-stats', icon: BarChart3, label: 'Koç İstatistikleri' },
-    { path: '/coach-reports', icon: FileCheck, label: 'Koç Raporları' },
     { path: '/soru-analitik', icon: CircleHelp, label: 'Soru Analitiği' },
     { path: '/soru-havuzu', icon: CircleHelp, label: 'Soru Havuzu' },
     { path: '/notifications', icon: Bell, label: 'Bildirimler' },
