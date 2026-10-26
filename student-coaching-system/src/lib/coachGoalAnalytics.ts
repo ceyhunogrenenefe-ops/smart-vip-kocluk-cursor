@@ -568,6 +568,36 @@ function pct(completed: number, target: number): number {
   return Math.min(999, Math.round((completed / target) * 100));
 }
 
+/**
+ * Koç hedefine bağlı OLMAYAN takvim blokları (öğrencinin kendi eklediği çalışma).
+ * Haftalık plan özeti bunları hedef + gerçekleşene katar; analiz de aynısını yapar.
+ */
+export function freePlannerBlocksInRange(
+  goals: CoachWeeklyGoalRow[],
+  plannerEntries: WeeklyPlannerEntryRow[],
+  weeklyEntries: WeeklyEntry[],
+  rangeFrom: string,
+  rangeTo: string
+): { row: WeeklyPlannerEntryRow; type: GoalAmountType; planned: number; done: number }[] {
+  const rf = clipYmd(rangeFrom);
+  const rt = clipYmd(rangeTo);
+  const allGoalIds = new Set(goals.map((g) => g.id));
+  const out: { row: WeeklyPlannerEntryRow; type: GoalAmountType; planned: number; done: number }[] = [];
+  for (const row of plannerEntries) {
+    const d = clipYmd(row.planner_date);
+    if (d < rf || d > rt) continue;
+    if (row.coach_goal_id && allGoalIds.has(row.coach_goal_id)) continue;
+    if (isAutoSyncedPlannerRow(row)) continue;
+    out.push({
+      row,
+      type: freeBlockAmountType(row),
+      planned: Math.max(0, Number(row.planned_quantity || 0)),
+      done: plannerBlockDoneQuantity(row, goals, weeklyEntries)
+    });
+  }
+  return out;
+}
+
 export function computeCoachGoalRangeAnalytics(
   goals: CoachWeeklyGoalRow[],
   entries: WeeklyEntry[],
@@ -603,6 +633,16 @@ export function computeCoachGoalRangeAnalytics(
     acc[kind].goalCount += 1;
   }
 
+  // Öğrencinin hedef dışı blokları: haftalık plan özetiyle aynı (hedef + gerçekleşen)
+  let freeQuestionTarget = 0;
+  for (const fb of freePlannerBlocksInRange(goals, plannerEntries, entries, rf, rt)) {
+    const kind: CoachGoalUnitKind = fb.type === 'sayfa' ? 'sayfa' : fb.type === 'dakika' ? 'dakika' : 'soru';
+    acc[kind].target += fb.planned;
+    acc[kind].planned += fb.planned;
+    acc[kind].completed += fb.done;
+    if (kind === 'soru') freeQuestionTarget += fb.planned;
+  }
+
   const finalize = (kind: CoachGoalUnitKind): CoachGoalProgressBucket => ({
     kind,
     label: KIND_LABELS[kind],
@@ -623,7 +663,7 @@ export function computeCoachGoalRangeAnalytics(
   const questionPlanned = qBuckets.reduce((a, b) => a + b.planned, 0);
   const questionCompleted = qBuckets.reduce((a, b) => a + b.completed, 0);
   const quotaTarget = totalCoachQuestionTargetsInRange(activeGoals, rf, rt);
-  if (quotaTarget > 0) questionTarget = quotaTarget;
+  if (quotaTarget > 0) questionTarget = quotaTarget + freeQuestionTarget;
 
   const buckets: CoachGoalProgressBucket[] = (
     ['soru', 'paragraf', 'problem', 'sayfa', 'tekrar', 'dakika', 'other'] as CoachGoalUnitKind[]
@@ -704,6 +744,19 @@ export function coachSubjectProgressInRange(
     prev.completed += doneByGoal.get(g.id) ?? 0;
     bySubject.set(key, prev);
   }
+  // Hedef dışı takvim blokları: ders satırına hedef + gerçekleşen olarak eklenir
+  const freeBlocks = freePlannerBlocksInRange(goals, plannerEntries, entries, rf, rt);
+  const freeSubjects = new Set<string>();
+  for (const fb of freeBlocks) {
+    const sub = String(fb.row.subject || '').trim() || 'Diğer';
+    const kind: CoachGoalUnitKind = fb.type === 'sayfa' ? 'sayfa' : fb.type === 'dakika' ? 'dakika' : 'soru';
+    const key = `${sub}::${fb.type}`;
+    const prev = bySubject.get(key) || { kind, target: 0, completed: 0 };
+    prev.target += fb.planned;
+    prev.completed += fb.done;
+    bySubject.set(key, prev);
+    if (fb.type === 'soru') freeSubjects.add(sub);
+  }
   const typesPerSubject = new Map<string, number>();
   for (const key of bySubject.keys()) {
     const sub = key.slice(0, key.lastIndexOf('::'));
@@ -723,6 +776,22 @@ export function coachSubjectProgressInRange(
       const d = clipYmd(e.date);
       if (d < clip.clipFrom || d > clip.clipTo) continue;
       if (normSubjectKey(e.subject) !== normSubjectKey(g.subject)) continue;
+      countedEntryForSubject.add(statKey);
+      if (!entryStats[sub]) entryStats[sub] = { correct: 0, wrong: 0, blank: 0, solved: 0 };
+      entryStats[sub].correct += e.correctAnswers || 0;
+      entryStats[sub].wrong += e.wrongAnswers || 0;
+      entryStats[sub].blank += e.blankAnswers || 0;
+      entryStats[sub].solved += e.solvedQuestions || 0;
+    }
+  }
+  // Hedef dışı blok derslerinin doğru/yanlış/boş istatistiği (aralıktaki kayıtlar)
+  for (const sub of freeSubjects) {
+    for (const e of entries) {
+      const statKey = `${sub}::${e.id}`;
+      if (countedEntryForSubject.has(statKey)) continue;
+      const d = clipYmd(e.date);
+      if (d < rf || d > rt) continue;
+      if (normSubjectKey(e.subject) !== normSubjectKey(sub)) continue;
       countedEntryForSubject.add(statKey);
       if (!entryStats[sub]) entryStats[sub] = { correct: 0, wrong: 0, blank: 0, solved: 0 };
       entryStats[sub].correct += e.correctAnswers || 0;

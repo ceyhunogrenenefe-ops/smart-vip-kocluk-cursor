@@ -407,12 +407,8 @@ export default function Analytics() {
       rt ?? undefined
     );
     if (!coachGoalAnalytics || !coachRangeYmd) return base;
-    const coachQuota = totalCoachQuestionTargetsInRange(
-      coachGoalsForAnalytics,
-      coachRangeYmd.rangeFrom,
-      coachRangeYmd.rangeTo
-    );
-    const totalTarget = coachQuota > 0 ? coachQuota : coachGoalAnalytics.questionTarget;
+    // Koç kotası + öğrencinin hedef dışı takvim blokları (haftalık plan özetiyle aynı)
+    const totalTarget = coachGoalAnalytics.questionTarget;
     const totalSolved = coachGoalAnalytics.questionCompleted;
     const realizationRate =
       totalTarget > 0 ? Math.min(999, Math.round((totalSolved / totalTarget) * 100)) : 0;
