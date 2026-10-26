@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ExternalLink, Loader2 } from 'lucide-react';
 import {
   fetchPublicVideoSolution,
   type VideoSolutionBrand,
@@ -105,17 +105,42 @@ export default function VideoSolutionQuestionPage() {
           {soru.title ? `: ${soru.title}` : ''}
         </h1>
         {soru.topic && <p className="mt-1 text-sm text-slate-500">{soru.topic}</p>}
+        {soru.provider_label && (
+          <p className="mt-1 text-xs text-slate-400">{soru.provider_label}</p>
+        )}
 
-        <div className="relative mt-4 aspect-video w-full overflow-hidden rounded-xl bg-black">
-          <iframe
-            title={`Soru ${soru.question_number} video çözüm`}
-            src={`${soru.embed_url}?rel=0&modestbranding=1`}
-            className="absolute inset-0 h-full w-full border-0"
-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-            allowFullScreen
-            referrerPolicy="strict-origin-when-cross-origin"
-          />
-        </div>
+        {soru.embed_url ? (
+          <div className="relative mt-4 aspect-video w-full overflow-hidden rounded-xl bg-black">
+            <iframe
+              title={`Soru ${soru.question_number} video çözüm`}
+              src={
+                soru.video_provider === 'youtube'
+                  ? `${soru.embed_url}?rel=0&modestbranding=1`
+                  : soru.embed_url
+              }
+              className="absolute inset-0 h-full w-full border-0"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+              allowFullScreen
+              referrerPolicy="strict-origin-when-cross-origin"
+            />
+          </div>
+        ) : soru.source_url ? (
+          <div className="mt-4 rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center">
+            <p className="mb-3 text-sm text-slate-600">
+              Bu soru harici bir bağlantıda. Videoyu yeni sekmede açın.
+            </p>
+            <a
+              href={soru.source_url}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-2 rounded-lg bg-[#173b70] px-4 py-2 text-sm text-white"
+            >
+              <ExternalLink className="h-4 w-4" /> Videoyu aç
+            </a>
+          </div>
+        ) : (
+          <p className="mt-4 text-sm text-slate-500">Video bağlantısı tanımlı değil.</p>
+        )}
       </div>
 
       <nav className="mt-4 flex flex-wrap items-center justify-between gap-2">

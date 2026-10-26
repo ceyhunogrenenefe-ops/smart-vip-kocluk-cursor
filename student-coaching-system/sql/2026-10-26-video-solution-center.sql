@@ -55,7 +55,9 @@ create table if not exists public.video_solution_questions (
   question_number integer not null,
   title text,
   topic text,
-  youtube_video_id text not null,
+  video_provider text not null default 'youtube',
+  video_ref text,
+  youtube_video_id text,
   youtube_url text,
   teacher_user_id text,
   image_storage_path text,
@@ -66,8 +68,12 @@ create table if not exists public.video_solution_questions (
   constraint video_solution_questions_set_num_uniq unique (set_id, question_number),
   constraint video_solution_questions_number_chk check (question_number >= 1),
   constraint video_solution_questions_status_chk check (status in ('draft', 'published')),
-  constraint video_solution_questions_yt_id_chk check (
-    char_length(trim(youtube_video_id)) between 6 and 20
+  constraint video_solution_questions_provider_chk check (
+    video_provider in ('youtube', 'vimeo', 'google_drive', 'external')
+  ),
+  constraint video_solution_questions_ref_chk check (
+    char_length(trim(coalesce(video_ref, youtube_video_id, ''))) >= 3
+    or char_length(trim(coalesce(youtube_url, ''))) >= 8
   )
 );
 

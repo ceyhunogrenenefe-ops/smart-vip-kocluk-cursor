@@ -27,7 +27,10 @@ export type VideoSolutionPublicQuestion = {
   question_number: number;
   title: string | null;
   topic: string | null;
-  embed_url: string;
+  video_provider: string;
+  provider_label?: string;
+  source_url: string | null;
+  embed_url: string | null;
 };
 
 export type VideoSolutionPublicPayload = {

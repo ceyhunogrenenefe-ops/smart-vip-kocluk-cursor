@@ -1,5 +1,5 @@
 import { supabaseAdmin } from './supabase-admin.js';
-import { youtubeNocookieEmbedUrl } from './video-solution-youtube.js';
+import { videoMediaFromRow } from './video-solution-media.js';
 import {
   VIDEO_SOLUTION_QUESTIONS_TABLE,
   VIDEO_SOLUTION_SETS_TABLE
@@ -23,7 +23,9 @@ export async function fetchPublishedVideoSolutionBySlug(slug) {
 
   const { data: qs, error: qe } = await supabaseAdmin
     .from(VIDEO_SOLUTION_QUESTIONS_TABLE)
-    .select('question_number,title,topic,youtube_video_id,status,sort_order')
+    .select(
+      'question_number,title,topic,video_provider,video_ref,youtube_video_id,youtube_url,status,sort_order'
+    )
     .eq('set_id', setRow.id)
     .eq('status', 'published')
     .order('sort_order', { ascending: true })
@@ -43,11 +45,17 @@ export async function fetchPublishedVideoSolutionBySlug(slug) {
       description: setRow.description,
       institution_id: setRow.institution_id
     },
-    questions: (qs || []).map((q) => ({
-      question_number: q.question_number,
-      title: q.title,
-      topic: q.topic,
-      embed_url: youtubeNocookieEmbedUrl(q.youtube_video_id)
-    }))
+    questions: (qs || []).map((q) => {
+      const media = videoMediaFromRow(q);
+      return {
+        question_number: q.question_number,
+        title: q.title,
+        topic: q.topic,
+        video_provider: media.video_provider,
+        source_url: media.source_url,
+        embed_url: media.embed_url,
+        provider_label: media.provider_label
+      };
+    })
   };
 }
