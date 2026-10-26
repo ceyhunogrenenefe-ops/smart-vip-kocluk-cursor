@@ -34,10 +34,13 @@ type QuestionRow = {
   question_number: number;
   title: string | null;
   topic: string | null;
-  youtube_video_id: string;
-  youtube_url: string | null;
+  video_provider?: string;
+  provider_label?: string;
+  source_url?: string | null;
+  youtube_video_id?: string | null;
+  youtube_url?: string | null;
   public_url: string | null;
-  embed_url: string;
+  embed_url: string | null;
 };
 
 const WORK_TYPES: { id: string; label: string }[] = [
@@ -88,7 +91,7 @@ export default function VideoSolutionCenterPage() {
     question_number: 1,
     title: '',
     topic: '',
-    youtube_url: ''
+    video_url: ''
   });
 
   const listeYukle = useCallback(async () => {
@@ -196,14 +199,20 @@ export default function VideoSolutionCenterPage() {
       const res = await apiFetch('/api/video-solution?op=upsert-question', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ set_id: seciliId, ...soruForm })
+        body: JSON.stringify({
+          set_id: seciliId,
+          question_number: soruForm.question_number,
+          title: soruForm.title,
+          topic: soruForm.topic,
+          video_url: soruForm.video_url
+        })
       });
       const j = (await res.json().catch(() => ({}))) as { hint?: string; error?: string };
       if (!res.ok) throw new Error(j.hint || j.error || 'Kaydedilemedi');
       toast.success('Soru kaydedildi');
       setSoruForm((f) => ({
         ...f,
-        youtube_url: '',
+        video_url: '',
         title: '',
         topic: '',
         question_number: f.question_number + 1
@@ -509,9 +518,9 @@ export default function VideoSolutionCenterPage() {
                   />
                   <input
                     className="col-span-2 rounded border px-2 py-1.5 text-sm"
-                    placeholder="YouTube linki *"
-                    value={soruForm.youtube_url}
-                    onChange={(e) => setSoruForm({ ...soruForm, youtube_url: e.target.value })}
+                    placeholder="YouTube, Vimeo, Drive veya https link *"
+                    value={soruForm.video_url}
+                    onChange={(e) => setSoruForm({ ...soruForm, video_url: e.target.value })}
                     required
                   />
                 </div>
@@ -555,7 +564,7 @@ export default function VideoSolutionCenterPage() {
                                 question_number: q.question_number,
                                 title: q.title || '',
                                 topic: q.topic || '',
-                                youtube_url: q.youtube_url || q.youtube_video_id
+                                video_url: q.source_url || q.youtube_url || q.youtube_video_id || ''
                               })
                             }
                             title="Forma al"
@@ -574,6 +583,9 @@ export default function VideoSolutionCenterPage() {
                       </div>
                       {q.title && <p className="text-slate-700">{q.title}</p>}
                       {q.topic && <p className="text-xs text-slate-500">{q.topic}</p>}
+                      {q.provider_label && (
+                        <p className="text-xs text-slate-400">{q.provider_label}</p>
+                      )}
                       <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
                         {q.public_url && (
                           <>

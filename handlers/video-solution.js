@@ -17,11 +17,7 @@ import {
   VIDEO_SOLUTION_QUESTIONS_TABLE,
   VIDEO_SOLUTION_SETS_TABLE
 } from '../api/_lib/video-solution-schema.js';
-import {
-  parseYoutubeVideoId,
-  youtubeWatchUrl,
-  youtubeNocookieEmbedUrl
-} from '../api/_lib/video-solution-youtube.js';
+import { parseVideoSource, videoMediaFromRow } from '../api/_lib/video-solution-media.js';
 import {
   videoSolutionPublicBaseUrl,
   videoSolutionQuestionPublicUrl,
@@ -99,20 +95,19 @@ function mapSet(row) {
 
 function mapQuestion(row) {
   if (!row) return null;
+  const media = videoMediaFromRow(row);
   return {
     id: row.id,
     set_id: row.set_id,
     question_number: row.question_number,
     title: row.title,
     topic: row.topic,
-    youtube_video_id: row.youtube_video_id,
-    youtube_url: row.youtube_url,
     teacher_user_id: row.teacher_user_id,
     image_storage_path: row.image_storage_path,
     status: row.status,
     sort_order: row.sort_order,
     updated_at: row.updated_at,
-    embed_url: youtubeNocookieEmbedUrl(row.youtube_video_id),
+    ...media,
     public_url: null
   };
 }
@@ -393,10 +388,15 @@ export default async function handler(req, res) {
         return res.status(404).json({ error: 'not_found' });
       }
 
-      const ytInput = String(body.youtube_url || body.youtube_video_id || '').trim();
-      const videoId = parseYoutubeVideoId(ytInput);
-      if (!videoId) {
-        return res.status(400).json({ error: 'invalid_youtube', hint: 'Geçerli YouTube linki veya video kimliği girin.' });
+      const videoInput = String(
+        body.video_url || body.youtube_url || body.youtube_video_id || ''
+      ).trim();
+      const parsed = parseVideoSource(videoInput);
+      if (!parsed) {
+        return res.status(400).json({
+          error: 'invalid_video',
+          hint: 'Geçerli YouTube, Vimeo, Google Drive veya https bağlantısı girin.'
+        });
       }
 
       const row = {
@@ -404,8 +404,10 @@ export default async function handler(req, res) {
         question_number: Math.trunc(qNum),
         title: String(body.title || '').trim() || null,
         topic: String(body.topic || '').trim() || null,
-        youtube_video_id: videoId,
-        youtube_url: youtubeWatchUrl(videoId),
+        video_provider: parsed.provider,
+        video_ref: parsed.ref,
+        youtube_video_id: parsed.provider === 'youtube' ? parsed.ref : null,
+        youtube_url: parsed.source_url,
         teacher_user_id: String(body.teacher_user_id || actor.sub || '').trim() || null,
         status: setRow.status === 'published' ? 'published' : 'draft',
         sort_order: Number.isFinite(Number(body.sort_order)) ? Math.trunc(Number(body.sort_order)) : Math.trunc(qNum),
