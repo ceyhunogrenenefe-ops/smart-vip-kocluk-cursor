@@ -80,10 +80,10 @@ export const COACH_GUIDE_INTRO = {
 export const COACH_MENU_GROUPS: GuideMenuGroup[] = [
   {
     id: 'panel',
-    title: 'Panel',
+    title: 'Dashboard',
     icon: 'LayoutDashboard',
     gradient: 'from-violet-600 to-indigo-600',
-    items: ['Koç Paneli', 'Kullanım kılavuzu'],
+    items: ['Koç Paneli', 'Yazılıya Hazırlık', 'Video Çözüm Merkezi'],
     note: 'Güne buradan başlayın; özet istatistikler ve riskli öğrenciler burada.'
   },
   {
@@ -114,18 +114,18 @@ export const COACH_MENU_GROUPS: GuideMenuGroup[] = [
     ]
   },
   {
-    id: 'whatsapp',
-    title: 'WhatsApp',
-    icon: 'MessageCircle',
-    gradient: 'from-green-600 to-emerald-600',
-    items: ['WhatsApp merkezi']
-  },
-  {
     id: 'org',
     title: 'Kurum',
     icon: 'FileText',
     gradient: 'from-rose-600 to-pink-600',
-    items: ['Veli onayı & e-imza', 'Bildirimler', 'Etkinlikler', 'AI KOÇ', 'Soru Havuzu / Analitik']
+    items: ['Veli onayı & e-imza', 'AI KOÇ', 'Soru Havuzu / Analitik']
+  },
+  {
+    id: 'settings',
+    title: 'Ayarlar',
+    icon: 'Bell',
+    gradient: 'from-green-600 to-emerald-600',
+    items: ['Profilimi Düzenle', 'Müsaitlik Takvimim', 'Bildirimler', 'Kullanım kılavuzu', 'WhatsApp merkezi']
   }
 ];
 
@@ -554,17 +554,10 @@ export const COACH_GUIDE_SECTIONS: CoachGuideSection[] = [
         where: 'Kurum → Bildirimler → Yeni',
         detail:
           'Başlık ve mesaj yazın; hedef olarak öğrencileri seçin. Anlık push / uygulama içi görünür.'
-      },
-      {
-        title: 'Etkinlik ekleyin',
-        where: 'Etkinlikler — takvim',
-        detail:
-          'Tarih, saat ve açıklama girin. Öğrenci panellerinde takvimde görünür.'
       }
     ],
     linkPath: '/notifications',
-    linkLabel: 'Bildirimlere git',
-    relatedLinks: [{ path: '/events', label: 'Etkinlikler' }]
+    linkLabel: 'Bildirimlere git'
   },
   {
     id: 'daily',
@@ -590,7 +583,7 @@ export const COACH_GUIDE_SECTIONS: CoachGuideSection[] = [
       },
       {
         title: 'Akşam: Kapanış',
-        where: 'Analiz · Etkinlikler',
+        where: 'Analiz Paneli',
         detail: 'Gün özetini not alın, yarını planlayın, haftalık hedefleri güncelleyin.'
       }
     ]
