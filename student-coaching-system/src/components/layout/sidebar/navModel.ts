@@ -155,13 +155,42 @@ export const NAV_VIDEO_SOLUTION_CENTER: FlatNavItem = {
   label: 'Video Çözüm Merkezi'
 };
 
-const PANEL_PATHS = new Set([
+/** Tüm dashboard'lar tek "Dashboard" grubunda: ana panel + yazılı hazırlık + video çözüm */
+const DASHBOARD_ORDER = [
   '/dashboard',
   '/coach-dashboard',
   '/teacher-panel',
   '/yazili-hazirlik',
   '/yazili-hazirlik-takip',
-  '/video-cozum-merkezi',
+  '/video-cozum-merkezi'
+] as const;
+const DASHBOARD_PATHS = new Set<string>(DASHBOARD_ORDER);
+
+/**
+ * Koç ve öğretmen (yönetici olmayan) için "Ayarlar" grubu: profil, müsaitlik,
+ * bildirimler, kullanım kılavuzu, WhatsApp merkezi.
+ */
+const STAFF_SETTINGS_ORDER = [
+  '/profilimi-duzenle',
+  '/musaitlik-takvimim',
+  '/notifications',
+  '/coach-kilavuz',
+  '/yardim',
+  '/coach-whatsapp-settings',
+  '/settings'
+] as const;
+const STAFF_SETTINGS_PATHS = new Set<string>(STAFF_SETTINGS_ORDER);
+
+/** Ayarlar grubunu kullanan roller: koç / öğretmen, yönetici değil. */
+export function usesStaffSettingsGroup(tags: UserRole[]): boolean {
+  return (
+    (tags.includes('coach') || tags.includes('teacher')) &&
+    !tags.includes('admin') &&
+    !tags.includes('super_admin')
+  );
+}
+
+const PANEL_PATHS = new Set([
   '/student-dashboard',
   /** Koc/ogretmen vitrin profili — panel satirinda (rest'e dusmesin) */
   '/profilimi-duzenle',
@@ -554,9 +583,10 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
     { path: '/class-live-lessons', icon: Calendar, label: 'Canlı Grup Dersi' },
     { path: '/attendance-report', icon: ClipboardList, label: 'Yoklama raporu' },
     { path: '/class-lesson-topic-progress', icon: MapPin, label: 'Grup dersi konu ilerlemesi' },
+    { path: '/notifications', icon: Bell, label: 'Bildirimler' },
     { path: '/coach-whatsapp-settings', icon: MessageCircle, label: 'WhatsApp merkezi' },
     { path: '/kitap-magazasi', icon: ShoppingBag, label: 'Kitap Mağazası' },
-    { path: '/settings', icon: Settings, label: 'Ayarlar' }
+    { path: '/settings', icon: Settings, label: 'Hesap ayarları' }
   ];
 
   const MENU_COACH: FlatNavItem[] = [
@@ -587,7 +617,6 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
     { path: '/soru-analitik', icon: CircleHelp, label: 'Soru Analitiği' },
     { path: '/soru-havuzu', icon: CircleHelp, label: 'Soru Havuzu' },
     { path: '/notifications', icon: Bell, label: 'Bildirimler' },
-    { path: '/events', icon: CalendarDays, label: 'Etkinlikler' },
     { path: '/ai-coach', icon: Brain, label: 'AI KOÇ' },
     { path: '/coach-whatsapp-settings', icon: MessageCircle, label: 'WhatsApp merkezi' },
     { path: '/written-exam', icon: FileCheck, label: 'Yazılı Takip' },
@@ -627,6 +656,7 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
 }
 
 export type NavGroupKind =
+  | 'dashboards'
   | 'lessons'
   | 'academic'
   | 'org'
@@ -637,6 +667,8 @@ export type NavGroupKind =
   | 'crm';
 
 export type StructuredNav = {
+  /** Ana panel + yazılı hazırlık + video çözüm (tek "Dashboard" grubu) */
+  dashboards: FlatNavItem[];
   panels: FlatNavItem[];
   academicCenter: FlatNavItem | null;
   lessons: FlatNavItem[];
@@ -650,7 +682,12 @@ export type StructuredNav = {
 };
 
 /** Gruplar + panel + kalan öğeler (sıra korunur). */
-export function structureNavFromFlat(flat: FlatNavItem[]): StructuredNav {
+export function structureNavFromFlat(
+  flat: FlatNavItem[],
+  opts: { staffSettings?: boolean } = {}
+): StructuredNav {
+  const staffSettings = Boolean(opts.staffSettings);
+  const dashboards: FlatNavItem[] = [];
   const panels: FlatNavItem[] = [];
   let academicCenter: FlatNavItem | null = null;
   const lessons: FlatNavItem[] = [];
@@ -669,6 +706,18 @@ export function structureNavFromFlat(flat: FlatNavItem[]): StructuredNav {
         label: ACADEMIC_LABELS[ACADEMIC_CENTER_PATH] ?? it.label,
         icon: Sparkles
       };
+      continue;
+    }
+    if (DASHBOARD_PATHS.has(it.path)) {
+      dashboards.push(it);
+      continue;
+    }
+    if (staffSettings && STAFF_SETTINGS_PATHS.has(it.path)) {
+      settings.push(
+        it.path === '/yardim' && !flat.some((x) => x.path === '/coach-kilavuz')
+          ? { ...it, label: 'Kullanım kılavuzu' }
+          : it
+      );
       continue;
     }
     if (PANEL_PATHS.has(it.path)) {
@@ -730,6 +779,15 @@ export function structureNavFromFlat(flat: FlatNavItem[]): StructuredNav {
   };
   orgSystem.sort((a, b) => orgRank(a.path) - orgRank(b.path));
 
+  const rankIn = (order: readonly string[]) => (p: string) => {
+    const i = order.indexOf(p);
+    return i === -1 ? 99 : i;
+  };
+  const dashRank = rankIn(DASHBOARD_ORDER);
+  dashboards.sort((a, b) => dashRank(a.path) - dashRank(b.path));
+  const setRank = rankIn(STAFF_SETTINGS_ORDER);
+  if (staffSettings) settings.sort((a, b) => setRank(a.path) - setRank(b.path));
+
   const teamRank = (p: string) => {
     const i = (TEAM_ORDER as readonly string[]).indexOf(p);
     return i === -1 ? 99 : i;
@@ -767,7 +825,7 @@ export function structureNavFromFlat(flat: FlatNavItem[]): StructuredNav {
   };
   academic.sort((a, b) => acRank(a.path) - acRank(b.path));
 
-  return { panels, academicCenter, lessons, team, academic, whatsapp, crm, orgSystem, settings, rest };
+  return { dashboards, panels, academicCenter, lessons, team, academic, whatsapp, crm, orgSystem, settings, rest };
 }
 
 export function pathnameMatchesGroup(pathname: string, kind: NavGroupKind, items: FlatNavItem[]): boolean {
@@ -786,7 +844,9 @@ export function pathnameMatchesGroup(pathname: string, kind: NavGroupKind, items
 }
 
 export function getStructuredNavForRoles(tags: UserRole[]): StructuredNav {
-  return structureNavFromFlat(getFlatMenuForRoles(tags));
+  return structureNavFromFlat(getFlatMenuForRoles(tags), {
+    staffSettings: usesStaffSettingsGroup(tags)
+  });
 }
 
 export function pathnameMatchesMobileTab(

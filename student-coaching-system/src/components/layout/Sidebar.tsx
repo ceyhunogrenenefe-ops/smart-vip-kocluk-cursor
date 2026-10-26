@@ -22,6 +22,7 @@ import {
   getFlatMenuForRoles,
   filterNavForInstitution,
   structureNavFromFlat,
+  usesStaffSettingsGroup,
   STUDENT_PANEL_SUBMENU_ITEMS,
   STUDENT_LESSON_NAV_ITEMS,
   STUDENT_NAV_ACADEMIC_CENTER,
@@ -58,7 +59,11 @@ export default function Sidebar({
     () => filterNavForInstitution(getFlatMenuForRoles(tags), institution?.id),
     [tags, institution?.id]
   );
-  const nav = useMemo(() => structureNavFromFlat(flat), [flat]);
+  const staffSettings = usesStaffSettingsGroup(tags);
+  const nav = useMemo(
+    () => structureNavFromFlat(flat, { staffSettings }),
+    [flat, staffSettings]
+  );
   const restNav = nav.rest;
   const isStudentOnlyNav =
     tags.includes('student') &&
@@ -225,6 +230,30 @@ export default function Sidebar({
             />
           </>
         ) : null}
+
+        {/* Dashboard: ana panel + yazılıya hazırlık + video çözüm tek grupta */}
+        {nav.dashboards.length > 1 ? (
+          <SidebarNavGroup
+            id="dashboards"
+            label="Dashboard"
+            icon={LayoutDashboard}
+            items={nav.dashboards}
+            pathname={location.pathname}
+            collapsed={railCollapsed}
+            onNavigate={go}
+          />
+        ) : (
+          nav.dashboards.map((p) => (
+            <SidebarNavLink
+              key={p.path}
+              label={p.label}
+              icon={p.icon}
+              active={location.pathname === p.path || location.pathname.startsWith(`${p.path}/`)}
+              collapsed={railCollapsed}
+              onNavigate={() => go(p.path)}
+            />
+          ))
+        )}
 
         {/* Panel */}
         {nav.panels.map((p) => {

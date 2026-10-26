@@ -85,7 +85,7 @@ export const ROUTE_ALLOWED_ROLES = {
   '/yardim': ['student', 'teacher', 'coach', 'admin', 'super_admin'],
   '/soru-havuzu': ['super_admin', 'admin', 'teacher', 'coach'],
   '/soru-analitik': ['super_admin', 'admin', 'coach'],
-  '/notifications': ['super_admin', 'admin', 'coach'],
+  '/notifications': ['super_admin', 'admin', 'coach', 'teacher'],
   '/events': ['super_admin', 'admin', 'coach'],
   '/toplanti-takip': ['super_admin', 'admin'],
   '/crm': ['super_admin', 'admin', 'crm_agent'],
