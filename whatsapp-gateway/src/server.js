@@ -13,6 +13,7 @@ import makeWASocket, {
   DisconnectReason,
   useMultiFileAuthState,
   fetchLatestBaileysVersion,
+  fetchLatestWaWebVersion,
   makeCacheableSignalKeyStore,
 } from '@whiskeysockets/baileys';
 import { createMessageStore, createMsgRetryCounterCache } from './message-store.js';
@@ -338,6 +339,48 @@ function isFatalDisconnect(statusCode, message) {
   if (msg.includes('conflict')) return true;
   if (msg.includes('logged out')) return true;
   return false;
+}
+
+/**
+ * WhatsApp istemci sürümü. Eski sürüm bildirilirse WhatsApp bağlantıyı 405 «Connection Failure» ile
+ * kapatır ve QR hiç üretilmez. Sıra: WA_WEB_VERSION env (ör. 2,3000,1043857760) →
+ * web.whatsapp.com güncel revizyonu → Baileys depo dosyası; en yüksek revizyon seçilir.
+ */
+const WA_VERSION_CACHE_MS = 30 * 60 * 1000;
+let waVersionCache = { version: null, source: null, at: 0 };
+
+function parseWaVersionEnv() {
+  const parts = String(process.env.WA_WEB_VERSION || '')
+    .split(/[.,\s]+/)
+    .map((x) => Number(x))
+    .filter((n) => Number.isFinite(n) && n >= 0);
+  return parts.length === 3 ? parts : null;
+}
+
+function invalidateWaVersionCache() {
+  waVersionCache = { version: null, source: null, at: 0 };
+}
+
+async function resolveWaVersion() {
+  const envVersion = parseWaVersionEnv();
+  if (envVersion) return { version: envVersion, source: 'env' };
+  if (waVersionCache.version && Date.now() - waVersionCache.at < WA_VERSION_CACHE_MS) {
+    return { version: waVersionCache.version, source: waVersionCache.source };
+  }
+  const [web, repo] = await Promise.all([
+    fetchLatestWaWebVersion({ timeout: 8000 }).catch(() => null),
+    fetchLatestBaileysVersion({ timeout: 8000 }).catch(() => null),
+  ]);
+  const candidates = [];
+  if (web?.isLatest && Array.isArray(web.version)) candidates.push({ version: web.version, source: 'web' });
+  if (repo?.isLatest && Array.isArray(repo.version)) candidates.push({ version: repo.version, source: 'repo' });
+  candidates.sort((a, b) => Number(b.version[2] || 0) - Number(a.version[2] || 0));
+  const best = candidates[0] || { version: (repo || web)?.version, source: 'bundled' };
+  if (best.source !== 'bundled') {
+    waVersionCache = { version: best.version, source: best.source, at: Date.now() };
+  }
+  logger.info({ waVersion: best.version?.join('.'), source: best.source }, 'WhatsApp client version resolved');
+  return best;
 }
 
 function humanizeDisconnectError(errMsg) {
@@ -1119,7 +1162,7 @@ async function setupSession(coachId, { allowDiskAuth = true } = {}) {
 
     await fs.mkdir(authDir, { recursive: true });
     const { state, saveCreds } = await useMultiFileAuthState(authDir);
-    const { version } = await fetchLatestBaileysVersion();
+    const { version } = await resolveWaVersion();
     if ((sessionEpoch.get(coachId) || 0) !== epoch) {
       return sessions.get(coachId) || parkSessionWaitingForQr(coachId);
     }
@@ -1282,6 +1325,12 @@ async function setupSession(coachId, { allowDiskAuth = true } = {}) {
         const code = lastDisconnect?.error?.output?.statusCode;
         const errMsg = lastDisconnect?.error?.message || null;
         sessionState.sock = null;
+
+        // 405: WhatsApp istemci sürümünü reddetti → bir sonraki denemede sürümü yeniden çek
+        if (Number(code) === 405) {
+          invalidateWaVersionCache();
+          logger.warn({ coachId, code, errMsg, waVersion: version?.join('.') }, 'WhatsApp rejected client version (405)');
+        }
 
         if (isRestartRequiredDisconnect(code, errMsg)) {
           logger.info({ coachId, code, errMsg }, 'WhatsApp restart required — reconnecting with same auth');
@@ -1474,6 +1523,8 @@ app.get('/health', (_req, res) => {
     ok: true,
     service: 'whatsapp-gateway',
     baileys: '@whiskeysockets/baileys',
+    wa_version: waVersionCache.version ? waVersionCache.version.join('.') : parseWaVersionEnv()?.join('.') || null,
+    wa_version_source: parseWaVersionEnv() ? 'env' : waVersionCache.source,
     sessions: sessions.size,
     connected,
     reconnecting,
