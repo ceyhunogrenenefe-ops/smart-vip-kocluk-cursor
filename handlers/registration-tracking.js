@@ -1768,8 +1768,8 @@ async function handleSendChannelMessage(body, institutionId, actor) {
             ok: false,
             provider: 'meta',
             error: /131047|24|re-?engagement|outside/i.test(msg)
-              ? `0850 hattından gönderilemedi: müşteri 24 saattir yazmadı. Onaylı şablon ile gönderin. (${msg})`
-              : `0850 hattından gönderilemedi: ${msg}`
+              ? `Kurumsal hattan gönderilemedi: müşteri 24 saattir yazmadı. Onaylı şablon ile gönderin. (${msg})`
+              : `Kurumsal hattan gönderilemedi: ${msg}`
           };
         }
       } else if (typeof gatewaySendConfigured === 'function' && gatewaySendConfigured()) {

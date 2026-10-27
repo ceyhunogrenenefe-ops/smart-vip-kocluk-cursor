@@ -660,7 +660,7 @@ export default function CrmInboxPage() {
           {inboundPending
             ? 'Bağlantı durumu kontrol ediliyor…'
             : inboundOk
-              ? 'WhatsApp 0850 bağlı.'
+              ? 'Kurumsal WhatsApp hattı bağlı.'
               : inbound?.hint || 'WhatsApp hattını bağlayın.'}{' '}
           {inboundPending
             ? null
@@ -687,7 +687,7 @@ export default function CrmInboxPage() {
                   setInbound(res.data || inbound);
                   toast.success(
                     res.data?.bound_to_production
-                      ? 'Kurumsal hat bağlandı — 0850’ye tekrar yazın'
+                      ? 'Kurumsal hat bağlandı — hatta tekrar yazın'
                       : res.data?.hint || 'Bağlama denendi'
                   );
                 })
