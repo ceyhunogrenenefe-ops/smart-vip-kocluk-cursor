@@ -104,7 +104,9 @@ export default function HaftaAktarModal({
     try {
       const r = await haftaAktar({ studentId, sourceWeek: kaynak, targetWeek: hedef, mode: secilenKip });
       toast.success(
-        `${r.inserted} görev aktarıldı` +
+        `${r.inserted} görev` +
+          (r.goals_inserted ? ` ve ${r.goals_inserted} hedef` : '') +
+          ' aktarıldı' +
           (r.deleted ? ` · ${r.deleted} görev değiştirildi` : '') +
           (secilenKip === 'birlestir' && onizleme.conflict_count
             ? ` · ${onizleme.conflict_count} çakışan görev korundu`
@@ -195,7 +197,7 @@ export default function HaftaAktarModal({
 
         {onizleme ? (
           <>
-            <div className="mt-4 grid gap-2 sm:grid-cols-3" data-test="aktar-ozet">
+            <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4" data-test="aktar-ozet">
               <div className="rounded-xl bg-slate-50 p-2.5 dark:bg-slate-800/60">
                 <p className="text-[11px] font-semibold text-slate-500">Aktarılacak görev</p>
                 <p className="text-xl font-bold text-slate-900 dark:text-white">{onizleme.copy_count}</p>
@@ -205,6 +207,17 @@ export default function HaftaAktarModal({
                 <p className="text-xl font-bold text-slate-900 dark:text-white">
                   {onizleme.target_existing_count}
                 </p>
+              </div>
+              <div className="rounded-xl bg-slate-50 p-2.5 dark:bg-slate-800/60">
+                <p className="text-[11px] font-semibold text-slate-500">Aktarılacak hedef</p>
+                <p className="text-xl font-bold text-slate-900 dark:text-white">
+                  {onizleme.goal_copy_count ?? 0}
+                </p>
+                {onizleme.goal_reused_count ? (
+                  <p className="text-[10px] text-slate-500">
+                    {onizleme.goal_reused_count} hedef zaten var, ona bağlanacak
+                  </p>
+                ) : null}
               </div>
               <div
                 className={`rounded-xl p-2.5 ${
@@ -221,8 +234,10 @@ export default function HaftaAktarModal({
             </div>
 
             <p className="mt-3 text-[11px] text-slate-500 dark:text-slate-400">
+              Koç haftalık hedefleri de aktarılır ve görevler yeni haftanın hedeflerine bağlanır.
               Tamamlanma durumu, gerçekleşen süreler ve koç değerlendirmeleri aktarılmaz; görevler
-              yeni haftada başlangıç durumunda oluşur. Kaynak hafta değişmez.
+              yeni haftada başlangıç durumunda oluşur. Kaynak hafta değişmez; hedefler hiçbir
+              kipte silinmez.
             </p>
 
             {hedefDolu ? (
@@ -254,6 +269,26 @@ export default function HaftaAktarModal({
                     </label>
                   ))}
                 </div>
+              </div>
+            ) : null}
+
+            {onizleme.goals_preview && onizleme.goals_preview.length ? (
+              <div className="mt-3 rounded-xl border border-slate-200 p-2 dark:border-slate-700">
+                <p className="mb-1 text-[11px] font-bold uppercase text-slate-500">
+                  Aktarılacak hedefler
+                </p>
+                <ul className="space-y-0.5 text-xs text-slate-700 dark:text-slate-200">
+                  {onizleme.goals_preview.map((g, i) => (
+                    <li key={i} className="flex justify-between gap-2">
+                      <span className="truncate">
+                        {g.subject} · {g.title}
+                      </span>
+                      <span className="shrink-0 text-slate-500">
+                        {g.target_quantity} {g.quantity_unit || ''}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
               </div>
             ) : null}
 
