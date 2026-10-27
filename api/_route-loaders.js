@@ -40,6 +40,7 @@ export const routeLoaders = {
   'meta/whatsapp': () => import('../handlers/meta-whatsapp.js'),
   'meta/webhook': () => import('../handlers/meta-whatsapp-webhook.js'),
   'meta/facebook-oauth': () => import('../handlers/meta-facebook-oauth.js'),
+  'meta/wa-coexistence': () => import('../handlers/meta-wa-coexistence.js'),
   'webhooks/meta': () => import('../handlers/webhooks-meta.js'),
   'crm-inbox': () => import('../handlers/crm-inbox.js'),
   'crm-admin': () => import('../handlers/crm-admin.js'),

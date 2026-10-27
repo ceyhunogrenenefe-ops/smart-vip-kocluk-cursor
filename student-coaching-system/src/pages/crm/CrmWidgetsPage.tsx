@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import CrmInstitutionMetaCard from '../../components/crm/CrmInstitutionMetaCard';
 import CrmAutoGreetingPanel from '../../components/crm/CrmAutoGreetingPanel';
 import CrmCommentAutomationPanel from '../../components/crm/CrmCommentAutomationPanel';
+import CrmWhatsAppCoexistenceCard from '../../components/crm/CrmWhatsAppCoexistenceCard';
 import { useApp } from '../../context/AppContext';
 import { PLATFORM_PRIMARY_INSTITUTION_ID } from '../../lib/activeInstitutionScope';
 import {
@@ -299,6 +300,8 @@ export default function CrmWidgetsPage() {
 
       {/* Instagram yorum → otomatik DM (PDF linki) — varsayılan kapalı */}
       <CrmCommentAutomationPanel />
+
+      {isPlatform ? <CrmWhatsAppCoexistenceCard /> : null}
 
       {isPlatform ? (
       <section
