@@ -6,7 +6,7 @@ export function bookStatusFromRow(row: BookRowLike): Book['status'] {
   const raw = String(row.status || '')
     .trim()
     .toLowerCase();
-  if (raw === 'completed' || raw === 'reading' || raw === 'planned') return raw;
+  if (raw === 'completed' || raw === 'reading' || raw === 'planned' || raw === 'kaynak') return raw;
   if (row.end_date && String(row.end_date).trim()) return 'completed';
   return 'reading';
 }
@@ -23,7 +23,7 @@ export function mergeBookStatusPatch(
       new Date().toISOString().split('T')[0];
     return { ...patch, status: 'completed', endDate: end };
   }
-  if (patch.status === 'reading' || patch.status === 'planned') {
+  if (patch.status === 'reading' || patch.status === 'planned' || patch.status === 'kaynak') {
     return { ...patch, endDate: patch.endDate ?? undefined };
   }
   return patch;

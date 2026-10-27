@@ -385,9 +385,12 @@ export interface Book {
   title: string;
   author: string;
   totalPages?: number;
+  /** Kaynak takibinde elle girilen sayfa veya test */
+  pagesRead?: number;
+  institutionId?: string;
   startDate: string;
   endDate?: string;
-  status: 'reading' | 'completed' | 'planned';
+  status: 'reading' | 'completed' | 'planned' | 'kaynak';
   rating?: number; // 1-5 arası puan
   notes?: string;
   coverImage?: string;

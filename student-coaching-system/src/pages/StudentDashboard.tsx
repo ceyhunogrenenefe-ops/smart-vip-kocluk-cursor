@@ -203,7 +203,7 @@ export default function StudentDashboard() {
   // Öğrencinin kitapları
   const myBooks = useMemo(() => {
     if (!resolvedStudentId) return [];
-    return books.filter(b => b.studentId === resolvedStudentId);
+    return books.filter(b => b.studentId === resolvedStudentId && b.status !== 'kaynak');
   }, [resolvedStudentId, books]);
 
   const myActiveBooks = useMemo(
