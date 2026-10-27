@@ -43,6 +43,7 @@ import {
   Filler
 } from 'chart.js';
 import { Line, Bar, Doughnut } from 'react-chartjs-2';
+import KaynakTakibi from '../components/bookTracking/KaynakTakibi';
 
 ChartJS.register(
   CategoryScale,
@@ -83,6 +84,7 @@ export default function BookTracking() {
 
   // State
   const [selectedStudentId, setSelectedStudentId] = useState<string>('');
+  const [sekme, setSekme] = useState<'okuma' | 'kaynak'>('okuma');
 
   useEffect(() => {
     void refreshBooks();
@@ -301,8 +303,10 @@ export default function BookTracking() {
               <BookMarked className="w-7 h-7 text-white" />
             </div>
             <div>
-              <h2 className="text-2xl font-bold text-slate-800">Kitap Okuma Takibi</h2>
-              <p className="text-gray-500">Öğrencilerin okuma alışkanlıklarını takip edin</p>
+              <h2 className="text-2xl font-bold text-slate-800">Kitap Takibi</h2>
+              <p className="text-gray-500">
+                {sekme === 'okuma' ? 'Okuma kitapları ve okuma süresi' : 'Soru bankası ve kaynak ilerlemesi'}
+              </p>
             </div>
           </div>
           <div className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-sm font-medium">
@@ -337,9 +341,38 @@ export default function BookTracking() {
             </option>
           ))}
         </select>
+        <div className="mt-4 flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setSekme('okuma')}
+            className={`rounded-lg px-4 py-2 text-sm font-medium ${sekme === 'okuma' ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-700'}`}
+          >
+            Okuma kitapları
+          </button>
+          <button
+            type="button"
+            onClick={() => setSekme('kaynak')}
+            className={`rounded-lg px-4 py-2 text-sm font-medium ${sekme === 'kaynak' ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-700'}`}
+          >
+            Soru bankası / kaynak
+          </button>
+        </div>
       </div>
 
-      {selectedStudentId && stats && (
+      {selectedStudentId && sekme === 'kaynak' && selectedStudent && (
+        <KaynakTakibi
+          studentId={selectedStudentId}
+          studentName={selectedStudent.name}
+          classLabel={formatClassLevelLabel(selectedStudent.classLevel)}
+          books={books}
+          weeklyEntries={weeklyEntries}
+          addBook={addBook}
+          updateBook={updateBook}
+          deleteBook={deleteBook}
+        />
+      )}
+
+      {selectedStudentId && sekme === 'okuma' && stats && (
         <>
           {/* İstatistik Kartları */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -875,7 +908,7 @@ export default function BookTracking() {
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-12 text-center">
           <BookMarked className="w-16 h-16 text-gray-300 mx-auto mb-4" />
           <h3 className="text-xl font-semibold text-gray-700 mb-2">Öğrenci Seçin</h3>
-          <p className="text-gray-500">Kitap okuma takibini görüntülemek için yukarıdan bir öğrenci seçin.</p>
+          <p className="text-gray-500">Okuma veya kaynak takibini görmek için yukarıdan bir öğrenci seçin.</p>
         </div>
       )}
     </div>

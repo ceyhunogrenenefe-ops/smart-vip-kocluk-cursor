@@ -1,0 +1,8 @@
+-- Kaynak ilerlemesi mevcut book_readings satırında tutulur.
+-- status = 'kaynak'
+-- notes = {"kind":"kaynak","subject":"Türkçe","unit":"test","total":40}
+-- pages_read = elle girilen konum
+-- book_title = kaynak adı
+-- end_date = hedeflenen bitiş
+-- Öğrenci haftalık planda aynı kaynak adıyla soru veya sayfa girdikçe
+-- ekrandaki yüzde, elle girilen konum ile haftalık toplamın büyüğünden hesaplanır.

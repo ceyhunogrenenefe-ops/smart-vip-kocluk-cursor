@@ -426,14 +426,16 @@ export function WeeklyPlannerStudyModal({
               (b) =>
                 b.studentId === sid &&
                 b.title.trim().toLowerCase() === titleNorm &&
-                b.status !== 'completed'
+                b.status !== 'completed' &&
+                b.status !== 'kaynak'
             ) ||
             books.find(
               (b) =>
                 b.studentId === sid &&
                 (b.title.trim().toLowerCase().includes(titleNorm) ||
                   titleNorm.includes(b.title.trim().toLowerCase())) &&
-                b.status !== 'completed'
+                b.status !== 'completed' &&
+                b.status !== 'kaynak'
             );
           if (match) {
             await updateBook(match.id, {

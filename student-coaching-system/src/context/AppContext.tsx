@@ -2279,7 +2279,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const getStudentBooks = (studentId: string) => {
     return books
-      .filter(b => b.studentId === studentId)
+      .filter(b => b.studentId === studentId && b.status !== 'kaynak')
       .sort((a, b) => new Date(b.startDate).getTime() - new Date(a.startDate).getTime());
   };
 

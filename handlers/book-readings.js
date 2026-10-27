@@ -1,7 +1,7 @@
 import { requireAuth, hasInstitutionAccess } from '../api/_lib/auth.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 
-const BOOK_STATUSES = ['reading', 'completed', 'planned'];
+const BOOK_STATUSES = ['reading', 'completed', 'planned', 'kaynak'];
 
 function normalizeBookStatus(raw, endDate) {
   const s = String(raw || '')
