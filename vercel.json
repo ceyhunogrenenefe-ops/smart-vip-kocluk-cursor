@@ -134,6 +134,10 @@
       "schedule": "*/30 * * * *"
     },
     {
+      "path": "/api/cron/wa-template-copy",
+      "schedule": "*/30 * * * *"
+    },
+    {
       "path": "/api/cron/veli-kayit-admin-notify-retry",
       "schedule": "*/15 * * * *"
     },
