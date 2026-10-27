@@ -160,6 +160,35 @@ export default async function handler(req, res) {
       });
       if (uretim.hata) return res.status(400).json({ error: uretim.hata });
 
+      /**
+       * Hedefler de aktarıldıysa (istemci önce hedefleri yeni haftaya kopyalar)
+       * goal_id_map {eskiHedefId: yeniHedefId} ile bloklar yeni hedeflere bağlanır.
+       * Yeni hedef kimlikleri yalnızca bu öğrenciye aitse kabul edilir.
+       */
+      const hamHarita =
+        body.goal_id_map && typeof body.goal_id_map === 'object' && !Array.isArray(body.goal_id_map)
+          ? body.goal_id_map
+          : null;
+      if (hamHarita) {
+        const yeniIdler = [...new Set(Object.values(hamHarita).map((v) => String(v || '').trim()).filter(Boolean))];
+        let gecerli = new Set();
+        if (yeniIdler.length) {
+          const { data: hedefRows, error: gErr } = await supabaseAdmin
+            .from('coach_weekly_goals')
+            .select('id')
+            .eq('student_id', sid)
+            .in('id', yeniIdler);
+          if (gErr) throw gErr;
+          gecerli = new Set((hedefRows || []).map((r) => String(r.id)));
+        }
+        const kaynakHedef = new Map((kaynakSatirlar || []).map((r) => [String(r.id), r.coach_goal_id || null]));
+        for (const k of uretim.kopyalar) {
+          const eski = kaynakHedef.get(String(k._kaynak_id));
+          const yeni = eski ? String(hamHarita[eski] || '') : '';
+          if (yeni && gecerli.has(yeni)) k.coach_goal_id = yeni;
+        }
+      }
+
       const mevcutSayi = (hedefSatirlar || []).length;
       const { eklenecek, cakisan } = cakismalariAyikla(uretim.kopyalar, hedefSatirlar || []);
 
