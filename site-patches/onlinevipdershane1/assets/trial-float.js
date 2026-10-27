@@ -6,7 +6,7 @@
 
   var waText =
     'Merhaba, Online VIP Dershane ücretsiz deneme dersine katılmak istiyorum. 3 gün ücretsiz deneme hakkında bilgi alabilir miyim?';
-  var href = 'https://wa.me/908503034014?text=' + encodeURIComponent(waText);
+  var href = 'https://wa.me/905061877494?text=' + encodeURIComponent(waText);
 
   var css = document.createElement('link');
   css.rel = 'stylesheet';

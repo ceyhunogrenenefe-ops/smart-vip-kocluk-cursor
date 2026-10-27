@@ -639,7 +639,7 @@ export default function CrmInboxPage() {
     return d as Record<string, unknown>;
   }, [selected]);
 
-  const lineLabel = inbound?.display_phone || inbound?.company_line || '0850 303 40 14';
+  const lineLabel = inbound?.display_phone || inbound?.company_line || '0506 187 74 94';
   const inboundOk = Boolean(inbound?.bound_to_production);
   const inboundPending = inboundChecking && !inbound;
 

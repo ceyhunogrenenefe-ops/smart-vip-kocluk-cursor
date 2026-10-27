@@ -870,7 +870,7 @@ export default function CrmWidgetsPage() {
                 ) : null}
                 {installed && w.id === 'whatsapp_business' ? (
                   <p className="mt-1 truncate text-[11px] text-slate-500">
-                    {inbound?.display_phone || inbound?.company_line || '0850 303 40 14'}
+                    {inbound?.display_phone || inbound?.company_line || '0506 187 74 94'}
                   </p>
                 ) : null}
                 <button

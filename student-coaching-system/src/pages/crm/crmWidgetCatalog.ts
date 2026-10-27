@@ -34,7 +34,7 @@ export const CRM_WIDGET_CATALOG: CrmWidgetDef[] = [
   {
     id: 'whatsapp_business',
     name: 'WhatsApp Business',
-    blurb: 'Cloud API · 0850 303 40 14 · gelen DM inbox',
+    blurb: 'Cloud API · 0506 187 74 94 · gelen DM inbox',
     category: 'messaging',
     action: 'whatsapp_cloud',
     accent: 'bg-emerald-600',

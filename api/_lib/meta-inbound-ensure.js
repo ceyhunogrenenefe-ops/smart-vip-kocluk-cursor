@@ -17,8 +17,8 @@ import { resolvePrimaryWabaId } from './meta-templates-sync.js';
 const GRAPH = () => String(process.env.META_GRAPH_API_VERSION || 'v21.0').trim() || 'v21.0';
 
 export const PRODUCTION_WEBHOOK_URL = 'https://www.dersonlinevipkocluk.com/api/meta/webhook';
-export const COMPANY_WA_DISPLAY = '0850 303 40 14';
-export const COMPANY_WA_DIGITS = '908503034014';
+export const COMPANY_WA_DISPLAY = '0506 187 74 94';
+export const COMPANY_WA_DIGITS = '905061877494';
 
 function token() {
   return String(process.env.META_WHATSAPP_TOKEN || '').trim();
@@ -113,7 +113,7 @@ export function summarizeInboundBind({
   const bound = Boolean(effective && isOurWebhookCallback(effective) && subscribedOk);
   const display =
     displayPhone ||
-    (String(displayPhone || '').includes('850') ? displayPhone : COMPANY_WA_DISPLAY);
+    (String(displayPhone || '').trim() ? displayPhone : COMPANY_WA_DISPLAY);
 
   let hint;
   if (!tokenValid) {
