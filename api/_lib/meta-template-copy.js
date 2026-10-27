@@ -13,7 +13,7 @@
  */
 import { supabaseAdmin } from './supabase-admin.js';
 import { loadMetaWhatsAppSecretsFromDb } from './meta-whatsapp.js';
-import { fetchTemplatesForWaba, resolvePrimaryWabaId, invalidateCrmTemplateCache } from './meta-templates-sync.js';
+import { resolvePrimaryWabaId, invalidateCrmTemplateCache } from './meta-templates-sync.js';
 import { uploadTemplateHeaderMedia } from './meta-template-media.js';
 
 const GRAPH = () => String(process.env.META_GRAPH_API_VERSION || 'v21.0').trim() || 'v21.0';
@@ -167,68 +167,153 @@ async function rememberSource(sourceWaba) {
   }
 }
 
+/** Meta'nın istek sınırı başlığından yeniden erişim için tahmini dakika. */
+export function rateLimitWaitMinutes(headerValue) {
+  try {
+    const parsed = JSON.parse(String(headerValue || '{}'));
+    let max = 0;
+    for (const arr of Object.values(parsed)) {
+      for (const u of Array.isArray(arr) ? arr : []) {
+        const m = Number(u?.estimated_time_to_regain_access || 0);
+        if (m > max) max = m;
+      }
+    }
+    return max || null;
+  } catch {
+    return null;
+  }
+}
+
+function isRateLimited(json) {
+  const code = Number(json?.error?.code || 0);
+  return code === 80008 || code === 4 || code === 17 || code === 32 || code === 613;
+}
+
+/** Şablon listesini okur; istek sınırına takılırsa bekleme süresini döner. */
+async function listTemplates(waba, tok, withComponents) {
+  const fields = withComponents
+    ? 'name,status,language,category,components,parameter_format'
+    : 'name,status,language';
+  const rows = [];
+  let url = g(`${encodeURIComponent(waba)}/message_templates?fields=${fields}&limit=250`);
+  while (url) {
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${tok}` } });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return {
+        ok: false,
+        rate_limited: isRateLimited(json),
+        wait_minutes: rateLimitWaitMinutes(res.headers.get('x-business-use-case-usage')),
+        error: graphErr(json, res.status)
+      };
+    }
+    rows.push(...(json.data || []));
+    url = json.paging?.next || null;
+  }
+  return { ok: true, templates: rows };
+}
+
+const MEDIA_HOST_RE = /(^|\.)(fbcdn\.net|fbsbx\.com|whatsapp\.net|facebook\.com|cdninstagram\.com)$/i;
+
+/** İstemciden geri gelen şablonda medya örneği yalnız Meta sunucularından indirilebilir. */
+function mediaUrlsAreMeta(components) {
+  for (const c of Array.isArray(components) ? components : []) {
+    for (const u of c?.example?.header_handle || []) {
+      try {
+        const h = new URL(String(u));
+        if (h.protocol !== 'https:' || !MEDIA_HOST_RE.test(h.hostname)) return false;
+      } catch {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+async function resolveSourceWaba(opts, tok) {
+  let source = String(opts.source_waba_id || '').trim();
+  if (source) return source;
+  try {
+    const { data } = await supabaseAdmin.from('commerce_settings').select('meta').is('institution_id', null).maybeSingle();
+    source = String(data?.meta?.whatsapp_prev?.waba_id || data?.meta?.whatsapp_prev_0850?.waba_id || '').trim();
+  } catch {
+    source = '';
+  }
+  return source || (await findWabaForPhone(String(opts.source_phone_number_id || LEGACY_0850_PHONE_NUMBER_ID), tok)) || '';
+}
+
+const keyOf = (t) => `${String(t.name || '').trim()}|${String(t.language || '').toLowerCase()}`;
+
 /**
- * @param {{ source_waba_id?: string, source_phone_number_id?: string, limit?: number, skip?: string[], dry_run?: boolean }} opts
+ * İki aşamalı:
+ *   - dry_run: iki hesabın listesini BİR KEZ okur, kopyalanacak şablonları bileşenleriyle döner.
+ *   - templates[]: istemcinin plandan gönderdiği şablonları liste okumadan oluşturur.
+ * Böylece Meta'nın WABA başına saatlik istek sınırı oluşturma isteklerine kalır.
+ *
+ * @param {{ source_waba_id?: string, source_phone_number_id?: string, dry_run?: boolean, templates?: object[] }} opts
  */
 export async function copyTemplatesFromLegacyWaba(opts = {}) {
   await loadMetaWhatsAppSecretsFromDb();
   const tok = String(process.env.META_WHATSAPP_TOKEN || '').trim();
   if (!tok) return { ok: false, error: 'META_WHATSAPP_TOKEN yok' };
 
-  const target = (await resolvePrimaryWabaId(tok)).waba_id;
+  const target = String(process.env.META_WABA_ID || '').trim() || (await resolvePrimaryWabaId(tok)).waba_id;
   if (!target) return { ok: false, error: 'Hedef (gönderim) WABA çözülemedi' };
 
-  let source = String(opts.source_waba_id || '').trim();
-  if (!source) {
-    let saved = '';
-    try {
-      const { data } = await supabaseAdmin.from('commerce_settings').select('meta').is('institution_id', null).maybeSingle();
-      saved = String(data?.meta?.whatsapp_prev?.waba_id || data?.meta?.whatsapp_prev_0850?.waba_id || '').trim();
-    } catch {
-      saved = '';
-    }
-    source = saved || (await findWabaForPhone(String(opts.source_phone_number_id || LEGACY_0850_PHONE_NUMBER_ID), tok)) || '';
-  }
-  if (!source) return { ok: false, error: 'Eski (0850) WABA bulunamadı — kaynak WABA kimliğini girin' };
-  if (source === target) return { ok: false, error: 'Kaynak ve hedef WABA aynı' };
-  await rememberSource(source);
-
-  const [src, dst] = await Promise.all([
-    fetchTemplatesForWaba(source, tok, { includeComponents: true }),
-    fetchTemplatesForWaba(target, tok)
-  ]);
-  if (!src.ok) return { ok: false, error: `Eski hesabın şablonları okunamadı: ${src.error}` };
-  if (!dst.ok) return { ok: false, error: `Yeni hesabın şablonları okunamadı: ${dst.error}` };
-
-  const key = (t) => `${String(t.name || '').trim()}|${String(t.language || '').toLowerCase()}`;
-  const have = new Set(dst.templates.map(key));
-  const skip = new Set((opts.skip || []).map(String));
-  const candidates = src.templates.filter((t) => !SKIP_STATUSES.has(String(t.status || '').toUpperCase()));
-  const pending = candidates.filter((t) => !have.has(key(t)) && !skip.has(key(t)));
-  const alreadyCopied = candidates.length - candidates.filter((t) => !have.has(key(t))).length;
-
-  const base = {
-    ok: true,
-    source_waba_suffix: source.slice(-6),
-    target_waba_suffix: target.slice(-6),
-    total_source: src.templates.length,
-    copyable: candidates.length,
-    already_in_target: alreadyCopied
-  };
   if (opts.dry_run) {
-    return { ...base, remaining: pending.length, pending: pending.map((t) => ({ key: key(t), name: t.name, language: t.language, status: t.status })) };
+    const source = await resolveSourceWaba(opts, tok);
+    if (!source) return { ok: false, error: 'Eski (0850) WABA bulunamadı — kaynak WABA kimliğini girin' };
+    if (source === target) return { ok: false, error: 'Kaynak ve hedef WABA aynı' };
+    await rememberSource(source);
+
+    const src = await listTemplates(source, tok, true);
+    if (!src.ok) return { ok: false, rate_limited: src.rate_limited, wait_minutes: src.wait_minutes, error: `Eski hesabın şablonları okunamadı: ${src.error}` };
+    const dst = await listTemplates(target, tok, false);
+    if (!dst.ok) return { ok: false, rate_limited: dst.rate_limited, wait_minutes: dst.wait_minutes, error: `Yeni hesabın şablonları okunamadı: ${dst.error}` };
+
+    const have = new Set(dst.templates.map(keyOf));
+    const candidates = src.templates.filter((t) => !SKIP_STATUSES.has(String(t.status || '').toUpperCase()));
+    const pending = candidates.filter((t) => !have.has(keyOf(t)));
+    return {
+      ok: true,
+      source_waba_suffix: source.slice(-6),
+      target_waba_suffix: target.slice(-6),
+      total_source: src.templates.length,
+      copyable: candidates.length,
+      already_in_target: candidates.length - pending.length,
+      remaining: pending.length,
+      pending: pending.map((t) => ({
+        key: keyOf(t),
+        name: t.name,
+        language: t.language,
+        category: t.category,
+        status: t.status,
+        parameter_format: t.parameter_format || null,
+        components: t.components || []
+      }))
+    };
   }
 
-  const limit = Math.max(1, Math.min(Number(opts.limit) || 8, 20));
+  const list = (Array.isArray(opts.templates) ? opts.templates : []).slice(0, 10);
   const results = [];
-  for (const t of pending.slice(0, limit)) {
-    const k = key(t);
-    const cloned = await cloneComponents(t.components);
-    if (!cloned.ok) {
-      results.push({ key: k, name: t.name, ok: false, error: cloned.error });
+  let rateLimited = null;
+  for (const t of list) {
+    const k = keyOf(t);
+    const name = String(t?.name || '').trim();
+    if (!/^[a-z0-9_]{1,512}$/.test(name) || !t?.language || !t?.category) {
+      results.push({ key: k, name, ok: false, error: 'geçersiz şablon verisi' });
       continue;
     }
-    const payload = { name: t.name, language: t.language, category: t.category, components: cloned.components };
+    if (!mediaUrlsAreMeta(t.components)) {
+      results.push({ key: k, name, ok: false, error: 'medya örneği Meta dışı bir adreste' });
+      continue;
+    }
+    const cloned = await cloneComponents(t.components);
+    if (!cloned.ok) {
+      results.push({ key: k, name, ok: false, error: cloned.error });
+      continue;
+    }
+    const payload = { name, language: t.language, category: t.category, components: cloned.components };
     if (t.parameter_format) payload.parameter_format = t.parameter_format;
     const res = await fetch(g(`${encodeURIComponent(target)}/message_templates`), {
       method: 'POST',
@@ -236,15 +321,25 @@ export async function copyTemplatesFromLegacyWaba(opts = {}) {
       body: JSON.stringify(payload)
     });
     const json = await res.json().catch(() => ({}));
-    results.push(
-      res.ok
-        ? { key: k, name: t.name, ok: true, status: json.status || 'PENDING', changed_number: cloned.changed_number }
-        : { key: k, name: t.name, ok: false, error: graphErr(json, res.status) }
-    );
+    if (res.ok) {
+      results.push({ key: k, name, ok: true, status: json.status || 'PENDING', changed_number: cloned.changed_number });
+      continue;
+    }
+    if (isRateLimited(json)) {
+      rateLimited = { wait_minutes: rateLimitWaitMinutes(res.headers.get('x-business-use-case-usage')) };
+      break;
+    }
+    const msg = graphErr(json, res.status);
+    const exists = /already exists|zaten mevcut|duplicate/i.test(msg) || [2388023, 2388024].includes(Number(json?.error?.error_subcode));
+    results.push(exists ? { key: k, name, ok: true, status: 'EXISTS' } : { key: k, name, ok: false, error: msg });
   }
-  invalidateCrmTemplateCache();
+  if (results.some((r) => r.ok)) invalidateCrmTemplateCache();
 
-  const failedKeys = results.filter((r) => !r.ok).map((r) => r.key);
-  const remaining = pending.length - results.length;
-  return { ...base, processed: results.length, remaining, results, failed_keys: failedKeys };
+  return {
+    ok: true,
+    processed: results.length,
+    results,
+    rate_limited: Boolean(rateLimited),
+    wait_minutes: rateLimited?.wait_minutes ?? null
+  };
 }

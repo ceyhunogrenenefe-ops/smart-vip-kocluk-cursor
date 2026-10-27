@@ -273,11 +273,10 @@ export default async function handler(req, res) {
       const r = await copyTemplatesFromLegacyWaba({
         source_waba_id: body.source_waba_id,
         source_phone_number_id: body.source_phone_number_id,
-        limit: body.limit,
-        skip: Array.isArray(body.skip) ? body.skip : [],
+        templates: Array.isArray(body.templates) ? body.templates : [],
         dry_run: Boolean(body.dry_run)
       });
-      return res.status(r.ok ? 200 : 400).json(r);
+      return res.status(r.ok ? 200 : r.rate_limited ? 429 : 400).json(r);
     }
 
     /** Meta'ya inceleme için gönder */

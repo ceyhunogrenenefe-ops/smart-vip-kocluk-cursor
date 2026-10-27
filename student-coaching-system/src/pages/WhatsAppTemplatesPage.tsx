@@ -295,53 +295,69 @@ Silinsin mi?`;
   const eskiSablonlariKopyala = async () => {
     setCopyBusy(true);
     setCopyFailures([]);
-    const post = async (payload: Record<string, unknown>) => {
+    type PlanItem = { key: string; name: string } & Record<string, unknown>;
+    type CopyResp = {
+      ok: boolean;
+      error?: string;
+      rate_limited?: boolean;
+      wait_minutes?: number | null;
+      remaining?: number;
+      already_in_target?: number;
+      pending?: PlanItem[];
+      results?: Array<{ key: string; name: string; ok: boolean; status?: string; error?: string }>;
+    };
+    const post = async (payload: Record<string, unknown>): Promise<CopyResp> => {
       const res = await apiFetch('/api/whatsapp-templates?op=copy-from-legacy', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
-      const j = await res.json().catch(() => ({}));
-      if (!res.ok || !j?.ok) throw new Error(j?.error || 'Kopyalama başarısız');
-      return j as {
-        remaining: number;
-        copyable: number;
-        already_in_target: number;
-        results?: Array<{ key: string; name: string; ok: boolean; error?: string }>;
-      };
+      const j = (await res.json().catch(() => ({}))) as CopyResp;
+      if (!j?.ok && !j?.rate_limited) throw new Error(j?.error || 'Kopyalama başarısız');
+      return j;
     };
+    const waitText = (m?: number | null) =>
+      m ? `Meta istek sınırı doldu, yaklaşık ${m} dakika sonra tekrar basın.` : 'Meta istek sınırı doldu, biraz sonra tekrar basın.';
     try {
       const plan = await post({ dry_run: true });
-      if (!plan.remaining) {
-        toast.success(`Kopyalanacak şablon yok — ${plan.already_in_target} şablon zaten yeni hesapta.`);
+      if (plan.rate_limited) {
+        toast.warning(waitText(plan.wait_minutes), { duration: 10000 });
         return;
       }
-      const skip: string[] = [];
+      const pending = plan.pending || [];
+      if (!pending.length) {
+        toast.success(`Kopyalanacak şablon yok — ${plan.already_in_target || 0} şablon zaten yeni hesapta.`);
+        return;
+      }
       const failures: Array<{ name: string; error?: string }> = [];
       let copied = 0;
-      let remaining = plan.remaining;
-      for (let guard = 0; remaining > 0 && guard < 40; guard += 1) {
-        setCopyProgress(`${copied + failures.length}/${plan.remaining} işlendi…`);
-        const r = await post({ limit: 6, skip });
+      let stoppedFor: number | null | undefined;
+      let stopped = false;
+      for (let i = 0; i < pending.length; i += 5) {
+        setCopyProgress(`${i}/${pending.length} işlendi…`);
+        const r = await post({ templates: pending.slice(i, i + 5) });
         for (const x of r.results || []) {
           if (x.ok) copied += 1;
-          else {
-            skip.push(x.key);
-            failures.push({ name: x.name, error: x.error });
-          }
+          else failures.push({ name: x.name, error: x.error });
         }
-        remaining = r.remaining;
-        if (!(r.results || []).length) break;
+        if (r.rate_limited) {
+          stopped = true;
+          stoppedFor = r.wait_minutes;
+          break;
+        }
       }
       setCopyFailures(failures);
-      if (failures.length) {
+      const kalan = pending.length - copied - failures.length;
+      if (stopped) {
+        toast.warning(`${copied} şablon onaya gönderildi, ${kalan} şablon kaldı. ${waitText(stoppedFor)}`, { duration: 12000 });
+      } else if (failures.length) {
         toast.warning(`${copied} şablon onaya gönderildi, ${failures.length} şablon kopyalanamadı (listeye bakın).`, {
           duration: 10000
         });
       } else {
         toast.success(`${copied} şablon yeni hesapta oluşturuldu ve Meta onayına gönderildi.`);
       }
-      await load();
+      if (copied) await load();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Kopyalama başarısız', { duration: 8000 });
     } finally {
