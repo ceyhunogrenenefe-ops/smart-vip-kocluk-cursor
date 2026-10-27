@@ -242,6 +242,48 @@ async function resolveSourceWaba(opts, tok) {
   return source || (await findWabaForPhone(String(opts.source_phone_number_id || LEGACY_0850_PHONE_NUMBER_ID), tok)) || '';
 }
 
+/** Otomasyonların kullandığı, kesintisi doğrudan veliye/koça yansıyan şablonlar. */
+export const URGENT_TEMPLATE_NAMES = [
+  'veli_kayit_admin_notify',
+  'class_absent_notice_v2',
+  'class_lesson_reminder',
+  'class_camera_off_notice',
+  'attendance_status_update',
+  'attendance_coach_late_update',
+  'lesson_reminder_parent',
+  'lesson_reminder',
+  'report_reminder',
+  'daily_report_reminder',
+  'parent_pdf_link_kurum',
+  'parent_pdf_link',
+  'teacher_lesson_reminder',
+  'toplant_hatrlatma',
+  'coach_lesson_attendance_summary',
+  'coach_daily_reminder',
+  'instant_absent_alert',
+  'etkinlik_hatirlatma_link_891bes',
+  'veli_sign_ready_notify',
+  'ogretmen_yorum_daveti'
+];
+
+/** Sabit liste + son 30 günde gerçekten gönderim yapılmış şablon adları. */
+async function urgentNames() {
+  const names = new Set(URGENT_TEMPLATE_NAMES);
+  try {
+    const since = new Date(Date.now() - 30 * 86400000).toISOString();
+    const { data } = await supabaseAdmin
+      .from('message_logs')
+      .select('meta_template_name')
+      .not('meta_template_name', 'is', null)
+      .gte('sent_at', since)
+      .limit(5000);
+    for (const r of data || []) if (r.meta_template_name) names.add(String(r.meta_template_name));
+  } catch {
+    /* sabit liste yeter */
+  }
+  return names;
+}
+
 const keyOf = (t) => `${String(t.name || '').trim()}|${String(t.language || '').toLowerCase()}`;
 
 /**
@@ -250,7 +292,7 @@ const keyOf = (t) => `${String(t.name || '').trim()}|${String(t.language || '').
  *   - templates[]: istemcinin plandan gönderdiği şablonları liste okumadan oluşturur.
  * Böylece Meta'nın WABA başına saatlik istek sınırı oluşturma isteklerine kalır.
  *
- * @param {{ source_waba_id?: string, source_phone_number_id?: string, dry_run?: boolean, templates?: object[] }} opts
+ * @param {{ source_waba_id?: string, source_phone_number_id?: string, dry_run?: boolean, scope?: 'urgent' | 'all', templates?: object[] }} opts
  */
 export async function copyTemplatesFromLegacyWaba(opts = {}) {
   await loadMetaWhatsAppSecretsFromDb();
@@ -272,7 +314,10 @@ export async function copyTemplatesFromLegacyWaba(opts = {}) {
     if (!dst.ok) return { ok: false, rate_limited: dst.rate_limited, wait_minutes: dst.wait_minutes, error: `Yeni hesabın şablonları okunamadı: ${dst.error}` };
 
     const have = new Set(dst.templates.map(keyOf));
-    const candidates = src.templates.filter((t) => !SKIP_STATUSES.has(String(t.status || '').toUpperCase()));
+    const only = opts.scope === 'urgent' ? await urgentNames() : null;
+    const candidates = src.templates.filter(
+      (t) => !SKIP_STATUSES.has(String(t.status || '').toUpperCase()) && (!only || only.has(String(t.name || '')))
+    );
     const pending = candidates.filter((t) => !have.has(keyOf(t)));
     return {
       ok: true,

@@ -292,7 +292,7 @@ Silinsin mi?`;
   };
 
   /** Kapanan 0850 hesabındaki şablonları 0506 hesabına kopyalayıp Meta onayına gönderir. */
-  const eskiSablonlariKopyala = async () => {
+  const eskiSablonlariKopyala = async (scope: 'urgent' | 'all' = 'urgent') => {
     setCopyBusy(true);
     setCopyFailures([]);
     type PlanItem = { key: string; name: string } & Record<string, unknown>;
@@ -319,7 +319,7 @@ Silinsin mi?`;
     const waitText = (m?: number | null) =>
       m ? `Meta istek sınırı doldu, yaklaşık ${m} dakika sonra tekrar basın.` : 'Meta istek sınırı doldu, biraz sonra tekrar basın.';
     try {
-      const plan = await post({ dry_run: true });
+      const plan = await post({ dry_run: true, scope });
       if (plan.rate_limited) {
         toast.warning(waitText(plan.wait_minutes), { duration: 10000 });
         return;
@@ -405,12 +405,22 @@ Silinsin mi?`;
             <button
               type="button"
               disabled={copyBusy}
-              onClick={() => void eskiSablonlariKopyala()}
-              title="Kapanan 0850 hesabındaki şablonları 0506 hesabında oluşturur ve Meta onayına gönderir; metindeki 0850 numarası 0506 ile değişir"
-              className="inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-white px-3 py-2 text-sm font-semibold text-emerald-800 hover:bg-emerald-50 disabled:opacity-50"
+              onClick={() => void eskiSablonlariKopyala('urgent')}
+              title="Yoklama, ders hatırlatma, kayıt bildirimi gibi otomasyonların kullandığı şablonları 0850 hesabından 0506 hesabına kopyalar ve onaya gönderir"
+              className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
             >
               {copyBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Copy className="h-4 w-4" />}
-              {copyBusy ? copyProgress || 'Hazırlanıyor…' : '0850 şablonlarını 0506’ya kopyala'}
+              {copyBusy ? copyProgress || 'Hazırlanıyor…' : 'Acil şablonları 0506’ya kopyala'}
+            </button>
+            <button
+              type="button"
+              disabled={copyBusy}
+              onClick={() => void eskiSablonlariKopyala('all')}
+              title="0850 hesabındaki tüm şablonları kopyalar (kampanya duyuruları dahil)"
+              className="inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-white px-3 py-2 text-sm font-semibold text-emerald-800 hover:bg-emerald-50 disabled:opacity-50"
+            >
+              <Copy className="h-4 w-4" />
+              Tümünü kopyala
             </button>
             <button
               type="button"
