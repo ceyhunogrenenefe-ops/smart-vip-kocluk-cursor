@@ -42,3 +42,13 @@ describe('cloneComponents', () => {
     expect(r.ok).toBe(false);
   });
 });
+
+describe('rateLimitWaitMinutes', async () => {
+  const { rateLimitWaitMinutes } = await import('./meta-template-copy.js');
+  it('Meta başlığından en uzun bekleme süresini okur', () => {
+    expect(
+      rateLimitWaitMinutes('{"1120383153199765":[{"type":"whatsapp_bm","call_count":100,"estimated_time_to_regain_access":37}]}')
+    ).toBe(37);
+    expect(rateLimitWaitMinutes('')).toBe(null);
+  });
+});
