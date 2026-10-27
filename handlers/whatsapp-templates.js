@@ -274,7 +274,8 @@ export default async function handler(req, res) {
         source_waba_id: body.source_waba_id,
         source_phone_number_id: body.source_phone_number_id,
         templates: Array.isArray(body.templates) ? body.templates : [],
-        dry_run: Boolean(body.dry_run)
+        dry_run: Boolean(body.dry_run),
+        scope: body.scope === 'urgent' ? 'urgent' : 'all'
       });
       return res.status(r.ok ? 200 : r.rate_limited ? 429 : 400).json(r);
     }
