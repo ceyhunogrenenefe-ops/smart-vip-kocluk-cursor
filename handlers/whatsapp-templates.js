@@ -17,6 +17,7 @@ import {
   protectedTemplateMessage
 } from '../api/_lib/protected-message-templates.js';
 import { HEADER_MEDIA_RULES, uploadTemplateHeaderMedia } from '../api/_lib/meta-template-media.js';
+import { copyTemplatesFromLegacyWaba } from '../api/_lib/meta-template-copy.js';
 import {
   fetchAllMetaMessageTemplates,
   invalidateCrmTemplateCache
@@ -265,6 +266,18 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: 'upload_failed', message: r.error });
       }
       return res.status(200).json({ ok: true, handle: r.handle });
+    }
+
+    /** Eski (0850) WABA şablonlarını gönderim WABA'sına (0506) kopyala — parça parça */
+    if (req.method === 'POST' && op === 'copy-from-legacy') {
+      const r = await copyTemplatesFromLegacyWaba({
+        source_waba_id: body.source_waba_id,
+        source_phone_number_id: body.source_phone_number_id,
+        limit: body.limit,
+        skip: Array.isArray(body.skip) ? body.skip : [],
+        dry_run: Boolean(body.dry_run)
+      });
+      return res.status(r.ok ? 200 : 400).json(r);
     }
 
     /** Meta'ya inceleme için gönder */

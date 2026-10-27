@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { FileText, Image as ImageIcon, Loader2, Plus, RefreshCw, Save, Send, Trash2, X } from 'lucide-react';
+import { Copy, FileText, Image as ImageIcon, Loader2, Plus, RefreshCw, Save, Send, Trash2, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiFetch } from '../lib/session';
 
@@ -143,6 +143,9 @@ export default function WhatsAppTemplatesPage() {
   const [meta, setMeta] = useState<Meta | null>(null);
   const [metaError, setMetaError] = useState<string | null>(null);
   const [yoklamaBusy, setYoklamaBusy] = useState(false);
+  const [copyBusy, setCopyBusy] = useState(false);
+  const [copyProgress, setCopyProgress] = useState<string | null>(null);
+  const [copyFailures, setCopyFailures] = useState<Array<{ name: string; error?: string }>>([]);
   const [loading, setLoading] = useState(true);
   const [draft, setDraft] = useState<Partial<Template> | null>(null);
   const [busy, setBusy] = useState(false);
@@ -288,6 +291,65 @@ Silinsin mi?`;
     }
   };
 
+  /** Kapanan 0850 hesabındaki şablonları 0506 hesabına kopyalayıp Meta onayına gönderir. */
+  const eskiSablonlariKopyala = async () => {
+    setCopyBusy(true);
+    setCopyFailures([]);
+    const post = async (payload: Record<string, unknown>) => {
+      const res = await apiFetch('/api/whatsapp-templates?op=copy-from-legacy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || !j?.ok) throw new Error(j?.error || 'Kopyalama başarısız');
+      return j as {
+        remaining: number;
+        copyable: number;
+        already_in_target: number;
+        results?: Array<{ key: string; name: string; ok: boolean; error?: string }>;
+      };
+    };
+    try {
+      const plan = await post({ dry_run: true });
+      if (!plan.remaining) {
+        toast.success(`Kopyalanacak şablon yok — ${plan.already_in_target} şablon zaten yeni hesapta.`);
+        return;
+      }
+      const skip: string[] = [];
+      const failures: Array<{ name: string; error?: string }> = [];
+      let copied = 0;
+      let remaining = plan.remaining;
+      for (let guard = 0; remaining > 0 && guard < 40; guard += 1) {
+        setCopyProgress(`${copied + failures.length}/${plan.remaining} işlendi…`);
+        const r = await post({ limit: 6, skip });
+        for (const x of r.results || []) {
+          if (x.ok) copied += 1;
+          else {
+            skip.push(x.key);
+            failures.push({ name: x.name, error: x.error });
+          }
+        }
+        remaining = r.remaining;
+        if (!(r.results || []).length) break;
+      }
+      setCopyFailures(failures);
+      if (failures.length) {
+        toast.warning(`${copied} şablon onaya gönderildi, ${failures.length} şablon kopyalanamadı (listeye bakın).`, {
+          duration: 10000
+        });
+      } else {
+        toast.success(`${copied} şablon yeni hesapta oluşturuldu ve Meta onayına gönderildi.`);
+      }
+      await load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Kopyalama başarısız', { duration: 8000 });
+    } finally {
+      setCopyBusy(false);
+      setCopyProgress(null);
+    }
+  };
+
   const varNums = useMemo(() => variableNumbers(String(draft?.body || '')), [draft?.body]);
   const varLabel = useMemo(() => {
     const m: Record<string, string> = {};
@@ -326,6 +388,16 @@ Silinsin mi?`;
             </button>
             <button
               type="button"
+              disabled={copyBusy}
+              onClick={() => void eskiSablonlariKopyala()}
+              title="Kapanan 0850 hesabındaki şablonları 0506 hesabında oluşturur ve Meta onayına gönderir; metindeki 0850 numarası 0506 ile değişir"
+              className="inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-white px-3 py-2 text-sm font-semibold text-emerald-800 hover:bg-emerald-50 disabled:opacity-50"
+            >
+              {copyBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Copy className="h-4 w-4" />}
+              {copyBusy ? copyProgress || 'Hazırlanıyor…' : '0850 şablonlarını 0506’ya kopyala'}
+            </button>
+            <button
+              type="button"
               onClick={() => setDraft(bos())}
               className="inline-flex items-center gap-2 rounded-xl bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-800"
             >
@@ -335,6 +407,20 @@ Silinsin mi?`;
           </div>
         ) : null}
       </div>
+
+      {copyFailures.length ? (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+          <p className="font-semibold">Kopyalanamayan şablonlar</p>
+          <ul className="mt-1 space-y-0.5">
+            {copyFailures.map((f) => (
+              <li key={f.name}>
+                <span className="font-medium">{f.name}</span>
+                {f.error ? <span className="text-amber-800"> — {f.error}</span> : null}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
 
       {metaError ? (
         <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
