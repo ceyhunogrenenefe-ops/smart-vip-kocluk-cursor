@@ -3212,6 +3212,7 @@ export function WeeklyPlannerCalendar({
           studentId={studentId}
           studentName={studentName}
           kaynakHafta={weekStartStr}
+          canManageGoals={canManageGoals}
           onClose={() => setHaftaAktarAcik(false)}
           onDone={() => {
             // Hedef hafta ekrandaki hafta olabilir; her durumda tazele

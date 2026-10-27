@@ -90,11 +90,14 @@ export function haftaAktar(params: {
   sourceWeek: string;
   targetWeek: string;
   mode: AktarimKipi;
+  /** Hedefler de aktarıldıysa: eski hedef id → yeni hedef id */
+  goalIdMap?: Record<string, string>;
 }) {
   return cagir<AktarimSonucu>('copy-week', {
     student_id: params.studentId,
     source_week: params.sourceWeek,
     target_week: params.targetWeek,
     mode: params.mode,
+    ...(params.goalIdMap ? { goal_id_map: params.goalIdMap } : {}),
   });
 }

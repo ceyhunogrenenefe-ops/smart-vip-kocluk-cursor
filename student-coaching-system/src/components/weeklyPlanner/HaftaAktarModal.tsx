@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { addDays, format, parseISO, startOfWeek } from 'date-fns';
+import { addDays, differenceInCalendarDays, format, parseISO, startOfWeek } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { AlertTriangle, ArrowRight, Loader2, X } from 'lucide-react';
 import { toast } from 'sonner';
@@ -9,6 +9,30 @@ import {
   type AktarimKipi,
   type AktarimOnizleme,
 } from '../../lib/haftalikPlanAktarApi';
+import {
+  createCoachWeeklyGoal,
+  fetchCoachWeeklyGoals,
+  type CoachWeeklyGoalRow,
+} from '../../lib/weeklyPlannerApi';
+
+/** Ne aktarılacak: takvim blokları, sağdaki hedefler ya da ikisi */
+type AktarimIcerigi = 'tumu' | 'cizelge' | 'hedefler';
+
+function gunKaydir(ymd: string, gun: number): string {
+  return format(addDays(parseISO(`${ymd}T12:00:00`), gun), 'yyyy-MM-dd');
+}
+
+/** Hedef bu haftada mı başlıyor? (önceki haftadan taşan uzun hedefler aktarılmaz) */
+function haftadaBasliyor(g: CoachWeeklyGoalRow, haftaBasi: string): boolean {
+  const son = gunKaydir(haftaBasi, 6);
+  const gs = String(g.goal_start_date || '').slice(0, 10);
+  if (gs) return gs >= haftaBasi && gs <= son;
+  return String(g.week_start_date || '').slice(0, 10) === haftaBasi;
+}
+
+function hedefAnahtari(g: CoachWeeklyGoalRow): string {
+  return [g.subject, g.title, g.quantity_unit].map((x) => String(x || '').trim().toLocaleLowerCase('tr')).join('|');
+}
 
 /**
  * "Planı Haftaya Aktar" — kaynak haftanın görevlerini hedef haftaya kopyalar.
@@ -43,11 +67,14 @@ export default function HaftaAktarModal({
   studentId,
   studentName,
   kaynakHafta,
+  canManageGoals = false,
   onClose,
   onDone,
 }: {
   studentId: string;
   studentName?: string;
+  /** Koç/yönetici: hedefler de aktarılabilir */
+  canManageGoals?: boolean;
   /** Ekranda açık olan hafta (pazartesi) */
   kaynakHafta: string;
   onClose: () => void;
@@ -60,20 +87,46 @@ export default function HaftaAktarModal({
   const [aktariliyor, setAktariliyor] = useState(false);
   const [hata, setHata] = useState<string | null>(null);
   const [kip, setKip] = useState<AktarimKipi>('birlestir');
+  const [icerik, setIcerik] = useState<AktarimIcerigi>(canManageGoals ? 'tumu' : 'cizelge');
+  const [kaynakHedefler, setKaynakHedefler] = useState<CoachWeeklyGoalRow[]>([]);
+  const [tasanHedefSayisi, setTasanHedefSayisi] = useState(0);
+  const [hedefHaftaHedefleri, setHedefHaftaHedefleri] = useState<CoachWeeklyGoalRow[]>([]);
+  /** Kaynak haftada takvim bloğu yoksa (yalnız hedef varsa) önizleme hatası gösterilmez */
+  const [cizelgeBos, setCizelgeBos] = useState(false);
+
+  const hedefDahil = canManageGoals && icerik !== 'cizelge';
+  const cizelgeDahil = icerik !== 'hedefler';
 
   const onizle = useCallback(async () => {
     if (!studentId || !kaynak || !hedef) return;
     setYukleniyor(true);
     setHata(null);
     setOnizleme(null);
+    setCizelgeBos(false);
     try {
-      setOnizleme(await haftaAktarimOnizle({ studentId, sourceWeek: kaynak, targetWeek: hedef }));
+      if (canManageGoals) {
+        const [kg, hg] = await Promise.all([
+          fetchCoachWeeklyGoals(studentId, kaynak).catch(() => [] as CoachWeeklyGoalRow[]),
+          fetchCoachWeeklyGoals(studentId, hedef).catch(() => [] as CoachWeeklyGoalRow[]),
+        ]);
+        const basliyan = kg.filter((g) => haftadaBasliyor(g, kaynak));
+        setKaynakHedefler(basliyan);
+        setTasanHedefSayisi(kg.length - basliyan.length);
+        setHedefHaftaHedefleri(hg);
+      }
+      try {
+        setOnizleme(await haftaAktarimOnizle({ studentId, sourceWeek: kaynak, targetWeek: hedef }));
+      } catch (e) {
+        const m = e instanceof Error ? e.message : '';
+        if (/aktarılacak görev yok/i.test(m)) setCizelgeBos(true);
+        else throw e;
+      }
     } catch (e) {
       setHata(e instanceof Error ? e.message : 'Önizleme alınamadı');
     } finally {
       setYukleniyor(false);
     }
-  }, [studentId, kaynak, hedef]);
+  }, [studentId, kaynak, hedef, canManageGoals]);
 
   useEffect(() => {
     void onizle();
@@ -90,7 +143,61 @@ export default function HaftaAktarModal({
     return [...harita.entries()].sort((a, b) => a[0].localeCompare(b[0]));
   }, [onizleme]);
 
+  /** Hedef haftada aynı ders + başlık + birimle zaten olan hedefler yeniden oluşturulmaz */
+  const hedefPlani = useMemo(() => {
+    const mevcut = new Map(hedefHaftaHedefleri.map((g) => [hedefAnahtari(g), g.id]));
+    const yeni: CoachWeeklyGoalRow[] = [];
+    const eslesen: [string, string][] = [];
+    for (const g of kaynakHedefler) {
+      const var_ = mevcut.get(hedefAnahtari(g));
+      if (var_) eslesen.push([g.id, var_]);
+      else yeni.push(g);
+    }
+    return { yeni, eslesen };
+  }, [kaynakHedefler, hedefHaftaHedefleri]);
+
+  const hedefleriKopyala = async (): Promise<{ harita: Record<string, string>; olusan: number }> => {
+    const kayma = differenceInCalendarDays(parseISO(`${hedef}T12:00:00`), parseISO(`${kaynak}T12:00:00`));
+    const harita: Record<string, string> = Object.fromEntries(hedefPlani.eslesen);
+    let olusan = 0;
+    for (const g of hedefPlani.yeni) {
+      const gs = String(g.goal_start_date || '').slice(0, 10) || kaynak;
+      const ge = String(g.goal_end_date || '').slice(0, 10) || gunKaydir(kaynak, 6);
+      const yeni = await createCoachWeeklyGoal({
+        student_id: studentId,
+        subject: g.subject,
+        title: g.title,
+        target_quantity: Number(g.target_quantity) || 0,
+        week_start_date: hedef,
+        goal_start_date: gunKaydir(gs, kayma),
+        goal_end_date: gunKaydir(ge, kayma),
+        quantity_unit: g.quantity_unit,
+      });
+      harita[g.id] = yeni.id;
+      olusan += 1;
+    }
+    return { harita, olusan };
+  };
+
   const aktar = async () => {
+    if (icerik === 'hedefler' || (hedefDahil && (!onizleme || onizleme.copy_count === 0))) {
+      // Yalnız hedefler (veya takvimde blok yok)
+      setAktariliyor(true);
+      try {
+        const { olusan } = await hedefleriKopyala();
+        toast.success(
+          `${olusan} hedef aktarıldı` +
+            (hedefPlani.eslesen.length ? ` · ${hedefPlani.eslesen.length} hedef hedef haftada zaten vardı` : '')
+        );
+        onDone();
+        onClose();
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'Hedefler aktarılamadı');
+      } finally {
+        setAktariliyor(false);
+      }
+      return;
+    }
     if (!onizleme) return;
     const secilenKip: AktarimKipi = hedefDolu ? kip : 'birlestir';
     if (secilenKip === 'degistir') {
@@ -102,8 +209,16 @@ export default function HaftaAktarModal({
     }
     setAktariliyor(true);
     try {
-      const r = await haftaAktar({ studentId, sourceWeek: kaynak, targetWeek: hedef, mode: secilenKip });
+      let goalIdMap: Record<string, string> | undefined;
+      let hedefSayisi = 0;
+      if (hedefDahil) {
+        const { harita, olusan } = await hedefleriKopyala();
+        goalIdMap = harita;
+        hedefSayisi = olusan;
+      }
+      const r = await haftaAktar({ studentId, sourceWeek: kaynak, targetWeek: hedef, mode: secilenKip, goalIdMap });
       toast.success(
+        (hedefDahil ? `${hedefSayisi} hedef · ` : '') +
         `${r.inserted} görev aktarıldı` +
           (r.deleted ? ` · ${r.deleted} görev değiştirildi` : '') +
           (secilenKip === 'birlestir' && onizleme.conflict_count
@@ -139,7 +254,8 @@ export default function HaftaAktarModal({
               Planı haftaya aktar
             </h2>
             <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-              {studentName ? `${studentName} · ` : ''}Yalnızca bu öğrencinin planı aktarılır.
+              {studentName ? `${studentName} · ` : ''}Yalnızca bu öğrencinin planı aktarılır
+              {canManageGoals ? ' (hedefler ve/veya takvim).' : '.'}
             </p>
           </div>
           <button
@@ -181,6 +297,60 @@ export default function HaftaAktarModal({
           </label>
         </div>
 
+        {canManageGoals ? (
+          <div className="mt-3 rounded-xl border border-slate-200 p-3 dark:border-slate-700" data-test="aktar-icerik">
+            <p className="text-xs font-bold text-slate-700 dark:text-slate-200">Ne aktarılsın?</p>
+            <div className="mt-1.5 grid gap-1.5 sm:grid-cols-3">
+              {(
+                [
+                  ['tumu', 'Tümü', 'Hedefler + takvim çizelgesi'],
+                  ['hedefler', 'Yalnızca hedefler', 'Sağdaki soru/sayfa/süre hedefleri'],
+                  ['cizelge', 'Yalnızca takvim', 'Takvimdeki çalışma blokları'],
+                ] as [AktarimIcerigi, string, string][]
+              ).map(([id, ad, aciklama]) => (
+                <label
+                  key={id}
+                  className={`flex cursor-pointer items-start gap-2 rounded-lg border px-2.5 py-2 text-xs ${
+                    icerik === id
+                      ? 'border-indigo-400 bg-indigo-50 dark:border-indigo-500 dark:bg-indigo-950/40'
+                      : 'border-slate-200 dark:border-slate-700'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="aktarim-icerik"
+                    checked={icerik === id}
+                    onChange={() => setIcerik(id)}
+                    className="mt-0.5"
+                  />
+                  <span>
+                    <span className="block font-semibold text-slate-800 dark:text-slate-100">{ad}</span>
+                    <span className="text-slate-500">{aciklama}</span>
+                  </span>
+                </label>
+              ))}
+            </div>
+            {hedefDahil && !yukleniyor ? (
+              <p className="mt-2 text-[11px] text-slate-600 dark:text-slate-300">
+                Aktarılacak hedef: <strong>{hedefPlani.yeni.length}</strong>
+                {hedefPlani.eslesen.length
+                  ? ` · ${hedefPlani.eslesen.length} hedef hedef haftada zaten var (yeniden oluşturulmaz)`
+                  : ''}
+                {tasanHedefSayisi
+                  ? ` · önceki haftadan devam eden ${tasanHedefSayisi} uzun hedef aktarılmaz`
+                  : ''}
+                . Hedefler tarihleriyle birlikte kaydırılır; takvim blokları yeni hedeflere bağlanır.
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+
+        {cizelgeBos && cizelgeDahil ? (
+          <p className="mt-3 rounded-lg bg-slate-50 p-2 text-sm text-slate-600 dark:bg-slate-800/60 dark:text-slate-300">
+            Kaynak haftanın takviminde blok yok{hedefDahil ? '; yalnızca hedefler aktarılır.' : '.'}
+          </p>
+        ) : null}
+
         {hata ? (
           <p className="mt-3 rounded-lg bg-red-50 p-2 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300">
             {hata}
@@ -193,7 +363,7 @@ export default function HaftaAktarModal({
           </p>
         ) : null}
 
-        {onizleme ? (
+        {onizleme && cizelgeDahil ? (
           <>
             <div className="mt-4 grid gap-2 sm:grid-cols-3" data-test="aktar-ozet">
               <div className="rounded-xl bg-slate-50 p-2.5 dark:bg-slate-800/60">
@@ -300,9 +470,12 @@ export default function HaftaAktarModal({
             disabled={
               aktariliyor ||
               yukleniyor ||
-              !onizleme ||
-              onizleme.copy_count === 0 ||
-              (hedefDolu && kip === 'iptal')
+              (icerik === 'hedefler'
+                ? hedefPlani.yeni.length === 0
+                : hedefDahil
+                  ? hedefPlani.yeni.length === 0 && (!onizleme || onizleme.copy_count === 0)
+                  : !onizleme || onizleme.copy_count === 0) ||
+              (cizelgeDahil && hedefDolu && kip === 'iptal' && (onizleme?.copy_count ?? 0) > 0)
             }
             className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-2 text-sm font-bold text-white hover:bg-indigo-500 disabled:opacity-50"
             data-test="aktar-onayla"
