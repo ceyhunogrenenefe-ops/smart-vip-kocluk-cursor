@@ -175,7 +175,7 @@ export default function CrmWidgetsPage() {
     try {
       const res = await crmEnsureInbound();
       setInbound(res.data || inbound);
-      toast.success(res.data?.bound_to_production ? 'WhatsApp 0850 bağlı' : res.data?.hint || 'Yenilendi');
+      toast.success(res.data?.bound_to_production ? 'Kurumsal WhatsApp hattı bağlı' : res.data?.hint || 'Yenilendi');
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Yenilenemedi');
     } finally {
