@@ -2,7 +2,7 @@
   if (document.getElementById('ovd-wa-float')) return;
 
   var href =
-    'https://wa.me/908503034014?text=' +
+    'https://wa.me/905061877494?text=' +
     encodeURIComponent('Merhaba, Online VIP Dershane hakkında bilgi almak istiyorum.');
 
   var css = document.createElement('link');
