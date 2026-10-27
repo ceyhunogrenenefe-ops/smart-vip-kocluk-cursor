@@ -183,7 +183,7 @@ export async function copyTemplatesFromLegacyWaba(opts = {}) {
     let saved = '';
     try {
       const { data } = await supabaseAdmin.from('commerce_settings').select('meta').is('institution_id', null).maybeSingle();
-      saved = String(data?.meta?.whatsapp_prev?.waba_id || '').trim();
+      saved = String(data?.meta?.whatsapp_prev?.waba_id || data?.meta?.whatsapp_prev_0850?.waba_id || '').trim();
     } catch {
       saved = '';
     }
