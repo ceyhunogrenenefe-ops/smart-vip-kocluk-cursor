@@ -138,6 +138,10 @@
       "schedule": "*/30 * * * *"
     },
     {
+      "path": "/api/cron/wa-template-category-audit",
+      "schedule": "*/30 * * * *"
+    },
+    {
       "path": "/api/cron/veli-kayit-admin-notify-retry",
       "schedule": "*/15 * * * *"
     },
