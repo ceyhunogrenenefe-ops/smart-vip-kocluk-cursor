@@ -14,10 +14,11 @@ export const TAKSIT_OVERDUE_TEMPLATE = 'taksit_payment_overdue';
 /** Elle hatırlatma — ödenmemiş taksit, tutar şablonda dolar. */
 export const TAKSIT_REMINDER_TEMPLATE = 'taksit_odeme_hatirlatma';
 
+/** İki değişken: Meta 2388293, kısa metinde çok değişkeni reddeder. Tutar özetin içinde dolar. */
 export const TAKSIT_REMINDER_BODY =
-  'Merhaba {{veli_ad_soyad}}, {{ogrenci_ad_soyad}} için {{taksit_no}}. taksit ödemeniz bekliyor. Tutar: {{tutar}}. Vade: {{vade_tarihi}}. {{kurum_adi}}';
+  'Merhaba {{veli_ad_soyad}}, Online VIP Dershane kaydınızdaki eğitim taksiti için ödeme hatırlatmasıdır. {{odeme_ozeti}} Ödemenizi yaptıysanız bu mesajı dikkate almanıza gerek yoktur. Dekont veya sorunuz için bu sohbetten yazabilirsiniz. İyi günler dileriz.';
 
-const TAKSIT_REMINDER_VARS = ['veli_ad_soyad', 'ogrenci_ad_soyad', 'taksit_no', 'tutar', 'vade_tarihi', 'kurum_adi'];
+const TAKSIT_REMINDER_VARS = ['veli_ad_soyad', 'odeme_ozeti'];
 
 const YMD = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -94,12 +95,16 @@ export function buildTaksitWhatsAppVars(row, card, indexZero) {
   const vade = effectiveVadeYmd(card, bas, indexZero);
   const tutar = Number(card?.tutar_tl);
   const taksitNo = card?.no != null ? String(card.no) : String(indexZero + 1);
+  const tutarText = formatTutar(Number.isFinite(tutar) ? tutar : 0, pb);
+  const vadeText = formatTrDate(vade);
+  const odemeOzeti = `${ogrenciLine} için ${taksitNo}. taksit tutarı ${tutarText}, vade tarihi ${vadeText}.`;
   return {
     veli_ad_soyad: veliLine.slice(0, 120),
     ogrenci_ad_soyad: ogrenciLine.slice(0, 120),
     taksit_no: taksitNo,
-    tutar: formatTutar(Number.isFinite(tutar) ? tutar : 0, pb),
-    vade_tarihi: formatTrDate(vade),
+    tutar: tutarText,
+    vade_tarihi: vadeText,
+    odeme_ozeti: odemeOzeti.slice(0, 300),
     program_adi: String(row?.program_adi || '').trim().slice(0, 120) || '—',
     contract_number: String(row?.contract_number || '').trim().slice(0, 40),
     kurum_adi: ''
@@ -248,11 +253,7 @@ export async function ensureTaksitReminderMetaTemplate() {
     bodyText: TAKSIT_REMINDER_BODY,
     examples: {
       veli_ad_soyad: 'Ayse Yilmaz',
-      ogrenci_ad_soyad: 'Emir Yalcin',
-      taksit_no: '1',
-      tutar: '14000 TL',
-      vade_tarihi: '15.10.2026',
-      kurum_adi: 'Online VIP Dershane'
+      odeme_ozeti: 'Emir Yalcin icin 1. taksit tutari 14000 TL, vade tarihi 15.10.2026.'
     }
   });
   const meta = await createOrReuseMetaMessageTemplate(payload);
