@@ -490,6 +490,20 @@ export async function patchParentSignKayitOnly(body: {
   return (j as { data: ParentSignContractRow }).data;
 }
 
+/** Ödenmemiş taksit için veliye Meta ödeme hatırlatması. Tutar sunucuda dolar. */
+export async function sendTaksitOdemeHatirlatma(id: string, index: number) {
+  const res = await apiFetch('/api/parent-sign-contracts', {
+    method: 'POST',
+    headers: JSON_HDR,
+    body: JSON.stringify({ action: 'taksit_odeme_hatirlat', id, index })
+  });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error((j as { error?: string }).error || `API ${res.status}`);
+  }
+  return (j as { data: { tutar?: string | null } }).data;
+}
+
 /** Tüm ödenmiş taksitleri öğrenci ödemelerine aktarır (banka/kart ayrımıyla). */
 export async function syncPaidTaksitToStudentPayments(institutionId?: string) {
   const res = await apiFetch('/api/parent-sign-contracts', {

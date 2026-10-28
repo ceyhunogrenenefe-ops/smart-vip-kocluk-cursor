@@ -25,7 +25,7 @@ import {
 } from '../api/_lib/parent-sign-defaults.js';
 import { institutionLegalHtmlForContract, loadInstitutionLegal } from '../api/_lib/parent-sign-legal.js';
 import { resolveLegalDocHrefs, resolveOptionalDocUrl } from '../api/_lib/veli-kayit-legal-url.js';
-import { notifyTaksitMarkedPaid } from '../api/_lib/taksit-whatsapp-notify.js';
+import { notifyTaksitMarkedPaid, sendManualTaksitReminder } from '../api/_lib/taksit-whatsapp-notify.js';
 import { resolveSinifFromVeliKayit } from '../api/_lib/veli-kayit-class-level.js';
 import { provisionStudentFromParentSignContract } from '../api/_lib/provision-student-from-parent-sign.js';
 import { notifyAdminsOnVeliKayitForm } from '../api/_lib/veli-kayit-admin-notify.js';
@@ -1547,6 +1547,28 @@ export default async function handler(req, res) {
           console.error('[parent-sign-contracts sync_paid_taksit]', errorMessage(e), e);
           return res.status(500).json({ error: errorMessage(e) });
         }
+      }
+
+      if (postAction === 'taksit_odeme_hatirlat') {
+        const id = String(body.id || body.contract_id || '').trim();
+        const index = Math.round(Number(body.index));
+        if (!id) return res.status(400).json({ error: 'id_required' });
+        if (!Number.isFinite(index) || index < 0) return res.status(400).json({ error: 'taksit_index_invalid' });
+        const { data: row, error: fErr } = await supabaseAdmin
+          .from('parent_sign_contracts')
+          .select('*')
+          .eq('id', id)
+          .maybeSingle();
+        if (fErr) throw fErr;
+        if (!row) return res.status(404).json({ error: 'not_found' });
+        if (role === 'admin' || role === 'coach') {
+          if (!hasInstitutionAccess(actor, row.institution_id)) return res.status(403).json({ error: 'forbidden' });
+        }
+        const out = await sendManualTaksitReminder(row, index);
+        if (!out.ok) {
+          return res.status(out.pending ? 409 : 502).json({ error: out.error || 'hatirlatma_gonderilemedi', pending: Boolean(out.pending) });
+        }
+        return res.status(200).json({ data: { tutar: out.tutar || null } });
       }
 
       if (postAction === 'provision_student_account') {

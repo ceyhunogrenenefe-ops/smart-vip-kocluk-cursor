@@ -5,9 +5,19 @@ import { sendAutomatedWhatsApp, OUTBOUND_LOG_CODE } from './whatsapp-outbound.js
 import { insertWhatsAppAutomationLog } from './message-log.js';
 import { metaWhatsAppConfigured } from './meta-whatsapp.js';
 import { resolveRowParaBirimi, paraBirimiLabel } from './parent-sign-defaults.js';
+import { renderMessageTemplate } from './template-engine.js';
+import { buildMetaTemplateCreatePayload } from './meta-template-payload.js';
+import { createOrReuseMetaMessageTemplate } from './meta-template-create.js';
 
 export const TAKSIT_PAID_TEMPLATE = 'taksit_payment_received';
 export const TAKSIT_OVERDUE_TEMPLATE = 'taksit_payment_overdue';
+/** Elle hatırlatma — ödenmemiş taksit, tutar şablonda dolar. */
+export const TAKSIT_REMINDER_TEMPLATE = 'taksit_odeme_hatirlatma';
+
+export const TAKSIT_REMINDER_BODY =
+  'Merhaba {{veli_ad_soyad}}, {{ogrenci_ad_soyad}} için {{taksit_no}}. taksit ödemeniz bekliyor. Tutar: {{tutar}}. Vade: {{vade_tarihi}}. {{kurum_adi}}';
+
+const TAKSIT_REMINDER_VARS = ['veli_ad_soyad', 'ogrenci_ad_soyad', 'taksit_no', 'tutar', 'vade_tarihi', 'kurum_adi'];
 
 const YMD = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -141,7 +151,7 @@ export async function sendTaksitWhatsAppNotice(row, index, opts) {
   const contractId = String(row?.id || '').trim();
   if (!contractId) return { ok: false, error: 'contract_id_missing' };
 
-  if (await alreadySentTaksitWhatsApp(contractId, index, baseKind)) {
+  if (!opts.force && (await alreadySentTaksitWhatsApp(contractId, index, baseKind))) {
     return { ok: true, skipped: 'already_sent' };
   }
 
@@ -188,6 +198,119 @@ export async function sendTaksitWhatsAppNotice(row, index, opts) {
   });
 
   return { ok: sent.ok, error: sent.error, phone, vars };
+}
+
+export function taksitReminderPreview(vars) {
+  return renderMessageTemplate(TAKSIT_REMINDER_BODY, vars).replace(/\s+/g, ' ').trim();
+}
+
+let reminderMetaCache = { at: 0, approved: false, status: null };
+
+async function upsertTaksitReminderTemplateRow() {
+  const row = {
+    name: 'Taksit ödeme hatırlatma',
+    type: TAKSIT_REMINDER_TEMPLATE,
+    content: TAKSIT_REMINDER_BODY,
+    variables: TAKSIT_REMINDER_VARS,
+    twilio_variable_bindings: TAKSIT_REMINDER_VARS,
+    channel: 'whatsapp',
+    is_active: true,
+    meta_template_name: TAKSIT_REMINDER_TEMPLATE,
+    meta_template_language: 'tr',
+    meta_named_body_parameters: true,
+    updated_at: new Date().toISOString()
+  };
+  const { data: existing, error: readErr } = await supabaseAdmin
+    .from('message_templates')
+    .select('id')
+    .eq('type', TAKSIT_REMINDER_TEMPLATE)
+    .maybeSingle();
+  if (readErr) throw new Error(readErr.message);
+  if (existing?.id) {
+    const { error } = await supabaseAdmin.from('message_templates').update(row).eq('id', existing.id);
+    if (error) throw new Error(error.message);
+    return;
+  }
+  const { error } = await supabaseAdmin.from('message_templates').insert(row);
+  if (error) throw new Error(error.message);
+}
+
+/** Meta'da yoksa onay kuyruğuna alır; varsa durumunu döner. */
+export async function ensureTaksitReminderMetaTemplate() {
+  await upsertTaksitReminderTemplateRow();
+  if (Date.now() - reminderMetaCache.at < 10 * 60 * 1000 && reminderMetaCache.approved) {
+    return { ok: true, approved: true, status: reminderMetaCache.status, reused: true };
+  }
+  const payload = buildMetaTemplateCreatePayload({
+    name: TAKSIT_REMINDER_TEMPLATE,
+    language: 'tr',
+    category: 'UTILITY',
+    bodyText: TAKSIT_REMINDER_BODY,
+    examples: {
+      veli_ad_soyad: 'Ayse Yilmaz',
+      ogrenci_ad_soyad: 'Emir Yalcin',
+      taksit_no: '1',
+      tutar: '14000 TL',
+      vade_tarihi: '15.10.2026',
+      kurum_adi: 'Online VIP Dershane'
+    }
+  });
+  const meta = await createOrReuseMetaMessageTemplate(payload);
+  reminderMetaCache = {
+    at: Date.now(),
+    approved: Boolean(meta.approved),
+    status: meta.status || null
+  };
+  return meta;
+}
+
+/**
+ * Ödenmemiş taksit için veliye Meta şablonu. Tutar karttan dolar.
+ * Onay bekliyorsa göndermez; şablonu kuyruğa bırakır.
+ */
+export async function sendManualTaksitReminder(row, index) {
+  const idx = Math.max(0, Math.round(Number(index)));
+  const kj = kayitJson(row);
+  const cards = Array.isArray(kj.taksit_kartlari) ? kj.taksit_kartlari : [];
+  const card = cards[idx];
+  if (!card || typeof card !== 'object') return { ok: false, error: 'Taksit bulunamadı.' };
+  if (card.odendi) return { ok: false, error: 'Bu taksit ödenmiş.' };
+
+  const phone = resolveVeliPhoneFromContract(row);
+  if (!phone) return { ok: false, error: 'Veli telefonu yok. Sözleşmedeki telefonu kontrol edin.' };
+
+  let meta;
+  try {
+    meta = await ensureTaksitReminderMetaTemplate();
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : 'Şablon hazırlanamadı.' };
+  }
+  if (!meta?.ok) return { ok: false, error: meta?.error || 'Meta şablonu hazırlanamadı.' };
+  if (!meta.approved) {
+    return {
+      ok: false,
+      pending: true,
+      error: 'Ödeme hatırlatma şablonu Meta onayına gönderildi. Onaylanınca aynı düğmeden tekrar gönderin.'
+    };
+  }
+
+  const vars = buildTaksitWhatsAppVars(row, card, idx);
+  const out = await sendTaksitWhatsAppNotice(row, idx, {
+    templateType: TAKSIT_REMINDER_TEMPLATE,
+    baseKind: 'taksit_manual_reminder',
+    force: true
+  });
+  if (out.skipped === 'meta_whatsapp_not_ready') {
+    return { ok: false, error: 'WhatsApp hattı ayarlı değil.' };
+  }
+  if (out.skipped === 'invalid_phone') {
+    return { ok: false, error: 'Veli telefonu geçersiz.' };
+  }
+  return {
+    ...out,
+    tutar: vars.tutar,
+    error: out.ok ? null : out.error || 'Hatırlatma gönderilemedi.'
+  };
 }
 
 export async function notifyTaksitMarkedPaid(row, index, wasPaidBefore) {

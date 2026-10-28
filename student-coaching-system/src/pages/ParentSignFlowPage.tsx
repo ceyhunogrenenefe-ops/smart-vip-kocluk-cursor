@@ -21,6 +21,7 @@ import {
   createStudentUserFromParentSign,
   updateParentSignContract,
   patchParentSignKayitOnly,
+  sendTaksitOdemeHatirlatma,
   deleteParentSignClassPreset,
   deleteParentSignContract,
   listInstitutionsForPicker,
@@ -76,6 +77,7 @@ import {
   Copy,
   Loader2,
   Link2,
+  MessageCircle,
   CheckCircle2,
   Clock,
   Download,
@@ -1250,6 +1252,37 @@ export default function ParentSignFlowPage() {
       void load();
     } catch (e) {
       setMsg(e instanceof Error ? e.message : 'Taksit güncellenemedi');
+    } finally {
+      setParentSignRowBusy(null);
+    }
+  };
+
+  const hatirlatTaksit = async (r: ParentSignContractRow, index: number) => {
+    const kart = taksitKartlariFromRow(r)[index];
+    if (!kart || kart.odendi) return;
+    const tutar =
+      kart.tutar_tl != null && Number.isFinite(kart.tutar_tl)
+        ? formatUcretWithCurrency(kart.tutar_tl, r.para_birimi)
+        : '';
+    const veli = `${r.veli_ad || ''} ${r.veli_soyad || ''}`.trim() || 'veli';
+    const no = kart.no ?? index + 1;
+    const onay = window.confirm(
+      tutar
+        ? `${veli} velisine ${no}. taksit için ${tutar} tutarlı ödeme hatırlatması WhatsApp ile gitsin mi?`
+        : `${veli} velisine ${no}. taksit ödeme hatırlatması WhatsApp ile gitsin mi?`
+    );
+    if (!onay) return;
+    setParentSignRowBusy(`${r.id}:h${index}`);
+    setMsg(null);
+    try {
+      const out = await sendTaksitOdemeHatirlatma(r.id, index);
+      setMsg(
+        out.tutar
+          ? `Veliye ödeme hatırlatması gitti. Tutar: ${out.tutar}.`
+          : 'Veliye ödeme hatırlatması gitti.'
+      );
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : 'Hatırlatma gönderilemedi');
     } finally {
       setParentSignRowBusy(null);
     }
@@ -2788,6 +2821,25 @@ export default function ParentSignFlowPage() {
                                   />
                                   Ödendi
                                 </label>
+                                {!tk.odendi ? (
+                                  <button
+                                    type="button"
+                                    disabled={parentSignRowBusy === `${r.id}:h${idx}`}
+                                    title="Ödenmemiş taksit için veliye Meta WhatsApp hatırlatması. Tutar otomatik yazılır."
+                                    onClick={() => void hatirlatTaksit(r, idx)}
+                                    className="inline-flex items-center gap-1 rounded-md border border-emerald-300 bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-800 hover:bg-emerald-100 disabled:opacity-50 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-100"
+                                  >
+                                    {parentSignRowBusy === `${r.id}:h${idx}` ? (
+                                      <Loader2 className="h-3 w-3 animate-spin" />
+                                    ) : (
+                                      <MessageCircle className="h-3 w-3" />
+                                    )}
+                                    Hatırlat
+                                    {tk.tutar_tl != null && Number.isFinite(tk.tutar_tl)
+                                      ? ` · ${formatUcretWithCurrency(tk.tutar_tl, r.para_birimi)}`
+                                      : ''}
+                                  </button>
+                                ) : null}
                                 </div>
                               </li>
                             );
