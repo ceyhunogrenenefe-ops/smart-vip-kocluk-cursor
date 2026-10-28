@@ -3,8 +3,9 @@
  *
  * Meta'nın WABA başına saatlik istek sınırı (#80008) dolduğunda bir sonraki
  * çalışmada kaldığı yerden devam eder. Yoklama şablonları önce gider.
- * Tüm acil şablonlar yeni hesapta oluşunca `done` işaretlenir ve görev artık
- * Meta'ya hiç istek atmaz.
+ * Önce acil (otomasyon) şablonları, ardından `scope: 'all'` ile kalan tüm
+ * şablonlar sırayla aktarılır. Hepsi yeni hesapta oluşunca `done` işaretlenir
+ * ve görev artık Meta'ya hiç istek atmaz.
  */
 import { authorizeVercelOrCronSecret } from '../api/_lib/cron-auth.js';
 import { recordCronRun } from '../api/_lib/cron-run-log.js';
@@ -37,7 +38,8 @@ export default async function handler(req, res) {
     if (row.state.done) return res.status(200).json({ ok: true, skipped: 'done' });
 
     const failed = new Set(Array.isArray(row.state.failed_keys) ? row.state.failed_keys : []);
-    const plan = await copyTemplatesFromLegacyWaba({ dry_run: true, scope: 'urgent' });
+    const scope = row.state.scope === 'all' ? 'all' : 'urgent';
+    const plan = await copyTemplatesFromLegacyWaba({ dry_run: true, scope });
     const log = (entry) => [...(row.state.runs || []).slice(-11), { at: new Date().toISOString(), ...entry }];
 
     if (!plan.ok) {
@@ -49,6 +51,11 @@ export default async function handler(req, res) {
     const pending = (plan.pending || [])
       .filter((t) => !failed.has(t.key))
       .sort((a, b) => Number(ATTENDANCE_RE.test(b.name)) - Number(ATTENDANCE_RE.test(a.name)));
+
+    if (!pending.length && scope === 'urgent') {
+      await writeState(row, { scope: 'all', runs: log({ stage: 'urgent_done', already_in_target: plan.already_in_target }) });
+      return res.status(200).json({ ok: true, next_scope: 'all' });
+    }
 
     if (!pending.length) {
       await writeState(row, { done: true, runs: log({ stage: 'done', already_in_target: plan.already_in_target, failed: [...failed] }) });
@@ -66,6 +73,7 @@ export default async function handler(req, res) {
       errors: { ...(row.state.errors || {}), ...Object.fromEntries(results.filter((x) => !x.ok).map((x) => [x.name, x.error])) },
       runs: log({
         stage: 'copy',
+        scope,
         copied,
         failed: results.filter((x) => !x.ok).map((x) => x.name),
         remaining: pending.length - results.length,
