@@ -131,7 +131,10 @@ export async function uploadTemplateHeaderMedia({ buffer, mimeType, headerType }
 
   // 2) Dosyayı gönder
   const sessionId = String(json.id);
-  res = await fetch(`https://graph.facebook.com/${GRAPH()}/${encodeURIComponent(sessionId)}`, {
+  // Oturum kimliği "upload:<base64>?sig=..." biçiminde gelir; ':' ve '?sig=' olduğu
+  // gibi kalmalı. encodeURIComponent bunları bozuyor ve Meta "Unsupported post
+  // request ... does not exist" (#100/33) döndürüyordu.
+  res = await fetch(`https://graph.facebook.com/${GRAPH()}/${sessionId}`, {
     method: 'POST',
     headers: {
       Authorization: `OAuth ${token}`,
