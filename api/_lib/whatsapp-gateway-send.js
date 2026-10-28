@@ -570,6 +570,65 @@ export async function sendGatewayTextMessage({
   };
 }
 
+/**
+ * Gateway üzerinden fotoğraf veya belge. PNG/JPG gateway'de görsel, diğerleri belge gider.
+ */
+export async function sendGatewayDocumentMessage({
+  phone,
+  dataBase64,
+  filename,
+  mimetype,
+  caption,
+  sessionId,
+  sessionCandidates,
+  allowSharedFallback = false
+}) {
+  const actorSid = String(sessionId || '').trim();
+  const candidates = [...(Array.isArray(sessionCandidates) ? sessionCandidates : []), actorSid];
+  const e164 = normalizePhoneToE164(phone);
+  const data = String(dataBase64 || '').trim();
+  if (!resolveGatewayUpstream() || !String(process.env.APP_JWT_SECRET || '').trim()) {
+    return {
+      ok: false,
+      channel: 'gateway',
+      error: 'Gateway yapılandırılmamış: WHATSAPP_GATEWAY_UPSTREAM ve APP_JWT_SECRET gerekli.',
+      errorCode: 'GATEWAY_ENV'
+    };
+  }
+  const { sessionId: sid } = await resolveGatewaySessionForSend(candidates, { allowSharedFallback });
+  if (!sid) {
+    return {
+      ok: false,
+      channel: 'gateway',
+      error: 'Sizin WhatsApp oturumunuz bağlı değil — Koç WhatsApp ayarlarından kendi numaranızı QR ile bağlayın.',
+      errorCode: 'GATEWAY_NOT_CONNECTED'
+    };
+  }
+  if (!e164) return { ok: false, channel: 'gateway', error: 'Geçersiz telefon numarası.', errorCode: 'PHONE' };
+  if (!data) return { ok: false, channel: 'gateway', error: 'Dosya boş.', errorCode: 'MEDIA' };
+
+  const r = await gatewayFetch(`/sessions/${encodeURIComponent(sid)}/send-document`, {
+    method: 'POST',
+    sessionId: sid,
+    body: {
+      phone: e164.replace(/^\+/, ''),
+      data_base64: data,
+      filename: String(filename || 'belge').slice(0, 120),
+      mimetype: String(mimetype || 'application/octet-stream'),
+      caption: String(caption || '').slice(0, 1024)
+    }
+  });
+  if (!r.ok) {
+    const code = String(r.data?.error || 'gateway_send_failed');
+    return { ok: false, channel: 'gateway', error: code, errorCode: code.toUpperCase().slice(0, 32), gateway_session_id: sid };
+  }
+  const mid = String(r.data?.id || '').trim();
+  if (!mid) {
+    return { ok: false, channel: 'gateway', error: 'send_no_message_id', errorCode: 'SEND_NO_MESSAGE_ID', gateway_session_id: sid };
+  }
+  return { ok: true, channel: 'gateway', sid: mid, gateway_message_id: mid, gateway_session_id: sid };
+}
+
 /** Otomatik / toplu gönderimde alıcılar arası bekleme (Signal «Mesaj bekleniyor» önlemi). */
 export function autoSendGapMs() {
   return Math.min(8000, Math.max(0, Number(process.env.WA_AUTO_SEND_GAP_MS) || 1500));

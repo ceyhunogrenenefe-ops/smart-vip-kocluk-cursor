@@ -1959,11 +1959,10 @@ app.post('/sessions/:coachId/send-document', requireGatewayAuth, requireCoachSco
       const pnJid = ensurePhoneJid(digits);
       await warmSignalSession(session.sock, resolvedJid, sendMeta.usedCoachId);
 
-      const payload = {
-        document: buf,
-        mimetype,
-        fileName: filename
-      };
+      const imageMime = /^image\/(png|jpeg)$/i.test(mimetype);
+      const payload = imageMime
+        ? { image: buf, mimetype }
+        : { document: buf, mimetype, fileName: filename };
       if (caption) payload.caption = caption;
       const sent = await sendDocumentWithTimeout(session.sock, resolvedJid, payload);
       const aliases = [resolvedJid, pnJid, sent?.key?.remoteJid, sent?.key?.remoteJidAlt].filter(Boolean);

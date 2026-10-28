@@ -528,6 +528,114 @@ export async function sendMetaTextMessage({ toE164, text, institutionId = null }
 }
 
 /**
+ * Fotoğraf veya belge. Yalnız-gateway kurumunda kurum oturumundan gider.
+ * Cloud API'de dosya önce Media API'ye yüklenir, mesaj dönen kimlikle gider.
+ * @param {{ toE164: string, buffer: Buffer, mimeType: string, filename: string, caption?: string, kind: 'image'|'document', institutionId?: string|null }} opts
+ */
+export async function sendMetaMediaMessage({
+  toE164,
+  buffer,
+  mimeType,
+  filename,
+  caption = '',
+  kind,
+  institutionId = null
+}) {
+  const viaGateway = await sendMediaViaGatewayIfRequired({
+    toE164,
+    buffer,
+    mimeType,
+    filename,
+    caption
+  });
+  if (viaGateway) return viaGateway;
+
+  const own = await resolveInstitutionWhatsApp(institutionId);
+  const pid = own.phoneNumberId || own.phone_number_id || phoneNumberId();
+  const tok = own.token || own.access_token || token();
+  if (!pid || !tok) {
+    const err = new Error('missing_meta_whatsapp_env');
+    err.code = 'ENV';
+    throw err;
+  }
+  const to = normalizePhoneDigitsForMeta(toE164);
+  if (!to || to.length < 8) {
+    const err = new Error('invalid_phone');
+    err.code = 'PHONE';
+    throw err;
+  }
+  const buf = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer || []);
+  const mime = String(mimeType || '').trim();
+  const safeName = String(filename || (kind === 'image' ? 'fotograf.png' : 'belge')).slice(0, 120);
+  const cap = String(caption || '').trim().slice(0, 1024);
+  const mediaKind = kind === 'image' ? 'image' : 'document';
+
+  const form = new FormData();
+  form.append('messaging_product', 'whatsapp');
+  form.append('type', mime);
+  form.append('file', new Blob([buf], { type: mime }), safeName);
+  const uploadUrl = `https://graph.facebook.com/${GRAPH()}/${pid}/media`;
+  const uploadRes = await fetch(uploadUrl, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${tok}` },
+    body: form
+  });
+  const uploadJson = await uploadRes.json().catch(() => ({}));
+  const mediaId = String(uploadJson?.id || '').trim();
+  if (!uploadRes.ok || !mediaId) {
+    const err = new Error(graphUserMessage(uploadJson, uploadRes.status) || 'Meta dosyayı kabul etmedi.');
+    err.status = uploadRes.status;
+    err.meta = uploadJson;
+    throw err;
+  }
+
+  const media = { id: mediaId };
+  if (cap) media.caption = cap;
+  if (mediaKind === 'document') media.filename = safeName;
+
+  const sendUrl = `https://graph.facebook.com/${GRAPH()}/${pid}/messages`;
+  const sendRes = await fetch(sendUrl, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${tok}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to,
+      type: mediaKind,
+      [mediaKind]: media
+    })
+  });
+  const sendJson = await sendRes.json().catch(() => ({}));
+  if (!sendRes.ok) {
+    const err = new Error(graphUserMessage(sendJson, sendRes.status));
+    err.status = sendRes.status;
+    err.meta = sendJson;
+    throw err;
+  }
+  return { messageId: sendJson?.messages?.[0]?.id || null, raw: sendJson, provider: 'meta' };
+}
+
+async function sendMediaViaGatewayIfRequired({ toE164, buffer, mimeType, filename, caption }) {
+  const policy = await gatewayOnlyPolicyFor(toE164);
+  if (!policy) return null;
+  const { sendViaInstitutionGatewayMedia, gatewayOnlyBlockedError } = await import('./institution-wa-policy.js');
+  const r = await sendViaInstitutionGatewayMedia({
+    policy,
+    phone: toE164,
+    dataBase64: Buffer.from(buffer).toString('base64'),
+    filename,
+    mimetype: mimeType,
+    caption
+  });
+  if (!r.ok) {
+    const err = gatewayOnlyBlockedError(policy, r.error || r.errorCode || 'gateway_failed');
+    err.gateway = r;
+    throw err;
+  }
+  return { messageId: r.sid || null, raw: { provider: 'institution_gateway' }, provider: 'institution_gateway' };
+}
+
+/**
  * Seçmeli (buton / liste) mesaj — Cloud API interactive.
  * Gövde crm-interactive-message.js'de kurulur; burada yalnız gönderilir.
  * Interactive reddedilirse çağıran taraf düz metne düşer.

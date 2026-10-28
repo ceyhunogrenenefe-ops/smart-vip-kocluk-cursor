@@ -4,15 +4,18 @@ import {
 import {
   Facebook,
   FileText,
+  Image as ImageIcon,
   Instagram,
   Loader2,
+  Paperclip,
   Plus,
   MessageCircle,
   RefreshCw,
   Search,
   Send,
   Trash2,
-  UserPlus
+  UserPlus,
+  X
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '../../context/AuthContext';
@@ -152,6 +155,66 @@ function replaceSlashToken(text: string, replacement: string) {
   return text.replace(/(^|\s)\/([^\s]*)$/, `$1${replacement}`);
 }
 
+/** API gövde sınırıyla aynı: ham dosya en fazla 2,5 MB. */
+const CRM_ATTACH_MAX = 2_621_440;
+const CRM_FILE_EXTS = new Set(['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'csv', 'png', 'jpg', 'jpeg']);
+
+type ComposerFile = { name: string; mime: string; base64: string; previewUrl: string | null };
+
+function fileExt(name: string) {
+  return (name.split('.').pop() || '').toLowerCase();
+}
+
+function readFileBase64(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const raw = String(reader.result || '');
+      const comma = raw.indexOf(',');
+      resolve(comma >= 0 ? raw.slice(comma + 1) : raw);
+    };
+    reader.onerror = () => reject(new Error('Dosya okunamadı'));
+    reader.readAsDataURL(file);
+  });
+}
+
+function isImageMessage(m: CrmMessage) {
+  const t = String(m.message_type || '').toLowerCase();
+  if (t === 'image' || t.startsWith('image/')) return true;
+  return /\.(png|jpe?g|gif|webp)(\?|$)/i.test(String(m.media_url || ''));
+}
+
+function MessageBody({ m, mine }: { m: CrmMessage; mine: boolean }) {
+  const url = m.media_url && /^https?:\/\//i.test(m.media_url) ? m.media_url : '';
+  const [broken, setBroken] = useState(false);
+  const showImage = Boolean(url) && !broken && isImageMessage(m);
+  const hidePlaceholder = showImage && m.body === 'Fotoğraf';
+  const linkCls = `mt-1 inline-flex items-center gap-1 text-[11px] font-medium underline ${
+    mine ? 'text-emerald-50' : 'text-emerald-700'
+  }`;
+  return (
+    <>
+      {showImage ? (
+        <a href={url} target="_blank" rel="noopener noreferrer" className="mb-1 block">
+          <img
+            src={url}
+            alt={m.body && m.body !== 'Fotoğraf' ? m.body : 'Fotoğraf'}
+            onError={() => setBroken(true)}
+            className="max-h-52 w-full rounded-lg object-contain"
+          />
+        </a>
+      ) : null}
+      {m.body && !hidePlaceholder ? <p className="whitespace-pre-wrap break-words">{m.body}</p> : null}
+      {!m.body && !showImage && m.media_url ? <p className="whitespace-pre-wrap break-words">[medya]</p> : null}
+      {url && !showImage ? (
+        <a href={url} target="_blank" rel="noopener noreferrer" className={linkCls}>
+          Dosyayı aç
+        </a>
+      ) : null}
+    </>
+  );
+}
+
 export default function CrmInboxPage() {
   const { effectiveUser } = useAuth();
   const tags = userRoleTags(effectiveUser);
@@ -183,6 +246,9 @@ export default function CrmInboxPage() {
   const internalTabRef = useRef(internalTab);
   internalTabRef.current = internalTab;
   const [draft, setDraft] = useState('');
+  const [attachment, setAttachment] = useState<ComposerFile | null>(null);
+  const photoInputRef = useRef<HTMLInputElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [loadingList, setLoadingList] = useState(true);
   const [loadingMsgs, setLoadingMsgs] = useState(false);
   const [sending, setSending] = useState(false);
@@ -507,13 +573,65 @@ export default function CrmInboxPage() {
     return () => window.clearInterval(t);
   }, [selectedId]);
 
+  const clearAttachment = useCallback(() => {
+    setAttachment((prev) => {
+      if (prev?.previewUrl) URL.revokeObjectURL(prev.previewUrl);
+      return null;
+    });
+  }, []);
+
+  useEffect(() => {
+    clearAttachment();
+  }, [selectedId, clearAttachment]);
+
+  const onPickFile = async (list: FileList | null, mode: 'photo' | 'file') => {
+    const file = list?.[0];
+    if (!file) return;
+    if (file.size > CRM_ATTACH_MAX) {
+      toast.error('Dosya en fazla 2,5 MB olabilir.');
+      return;
+    }
+    const ext = fileExt(file.name);
+    const isPhoto =
+      file.type === 'image/png' || file.type === 'image/jpeg' || ext === 'png' || ext === 'jpg' || ext === 'jpeg';
+    if (mode === 'photo' && !isPhoto) {
+      toast.error('Fotoğraf PNG veya JPG olmalı.');
+      return;
+    }
+    if (mode === 'file' && !CRM_FILE_EXTS.has(ext)) {
+      toast.error('PNG, JPG, PDF, Word, Excel, PowerPoint veya metin dosyası seçin.');
+      return;
+    }
+    try {
+      const base64 = await readFileBase64(file);
+      const previewUrl = isPhoto ? URL.createObjectURL(file) : null;
+      setAttachment((prev) => {
+        if (prev?.previewUrl) URL.revokeObjectURL(prev.previewUrl);
+        return { name: file.name, mime: file.type || '', base64, previewUrl };
+      });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Dosya okunamadı');
+    }
+  };
+
   const onSend = async () => {
-    if (!selectedId || !draft.trim()) return;
+    if (!selectedId || sending) return;
+    const text = draft.trim();
+    const file = attachment;
+    if (!text && !file) return;
     setSending(true);
     try {
-      const res = await crmSendMessage(selectedId, draft.trim());
+      const res = await crmSendMessage(
+        selectedId,
+        text,
+        undefined,
+        file
+          ? { media_base64: file.base64, media_mime: file.mime, media_filename: file.name }
+          : undefined
+      );
       if (res.data) setMessages((prev) => [...prev, res.data]);
       setDraft('');
+      clearAttachment();
       setSlashOpen(false);
       void loadList();
     } catch (e) {
@@ -1015,22 +1133,7 @@ export default function CrmInboxPage() {
                             : 'rounded-bl-md bg-white text-slate-800 ring-1 ring-slate-200'
                         }`}
                       >
-                        <p className="whitespace-pre-wrap break-words">
-                          {m.body || (m.media_url ? '[medya]' : '')}
-                        </p>
-                        {/* Instagram / Facebook eki: bağlantıyı aç (WhatsApp medyası meta-media: ile gelir, açılamaz) */}
-                        {m.media_url && /^https?:\/\//i.test(m.media_url) ? (
-                          <a
-                            href={m.media_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className={`mt-1 inline-flex items-center gap-1 text-[11px] font-medium underline ${
-                              mine ? 'text-emerald-50' : 'text-emerald-700'
-                            }`}
-                          >
-                            Eki aç
-                          </a>
-                        ) : null}
+                        <MessageBody m={m} mine={mine} />
                         <p className={`mt-1 text-[10px] ${mine ? 'text-emerald-100' : 'text-slate-400'}`}>
                           {formatTime(m.created_at)}
                           {m.delivery_status ? ` · ${m.delivery_status}` : ''}
@@ -1121,7 +1224,68 @@ export default function CrmInboxPage() {
                 </div>
               ) : null}
 
+              {attachment ? (
+                <div className="mb-2 flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-2 py-1.5">
+                  {attachment.previewUrl ? (
+                    <img src={attachment.previewUrl} alt="" className="h-12 w-12 rounded-lg object-cover" />
+                  ) : (
+                    <FileText className="h-5 w-5 shrink-0 text-slate-500" />
+                  )}
+                  <span className="min-w-0 flex-1 truncate text-xs text-slate-700">{attachment.name}</span>
+                  <button
+                    type="button"
+                    title="Kaldır"
+                    onClick={clearAttachment}
+                    className="rounded p-1 text-slate-400 hover:bg-white hover:text-slate-700"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              ) : null}
+
               <div className="flex items-end gap-2">
+                <input
+                  ref={photoInputRef}
+                  type="file"
+                  accept="image/png,image/jpeg,.png,.jpg,.jpeg"
+                  className="hidden"
+                  onChange={(e) => {
+                    void onPickFile(e.target.files, 'photo');
+                    e.target.value = '';
+                  }}
+                />
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".png,.jpg,.jpeg,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv"
+                  className="hidden"
+                  onChange={(e) => {
+                    void onPickFile(e.target.files, 'file');
+                    e.target.value = '';
+                  }}
+                />
+                <div className="flex shrink-0 items-center gap-1 self-end">
+                  <button
+                    type="button"
+                    aria-label="Fotoğraf ekle"
+                    title="PNG veya JPG fotoğraf, en fazla 2,5 MB"
+                    disabled={sending}
+                    onClick={() => photoInputRef.current?.click()}
+                    className="inline-flex h-11 w-10 items-center justify-center rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                  >
+                    <ImageIcon className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    aria-label="Dosya ekle"
+                    title="Dosya: PDF, Word, Excel, PowerPoint veya metin. En fazla 2,5 MB"
+                    disabled={sending}
+                    onClick={() => fileInputRef.current?.click()}
+                    className="inline-flex h-11 w-10 items-center justify-center rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                  >
+                    <Paperclip className="h-4 w-4" />
+                  </button>
+                </div>
                 <textarea
                   ref={composeRef}
                   value={draft}
@@ -1157,12 +1321,12 @@ export default function CrmInboxPage() {
                     }
                   }}
                   rows={2}
-                  placeholder="Yanıt yazın…  / ile şablon · Enter = gönder"
+                  placeholder="Yanıt yazın…  / ile şablon · fotoğraf veya dosya ekleyin · Enter = gönder"
                   className="min-h-[44px] flex-1 resize-none rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-emerald-500"
                 />
                 <button
                   type="button"
-                  disabled={sending || !draft.trim()}
+                  disabled={sending || (!draft.trim() && !attachment)}
                   onClick={() => void onSend()}
                   className="inline-flex h-11 items-center gap-1 rounded-xl bg-emerald-600 px-4 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
                 >

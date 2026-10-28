@@ -35,6 +35,7 @@ import {
   loadMetaWhatsAppSecretsFromDb,
   metaWhatsAppConfigured,
   normalizePhoneToE164,
+  sendMetaMediaMessage,
   sendMetaTemplateMessage,
   sendMetaTextMessage
 } from './meta-whatsapp.js';
@@ -856,6 +857,42 @@ export async function sendCrmWhatsAppText({ phone, text, institutionId = null })
   };
 }
 
+/** WhatsApp fotoğraf (PNG/JPG) veya belge. Açıklama caption olur. */
+export async function sendCrmWhatsAppMedia({
+  phone,
+  buffer,
+  mimeType,
+  filename,
+  caption = '',
+  kind = 'document',
+  institutionId = null
+}) {
+  await loadMetaWhatsAppSecretsFromDb();
+  if (!metaWhatsAppConfigured()) {
+    const err = new Error(
+      'whatsapp_not_configured — META_WHATSAPP_TOKEN + META_PHONE_NUMBER_ID (0850 hattı) veya panel commerce_settings.meta.whatsapp gerekli'
+    );
+    err.code = 'ENV';
+    throw err;
+  }
+  const e164 = normalizePhoneToE164(phone) || (toMetaWaContactId(phone) ? `+${toMetaWaContactId(phone)}` : null);
+  if (!e164) {
+    const err = new Error('invalid_phone');
+    err.code = 'PHONE';
+    throw err;
+  }
+  const result = await sendMetaMediaMessage({
+    toE164: e164,
+    buffer,
+    mimeType,
+    filename,
+    caption,
+    kind,
+    institutionId
+  });
+  return { messageId: result?.messageId || null, raw: result };
+}
+
 /**
  * WhatsApp seçmeli mesaj (interactive button / list).
  * Numaralı liste yerine gerçek seçim bileşeni gönderir.
@@ -1186,6 +1223,93 @@ export async function sendCrmInstagramDm({ igScopedId, text, allowHumanAgentTag 
     err.code = 'META';
     err.raw = json;
     throw err;
+  }
+  return { messageId: json?.message_id || json?.id || null, raw: json, tokenSource };
+}
+
+/**
+ * Instagram / Messenger fotoğraf veya dosya.
+ * Açıklama ayrı metin olarak gider; görselin kendisinde caption alanı yok.
+ */
+export async function sendCrmSocialMedia({
+  igScopedId,
+  buffer,
+  mimeType,
+  filename,
+  kind = 'document',
+  caption = '',
+  allowHumanAgentTag = true
+}) {
+  await loadMetaWhatsAppSecretsFromDb();
+  const { resolveSocialToken, resolvePageId } = await import('./meta-social-inbound.js');
+  const { token, source: tokenSource } = resolveSocialToken();
+  const pageId = resolvePageId();
+  if (!token || !pageId) {
+    const err = new Error(
+      'instagram_not_configured — META_BOUND_PAGE_TOKEN (veya META_PAGE_ACCESS_TOKEN) + META_PAGE_ID gerekli'
+    );
+    err.code = 'ENV';
+    throw err;
+  }
+  const graphVer = String(process.env.META_GRAPH_API_VERSION || 'v21.0').trim() || 'v21.0';
+  const url = `https://graph.facebook.com/${graphVer}/${encodeURIComponent(pageId)}/messages`;
+  const attachmentType = kind === 'image' ? 'image' : 'file';
+  const buf = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer || []);
+  const name = String(filename || 'dosya').slice(0, 120);
+  const mime = String(mimeType || 'application/octet-stream');
+
+  const buildForm = (tagged) => {
+    const form = new FormData();
+    form.append('recipient', JSON.stringify({ id: String(igScopedId) }));
+    if (tagged) {
+      form.append('messaging_type', 'MESSAGE_TAG');
+      form.append('tag', 'HUMAN_AGENT');
+    } else {
+      form.append('messaging_type', 'RESPONSE');
+    }
+    form.append(
+      'message',
+      JSON.stringify({
+        attachment: { type: attachmentType, payload: { is_reusable: true } }
+      })
+    );
+    form.append('filedata', new Blob([buf], { type: mime }), name);
+    return form;
+  };
+
+  const post = (tagged) =>
+    fetch(url, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      body: buildForm(tagged)
+    });
+
+  let res = await post(false);
+  let json = await res.json().catch(() => ({}));
+  if (!res.ok && allowHumanAgentTag && instagramWindowClosedError(json, res.status)) {
+    res = await post(true);
+    json = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const err = new Error('Instagram 24 saatlik yanıt penceresi kapalı.');
+      err.code = 'IG_WINDOW';
+      err.raw = json;
+      throw err;
+    }
+  }
+  if (!res.ok) {
+    const err = new Error(json?.error?.message || `instagram_media_http_${res.status}`);
+    err.code = 'META';
+    err.raw = json;
+    throw err;
+  }
+
+  const cap = String(caption || '').trim();
+  if (cap) {
+    try {
+      await sendCrmInstagramDm({ igScopedId, text: cap, allowHumanAgentTag });
+    } catch (e) {
+      console.warn('[crm-inbox] ek açıklaması gitmedi:', e instanceof Error ? e.message : e);
+    }
   }
   return { messageId: json?.message_id || json?.id || null, raw: json, tokenSource };
 }
