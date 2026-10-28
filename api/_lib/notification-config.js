@@ -159,22 +159,24 @@ export const NOTIFICATION_DEFINITIONS = [
     id: 'class_camera_off_notice',
     templateType: 'class_camera_off_notice',
     nameTr: 'Yoklama — kamera kapalı (veli)',
-    descriptionTr: 'Katıldı + kamera kapalı; Kaydet anında ilgili veliye.',
-    sendChannel: SEND_CHANNELS.META_API,
+    descriptionTr:
+      'Katıldı + kamera kapalı; Kaydet anında ilgili veliye, öğrencinin koçunun WhatsApp hattından (hat bağlı değilse Meta şablonuyla).',
+    sendChannel: SEND_CHANNELS.COACH_GATEWAY,
     mode: 'instant',
     cronJobKey: 'absent_student_notification',
-    coachScoped: false,
+    coachScoped: true,
     allowMetaFallback: true
   },
   {
     id: 'attendance_status_update',
     templateType: 'attendance_status_update',
     nameTr: 'Yoklama güncelleme — geç katıldı (veli)',
-    descriptionTr: 'absent→late; Meta Utility; yalnızca ilgili veli.',
-    sendChannel: SEND_CHANNELS.META_API,
+    descriptionTr:
+      'absent→late; yalnızca ilgili veliye, öğrencinin koçunun WhatsApp hattından (hat bağlı değilse Meta şablonuyla).',
+    sendChannel: SEND_CHANNELS.COACH_GATEWAY,
     mode: 'instant',
     cronJobKey: 'absent_student_notification',
-    coachScoped: false,
+    coachScoped: true,
     allowMetaFallback: true
   },
   {

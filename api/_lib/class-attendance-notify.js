@@ -404,7 +404,7 @@ export async function sendLateArrivalUpdateForStudent({
 
   const { data: student } = await supabaseAdmin
     .from('students')
-    .select('name, parent_phone')
+    .select('name, parent_phone, coach_id')
     .eq('id', studentId)
     .maybeSingle();
   if (!student) return { ok: false, note: 'student_not_found', student_id: studentId };
@@ -447,7 +447,9 @@ export async function sendLateArrivalUpdateForStudent({
     phone: parentPhone,
     templateType: LATE_UPDATE_KIND,
     vars,
-    plainText: text
+    plainText: text,
+    // Veliye öğrencinin kendi koçunun WhatsApp hattından gider
+    coachId: student.coach_id || null
   });
 
   await logAttendanceWa({
@@ -490,7 +492,7 @@ export async function sendCameraOffNoticeForStudent({
 
   const { data: student } = await supabaseAdmin
     .from('students')
-    .select('name, parent_phone')
+    .select('name, parent_phone, coach_id')
     .eq('id', studentId)
     .maybeSingle();
   if (!student) return { ok: false, note: 'student_not_found', student_id: studentId };
@@ -530,7 +532,9 @@ export async function sendCameraOffNoticeForStudent({
     phone: parentPhone,
     templateType: CAMERA_OFF_KIND,
     vars,
-    plainText: text
+    plainText: text,
+    // Veliye öğrencinin kendi koçunun WhatsApp hattından gider
+    coachId: student.coach_id || null
   });
 
   await logAttendanceWa({
