@@ -8,6 +8,8 @@ import { actorRoleSet, actorIsAdminLike } from '../api/_lib/actor-roles.js';
 import {
   getCrmInboundInstitutionId,
   sendCrmInstagramDm,
+  sendCrmSocialMedia,
+  sendCrmWhatsAppMedia,
   sendCrmWhatsAppTemplate,
   sendCrmWhatsAppText,
   upsertCrmMessage,
@@ -25,6 +27,8 @@ import {
   createOrReuseMetaMessageTemplate
 } from '../api/_lib/meta-template-create.js';
 import { diagnoseCrmInbox, ensureCrmInboxSchema, probeFacebookChannelSupport, FACEBOOK_CHANNEL_REPAIR_SQL } from '../api/_lib/crm-inbox-schema.js';
+import { prepareCrmOutboundMedia } from '../api/_lib/crm-outbound-media.js';
+import { uploadCrmOutboundFile } from '../api/_lib/meta-document-storage.js';
 import { listRecentMetaWebhookLogs } from '../api/_lib/meta-webhook-logs.js';
 import {
   markConversationMessagesDeleted,
@@ -1109,8 +1113,30 @@ export default async function handler(req, res) {
       const templateHeaderText = String(body.template_header_text || '').trim();
       const templateHeaderMediaUrl = String(body.template_header_media_url || '').trim();
       const templateButtonParams = Array.isArray(body.template_button_params) ? body.template_button_params : [];
+      const mediaB64 = String(body.media_base64 || '').trim();
       if (!conversationId) return res.status(400).json({ error: 'conversation_id_required' });
-      if (!templateName && !text) return res.status(400).json({ error: 'body_required' });
+      if (!templateName && !text && !mediaB64) return res.status(400).json({ error: 'body_required' });
+      if (templateName && mediaB64) {
+        return res.status(400).json({
+          error: 'template_and_media',
+          message: 'Şablon ile dosya birlikte gönderilemez.'
+        });
+      }
+      let prepared = null;
+      if (mediaB64) {
+        try {
+          prepared = prepareCrmOutboundMedia({
+            dataBase64: mediaB64,
+            mimeType: body.media_mime,
+            filename: body.media_filename
+          });
+        } catch (e) {
+          return res.status(400).json({
+            error: 'invalid_media',
+            message: e instanceof Error ? e.message : 'Dosya kabul edilmedi.'
+          });
+        }
+      }
 
       const { data: conv } = await supabaseAdmin
         .from('crm_conversations')
@@ -1131,6 +1157,18 @@ export default async function handler(req, res) {
 
       let sendResult = { ok: false, messageId: null, error: null };
       let outboundBody = text;
+      let hosted = null;
+      if (prepared && !text) outboundBody = prepared.kind === 'image' ? 'Fotoğraf' : prepared.filename;
+      if (prepared) {
+        hosted = await uploadCrmOutboundFile({
+          buffer: prepared.buffer,
+          filename: prepared.filename,
+          mimeType: prepared.mime
+        });
+        if (prepared.kind === 'document' && !hosted?.signedUrl) {
+          outboundBody = text ? `${text}\n${prepared.filename}` : prepared.filename;
+        }
+      }
       try {
         if (templateName) {
           outboundBody =
@@ -1183,6 +1221,27 @@ export default async function handler(req, res) {
               mode: 'social_text'
             };
           }
+        } else if (prepared && conv.channel === 'whatsapp') {
+          const r = await sendCrmWhatsAppMedia({
+            phone: conv.contact_identifier,
+            buffer: prepared.buffer,
+            mimeType: prepared.mime,
+            filename: prepared.filename,
+            caption: text,
+            kind: prepared.kind,
+            institutionId: conv.institution_id || institutionId
+          });
+          sendResult = { ok: true, messageId: r.messageId, error: null, mode: 'whatsapp_media' };
+        } else if (prepared) {
+          const r = await sendCrmSocialMedia({
+            igScopedId: conv.contact_identifier,
+            buffer: prepared.buffer,
+            mimeType: prepared.mime,
+            filename: prepared.filename,
+            caption: text,
+            kind: prepared.kind
+          });
+          sendResult = { ok: true, messageId: r.messageId, error: null, mode: 'social_media' };
         } else if (conv.channel === 'whatsapp') {
           const r = await sendCrmWhatsAppText({
             phone: conv.contact_identifier,
@@ -1210,7 +1269,8 @@ export default async function handler(req, res) {
         contactIdentifier: conv.contact_identifier,
         contactName: conv.contact_name,
         body: outboundBody,
-        messageType: templateName ? 'template' : 'text',
+        mediaUrl: hosted?.signedUrl || null,
+        messageType: templateName ? 'template' : prepared ? prepared.kind : 'text',
         messageId: sendResult.messageId,
         timestamp: Date.now(),
         direction: 'outbound',
@@ -1220,6 +1280,15 @@ export default async function handler(req, res) {
         leadId: conv.lead_id,
         payload: {
           send: sendResult,
+          media: prepared
+            ? {
+                filename: prepared.filename,
+                mime: prepared.mime,
+                kind: prepared.kind,
+                bytes: prepared.size,
+                storage_path: hosted?.path || null
+              }
+            : null,
           template: templateName
             ? {
                 name: templateName,

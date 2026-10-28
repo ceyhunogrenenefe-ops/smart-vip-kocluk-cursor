@@ -5,7 +5,14 @@ import { supabaseAdmin } from './supabase-admin.js';
 const BUCKET = String(process.env.META_DOCUMENT_BUCKET || 'question-help').trim() || 'question-help';
 const PREFIX = 'wa-parent-pdf';
 
-export async function uploadParentPdfForMeta({ buffer, filename, mimeType = 'application/pdf', expiresSec }) {
+export async function uploadParentPdfForMeta({
+  buffer,
+  filename,
+  mimeType = 'application/pdf',
+  expiresSec,
+  prefix = PREFIX,
+  maxTtl
+}) {
   const buf = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer || []);
   if (!buf.length) throw new Error('empty_document_buffer');
 
@@ -15,7 +22,8 @@ export async function uploadParentPdfForMeta({ buffer, filename, mimeType = 'app
       .trim()
       .replace(/[^\w.\-() ]+/g, '_')
       .slice(0, 80) || 'document.pdf';
-  const path = `${PREFIX}/${id}/${safeName}`;
+  const folder = String(prefix || PREFIX).replace(/^\/+|\/+$/g, '') || PREFIX;
+  const path = `${folder}/${id}/${safeName}`;
   const contentType = String(mimeType || 'application/pdf').trim() || 'application/pdf';
 
   const { error: uploadErr } = await supabaseAdmin.storage.from(BUCKET).upload(path, buf, {
@@ -28,9 +36,10 @@ export async function uploadParentPdfForMeta({ buffer, filename, mimeType = 'app
     throw err;
   }
 
+  const ceiling = Math.min(365 * 24 * 3600, Math.max(3600, Number(maxTtl) || 7 * 24 * 3600));
   const ttl = Math.min(
-    7 * 24 * 3600,
-    Math.max(600, Number(expiresSec) || Number(process.env.META_DOCUMENT_SIGNED_URL_SEC) || 7 * 24 * 3600)
+    ceiling,
+    Math.max(600, Number(expiresSec) || Number(process.env.META_DOCUMENT_SIGNED_URL_SEC) || ceiling)
   );
   const { data: signed, error: signErr } = await supabaseAdmin.storage
     .from(BUCKET)
@@ -47,4 +56,21 @@ export async function uploadParentPdfForMeta({ buffer, filename, mimeType = 'app
     signedUrl: signed.signedUrl,
     filename: safeName
   };
+}
+
+/** Gelen kutusu eki. Kovada tür yoksa gönderim sürer, önizleme bağlantısı boş kalır. */
+export async function uploadCrmOutboundFile({ buffer, filename, mimeType }) {
+  try {
+    return await uploadParentPdfForMeta({
+      buffer,
+      filename,
+      mimeType,
+      prefix: 'crm-outbound',
+      expiresSec: 30 * 24 * 3600,
+      maxTtl: 30 * 24 * 3600
+    });
+  } catch (e) {
+    console.warn('[crm-media] depolama:', e instanceof Error ? e.message : e);
+    return null;
+  }
 }

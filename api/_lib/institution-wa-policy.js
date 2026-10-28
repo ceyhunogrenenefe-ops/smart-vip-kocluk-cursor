@@ -139,6 +139,48 @@ export async function sendViaInstitutionGateway({ policy, phone, text }) {
   };
 }
 
+/** Kurum gateway oturumundan fotoğraf veya belge. Metin zorunlu değil. */
+export async function sendViaInstitutionGatewayMedia({ policy, phone, dataBase64, filename, mimetype, caption }) {
+  if (!policy?.gatewayUserId) {
+    return {
+      ok: false,
+      channel: 'institution_gateway',
+      error: `${policy?.institutionName || 'Kurum'}: gateway oturumu tanımlı değil — Meta'dan gönderilmedi`,
+      errorCode: 'INSTITUTION_GATEWAY_NOT_LINKED'
+    };
+  }
+  if (!String(dataBase64 || '').trim()) {
+    return { ok: false, channel: 'institution_gateway', error: 'Dosya boş', errorCode: 'MEDIA' };
+  }
+  const { getGatewaySessionStatus, sendGatewayDocumentMessage } = await import('./whatsapp-gateway-send.js');
+  const st = await getGatewaySessionStatus(policy.gatewayUserId, { skipHealth: true });
+  if (!st.ok || st.status !== 'connected') {
+    return {
+      ok: false,
+      channel: 'institution_gateway',
+      error: `${policy.institutionName || 'Kurum'} WhatsApp gateway bağlı değil — Meta'dan gönderilmedi`,
+      errorCode: 'INSTITUTION_GATEWAY_DISCONNECTED'
+    };
+  }
+  const sent = await sendGatewayDocumentMessage({
+    phone,
+    dataBase64,
+    filename,
+    mimetype,
+    caption,
+    sessionId: policy.gatewayUserId,
+    sessionCandidates: [policy.gatewayUserId],
+    allowSharedFallback: false
+  });
+  return {
+    ok: Boolean(sent.ok),
+    channel: 'institution_gateway',
+    sid: sent.gateway_message_id || sent.sid || null,
+    error: sent.ok ? null : sent.error || 'gateway_send_failed',
+    errorCode: sent.ok ? null : sent.errorCode || 'GATEWAY_SEND_FAILED'
+  };
+}
+
 /** Meta gönderimi engellendiğinde fırlatılan hata. */
 export function gatewayOnlyBlockedError(policy, detail = '') {
   const err = new Error(

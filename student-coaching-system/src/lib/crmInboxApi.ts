@@ -172,12 +172,18 @@ export function crmSendMessage(
     template_params?: string[];
     template_param_names?: string[];
     template_body?: string;
+  },
+  media?: {
+    media_base64: string;
+    media_mime: string;
+    media_filename: string;
   }
 ) {
   return inboxPost<{ ok: boolean; data: CrmMessage }>('send_message', {
     conversation_id: conversationId,
     body: text,
-    ...(template || {})
+    ...(template || {}),
+    ...(media || {})
   });
 }
 
