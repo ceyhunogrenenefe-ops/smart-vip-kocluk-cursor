@@ -8,10 +8,62 @@ function authHeaders(tok) {
   return { Authorization: `Bearer ${tok}` };
 }
 
+/*
+ * Şablon okumaları için süreç içi önbellek + istek sınırı sigortası.
+ *
+ * Şablon yeni WABA'da yokken her gönderim denemesi Graph'a ~4 okuma yapıyordu;
+ * tekrar deneme cron'ları bunu katlayınca WABA saatlik sınırı (#80008) sürekli
+ * dolu kalıyor ve şablonu kopyalamak bile mümkün olmuyordu.
+ *   - Başarılı GET yanıtları 2 dk önbellekte (boş liste dahil).
+ *   - #80008 vb. gelince Meta'nın bildirdiği süre kadar (en çok 30 dk) bu
+ *     süreçteki şablon okumaları ağa çıkmadan hata döner.
+ */
+const GET_CACHE_MS = 120_000;
+const getCache = new Map();
+let rateLimitedUntil = 0;
+const RATE_LIMIT_CODES = new Set([4, 17, 32, 613, 80008]);
+
+function waitMinutesFromHeader(value) {
+  try {
+    let max = 0;
+    for (const arr of Object.values(JSON.parse(String(value || '{}')))) {
+      for (const u of Array.isArray(arr) ? arr : []) max = Math.max(max, Number(u?.estimated_time_to_regain_access || 0));
+    }
+    return max;
+  } catch {
+    return 0;
+  }
+}
+
+export function clearMetaTemplateReadCache() {
+  getCache.clear();
+}
+
 async function graphGet(url, tok) {
+  const now = Date.now();
+  if (rateLimitedUntil > now) {
+    return {
+      ok: false,
+      status: 429,
+      json: { error: { code: 80008, message: 'Meta istek sınırı — kısa süre bekleniyor (yerel sigorta)' } }
+    };
+  }
+  const key = `${String(tok || '').slice(-12)}|${url}`;
+  const hit = getCache.get(key);
+  if (hit && now - hit.at < GET_CACHE_MS) return hit.result;
+
   const res = await fetch(url, { headers: authHeaders(tok) });
   const json = await res.json().catch(() => ({}));
-  return { ok: res.ok, status: res.status, json };
+  const result = { ok: res.ok, status: res.status, json };
+  if (res.ok) {
+    if (getCache.size > 500) getCache.clear();
+    getCache.set(key, { at: now, result });
+  } else if (RATE_LIMIT_CODES.has(Number(json?.error?.code || 0))) {
+    const mins = Math.min(30, Math.max(1, waitMinutesFromHeader(res.headers.get('x-business-use-case-usage')) || 5));
+    rateLimitedUntil = now + mins * 60_000;
+    console.warn('[meta-templates-sync] istek sınırı, şablon okumaları duraklatıldı', { minutes: mins });
+  }
+  return result;
 }
 
 function parseWabaFromGraphField(waba) {
@@ -706,6 +758,7 @@ const CRM_TPL_CACHE_MS = 60_000;
 
 export function invalidateCrmTemplateCache() {
   crmApprovedTplCache = { at: 0, payload: null };
+  getCache.clear();
 }
 
 export function isMetaTemplatePendingStatus(status) {
