@@ -987,6 +987,47 @@ export function sortCatalogExamsByRecencyDesc(rows) {
   return [...(rows || [])].sort((a, b) => catalogExamRecencyMs(b) - catalogExamRecencyMs(a));
 }
 
+/** Öğrencinin sınavı girdiği / sonucun oluştuğu an — sınav tanım tarihi (examDate) değil. */
+const EDESIS_RESULT_TAKEN_AT_KEYS = [
+  'tamamlanmaZamani',
+  'completionTime',
+  'processedTime',
+  'submittedAt',
+  'resultTime',
+  'creationTime',
+  'createdAt',
+  'createdDate',
+  'lastModificationTime',
+  'girisTarihi',
+  'bitisTarihi'
+];
+
+export function edesisResultTakenAtMs(row) {
+  const flat = flattenEdesisRow(row);
+  let best = 0;
+  for (const k of EDESIS_RESULT_TAKEN_AT_KEYS) {
+    const t = Date.parse(getPropCi(flat, [k]));
+    if (Number.isFinite(t) && t > best) best = t;
+  }
+  if (!best) {
+    const d = String(pickStr(flat, ['examDate', 'sinavTarihi', 'sinav_tarihi', 'date']) || '').slice(0, 10);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(d)) {
+      const t = Date.parse(`${d}T12:00:00`);
+      if (Number.isFinite(t)) best = t;
+    }
+  }
+  return best;
+}
+
+/** Sonuçlarım: en son girilen deneme üstte (öğrenci giriş / tamamlanma zamanı). */
+export function sortEdesisResultRowsByTakenDesc(rows) {
+  return [...(rows || [])].sort((a, b) => {
+    const diff = edesisResultTakenAtMs(b) - edesisResultTakenAtMs(a);
+    if (diff) return diff;
+    return String(pickEdesisResultExamId(b) || '').localeCompare(String(pickEdesisResultExamId(a) || ''));
+  });
+}
+
 function catalogExamRecencyMs(exam) {
   const flat = flattenEdesisRow(exam);
   let best = 0;
@@ -4282,6 +4323,16 @@ export function mapEdesisRowToExamDraft(row, { studentId, institutionId }) {
     : `edesis-${studentId}-${examDate}-${examType}`.replace(/\s+/g, '_');
 
   const edesisStudentId = pickStr(source, ['studentId', 'ogrenciId', 'ogrenci_id']);
+  const takenAtMs = edesisResultTakenAtMs(row);
+  const recordedAt =
+    pickStr(source, [
+      'tamamlanmaZamani',
+      'processedTime',
+      'creationTime',
+      'createdAt',
+      'createdDate',
+      'lastModificationTime'
+    ]) || null;
 
   return {
     id,
@@ -4295,7 +4346,8 @@ export function mapEdesisRowToExamDraft(row, { studentId, institutionId }) {
     edesisExamId: examId || undefined,
     edesisStudentId: edesisStudentId || undefined,
     notes: `Edesis v1${examId ? ` exam #${examId}` : ''}`,
-    createdAt: new Date().toISOString(),
+    takenAtMs,
+    createdAt: recordedAt || new Date().toISOString(),
     institutionId
   };
 }
@@ -5018,6 +5070,7 @@ export async function fetchEdesisStudentResults(edesisStudentId, cfgOverride = {
     const enriched = await enrichEdesisRowsWithSubjectDetails(rows, localCfg, { maxStudents: 25 });
     rows = enriched.rows;
   }
+  rows = sortEdesisResultRowsByTakenDesc(rows);
   return {
     rows,
     totalCount: rows.length,
