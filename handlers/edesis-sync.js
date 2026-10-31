@@ -573,6 +573,7 @@ function mapHubResultExams(rows, platformId, edesisStudentId, institutionId) {
       examTitle: draft.examTitle || draft.examType,
       examType: draft.examType,
       examDate: draft.examDate,
+      takenAt: draft.takenAtMs || null,
       totalNet: draft.totalNet,
       correct: totals.correct,
       wrong: totals.wrong,
@@ -582,6 +583,10 @@ function mapHubResultExams(rows, platformId, edesisStudentId, institutionId) {
       subjects: draft.subjects || [],
       draft
     };
+  }).sort((a, b) => {
+    const diff = (b.takenAt || 0) - (a.takenAt || 0);
+    if (diff) return diff;
+    return String(b.examDate || '').localeCompare(String(a.examDate || ''));
   });
 }
 
