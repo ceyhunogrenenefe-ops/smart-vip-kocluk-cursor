@@ -17,6 +17,7 @@ import makeWASocket, {
   makeCacheableSignalKeyStore,
 } from '@whiskeysockets/baileys';
 import { createMessageStore, createMsgRetryCounterCache } from './message-store.js';
+import { isSelfRecipient, SELF_RECIPIENT_GATEWAY_HINT } from './self-recipient.js';
 import { forwardInboundToRegistration } from './registration-inbound-forward.js';
 
 const SILENCE_SIGNAL_SESSION_LOGS = String(process.env.SILENCE_SIGNAL_SESSION_LOGS || '1') !== '0';
@@ -1052,6 +1053,16 @@ function linkedPhoneFromSession(session) {
   return phoneDigitsFromJid(jid);
 }
 
+function selfSendBlocked(session, recipientDigits) {
+  const linked = linkedPhoneFromSession(session);
+  if (!linked || !recipientDigits) return null;
+  if (!isSelfRecipient(recipientDigits, linked)) return null;
+  return {
+    error: 'self_recipient_not_allowed',
+    hint: SELF_RECIPIENT_GATEWAY_HINT,
+  };
+}
+
 function sessionPayload(coachId, session, extra = {}) {
   const st = session?.status || 'idle';
   const linkedPhone = st === 'connected' ? linkedPhoneFromSession(session) : null;
@@ -1798,6 +1809,14 @@ app.post('/sessions/:coachId/send', requireGatewayAuth, requireCoachScope, async
         throw err;
       }
 
+      const selfBlock = selfSendBlocked(session, digits);
+      if (selfBlock) {
+        const err = new Error(selfBlock.error);
+        err.httpStatus = 400;
+        err.hint = selfBlock.hint;
+        throw err;
+      }
+
       resolvedJid = await resolveRecipientJid(session.sock, digits);
       const pnJid = ensurePhoneJid(digits);
       return sendTextWithDeliveryCheck(
@@ -1892,6 +1911,10 @@ app.post('/sessions/:coachId/send', requireGatewayAuth, requireCoachScope, async
         hint ||
         'Numara WhatsApp\'ta kayıtlı görünmüyor veya format hatalı. TR cep için 05xx veya 905xx kullanın.';
     }
+    if (outError === 'self_recipient_not_allowed') {
+      status = 400;
+      hint = hint || SELF_RECIPIENT_GATEWAY_HINT;
+    }
     res.status(status).json({
       ok: false,
       error: outError,
@@ -1952,6 +1975,14 @@ app.post('/sessions/:coachId/send-document', requireGatewayAuth, requireCoachSco
             ? 'Bu hesabın kendi WhatsApp oturumu bağlı değil — Koç WhatsApp ayarlarından QR ile bağlayın.'
             : `Bu oturum bağlı değil. Vercel BOOK_ORDER_GATEWAY_SESSION_ID şunlardan biri olmalı: ${live.join(', ')}`
           : 'WhatsApp bağlı değil — Koç WhatsApp’tan QR ile bağlayın.';
+        throw err;
+      }
+
+      const selfBlockDoc = selfSendBlocked(session, digits);
+      if (selfBlockDoc) {
+        const err = new Error(selfBlockDoc.error);
+        err.httpStatus = 400;
+        err.hint = selfBlockDoc.hint;
         throw err;
       }
 
