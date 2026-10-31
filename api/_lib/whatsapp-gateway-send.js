@@ -5,6 +5,7 @@
 import { signAuthToken } from './auth.js';
 import { normalizePhoneToE164 } from './phone-whatsapp.js';
 import { resolveGatewayUpstream, probeGatewayHealth } from './gateway-upstream.js';
+import { isSelfRecipient, SELF_RECIPIENT_GATEWAY_HINT } from './gateway-self-recipient.js';
 
 function gatewayApiKey() {
   return String(
@@ -481,6 +482,21 @@ export async function sendGatewayTextMessage({
     return { ok: false, channel: 'gateway', error: 'Mesaj metni boş.', errorCode: 'MESSAGE' };
   }
 
+  const linkedForSelfCheck = await getGatewaySessionStatus(sid, { skipHealth: true });
+  const linkedPhone =
+    linkedForSelfCheck?.raw?.linkedPhone ||
+    linkedForSelfCheck?.raw?.linked_phone ||
+    null;
+  if (isSelfRecipient(e164, linkedPhone)) {
+    return {
+      ok: false,
+      channel: 'gateway',
+      error: SELF_RECIPIENT_GATEWAY_HINT,
+      errorCode: 'SELF_RECIPIENT_NOT_ALLOWED',
+      gateway_session_id: sid
+    };
+  }
+
   const retryableErrors = new Set([
     'send_message_timeout',
     'gateway_upstream_timeout',
@@ -488,6 +504,7 @@ export async function sendGatewayTextMessage({
     'send_precheck_timeout',
     'gateway_fetch_failed'
   ]);
+  const nonRetryableErrors = new Set(['self_recipient_not_allowed']);
 
   const hints = {
     session_not_connected: 'Gateway oturumu düştü — QR ile yeniden bağlayın veya birkaç saniye sonra tekrar deneyin.',
@@ -498,7 +515,8 @@ export async function sendGatewayTextMessage({
     send_no_message_id:
       'WhatsApp gateway mesaj kimliği dönmedi — QR oturumunu yenileyip tekrar deneyin.',
     send_not_acknowledged:
-      'WhatsApp sunucusu mesajı onaylamadı — oturum kopuk olabilir; QR ile yeniden bağlanın.'
+      'WhatsApp sunucusu mesajı onaylamadı — oturum kopuk olabilir; QR ile yeniden bağlanın.',
+    self_recipient_not_allowed: SELF_RECIPIENT_GATEWAY_HINT
   };
 
   const payload = { phone: e164.replace(/^\+/, ''), message: text };
@@ -544,7 +562,7 @@ export async function sendGatewayTextMessage({
     }
 
     lastErr = String(r.data?.error || 'gateway_send_failed');
-    if (!retryableErrors.has(lastErr) || attempt >= maxAttempts) {
+    if (nonRetryableErrors.has(lastErr) || !retryableErrors.has(lastErr) || attempt >= maxAttempts) {
       return {
         ok: false,
         channel: 'gateway',
