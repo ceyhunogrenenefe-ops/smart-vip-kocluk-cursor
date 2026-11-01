@@ -18,6 +18,192 @@ function canManage(actor, tags) {
   );
 }
 
+function readBody(req) {
+  return typeof req.body === 'string' ? JSON.parse(req.body || '{}') : req.body || {};
+}
+
+/** ig_user_id kolonu henüz yoksa (SQL uygulanmadıysa) */
+function igColumnMissing(error) {
+  return /ig_user_id/i.test(String(error?.message || '')) && /column|schema cache|PGRST204/i.test(String(error?.message || '') + String(error?.code || ''));
+}
+
+/**
+ * Ek Instagram hesapları: liste / ekle / güncelle / sil.
+ * Sayfa erişim anahtarı yanıtta her zaman maskelidir.
+ */
+async function handleAccounts(req, res, { institutionId, actor }) {
+  const acc = await import('../api/_lib/crm-instagram-accounts.js');
+  const table = acc.INSTAGRAM_ACCOUNTS_TABLE;
+  const stored = acc.storedInstitutionId(institutionId);
+  const scope = (q) => (stored ? q.eq('institution_id', stored) : q.is('institution_id', null));
+
+  if (req.method === 'GET') {
+    const { rows, tableMissing } = await acc.listInstagramAccountRows(institutionId);
+    let primary = { ig_user_id: null, username: null };
+    try {
+      const { resolveMetaConnection } = await import('../api/_lib/crm-meta-connection.js');
+      const conn = await resolveMetaConnection(institutionId);
+      primary = {
+        ig_user_id: (await acc.primaryInstagramIgUserId(institutionId)) || null,
+        username: conn?.instagram?.username || null
+      };
+    } catch {
+      /* birincil hesap bilgisi opsiyonel */
+    }
+    return res.status(200).json({
+      ok: true,
+      table_missing: tableMissing,
+      primary,
+      items: rows.map(acc.publicAccountRow)
+    });
+  }
+
+  if (req.method === 'POST') {
+    const body = readBody(req);
+    const pageId = String(body.page_id || '').trim();
+    const pageToken = String(body.page_token || '').trim();
+    if (!pageId || !pageToken) {
+      return res.status(400).json({ error: 'page_required', message: 'Sayfa ID ve sayfa erişim anahtarı gerekli.' });
+    }
+    const check = await acc.verifyPageInstagramAccount({ pageId, token: pageToken });
+    if (!check.ok) {
+      return res.status(400).json({ error: 'verify_failed', message: check.error });
+    }
+    const primaryId = await acc.primaryInstagramIgUserId(institutionId);
+    if (primaryId && primaryId === check.ig_user_id) {
+      return res.status(400).json({
+        error: 'primary_account',
+        message: 'Bu hesap zaten ana Instagram hesabı; ek hesap olarak eklenemez.'
+      });
+    }
+    const existing = await acc.getInstagramAccountRow(check.ig_user_id);
+    if (existing && !acc.sameInstitution(existing.institution_id, institutionId)) {
+      return res.status(409).json({ error: 'account_taken', message: 'Bu Instagram hesabı başka bir kuruma bağlı.' });
+    }
+
+    const subscription = await acc.subscribePageToApp({ pageId, token: pageToken });
+    const now = new Date().toISOString();
+    const row = {
+      institution_id: stored,
+      ig_user_id: check.ig_user_id,
+      ig_username: check.ig_username,
+      page_id: pageId,
+      page_token: pageToken,
+      is_active: body.is_active !== false,
+      last_verified_at: now,
+      last_verify_error: subscription.ok ? null : `Webhook aboneliği: ${String(subscription.error || '').slice(0, 300)}`,
+      updated_at: now
+    };
+    if (!existing) row.created_by = actor.sub || null;
+    const { data, error } = await supabaseAdmin
+      .from(table)
+      .upsert(row, { onConflict: 'ig_user_id' })
+      .select('*')
+      .maybeSingle();
+    if (error) {
+      if (acc.accountsTableMissing(error)) {
+        return res.status(400).json({
+          error: 'table_missing',
+          message: 'crm_instagram_accounts tablosu yok — önce SQL dosyasını uygulayın.'
+        });
+      }
+      return res.status(500).json({ error: error.message });
+    }
+    return res.status(200).json({
+      ok: true,
+      item: acc.publicAccountRow(data),
+      page_name: check.page_name || null,
+      subscription
+    });
+  }
+
+  if (req.method === 'PATCH') {
+    const body = readBody(req);
+    const id = String(body.id || '').trim();
+    if (!id) return res.status(400).json({ error: 'id_required' });
+    const { data: current, error: readErr } = await scope(
+      supabaseAdmin.from(table).select('*').eq('id', id)
+    ).maybeSingle();
+    if (readErr) return res.status(500).json({ error: readErr.message });
+    if (!current) return res.status(404).json({ error: 'not_found' });
+
+    const patch = { updated_at: new Date().toISOString() };
+    if (body.is_active !== undefined) patch.is_active = body.is_active === true;
+
+    let subscription;
+    const newToken = String(body.page_token || '').trim();
+    const newPageId = String(body.page_id || '').trim();
+    if (newToken || newPageId) {
+      const pageId = newPageId || current.page_id;
+      const token = newToken || current.page_token;
+      const check = await acc.verifyPageInstagramAccount({ pageId, token });
+      if (!check.ok) return res.status(400).json({ error: 'verify_failed', message: check.error });
+      if (check.ig_user_id !== current.ig_user_id) {
+        return res.status(400).json({
+          error: 'account_mismatch',
+          message: 'Bu sayfa farklı bir Instagram hesabına bağlı; yeni hesap olarak ekleyin.'
+        });
+      }
+      subscription = await acc.subscribePageToApp({ pageId, token });
+      patch.page_id = pageId;
+      patch.page_token = token;
+      patch.ig_username = check.ig_username || current.ig_username || null;
+      patch.last_verified_at = patch.updated_at;
+      patch.last_verify_error = subscription.ok
+        ? null
+        : `Webhook aboneliği: ${String(subscription.error || '').slice(0, 300)}`;
+    }
+
+    const { data, error } = await scope(supabaseAdmin.from(table).update(patch).eq('id', id))
+      .select('*')
+      .maybeSingle();
+    if (error) return res.status(500).json({ error: error.message });
+    return res.status(200).json({ ok: true, item: acc.publicAccountRow(data), ...(subscription ? { subscription } : {}) });
+  }
+
+  if (req.method === 'DELETE') {
+    const id = String(req.query?.id || '').trim();
+    if (!id) return res.status(400).json({ error: 'id_required' });
+    const { data: current, error: readErr } = await scope(
+      supabaseAdmin.from(table).select('id, ig_user_id').eq('id', id)
+    ).maybeSingle();
+    if (readErr) return res.status(500).json({ error: readErr.message });
+    if (!current) return res.status(404).json({ error: 'not_found' });
+
+    const { error } = await scope(supabaseAdmin.from(table).delete().eq('id', id));
+    if (error) return res.status(500).json({ error: error.message });
+
+    // Bu hesaba bağlı otomasyonlar artık gönderemez: kapat (silme — kayıt kalsın)
+    let q = supabaseAdmin
+      .from(TABLE)
+      .update({ is_active: false, updated_at: new Date().toISOString() })
+      .eq('ig_user_id', current.ig_user_id);
+    q = institutionId ? q.eq('institution_id', institutionId) : q;
+    await q.then(() => null, () => null);
+    return res.status(200).json({ ok: true });
+  }
+
+  return res.status(405).json({ error: 'Method not allowed' });
+}
+
+/**
+ * Otomasyonda seçilen hesap geçerli mi? Boş → ana hesap (null).
+ * @returns {Promise<{ ok: true, value: string|null } | { ok: false, message: string }>}
+ */
+async function validateAutomationAccount(raw, institutionId) {
+  const ig = String(raw || '').trim();
+  if (!ig) return { ok: true, value: null };
+  const acc = await import('../api/_lib/crm-instagram-accounts.js');
+  const primaryId = await acc.primaryInstagramIgUserId(institutionId);
+  // Ana hesap seçildiyse null saklanır: eski otomasyonlarla aynı davranış
+  if (primaryId && primaryId === ig) return { ok: true, value: null };
+  const row = await acc.getInstagramAccountRow(ig);
+  if (!row || !acc.sameInstitution(row.institution_id, institutionId)) {
+    return { ok: false, message: 'Seçilen Instagram hesabı bulunamadı.' };
+  }
+  return { ok: true, value: ig };
+}
+
 function sanitizeKeywords(raw) {
   const arr = Array.isArray(raw)
     ? raw
@@ -45,11 +231,31 @@ export default async function handler(req, res) {
   const op = String(req.query?.op || '').trim();
 
   try {
-    /** Otomasyon kurarken gönderi seçim listesi */
+    /** Ek Instagram hesapları */
+    if (op === 'accounts') {
+      return await handleAccounts(req, res, { institutionId, actor });
+    }
+
+    /** Otomasyon kurarken gönderi seçim listesi (opsiyonel ig_user_id: ek hesap) */
     if (req.method === 'GET' && op === 'media') {
       const { listInstagramMedia } = await import('../api/_lib/crm-inbox.js');
+      let override;
+      const mediaIg = String(req.query?.ig_user_id || '').trim();
+      if (mediaIg) {
+        const acc = await import('../api/_lib/crm-instagram-accounts.js');
+        const hesap = await acc.resolveInstagramAccount({ institutionId, igUserId: mediaIg });
+        if (hesap === null) {
+          return res.status(200).json({
+            ok: false,
+            items: [],
+            error: 'account_inactive',
+            hint: 'Seçilen Instagram hesabı pasif ya da erişim anahtarı eksik.'
+          });
+        }
+        override = acc.sendOverrideFor(hesap);
+      }
       try {
-        const items = await listInstagramMedia({ limit: Number(req.query?.limit) || 25 });
+        const items = await listInstagramMedia({ limit: Number(req.query?.limit) || 25, override });
         return res.status(200).json({ ok: true, items });
       } catch (e) {
         return res.status(200).json({
@@ -117,7 +323,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'POST' || req.method === 'PATCH') {
-      const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : req.body || {};
+      const body = readBody(req);
       const id = String(body.id || '').trim();
 
       const row = {
@@ -144,6 +350,17 @@ export default async function handler(req, res) {
         updated_at: new Date().toISOString()
       };
 
+      /**
+       * Hangi Instagram hesabında çalışacak? Boş / ana hesap → null (eski
+       * davranış). Alan hiç gönderilmezse dokunulmaz.
+       */
+      const hasAccountField = Object.prototype.hasOwnProperty.call(body, 'ig_user_id');
+      if (hasAccountField) {
+        const v = await validateAutomationAccount(body.ig_user_id, institutionId);
+        if (!v.ok) return res.status(400).json({ error: 'account_invalid', message: v.message });
+        row.ig_user_id = v.value;
+      }
+
       if (!row.keywords.length) return res.status(400).json({ error: 'keywords_required' });
       if (!row.dm_text) {
         return res.status(400).json({
@@ -154,18 +371,35 @@ export default async function handler(req, res) {
         });
       }
 
-      if (id) {
-        let q = supabaseAdmin.from(TABLE).update(row).eq('id', id);
-        if (institutionId) q = q.eq('institution_id', institutionId);
-        const { data, error } = await q.select('*').maybeSingle();
-        if (error) return res.status(500).json({ error: error.message });
-        if (!data) return res.status(404).json({ error: 'not_found' });
-        return res.status(200).json({ ok: true, item: data });
+      /**
+       * ig_user_id kolonu henüz yoksa (SQL uygulanmadı): ana hesap seçiliyken
+       * alan atlanır ve eskisi gibi kaydedilir; ek hesap seçiliyse açıkça uyar.
+       */
+      const save = async (r) => {
+        if (id) {
+          let q = supabaseAdmin.from(TABLE).update(r).eq('id', id);
+          if (institutionId) q = q.eq('institution_id', institutionId);
+          return q.select('*').maybeSingle();
+        }
+        return supabaseAdmin
+          .from(TABLE)
+          .insert({ ...r, created_by: actor.sub || null })
+          .select('*')
+          .maybeSingle();
+      };
+      let { data, error } = await save(row);
+      if (error && 'ig_user_id' in row && igColumnMissing(error)) {
+        if (row.ig_user_id) {
+          return res.status(400).json({
+            error: 'account_column_missing',
+            message: 'Ek hesap seçimi için veritabanı güncellemesi (SQL) henüz uygulanmamış.'
+          });
+        }
+        const { ig_user_id: _omit, ...rest } = row;
+        ({ data, error } = await save(rest));
       }
-
-      row.created_by = actor.sub || null;
-      const { data, error } = await supabaseAdmin.from(TABLE).insert(row).select('*').maybeSingle();
       if (error) return res.status(500).json({ error: error.message });
+      if (id && !data) return res.status(404).json({ error: 'not_found' });
       return res.status(200).json({ ok: true, item: data });
     }
 

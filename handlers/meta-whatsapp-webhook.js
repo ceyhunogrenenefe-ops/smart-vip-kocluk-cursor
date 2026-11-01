@@ -491,7 +491,14 @@ export default async function handler(req, res) {
             console.warn('[meta-webhook] ig comment ingest:', e instanceof Error ? e.message : e);
           }
           try {
-            const igc = await syncInstagramCommentsToCrm(commentChanges);
+            /**
+             * entry.id = yorumu alan IG işletme hesabı. Ek hesaplardan gelen
+             * yorumlarda otomasyon o hesabın anahtarıyla çalışır; birincil
+             * hesapta davranış aynen korunur.
+             */
+            const igc = await syncInstagramCommentsToCrm(commentChanges, {
+              accountIgUserId: entry?.id != null ? String(entry.id) : null
+            });
             crmIgSync = {
               processed: Number(crmIgSync?.processed || 0) + Number(igc?.processed || 0),
               comments: Number(igc?.processed || 0)

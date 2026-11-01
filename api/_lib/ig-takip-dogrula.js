@@ -37,24 +37,31 @@ export function desteklenmiyorMu(hataMetni, kod) {
  * Kullanıcının hesabı takip edip etmediğini sorar.
  * @returns {{takipEdiyor: boolean|null, desteklenmiyor: boolean, hata?: string, username?: string}}
  */
-export async function takipDurumunuOku({ institutionId, igsid }) {
+/**
+ * @param {{ institutionId?: string|null, igsid: string, token?: string }} args
+ *   token: ek Instagram hesabının sayfa anahtarı; verilmezse kurumun /
+ *   platformun bağlantısı kullanılır (eski davranış).
+ */
+export async function takipDurumunuOku({ institutionId, igsid, token: tokenOverride }) {
   const kullanici = String(igsid || '').trim();
   if (!kullanici) {
     return { takipEdiyor: null, desteklenmiyor: true, hata: 'Instagram kullanıcı kimliği yok.' };
   }
 
   let baglanti;
-  try {
-    baglanti = await resolveMetaConnection(institutionId);
-  } catch (e) {
-    return {
-      takipEdiyor: null,
-      desteklenmiyor: true,
-      hata: `Meta bağlantısı okunamadı: ${e instanceof Error ? e.message : String(e)}`
-    };
+  if (!String(tokenOverride || '').trim()) {
+    try {
+      baglanti = await resolveMetaConnection(institutionId);
+    } catch (e) {
+      return {
+        takipEdiyor: null,
+        desteklenmiyor: true,
+        hata: `Meta bağlantısı okunamadı: ${e instanceof Error ? e.message : String(e)}`
+      };
+    }
   }
 
-  const token = String(baglanti?.instagram?.token || '').trim();
+  const token = String(tokenOverride || baglanti?.instagram?.token || '').trim();
   if (!token) {
     return {
       takipEdiyor: null,

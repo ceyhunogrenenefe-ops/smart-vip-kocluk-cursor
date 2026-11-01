@@ -5,7 +5,7 @@ import {
   normalizeForMatch,
   pickAutomation,
   renderAutomationText,
-  tokenize, mesajdakiBagi} from './crm-comment-automation-core.js';
+  tokenize, mesajdakiBagi, automationsForAccount } from './crm-comment-automation-core.js';
 
 describe('anahtar kelime eşleştirme', () => {
   const kw = ['LGS'];
@@ -145,4 +145,46 @@ describe('mesajdakiBagi — otomasyonlar arasi tekillestirme', () => {
   assert.equal(mesajdakiBagi(null), null);
   });
 
+});
+
+describe('automationsForAccount — çoklu Instagram hesabı', () => {
+  const eski = { id: 'eski', ig_user_id: null, keywords: ['LGS'], created_at: '2026-01-01' };
+  const eskiBos = { id: 'eskiBos', keywords: ['LGS'], created_at: '2026-01-02' };
+  const anaAcik = { id: 'anaAcik', ig_user_id: '111', keywords: ['LGS'], created_at: '2026-01-03' };
+  const ek = { id: 'ek', ig_user_id: '222', keywords: ['LGS'], created_at: '2026-01-04' };
+  const hepsi = [eski, eskiBos, anaAcik, ek];
+  const idler = (l) => l.map((a) => a.id).sort();
+
+  it('birincil hesapta hesapsız (eski) otomasyonlar + o hesaba atananlar çalışır', () => {
+    assert.deepEqual(
+      idler(automationsForAccount(hepsi, { accountIgUserId: '111', isPrimary: true })),
+      ['anaAcik', 'eski', 'eskiBos']
+    );
+  });
+
+  it('ek hesapta yalnız o hesaba atanmış otomasyonlar çalışır', () => {
+    assert.deepEqual(idler(automationsForAccount(hepsi, { accountIgUserId: '222', isPrimary: false })), ['ek']);
+  });
+
+  it('eski otomasyonlar ek hesaba sızmaz', () => {
+    assert.deepEqual(idler(automationsForAccount([eski, eskiBos], { accountIgUserId: '333', isPrimary: false })), []);
+  });
+
+  it('hesap bilgisi yoksa (eski çağrı) yalnız hesapsız otomasyonlar çalışır', () => {
+    assert.deepEqual(idler(automationsForAccount(hepsi)), ['eski', 'eskiBos']);
+    assert.deepEqual(idler(automationsForAccount(hepsi, { accountIgUserId: '', isPrimary: true })), ['eski', 'eskiBos']);
+  });
+
+  it('pickAutomation ile birlikte doğru hesabın otomasyonu seçilir', () => {
+    const hit = pickAutomation(automationsForAccount(hepsi, { accountIgUserId: '222', isPrimary: false }), {
+      mediaId: 'm1',
+      text: 'lgs'
+    });
+    assert.equal(hit?.automation?.id, 'ek');
+  });
+
+  it('boş / geçersiz girdi', () => {
+    assert.deepEqual(automationsForAccount(null, { accountIgUserId: '1' }), []);
+    assert.deepEqual(automationsForAccount([null, undefined], { isPrimary: true }), []);
+  });
 });
