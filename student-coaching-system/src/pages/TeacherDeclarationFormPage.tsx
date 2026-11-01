@@ -18,6 +18,7 @@ type Form = {
   period_label: string;
   status: string;
   editable: boolean;
+  correction_note?: string | null;
   submitted_at: string | null;
   lines: Array<Record<string, unknown>>;
   kinds: Kind[];
@@ -260,6 +261,12 @@ export default function TeacherDeclarationFormPage() {
       </header>
 
       <main className="mx-auto max-w-2xl space-y-4 p-4">
+        {form?.correction_note ? (
+          <div className="rounded-2xl border border-orange-200 bg-orange-50 px-4 py-3 text-sm text-orange-950">
+            <p className="font-semibold">Yönetici düzeltme istedi</p>
+            <p className="mt-1 whitespace-pre-wrap">{form.correction_note}</p>
+          </div>
+        ) : null}
         {(form?.kinds || []).map((k) => {
           const kendi = lines.map((l, i) => ({ l, i })).filter((x) => x.l.kind === k.id);
           const ogrenciSec = k.id === 'private' || k.id === 'guidance';

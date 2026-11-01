@@ -27,6 +27,7 @@ import {
   ensureDeclarationsForPeriod,
   loadActiveWorkerIds,
   loadDeclarationSettings,
+  sendDeclarationCorrection,
   sendDeclarationMessages
 } from '../api/_lib/teacher-declaration-notify.js';
 
@@ -289,22 +290,64 @@ export default async function handler(req, res) {
       });
     }
 
-    /** Öğretmene düzeltme izni ver */
+    /** Yanlış beyanı notla birlikte öğretmene geri gönder */
     if (req.method === 'POST' && op === 'allow-edit') {
       const id = String(body.id || '').trim();
       if (!id) return res.status(400).json({ error: 'id_required' });
-      const { error } = await supabaseAdmin
+      const correctionNote = String(body.correction_note || body.note || '').trim();
+      if (!correctionNote) {
+        return res.status(400).json({
+          error: 'correction_note_required',
+          hint: 'Düzeltme notu yazın. Öğretmen bu notu WhatsApp mesajında ve formda görür.'
+        });
+      }
+      if (correctionNote.length > 1000) {
+        return res.status(400).json({
+          error: 'correction_note_too_long',
+          hint: 'Düzeltme notu en fazla 1000 karakter olabilir.'
+        });
+      }
+
+      const { data: current, error: readErr } = await supabaseAdmin
         .from(DECL)
-        .update({
-          edit_allowed: true,
-          edit_allowed_by: actor.sub || null,
-          edit_allowed_at: new Date().toISOString(),
-          status: 'reopened',
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', id);
+        .select('id, status')
+        .eq('id', id)
+        .maybeSingle();
+      if (readErr) return res.status(500).json({ error: readErr.message });
+      if (!current) return res.status(404).json({ error: 'not_found' });
+      if (current.status !== 'submitted' && current.status !== 'reopened') {
+        return res.status(409).json({
+          error: 'not_submitted',
+          hint: 'Düzeltme, öğretmen beyanı gönderdikten sonra yollanır.'
+        });
+      }
+
+      const now = new Date().toISOString();
+      const patch = {
+        edit_allowed: true,
+        edit_allowed_by: actor.sub || null,
+        edit_allowed_at: now,
+        status: 'reopened',
+        correction_note: correctionNote,
+        updated_at: now
+      };
+      let { error } = await supabaseAdmin.from(DECL).update(patch).eq('id', id);
+      if (error && /correction_note/i.test(error.message || '')) {
+        delete patch.correction_note;
+        ({ error } = await supabaseAdmin.from(DECL).update(patch).eq('id', id));
+      }
       if (error) return res.status(500).json({ error: error.message });
-      return res.status(200).json({ ok: true, message: 'Öğretmen formunu düzeltebilir.' });
+
+      const sent = await sendDeclarationCorrection({ declarationId: id, note: correctionNote });
+      const message = sent.ok
+        ? 'Düzeltme öğretmene gönderildi. Form yeniden açıldı.'
+        : `Form yeniden açıldı. WhatsApp gönderilemedi: ${sent.error || 'bilinmeyen hata'}`;
+      return res.status(200).json({
+        ok: true,
+        message,
+        whatsapp_ok: Boolean(sent.ok),
+        url: sent.url || null
+      });
     }
 
     /** Formun bağlantısını yöneticiye göster — öğretmene elden iletmek için */

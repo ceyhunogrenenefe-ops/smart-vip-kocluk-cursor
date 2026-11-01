@@ -144,6 +144,7 @@ export default async function handler(req, res) {
         period_label: periodLabel(decl.period_month),
         status: decl.status,
         submitted_at: decl.submitted_at,
+        correction_note: decl.status === 'reopened' ? decl.correction_note || null : null,
         // Gönderilmiş beyan yalnız yönetici izin verirse düzenlenir
         editable: decl.status !== 'submitted' || decl.edit_allowed === true,
         lines: lines || [],
@@ -198,17 +199,21 @@ export default async function handler(req, res) {
       if (insErr) return res.status(500).json({ error: errorMessage(insErr) });
 
       const now = new Date().toISOString();
-      await supabaseAdmin
-        .from(DECL)
-        .update({
-          status: 'submitted',
-          submitted_at: now,
-          // Düzeltme izni tek kullanımlıktır
-          edit_allowed: false,
-          note: String(req.body?.note || '').trim().slice(0, 1000) || decl.note,
-          updated_at: now
-        })
-        .eq('id', decl.id);
+      const patch = {
+        status: 'submitted',
+        submitted_at: now,
+        // Düzeltme izni tek kullanımlıktır
+        edit_allowed: false,
+        correction_note: null,
+        note: String(req.body?.note || '').trim().slice(0, 1000) || decl.note,
+        updated_at: now
+      };
+      let { error: upErr } = await supabaseAdmin.from(DECL).update(patch).eq('id', decl.id);
+      if (upErr && /correction_note/i.test(upErr.message || '')) {
+        delete patch.correction_note;
+        ({ error: upErr } = await supabaseAdmin.from(DECL).update(patch).eq('id', decl.id));
+      }
+      if (upErr) return res.status(500).json({ error: errorMessage(upErr) });
 
       return res.status(200).json({
         ok: true,

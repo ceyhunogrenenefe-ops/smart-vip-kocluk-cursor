@@ -57,6 +57,25 @@ export function periodRange(period) {
   return { from: `${y}-${pad(m)}-01`, to: `${y}-${pad(m)}-${pad(last)}` };
 }
 
+/** Yönetici düzeltme notunun öğretmene giden metni. */
+export function correctionMessage({ name, periodLabel: label, note, link }) {
+  const who = String(name || '').trim() || 'öğretmenim';
+  const text = String(note || '').trim();
+  const url = String(link || '').trim();
+  return [
+    `Sayın ${who},`,
+    '',
+    `${label} çalışma bildiriminizde düzeltme gerekiyor:`,
+    '',
+    text,
+    '',
+    'Formu yeniden açtık. Lütfen bağlantıdan düzeltip tekrar gönderin:',
+    url,
+    '',
+    'Online VIP Dershane'
+  ].join('\n');
+}
+
 /** "2026-10-01" → "Ekim 2026" */
 export function periodLabel(period) {
   const [y, m] = String(period || '').split('-').map(Number);
