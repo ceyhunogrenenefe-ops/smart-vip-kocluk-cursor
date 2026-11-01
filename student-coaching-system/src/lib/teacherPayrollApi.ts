@@ -18,6 +18,7 @@ export type PayrollDeclaration = {
   id: string;
   status: string;
   submitted_at: string | null;
+  correction_note?: string | null;
   declared: { group: number; private: number; guidance: number; other: number };
   mismatch: boolean;
 };
@@ -152,6 +153,20 @@ export async function saveTeacherPayrollRates(body: {
   const j = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(j.error || j.hint || 'Ücretler kaydedilemedi');
   return j;
+}
+
+/** Yanlış beyanı notla öğretmene geri gönderir; form yeniden açılır. */
+export async function sendTeacherDeclarationCorrection(body: {
+  id: string;
+  correction_note: string;
+}) {
+  const res = await apiFetch('/api/teacher-declarations?op=allow-edit', {
+    method: 'POST',
+    body: JSON.stringify(body)
+  });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(j.hint || j.error || 'Düzeltme gönderilemedi');
+  return j as { ok?: boolean; message?: string; whatsapp_ok?: boolean; url?: string | null };
 }
 
 /** CRM beyanindaki sayilari onayli sayi olarak hakedise aktarir. */

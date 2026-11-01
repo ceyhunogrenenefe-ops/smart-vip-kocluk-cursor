@@ -75,6 +75,7 @@ export default function TeacherDeclarationsPage() {
   const [ayarKaydet, setAyarKaydet] = useState(false);
   const [detail, setDetail] = useState<Record<string, unknown> | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [duzeltmeNotu, setDuzeltmeNotu] = useState('');
 
   const load = useCallback(async () => {
     if (!period) return;
@@ -211,16 +212,23 @@ Devam edilsin mi?`
   };
 
   const duzeltmeyeAc = async (id: string) => {
+    const note = duzeltmeNotu.trim();
+    if (!note) {
+      toast.error('Düzeltme notu yazın. Öğretmen bu notu WhatsApp mesajında ve formda görür.');
+      return;
+    }
     const res = await apiFetch('/api/teacher-declarations?op=allow-edit', {
       method: 'POST',
-      body: JSON.stringify({ id })
+      body: JSON.stringify({ id, correction_note: note })
     });
     const j = await res.json().catch(() => ({}));
     if (!res.ok) {
-      toast.error(j.error || 'İşlem başarısız');
+      toast.error(j.hint || j.error || 'İşlem başarısız');
       return;
     }
-    toast.success(j.message || 'Açıldı');
+    if (j.whatsapp_ok) toast.success(j.message || 'Düzeltme gönderildi');
+    else toast.error(j.message || 'Form açıldı, mesaj gitmedi');
+    setDuzeltmeNotu('');
     setDetail(null);
     await load();
   };
@@ -710,23 +718,39 @@ Devam edilsin mi?`
               )}
             </div>
 
-            <div className="flex shrink-0 justify-end gap-2 border-t border-slate-200 px-4 py-3">
-              {dDecl?.status === 'submitted' ? (
+            <div className="flex shrink-0 flex-col gap-2 border-t border-slate-200 px-4 py-3">
+              {dDecl?.status === 'submitted' || dDecl?.status === 'reopened' ? (
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+                  <label className="block min-w-0 flex-1 text-sm">
+                    <span className="mb-1 block text-xs font-semibold text-slate-500">
+                      Düzeltme notu — öğretmene gider
+                    </span>
+                    <textarea
+                      rows={2}
+                      value={duzeltmeNotu}
+                      onChange={(e) => setDuzeltmeNotu(e.target.value)}
+                      placeholder="Örneğin: grup dersi sistemde 18, beyan 22. Lütfen günleri kontrol edin."
+                      className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => void duzeltmeyeAc(String(dDecl.id))}
+                    className="rounded-lg border border-orange-200 bg-orange-50 px-4 py-2 text-sm font-semibold text-orange-950 hover:bg-orange-100"
+                  >
+                    Düzeltme gönder
+                  </button>
+                </div>
+              ) : null}
+              <div className="flex justify-end">
                 <button
                   type="button"
-                  onClick={() => void duzeltmeyeAc(String(dDecl.id))}
-                  className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                  onClick={() => setDetail(null)}
+                  className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white"
                 >
-                  Öğretmene düzeltme izni ver
+                  Kapat
                 </button>
-              ) : null}
-              <button
-                type="button"
-                onClick={() => setDetail(null)}
-                className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white"
-              >
-                Kapat
-              </button>
+              </div>
             </div>
           </div>
         </div>

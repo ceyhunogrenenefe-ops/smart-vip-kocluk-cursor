@@ -8,6 +8,7 @@ import {
   Loader2,
   Plus,
   RefreshCw,
+  Send,
   Trash2,
   Unlock,
   Wallet
@@ -21,6 +22,7 @@ import {
   payTeacherPayroll,
   saveTeacherPayrollDraft,
   applyTeacherDeclaration,
+  sendTeacherDeclarationCorrection,
   saveTeacherPayrollDefaultRates,
   saveTeacherPayrollRates,
   unpayTeacherPayroll,
@@ -33,6 +35,14 @@ type TeacherOption = { id: string; name: string };
 function monthStartIso(): string {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
+}
+
+function calendarMonthOf(iso: string): { from: string; to: string } | null {
+  const [y, m] = iso.slice(0, 7).split('-').map((x) => Number(x));
+  if (!y || !m) return null;
+  const last = new Date(y, m, 0).getDate();
+  const mm = String(m).padStart(2, '0');
+  return { from: `${y}-${mm}-01`, to: `${y}-${mm}-${String(last).padStart(2, '0')}` };
 }
 
 function todayIso(): string {
@@ -122,6 +132,7 @@ export function TeacherPaymentsPanel({ onTeacherTotalChange }: Props) {
   const [notice, setNotice] = useState<string | null>(null);
   const [schemaHint, setSchemaHint] = useState<string | null>(null);
   const [view, setView] = useState<'cards' | 'table'>('cards');
+  const [duzeltmeNotu, setDuzeltmeNotu] = useState<Record<string, string>>({});
 
   useEffect(() => {
     let cancel = false;
@@ -404,6 +415,18 @@ export function TeacherPaymentsPanel({ onTeacherTotalChange }: Props) {
           >
             Canlı grup dersleri →
           </Link>
+          <button
+            type="button"
+            onClick={() => {
+              const bounds = calendarMonthOf(from);
+              if (!bounds) return;
+              setFrom(bounds.from);
+              setTo(bounds.to);
+            }}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          >
+            Takvim ayı
+          </button>
           <button
             type="button"
             onClick={() => void reload()}
@@ -821,6 +844,56 @@ export function TeacherPaymentsPanel({ onTeacherTotalChange }: Props) {
                         </button>
                       ) : null}
                     </div>
+                    {card.declaration.status === 'submitted' || card.declaration.status === 'reopened' ? (
+                      <div className="mt-3 space-y-2 border-t border-slate-200/80 pt-3">
+                        {card.declaration.correction_note ? (
+                          <p className="whitespace-pre-wrap text-xs text-orange-950">
+                            Son düzeltme notu: {card.declaration.correction_note}
+                          </p>
+                        ) : null}
+                        <textarea
+                          rows={2}
+                          value={duzeltmeNotu[card.declaration.id] || ''}
+                          onChange={(e) =>
+                            setDuzeltmeNotu((prev) => ({
+                              ...prev,
+                              [card.declaration!.id]: e.target.value
+                            }))
+                          }
+                          placeholder="Neyi düzeltmesi gerektiğini yazın"
+                          className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+                        />
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={async () => {
+                            const note = (duzeltmeNotu[card.declaration!.id] || '').trim();
+                            if (!note) {
+                              toast.error('Düzeltme notu yazın. Öğretmen bu notu mesajda görür.');
+                              return;
+                            }
+                            setBusyId(card.teacher_id);
+                            try {
+                              const j = await sendTeacherDeclarationCorrection({
+                                id: card.declaration!.id,
+                                correction_note: note
+                              });
+                              if (j.whatsapp_ok) toast.success(j.message || 'Düzeltme gönderildi');
+                              else toast.error(j.message || 'Form açıldı, mesaj gitmedi');
+                              setDuzeltmeNotu((prev) => ({ ...prev, [card.declaration!.id]: '' }));
+                              await reload();
+                            } catch (e) {
+                              toast.error(e instanceof Error ? e.message : 'Düzeltme gönderilemedi');
+                            } finally {
+                              setBusyId('');
+                            }
+                          }}
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-orange-200 bg-orange-50 px-3 py-1.5 text-xs font-semibold text-orange-950 disabled:opacity-60"
+                        >
+                          <Send className="h-3.5 w-3.5" /> Düzeltme gönder
+                        </button>
+                      </div>
+                    ) : null}
                   </div>
                 ) : null}
 

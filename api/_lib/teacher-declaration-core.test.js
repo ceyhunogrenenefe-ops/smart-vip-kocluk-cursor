@@ -5,12 +5,28 @@ import {
   compareDetails,
   compareTotals,
   compareValue,
+  correctionMessage,
   periodLabel,
   periodRange,
   previousPeriod,
   sumByKind,
   summarizeDeclarations
 } from './teacher-declaration-core.js';
+
+describe('düzeltme mesajı', () => {
+  it('notu ve form bağlantısını öğretmene yazar', () => {
+    const text = correctionMessage({
+      name: 'Ayşe',
+      periodLabel: 'Ekim 2026',
+      note: 'Grup dersi 2 fazla.',
+      link: 'https://ornek/form'
+    });
+    assert.match(text, /Sayın Ayşe/);
+    assert.match(text, /Ekim 2026/);
+    assert.match(text, /Grup dersi 2 fazla/);
+    assert.match(text, /https:\/\/ornek\/form/);
+  });
+});
 
 describe('dönem hesabı', () => {
   it('ayın 1inde bir önceki ay istenir', () => {

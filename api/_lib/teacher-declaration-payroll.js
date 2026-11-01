@@ -50,13 +50,24 @@ export async function loadDeclarationsForPayroll({ from, to, institutionId = nul
   try {
     let q = supabaseAdmin
       .from(DECL)
-      .select('id, teacher_id, status, submitted_at, institution_id')
+      .select('id, teacher_id, status, submitted_at, institution_id, correction_note')
       .eq('period_month', period)
       .in('status', ['submitted', 'reopened'])
       .limit(1000);
     if (institutionId) q = q.eq('institution_id', institutionId);
     if (Array.isArray(teacherIds) && teacherIds.length) q = q.in('teacher_id', teacherIds);
-    const { data: decls, error } = await q;
+    let { data: decls, error } = await q;
+    if (error && /correction_note/i.test(error.message || '')) {
+      let again = supabaseAdmin
+        .from(DECL)
+        .select('id, teacher_id, status, submitted_at, institution_id')
+        .eq('period_month', period)
+        .in('status', ['submitted', 'reopened'])
+        .limit(1000);
+      if (institutionId) again = again.eq('institution_id', institutionId);
+      if (Array.isArray(teacherIds) && teacherIds.length) again = again.in('teacher_id', teacherIds);
+      ({ data: decls, error } = await again);
+    }
     if (error || !decls?.length) return out;
 
     const { data: lines } = await supabaseAdmin
@@ -76,6 +87,7 @@ export async function loadDeclarationsForPayroll({ from, to, institutionId = nul
         id: d.id,
         status: d.status,
         submitted_at: d.submitted_at,
+        correction_note: d.correction_note || null,
         declared: {
           group: toplam.group || 0,
           private: toplam.private || 0,

@@ -11,7 +11,7 @@
 import crypto from 'node:crypto';
 import { supabaseAdmin } from './supabase-admin.js';
 import { errorMessage } from './error-msg.js';
-import { periodLabel, periodRange, previousPeriod } from './teacher-declaration-core.js';
+import { correctionMessage, periodLabel, periodRange, previousPeriod } from './teacher-declaration-core.js';
 import {
   loadTeacherReminderSettings,
   resolveTeacherReminderSession
@@ -240,6 +240,67 @@ function fillMessage(template, { donem, link, ad }) {
  *   dryRun?: boolean
  * }} args
  */
+/** Yanlış beyan için formu açar ve öğretmene WhatsApp ile notu yollar. */
+export async function sendDeclarationCorrection({ declarationId, note }) {
+  const textNote = String(note || '').trim();
+  const { data: decl, error } = await supabaseAdmin
+    .from(DECL)
+    .select('id, teacher_id, token, period_month')
+    .eq('id', declarationId)
+    .maybeSingle();
+  if (error || !decl) return { ok: false, error: 'Beyan bulunamadı.' };
+
+  const { data: teacher } = await supabaseAdmin
+    .from('users')
+    .select('id, name, phone')
+    .eq('id', decl.teacher_id)
+    .maybeSingle();
+  const link = await buildDeclarationFormUrl(decl.token);
+  const message = correctionMessage({
+    name: teacher?.name,
+    periodLabel: periodLabel(decl.period_month),
+    note: textNote,
+    link
+  });
+  const phone = String(teacher?.phone || '').trim();
+  if (!phone) {
+    return { ok: false, error: 'Öğretmenin telefonu kayıtlı değil.', url: link };
+  }
+
+  const reminderSettings = await loadTeacherReminderSettings();
+  const session = await resolveTeacherReminderSession(reminderSettings);
+  if (!session.sessionId) {
+    return { ok: false, error: 'Bağlı WhatsApp hattı yok.', url: link };
+  }
+
+  let result;
+  try {
+    result = await sendGatewayTextMessage({
+      phone,
+      message,
+      sessionId: session.sessionId,
+      sessionCandidates: [session.sessionId],
+      allowSharedFallback: false
+    });
+  } catch (e) {
+    result = { ok: false, error: errorMessage(e) };
+  }
+
+  const { error: logErr } = await supabaseAdmin.from(MSGS).insert({
+    declaration_id: decl.id,
+    kind: 'correction',
+    channel: 'gateway',
+    ok: Boolean(result?.ok),
+    error: result?.ok ? null : String(result?.error || 'gonderilemedi').slice(0, 500)
+  });
+  if (logErr) console.warn('[declaration-notify] duzeltme kaydi', errorMessage(logErr));
+
+  if (!result?.ok) {
+    return { ok: false, error: String(result?.error || 'Mesaj gönderilemedi.'), url: link };
+  }
+  return { ok: true, url: link };
+}
+
 export async function sendDeclarationMessages({
   period,
   declarationIds = null,
