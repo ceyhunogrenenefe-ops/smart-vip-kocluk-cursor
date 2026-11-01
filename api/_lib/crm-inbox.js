@@ -739,10 +739,35 @@ export async function syncInstagramMessagingToCrm(events, { institutionId, chann
 }
 
 /** Instagram gönderi / canlı yayın yorumları (field=comments|live_comments) → CRM inbox */
-export async function syncInstagramCommentsToCrm(changes, { institutionId } = {}) {
+export async function syncInstagramCommentsToCrm(changes, { institutionId, accountIgUserId } = {}) {
   const list = Array.isArray(changes) ? changes : [];
   let processed = 0;
   let skipped = 0;
+
+  /**
+   * Yorumu alan IG hesabı (webhook entry.id). Ek hesapsa (crm_instagram_accounts)
+   * otomasyon o hesabın anahtarıyla çalışır ve konuşmaya hangi hesaba geldiği
+   * not edilir. Hesap bilgisi yoksa / birincil hesapsa eski davranış aynen.
+   */
+  let account;
+  const accountId = String(accountIgUserId || '').trim();
+  if (accountId) {
+    try {
+      const { resolveInstagramAccount } = await import('./crm-instagram-accounts.js');
+      account = await resolveInstagramAccount({ igUserId: accountId });
+    } catch (e) {
+      console.warn('[crm-inbox] ig hesap çözümü:', e?.message || e);
+      account = { isPrimary: true, igUserId: accountId };
+    }
+  }
+  const isExtraAccount = account === null || (account && account.isPrimary === false);
+  if (isExtraAccount && account?.institutionId && !institutionId) {
+    institutionId = account.institutionId;
+  }
+  const accountMeta = isExtraAccount
+    ? { ig_account_id: accountId, ...(account?.username ? { ig_account_username: account.username } : {}) }
+    : {};
+
   for (const change of list) {
     const norm = normalizeInstagramCommentChange(change);
     if (!norm?.hasInboundContent || !norm.fromId) continue;
@@ -765,9 +790,10 @@ export async function syncInstagramCommentsToCrm(changes, { institutionId } = {}
         comment_id: norm.commentId,
         media_product_type: norm.mediaProductType,
         parent_id: norm.parentId,
-        username: norm.fromUsername
+        username: norm.fromUsername,
+        ...accountMeta
       },
-      payload: change
+      payload: isExtraAccount ? { ...change, ...accountMeta } : change
     });
     if (r?.conversation_id && norm.fromUsername) {
       const { applyConversationProfile } = await import('./social-profile.js');
@@ -779,7 +805,9 @@ export async function syncInstagramCommentsToCrm(changes, { institutionId } = {}
      */
     try {
       const { runCommentAutomationForComment } = await import('./crm-comment-automation.js');
-      await runCommentAutomationForComment({ comment: norm, institutionId });
+      await runCommentAutomationForComment(
+        account === undefined ? { comment: norm, institutionId } : { comment: norm, institutionId, account }
+      );
     } catch (e) {
       console.warn('[crm-inbox] yorum otomasyonu:', e?.message || e);
     }
@@ -925,11 +953,33 @@ export async function sendCrmWhatsAppInteractive({ phone, interactive, instituti
  *   Butona basmak Instagram'da bir MESAJ sayilir; Meta'nin takip alanini
  *   okuyabilmesi icin gereken kullanici onayi boylece olusur.
  */
-export async function sendInstagramPrivateReply({ commentId, text, quickReply }) {
+/**
+ * Ek Instagram hesabı için gönderim kimlik bilgisi.
+ * override verilmezse (veya boşsa) eski platform/env çözümü aynen kullanılır.
+ * @param {{ token?: string, pageId?: string, igUserId?: string }|undefined} override
+ */
+async function resolveInstagramSendCreds(override) {
   await loadMetaWhatsAppSecretsFromDb();
-  const { resolveSocialToken, resolvePageId } = await import('./meta-social-inbound.js');
-  const { token } = resolveSocialToken();
-  const pageId = resolvePageId();
+  const { resolveSocialToken, resolvePageId, igBusinessIdEnv } = await import('./meta-social-inbound.js');
+  const overrideToken = String(override?.token || '').trim();
+  if (overrideToken) {
+    return {
+      token: overrideToken,
+      source: 'crm_instagram_accounts',
+      pageId: String(override?.pageId || '').trim(),
+      igUserId: String(override?.igUserId || '').trim()
+    };
+  }
+  const { token, source } = resolveSocialToken();
+  return { token, source, pageId: resolvePageId(), igUserId: igBusinessIdEnv() };
+}
+
+/**
+ * @param {{ token?: string, pageId?: string, igUserId?: string }} [p.override]
+ *   Ek Instagram hesabı: verilirse bu hesabın sayfa anahtarı / sayfa kimliği kullanılır.
+ */
+export async function sendInstagramPrivateReply({ commentId, text, quickReply, override }) {
+  const { token, pageId } = await resolveInstagramSendCreds(override);
   if (!token || !pageId) {
     const err = new Error('instagram_not_configured');
     err.code = 'ENV';
@@ -970,10 +1020,8 @@ export async function sendInstagramPrivateReply({ commentId, text, quickReply })
 }
 
 /** Yorumun altına herkese açık yanıt (POST /{comment-id}/replies). */
-export async function replyToInstagramComment({ commentId, text }) {
-  await loadMetaWhatsAppSecretsFromDb();
-  const { resolveSocialToken } = await import('./meta-social-inbound.js');
-  const { token } = resolveSocialToken();
+export async function replyToInstagramComment({ commentId, text, override }) {
+  const { token } = await resolveInstagramSendCreds(override);
   if (!token) {
     const err = new Error('instagram_not_configured');
     err.code = 'ENV';
@@ -997,11 +1045,8 @@ export async function replyToInstagramComment({ commentId, text }) {
 }
 
 /** Instagram hesabının son gönderileri — otomasyon kurarken seçim listesi. */
-export async function listInstagramMedia({ limit = 25 } = {}) {
-  await loadMetaWhatsAppSecretsFromDb();
-  const { resolveSocialToken, igBusinessIdEnv } = await import('./meta-social-inbound.js');
-  const { token } = resolveSocialToken();
-  const igUserId = igBusinessIdEnv();
+export async function listInstagramMedia({ limit = 25, override } = {}) {
+  const { token, igUserId } = await resolveInstagramSendCreds(override);
   if (!token || !igUserId) {
     const err = new Error('instagram_business_account_missing');
     err.code = 'ENV';
@@ -1045,11 +1090,8 @@ export function normalizeQuickReplies(quickReplies) {
     }));
 }
 
-export async function sendCrmInstagramQuickReplies({ igScopedId, text, quickReplies }) {
-  await loadMetaWhatsAppSecretsFromDb();
-  const { resolveSocialToken, resolvePageId } = await import('./meta-social-inbound.js');
-  const { token } = resolveSocialToken();
-  const pageId = resolvePageId();
+export async function sendCrmInstagramQuickReplies({ igScopedId, text, quickReplies, override }) {
+  const { token, pageId } = await resolveInstagramSendCreds(override);
   if (!token || !pageId) {
     const err = new Error('instagram_not_configured');
     err.code = 'ENV';
@@ -1160,11 +1202,8 @@ export function instagramWindowClosedError(json, status) {
  * güne kadar izin verir). O da olmazsa neyin olduğunu anlatan bir hata döner —
  * eskiden ham Meta metni geliyordu ve temsilci ne yapacağını bilmiyordu.
  */
-export async function sendCrmInstagramDm({ igScopedId, text, allowHumanAgentTag = true }) {
-  await loadMetaWhatsAppSecretsFromDb();
-  const { resolveSocialToken, resolvePageId } = await import('./meta-social-inbound.js');
-  const { token, source: tokenSource } = resolveSocialToken();
-  const pageId = resolvePageId();
+export async function sendCrmInstagramDm({ igScopedId, text, allowHumanAgentTag = true, override }) {
+  const { token, source: tokenSource, pageId } = await resolveInstagramSendCreds(override);
   if (!token || !pageId) {
     const err = new Error(
       'instagram_not_configured — META_BOUND_PAGE_TOKEN (veya META_PAGE_ACCESS_TOKEN) + META_PAGE_ID gerekli'

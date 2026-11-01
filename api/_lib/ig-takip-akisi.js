@@ -58,6 +58,20 @@ export async function takipButonunuIsle({ payload, igUserId, institutionId, even
     const engel = tekrarEngeli(log, coz.adim);
     if (engel.engelle) return { handled: true, reason: engel.neden, state: log.follow_state };
 
+    /**
+     * Otomasyon bir ek Instagram hesabına aitse takip kontrolü ve tüm
+     * gönderimler o hesabın sayfa anahtarıyla yapılır. ig_user_id boşsa
+     * (eski otomasyonlar) birincil hesap — davranış aynen.
+     */
+    let override;
+    const hesapIgId = String(automation.ig_user_id || '').trim();
+    if (hesapIgId) {
+      const { resolveInstagramAccount, sendOverrideFor } = await import('./crm-instagram-accounts.js');
+      const hesap = await resolveInstagramAccount({ igUserId: hesapIgId });
+      if (hesap === null) return { handled: true, reason: 'account_inactive', state: log.follow_state };
+      override = sendOverrideFor(hesap);
+    }
+
     // 1) Beyan: doğrulama DEĞİL
     await supabaseAdmin
       .from(LOG_TABLE)
@@ -67,7 +81,8 @@ export async function takipButonunuIsle({ payload, igUserId, institutionId, even
     // 2) Meta'dan oku
     const sonuc = await takipDurumunuOku({
       institutionId: institutionId || automation.institution_id || null,
-      igsid: kullanici
+      igsid: kullanici,
+      token: override?.token
     });
 
     const plan = dogrulamaSonrasiPlan(sonuc, automation);
@@ -103,7 +118,7 @@ export async function takipButonunuIsle({ payload, igUserId, institutionId, even
         return { handled: true, state: 'pdf_sent', reason: 'pdf_zaten_gonderildi' };
       }
       try {
-        await inbox.sendCrmInstagramDm({ igScopedId: kullanici, text: plan.text });
+        await inbox.sendCrmInstagramDm({ igScopedId: kullanici, text: plan.text, override });
         await gonderimSonucu({ dedupKey: pdfKey, status: 'sent' });
         yama.follow_state = 'pdf_sent';
         yama.dm_status = 'sent';
@@ -115,7 +130,7 @@ export async function takipButonunuIsle({ payload, igUserId, institutionId, even
         const replyText = String(automation.reply_comment_text || '').trim();
         if (replyText && log.comment_id) {
           try {
-            await inbox.replyToInstagramComment({ commentId: log.comment_id, text: replyText });
+            await inbox.replyToInstagramComment({ commentId: log.comment_id, text: replyText, override });
             yama.reply_status = 'sent';
           } catch (e) {
             yama.reply_status = 'failed';
@@ -155,7 +170,8 @@ export async function takipButonunuIsle({ payload, igUserId, institutionId, even
         await inbox.sendCrmInstagramQuickReplies({
           igScopedId: kullanici,
           text: plan.text,
-          quickReplies: [{ title: plan.buttonText, payload: plan.payload }]
+          quickReplies: [{ title: plan.buttonText, payload: plan.payload }],
+          override
         });
         await gonderimSonucu({ dedupKey: retryKey, status: 'sent' });
       } catch (e) {

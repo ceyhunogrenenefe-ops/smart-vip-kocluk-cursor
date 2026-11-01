@@ -107,6 +107,28 @@ export function pickAutomation(automations, { mediaId, text }) {
   return null;
 }
 
+/**
+ * Yorumun geldiği Instagram hesabında hangi otomasyonlar çalışabilir?
+ *
+ * - `ig_user_id` dolu otomasyon yalnız o hesaba gelen yorumlarda çalışır.
+ * - `ig_user_id` boş (eski / "ana hesap") otomasyon YALNIZ yorum birincil
+ *   hesaba geldiyse çalışır. Böylece mevcut otomasyonlar ek hesaplara
+ *   sızmaz, ana hesapta eskisi gibi çalışmaya devam eder.
+ *
+ * @param {object[]} automations
+ * @param {{ accountIgUserId?: string|null, isPrimary?: boolean }} account
+ * @returns {object[]}
+ */
+export function automationsForAccount(automations, { accountIgUserId, isPrimary = true } = {}) {
+  const account = String(accountIgUserId || '').trim();
+  return (Array.isArray(automations) ? automations : []).filter((a) => {
+    if (!a) return false;
+    const target = String(a.ig_user_id || '').trim();
+    if (!target) return isPrimary === true;
+    return Boolean(account) && target === account;
+  });
+}
+
 /** Mesaj metnindeki yer tutucular. */
 export function renderAutomationText(template, { username = '', keyword = '' } = {}) {
   return String(template || '')

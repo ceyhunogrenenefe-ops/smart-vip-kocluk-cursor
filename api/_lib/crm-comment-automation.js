@@ -23,7 +23,12 @@ import {
   islemAnahtari
 } from './ig-gonderim-kilidi.js';
 import { errorMessage } from './error-msg.js';
-import { mesajdakiBagi, pickAutomation, renderAutomationText } from './crm-comment-automation-core.js';
+import {
+  automationsForAccount,
+  mesajdakiBagi,
+  pickAutomation,
+  renderAutomationText
+} from './crm-comment-automation-core.js';
 
 const TABLE = 'crm_comment_automations';
 const LOG_TABLE = 'crm_comment_automation_logs';
@@ -31,6 +36,11 @@ const LOG_TABLE = 'crm_comment_automation_logs';
 function tableMissing(error) {
   const msg = String(error?.message || '');
   return /does not exist|schema cache|PGRST205/i.test(msg);
+}
+
+/** account_ig_user_id kolonu henüz eklenmemiş mi? (SQL uygulanmadan önce) */
+function accountColumnMissing(error) {
+  return /account_ig_user_id/i.test(String(error?.message || ''));
 }
 
 /** Kurumun açık otomasyonları. */
@@ -98,9 +108,12 @@ async function alreadyHandled({ commentId, automationId, igUserId, oncePerUser, 
  * @param {object} args
  * @param {object} args.comment normalizeInstagramCommentChange çıktısı
  * @param {string} [args.institutionId]
+ * @param {object|null} [args.account] resolveInstagramAccount çıktısı (yorumu
+ *   alan IG hesabı). Verilmezse birincil hesap varsayılır (eski davranış);
+ *   null ise ek hesap pasif/eksik demektir ve otomasyon çalışmaz.
  * @returns {Promise<{ ran: boolean, reason?: string, automationId?: string }>}
  */
-export async function runCommentAutomationForComment({ comment, institutionId }) {
+export async function runCommentAutomationForComment({ comment, institutionId, account }) {
   try {
     const commentId = String(comment?.commentId || '').trim();
     const text = String(comment?.rawText || '').trim();
@@ -109,7 +122,22 @@ export async function runCommentAutomationForComment({ comment, institutionId })
     if (!commentId || !text) return { ran: false, reason: 'no_comment_text' };
     if (comment?.isLive) return { ran: false, reason: 'live_comment_skipped' };
 
-    const automations = await loadActiveCommentAutomations(institutionId);
+    // Ek hesap kayıtlı ama pasif / anahtarı eksik → hiçbir şey gönderme
+    if (account === null) return { ran: false, reason: 'account_inactive' };
+    const hesap = account || { isPrimary: true, igUserId: '' };
+    const hesapIgId = String(hesap.igUserId || '').trim();
+    // Hesabın kendi yorumu (ör. bizim yazdığımız açık yanıt) otomasyonu tetiklemesin
+    if (hesapIgId && igUserId && hesapIgId === igUserId) {
+      return { ran: false, reason: 'own_account_comment' };
+    }
+    const override = hesap.isPrimary
+      ? undefined
+      : { token: hesap.token, pageId: hesap.pageId, igUserId: hesapIgId };
+
+    const automations = automationsForAccount(await loadActiveCommentAutomations(institutionId), {
+      accountIgUserId: hesapIgId,
+      isPrimary: hesap.isPrimary !== false
+    });
     if (!automations.length) return { ran: false, reason: 'no_active_automation' };
 
     const hit = pickAutomation(automations, { mediaId, text });
@@ -126,7 +154,7 @@ export async function runCommentAutomationForComment({ comment, institutionId })
     if (dup) return { ran: false, reason: dup, automationId: automation.id };
 
     // Kaydı önce at: aynı yorum iki webhook'ta gelirse ikinci gönderim olmasın
-    const { error: logErr } = await supabaseAdmin.from(LOG_TABLE).insert({
+    const logRow = {
       automation_id: automation.id,
       institution_id: institutionId || automation.institution_id || null,
       comment_id: commentId,
@@ -137,7 +165,14 @@ export async function runCommentAutomationForComment({ comment, institutionId })
       // Otomasyonlar arasi tekillestirme anahtari
       sent_link: mesajdakiBagi(automation.dm_text),
       dm_status: 'pending'
-    });
+    };
+    // Hangi hesapta tetiklendi (kolon yoksa eski kayıt biçimine düşülür)
+    if (hesapIgId) logRow.account_ig_user_id = hesapIgId;
+    let { error: logErr } = await supabaseAdmin.from(LOG_TABLE).insert(logRow);
+    if (logErr && logRow.account_ig_user_id && accountColumnMissing(logErr)) {
+      delete logRow.account_ig_user_id;
+      ({ error: logErr } = await supabaseAdmin.from(LOG_TABLE).insert(logRow));
+    }
     if (logErr) {
       if (/duplicate|unique/i.test(logErr.message || '')) {
         return { ran: false, reason: 'comment_already_handled', automationId: automation.id };
@@ -191,7 +226,8 @@ export async function runCommentAutomationForComment({ comment, institutionId })
         await inbox.sendInstagramPrivateReply({
           commentId,
           text: dmText,
-          quickReply: takipKapisi ? { title: plan.buttonText, payload: plan.payload } : undefined
+          quickReply: takipKapisi ? { title: plan.buttonText, payload: plan.payload } : undefined,
+          override
         });
         await gonderimSonucu({ dedupKey: davetKey, status: 'sent' });
         // Temsilci gelen kutusunda görsün
@@ -225,7 +261,7 @@ export async function runCommentAutomationForComment({ comment, institutionId })
     const replyText = takipKapisi ? '' : renderAutomationText(automation.reply_comment_text, vars);
     if (replyText) {
       try {
-        await inbox.replyToInstagramComment({ commentId, text: replyText });
+        await inbox.replyToInstagramComment({ commentId, text: replyText, override });
         patch.reply_status = 'sent';
       } catch (e) {
         patch.reply_status = 'failed';

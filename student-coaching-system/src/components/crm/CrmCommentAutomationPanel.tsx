@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Instagram, Loader2, Plus, Save, Trash2, Wand2 } from 'lucide-react';
+import { Instagram, Loader2, Plus, Save, Trash2, Users, Wand2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiFetch } from '../../lib/session';
 
@@ -24,7 +24,23 @@ type Automation = {
   follow_retry_button_text?: string | null;
   sent_count?: number;
   last_sent_at?: string | null;
+  /** Otomasyonun çalışacağı Instagram hesabı; boş = ana hesap */
+  ig_user_id?: string | null;
 };
+
+/** Ek Instagram hesabı (erişim anahtarı sunucudan maskeli gelir) */
+type IgHesap = {
+  id: string;
+  ig_user_id: string;
+  ig_username: string | null;
+  page_id: string | null;
+  token_masked: string;
+  is_active: boolean;
+  last_verified_at: string | null;
+  last_verify_error: string | null;
+};
+
+type AnaHesap = { ig_user_id: string | null; username: string | null };
 
 type Media = {
   id: string;
@@ -51,7 +67,8 @@ const BOS: Automation = {
   follow_invite_text: null,
   follow_button_text: null,
   follow_retry_text: null,
-  follow_retry_button_text: null
+  follow_retry_button_text: null,
+  ig_user_id: null
 };
 
 /** Takip dogrulamasi bu kurulumda calisiyor mu */
@@ -66,6 +83,211 @@ type Yetenek = {
 
 const input =
   'mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-indigo-400 focus:outline-none';
+
+function hesapAdi(h: { ig_username?: string | null; ig_user_id?: string | null }): string {
+  return h.ig_username ? `@${h.ig_username}` : String(h.ig_user_id || '');
+}
+
+/**
+ * Ek Instagram hesapları — aynı kurumun başka IG hesaplarını bağlar.
+ * Yorumlar aynı CRM gelen kutusuna düşer; otomasyonlar hesap bazında seçilir.
+ */
+function IgHesaplariBolumu({
+  hesaplar,
+  anaHesap,
+  tabloYok,
+  onDegisti
+}: {
+  hesaplar: IgHesap[];
+  anaHesap: AnaHesap | null;
+  tabloYok: boolean;
+  onDegisti: () => Promise<void> | void;
+}) {
+  const [acik, setAcik] = useState(false);
+  const [pageId, setPageId] = useState('');
+  const [pageToken, setPageToken] = useState('');
+  const [mesgul, setMesgul] = useState(false);
+
+  const ekle = async () => {
+    if (!pageId.trim() || !pageToken.trim()) {
+      toast.error('Sayfa ID ve sayfa erişim anahtarı gerekli');
+      return;
+    }
+    setMesgul(true);
+    try {
+      const res = await apiFetch('/api/crm-comment-automations?op=accounts', {
+        method: 'POST',
+        body: JSON.stringify({ page_id: pageId.trim(), page_token: pageToken.trim() })
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j.message || j.error || 'Hesap eklenemedi');
+      const ad = j.item ? hesapAdi(j.item) : 'Hesap';
+      if (j.subscription && j.subscription.ok === false) {
+        toast.warning(`${ad} eklendi, ancak webhook aboneliği yapılamadı: ${j.subscription.error || ''}`);
+      } else {
+        toast.success(`${ad} eklendi`);
+      }
+      setPageId('');
+      setPageToken('');
+      await onDegisti();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Hesap eklenemedi');
+    } finally {
+      setMesgul(false);
+    }
+  };
+
+  const aktiflik = async (h: IgHesap) => {
+    try {
+      const res = await apiFetch('/api/crm-comment-automations?op=accounts', {
+        method: 'PATCH',
+        body: JSON.stringify({ id: h.id, is_active: !h.is_active })
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j.message || j.error || 'Güncellenemedi');
+      await onDegisti();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Güncellenemedi');
+    }
+  };
+
+  const sil = async (h: IgHesap) => {
+    if (
+      !window.confirm(
+        `${hesapAdi(h)} hesabı silinsin mi? Bu hesaba bağlı otomasyonlar kapatılır. Geçici olarak durdurmak için "Pasif yap" yeterlidir.`
+      )
+    )
+      return;
+    try {
+      const res = await apiFetch(`/api/crm-comment-automations?op=accounts&id=${encodeURIComponent(h.id)}`, {
+        method: 'DELETE'
+      });
+      if (!res.ok) throw new Error('Silinemedi');
+      toast.success('Hesap silindi');
+      await onDegisti();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Silinemedi');
+    }
+  };
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
+      <button
+        type="button"
+        onClick={() => setAcik(!acik)}
+        className="flex w-full items-center justify-between gap-2 text-left"
+      >
+        <span className="flex items-center gap-2 text-xs font-semibold text-slate-800">
+          <Users className="h-3.5 w-3.5 text-pink-600" />
+          Instagram hesapları ({1 + hesaplar.length})
+        </span>
+        <span className="text-[11px] font-medium text-indigo-700">{acik ? 'Gizle' : 'Yönet'}</span>
+      </button>
+
+      {acik ? (
+        <div className="mt-2 space-y-2">
+          <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700">
+            <b>Ana hesap</b>
+            {anaHesap?.username || anaHesap?.ig_user_id ? (
+              <span className="ml-1 text-slate-500">
+                · {anaHesap.username ? `@${anaHesap.username}` : anaHesap.ig_user_id}
+              </span>
+            ) : null}
+            <span className="ml-1 text-[11px] text-slate-400">(Meta bağlantı ayarlarından)</span>
+          </div>
+
+          {hesaplar.map((h) => (
+            <div
+              key={h.id}
+              className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2"
+            >
+              <div className="min-w-0 text-xs">
+                <p className="font-medium text-slate-900">
+                  {hesapAdi(h)}
+                  <span
+                    className={`ml-2 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                      h.is_active ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-600'
+                    }`}
+                  >
+                    {h.is_active ? 'Aktif' : 'Pasif'}
+                  </span>
+                </p>
+                <p className="mt-0.5 text-[11px] text-slate-500">
+                  Sayfa: {h.page_id || '—'} · Anahtar: {h.token_masked || '—'}
+                </p>
+                {h.last_verify_error ? (
+                  <p className="mt-0.5 text-[11px] text-amber-700">{h.last_verify_error}</p>
+                ) : null}
+              </div>
+              <div className="flex gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => void aktiflik(h)}
+                  className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  {h.is_active ? 'Pasif yap' : 'Aktif yap'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void sil(h)}
+                  className="rounded-lg border border-red-200 bg-red-50 p-1.5 text-red-600 hover:bg-red-100"
+                  title="Sil"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </div>
+          ))}
+
+          {tabloYok ? (
+            <p className="text-[11px] text-amber-700">
+              Ek hesap tablosu henüz oluşturulmamış — veritabanı güncellemesi uygulanınca hesap eklenebilir.
+            </p>
+          ) : (
+            <div className="space-y-2 rounded-lg border border-dashed border-slate-300 bg-white p-2.5">
+              <p className="text-[11px] font-medium text-slate-600">Yeni hesap ekle</p>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <label className="block text-xs font-medium text-slate-600">
+                  Facebook Sayfa ID
+                  <input
+                    value={pageId}
+                    onChange={(e) => setPageId(e.target.value)}
+                    placeholder="1234567890"
+                    className={input}
+                  />
+                </label>
+                <label className="block text-xs font-medium text-slate-600">
+                  Sayfa erişim anahtarı
+                  <input
+                    type="password"
+                    autoComplete="off"
+                    value={pageToken}
+                    onChange={(e) => setPageToken(e.target.value)}
+                    placeholder="EAAG…"
+                    className={input}
+                  />
+                </label>
+              </div>
+              <p className="text-[11px] text-slate-500">
+                Sayfaya bağlı Instagram işletme hesabı otomatik bulunur ve sayfa yorum/mesaj
+                bildirimlerine abone edilir. Anahtar sunucuda saklanır, burada yalnız maskeli görünür.
+              </p>
+              <button
+                type="button"
+                disabled={mesgul}
+                onClick={() => void ekle()}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-800 hover:bg-indigo-100 disabled:opacity-60"
+              >
+                {mesgul ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+                Hesap ekle
+              </button>
+            </div>
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 function kisaBaslik(m: Media): string {
   const c = String(m.caption || '').replace(/\s+/g, ' ').trim();
@@ -89,6 +311,31 @@ export default function CrmCommentAutomationPanel() {
   const [testText, setTestText] = useState('');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [hesaplar, setHesaplar] = useState<IgHesap[]>([]);
+  const [anaHesap, setAnaHesap] = useState<AnaHesap | null>(null);
+  const [hesapTablosuYok, setHesapTablosuYok] = useState(false);
+
+  const loadAccounts = useCallback(async () => {
+    try {
+      const res = await apiFetch('/api/crm-comment-automations?op=accounts');
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) return;
+      setHesaplar(Array.isArray(j.items) ? j.items : []);
+      setAnaHesap(j.primary || null);
+      setHesapTablosuYok(j.table_missing === true);
+    } catch {
+      setHesaplar([]);
+    }
+  }, []);
+
+  /** Otomasyon listesinde hesap adı */
+  const otomasyonHesabi = (igUserId?: string | null): string => {
+    if (!igUserId || igUserId === anaHesap?.ig_user_id) {
+      return anaHesap?.username ? `Ana hesap (@${anaHesap.username})` : 'Ana hesap';
+    }
+    const h = hesaplar.find((x) => x.ig_user_id === igUserId);
+    return h ? hesapAdi(h) : igUserId;
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -104,9 +351,10 @@ export default function CrmCommentAutomationPanel() {
     }
   }, []);
 
-  const loadMedia = useCallback(async () => {
+  const loadMedia = useCallback(async (igUserId?: string | null) => {
     try {
-      const res = await apiFetch('/api/crm-comment-automations?op=media');
+      const qs = igUserId ? `&ig_user_id=${encodeURIComponent(igUserId)}` : '';
+      const res = await apiFetch(`/api/crm-comment-automations?op=media${qs}`);
       const j = await res.json().catch(() => ({}));
       setMedia(Array.isArray(j.items) ? j.items : []);
       setMediaHint(j.ok === false ? j.hint || j.error || null : null);
@@ -117,7 +365,8 @@ export default function CrmCommentAutomationPanel() {
 
   useEffect(() => {
     void load();
-  }, [load]);
+    void loadAccounts();
+  }, [load, loadAccounts]);
 
   const yeni = () => {
     setDraft({ ...BOS });
@@ -130,7 +379,7 @@ export default function CrmCommentAutomationPanel() {
     setDraft({ ...a });
     setKeywordText((a.keywords || []).join(', '));
     setTestText('');
-    void loadMedia();
+    void loadMedia(a.ig_user_id || null);
   };
 
   /** Takip dogrulamasi calisiyor mu — hicbir mesaj gondermez */
@@ -165,10 +414,10 @@ export default function CrmCommentAutomationPanel() {
     try {
       const res = await apiFetch('/api/crm-comment-automations', {
         method: 'POST',
-        body: JSON.stringify({ ...draft, keywords })
+        body: JSON.stringify({ ...draft, keywords, ig_user_id: draft.ig_user_id || null })
       });
       const j = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(j.error || 'Kaydedilemedi');
+      if (!res.ok) throw new Error(j.message || j.error || 'Kaydedilemedi');
       toast.success('Otomasyon kaydedildi');
       setDraft(null);
       await load();
@@ -233,6 +482,15 @@ export default function CrmCommentAutomationPanel() {
         <b>lgs&apos;ye</b> aynı sayılır.
       </p>
 
+      {!draft ? (
+        <IgHesaplariBolumu
+          hesaplar={hesaplar}
+          anaHesap={anaHesap}
+          tabloYok={hesapTablosuYok}
+          onDegisti={loadAccounts}
+        />
+      ) : null}
+
       {loading ? (
         <p className="flex items-center gap-2 text-xs text-slate-500">
           <Loader2 className="h-3.5 w-3.5 animate-spin" /> Yükleniyor…
@@ -256,6 +514,7 @@ export default function CrmCommentAutomationPanel() {
                     </span>
                   </p>
                   <p className="mt-0.5 text-[11px] text-slate-500">
+                    {otomasyonHesabi(a.ig_user_id)} ·{' '}
                     {a.media_id ? `Gönderi: ${a.media_caption || a.media_id}` : 'Tüm gönderiler'} ·{' '}
                     {(a.keywords || []).join(', ')} · {a.sent_count || 0} gönderim
                   </p>
@@ -299,6 +558,38 @@ export default function CrmCommentAutomationPanel() {
               className={input}
             />
           </label>
+
+          {hesaplar.length ? (
+            <label className="block text-xs font-medium text-slate-600">
+              Instagram hesabı
+              <select
+                value={draft.ig_user_id || ''}
+                onChange={(e) => {
+                  const ig = e.target.value || null;
+                  // Gönderiler hesaba özel: hesap değişince gönderi seçimi sıfırlanır
+                  setDraft({
+                    ...draft,
+                    ig_user_id: ig,
+                    media_id: null,
+                    media_caption: null,
+                    media_permalink: null,
+                    media_thumbnail_url: null
+                  });
+                  setMedia([]);
+                  void loadMedia(ig);
+                }}
+                className={input}
+              >
+                <option value="">{otomasyonHesabi(null)}</option>
+                {hesaplar.map((h) => (
+                  <option key={h.id} value={h.ig_user_id} disabled={!h.is_active && h.ig_user_id !== draft.ig_user_id}>
+                    {hesapAdi(h)}
+                    {h.is_active ? '' : ' (pasif)'}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
 
           <label className="block text-xs font-medium text-slate-600">
             Hangi gönderi
