@@ -17,7 +17,7 @@ import {
 function redirectToWidgets(res, query = {}) {
   const url = new URL(widgetRedirectUri());
   for (const [key, value] of Object.entries(query)) {
-    if (value != null && String(value).trim()) url.searchParams.set(key, String(value).slice(0, 180));
+    if (value != null && String(value).trim()) url.searchParams.set(key, String(value).slice(0, key === 'ig_seen' ? 600 : 180));
   }
   res.statusCode = 302;
   res.setHeader('Location', url.toString());
@@ -38,7 +38,14 @@ async function finishExtraInstagram(res, shortUserToken, statePayload) {
   const listed = await acc.listExtraInstagramCandidates(userTok, institutionId);
   if (!listed.ok) return redirectToWidgets(res, { ig_extra_error: listed.error || 'page_list_failed' });
   const candidates = listed.candidates || [];
-  if (!candidates.length) return redirectToWidgets(res, { ig_extra_error: 'no_candidates' });
+  if (!candidates.length) {
+    // Facebook'un paylaştığı sayfaları göster: kullanıcı yeni sayfayı seçmemişse anlasın
+    const seen = (listed.seen || [])
+      .map((p) => `${p.page_name || p.page_id} (${p.ig_username ? `@${p.ig_username}` : 'Instagram bağlı değil'}${p.primary ? ', ana hesap' : ''})`)
+      .join('; ');
+    console.info('[facebook-oauth] extra_ig no_candidates', { seen_count: (listed.seen || []).length });
+    return redirectToWidgets(res, { ig_extra_error: 'no_candidates', ig_seen: seen || 'hiç sayfa yok' });
+  }
 
   if (candidates.length === 1) {
     const c = candidates[0];
@@ -103,7 +110,11 @@ export default async function handler(req, res) {
           : { oauth_purpose: 'facebook_login_widget' }
       );
       return res.status(200).json({
-        authorize_url: buildFacebookLoginUrl({ responseType: 'code', state })
+        authorize_url: buildFacebookLoginUrl({
+          responseType: 'code',
+          state,
+          ...(extra ? { authType: 'rerequest' } : {})
+        })
       });
     }
 

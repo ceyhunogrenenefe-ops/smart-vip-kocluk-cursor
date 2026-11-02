@@ -321,8 +321,15 @@ export async function listExtraInstagramCandidates(userToken, institutionId) {
   if (!res.ok || json?.error) return { ok: false, error: json?.error?.message || `HTTP ${res.status}`, candidates: [] };
   const primaryId = await primaryInstagramIgUserId(institutionId);
   const candidates = [];
+  const seen = [];
   for (const p of json?.data || []) {
     const iba = p?.instagram_business_account;
+    seen.push({
+      page_id: String(p?.id || ''),
+      page_name: p?.name || null,
+      ig_username: iba?.username ? String(iba.username) : null,
+      primary: Boolean(primaryId && iba?.id && String(iba.id) === primaryId)
+    });
     if (!iba?.id || !p?.access_token) continue;
     if (primaryId && String(iba.id) === primaryId) continue;
     candidates.push({
@@ -333,7 +340,7 @@ export async function listExtraInstagramCandidates(userToken, institutionId) {
       ig_username: iba.username ? String(iba.username) : null
     });
   }
-  return { ok: true, candidates, primary_ig_user_id: primaryId || null };
+  return { ok: true, candidates, seen, primary_ig_user_id: primaryId || null };
 }
 
 /**

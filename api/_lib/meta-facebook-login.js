@@ -68,7 +68,8 @@ export function buildFacebookLoginUrl({
   redirectUri,
   state,
   origin = PRODUCTION_ORIGIN,
-  mode = 'scopes'
+  mode = 'scopes',
+  authType = ''
 } = {}) {
   const type = responseType === 'token' ? 'token' : 'code';
   const uri = redirectUri || oauthRedirectUri(origin);
@@ -84,6 +85,9 @@ export function buildFacebookLoginUrl({
     params.set('scope', PAGE_IG_OAUTH_SCOPES);
   }
   if (state) params.set('state', String(state));
+  // rerequest: Facebook önceki sayfa seçimini hatırlayıp doğrudan geçmesin,
+  // "Erişimi düzenle" ile yeni sayfa / Instagram hesabı seçtirsin
+  if (authType) params.set('auth_type', String(authType));
   return `https://www.facebook.com/${metaFacebookGraphVersion()}/dialog/oauth?${params.toString()}`;
 }
 
