@@ -2,9 +2,8 @@
  * Misafir öğrenci — saf mantık (veritabanı erişimi yok).
  *
  * Canlı derse kayıtlı öğrenci listesi dışından katılanlar "misafir"dir.
- * Otomatik tespit KESİN KARAR VERMEZ: eşleşmeyen ad yalnız "muhtemel misafir"
- * olarak işaretlenir, öğretmen/yönetici onaylayınca kesinleşir. Böylece
- * adını farklı yazan kayıtlı öğrenci yanlışlıkla misafir sayılmaz.
+ * Kayıt yalnız öğretmen/yönetici manuel işaretler; davet linki veya BBB
+ * katılımcı listesi otomatik misafir satırı oluşturmaz.
  */
 import {
   findBbbAttendeeForStudentName,

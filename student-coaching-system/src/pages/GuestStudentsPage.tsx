@@ -153,9 +153,8 @@ export default function GuestStudentsPage() {
             Misafir Öğrenciler
           </h1>
           <p className="mt-0.5 text-sm text-slate-600 dark:text-slate-400">
-            Canlı derse kayıtlı öğrenci listesi dışından katılanlar. Sistem eşleşmeyen adı
-            “muhtemel misafir” olarak işaretler; kesin karar öğretmen ya da yönetici onayıyla
-            verilir.
+            Öğretmenin veya yöneticinin manuel işaretlediği misafir katılımlar. Davet linkiyle
+            derse girenler otomatik listelenmez; yoklama ekranından adını yazarak işaretleyin.
           </p>
         </div>
         <div className="flex flex-wrap items-end gap-2">

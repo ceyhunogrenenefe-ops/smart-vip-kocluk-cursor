@@ -1,9 +1,8 @@
 /**
  * Misafir öğrenciler — /api/class-session-guests?op=...
  *
- * Canlı derse kayıtlı öğrenci listesi dışından katılanlar. Otomatik tespit
- * yalnız "muhtemel misafir" üretir; kesin karar öğretmen/yöneticinin
- * onayıyla verilir.
+ * Canlı derse kayıtlı öğrenci listesi dışından katılanlar. Misafir kaydı
+ * yalnız öğretmen/yönetici manuel işaretler; davet linki otomatik kayıt açmaz.
  *
  * Yetki: yönetici (admin / super_admin / coach) her şeyi görür; öğretmen
  * yalnız kendi dersini — op=bbb-sync-attendance ile aynı kural.
@@ -24,7 +23,6 @@ import {
   GUESTS_SQL_HINT,
   GuestSchemaMissing,
   convertGuestToStudent,
-  detectGuestsForSession,
   listGuestReport,
   listGuestsForSession,
   setGuestStatus,
@@ -88,25 +86,17 @@ export default async function handler(req, res) {
   const op = String(req.query?.op || body.op || 'list').trim();
 
   try {
-    /** Öğretmen ekranı: bir dersin misafirleri (+ otomatik tespit tazelenir) */
+    /** Öğretmen ekranı: bir dersin manuel işaretlenmiş misafirleri */
     if (op === 'list') {
       const session = await loadSession(req.query?.session_id || body.session_id);
       if (!session) return jsonError(res, 404, 'session_not_found');
       if (!(await canSeeSession(session, actor, roleSet))) {
         return jsonError(res, 403, 'forbidden');
       }
-      // Katılımcı listesi tazelendikçe yeni adlar "muhtemel misafir" olur.
-      // Onaylanmış/reddedilmiş satırlara dokunmaz.
-      let detect = null;
-      try {
-        detect = await detectGuestsForSession(session);
-      } catch (e) {
-        detect = { ok: false, reason: errorMessage(e) };
-      }
       const guests = await listGuestsForSession(session.id, session);
       return res.status(200).json({
         data: guests,
-        detect,
+        detect: { ok: true, detected: 0, reason: 'manual_only' },
         statuses: GUEST_STATUSES,
         sources: GUEST_SOURCES
       });
