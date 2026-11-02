@@ -125,14 +125,16 @@ function IgHesaplariBolumu({
       toast.success(`${u ? `@${u}` : 'Instagram hesabı'} CRM'e eklendi`);
       void onDegisti();
     } else if (hata) {
+      const gorulen = params.get('ig_seen');
       toast.error(
         hata === 'no_candidates'
-          ? 'Eklenecek Instagram hesabı bulunamadı. Facebook penceresinde yeni hesabın bağlı olduğu sayfayı seçtiğinizden emin olun.'
+          ? `Yeni Instagram hesabı gelmedi. Facebook yalnız şu sayfaları paylaştı: ${gorulen || '—'}. ` +
+              'Tekrar deneyin ve Facebook penceresinde "Erişimi düzenle / Ayarları düzenle" ile yeni sayfayı ve Instagram hesabını da işaretleyin.'
           : `Instagram hesabı eklenemedi: ${hata}`,
-        { duration: 10000 }
+        { duration: 20000 }
       );
     }
-    for (const k of ['ig_extra', 'ig_extra_error', 'ig_username']) params.delete(k);
+    for (const k of ['ig_extra', 'ig_extra_error', 'ig_username', 'ig_seen']) params.delete(k);
     const q = params.toString();
     window.history.replaceState(null, '', `${window.location.pathname}${q ? `?${q}` : ''}`);
     // eslint-disable-next-line react-hooks/exhaustive-deps
