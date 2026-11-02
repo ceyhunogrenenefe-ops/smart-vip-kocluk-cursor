@@ -236,3 +236,141 @@ export async function subscribePageToApp({ pageId, token, fields = 'feed,message
     return { ok: false, error: errorMessage(e), fields };
   }
 }
+
+/* ------------------------------------------------------------------ */
+/* DM desteği: gelen mesajın / yanıtın hangi ek hesaba ait olduğu      */
+/* ------------------------------------------------------------------ */
+
+const RESOLVE_CACHE_MS = 60_000;
+const resolveCache = new Map();
+let extraIdsCache = { at: 0, ids: null };
+
+/** Önbellekli resolveInstagramAccount (webhook başına çok olay gelebilir). */
+export async function resolveInstagramAccountCached(igUserId) {
+  const ig = String(igUserId || '').trim();
+  if (!ig) return { isPrimary: true, igUserId: '' };
+  const hit = resolveCache.get(ig);
+  if (hit && Date.now() - hit.at < RESOLVE_CACHE_MS) return hit.value;
+  const value = await resolveInstagramAccount({ igUserId: ig });
+  if (resolveCache.size > 200) resolveCache.clear();
+  resolveCache.set(ig, { at: Date.now(), value });
+  return value;
+}
+
+/** Etkin ek hesapların IG kimlikleri (webhook kanal tespiti için). Tablo yoksa boş küme. */
+export async function extraInstagramIgUserIds() {
+  if (extraIdsCache.ids && Date.now() - extraIdsCache.at < RESOLVE_CACHE_MS) return extraIdsCache.ids;
+  const ids = new Set();
+  try {
+    const { data, error } = await supabaseAdmin
+      .from(INSTAGRAM_ACCOUNTS_TABLE)
+      .select('ig_user_id, is_active')
+      .limit(200);
+    if (!error) for (const r of data || []) if (r.is_active !== false && r.ig_user_id) ids.add(String(r.ig_user_id));
+  } catch {
+    /* tablo yok → boş */
+  }
+  extraIdsCache = { at: Date.now(), ids };
+  return ids;
+}
+
+export function clearInstagramAccountCaches() {
+  resolveCache.clear();
+  extraIdsCache = { at: 0, ids: null };
+}
+
+/**
+ * Bir konuşmanın (IG kapsamlı kişi kimliği) hangi ek hesaba geldiğini bulur ve
+ * o hesabın gönderim override'ını döner. Birincil hesapta / bulunamazsa undefined.
+ * IGSID hesaba özgü olduğundan aynı kimlik iki hesapta çakışmaz.
+ */
+export async function sendOverrideForContact(igScopedId) {
+  const contact = String(igScopedId || '').trim();
+  if (!contact) return undefined;
+  const ids = await extraInstagramIgUserIds();
+  if (!ids.size) return undefined;
+  try {
+    const { data } = await supabaseAdmin
+      .from('crm_conversations')
+      .select('ad_source_data')
+      .eq('contact_identifier', contact)
+      .in('channel', ['instagram', 'facebook'])
+      .order('last_message_at', { ascending: false })
+      .limit(1);
+    const ig = String(data?.[0]?.ad_source_data?.ig_account_id || '').trim();
+    if (!ig || !ids.has(ig)) return undefined;
+    return sendOverrideFor(await resolveInstagramAccountCached(ig));
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Facebook ile giriş sonrası: kullanıcının yönettiği sayfalardan, Instagram
+ * işletme hesabı bağlı olup ana hesap OLMAYANLARI döner (sayfa anahtarlarıyla).
+ * Anahtarlar yalnız sunucuda kalır.
+ */
+export async function listExtraInstagramCandidates(userToken, institutionId) {
+  const tok = String(userToken || '').trim();
+  if (!tok) return { ok: false, error: 'user_token_missing', candidates: [] };
+  const url =
+    `https://graph.facebook.com/${graphVersion()}/me/accounts` +
+    `?fields=${encodeURIComponent('id,name,access_token,instagram_business_account{id,username}')}&limit=50`;
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${tok}` }, signal: AbortSignal.timeout(15000) });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok || json?.error) return { ok: false, error: json?.error?.message || `HTTP ${res.status}`, candidates: [] };
+  const primaryId = await primaryInstagramIgUserId(institutionId);
+  const candidates = [];
+  for (const p of json?.data || []) {
+    const iba = p?.instagram_business_account;
+    if (!iba?.id || !p?.access_token) continue;
+    if (primaryId && String(iba.id) === primaryId) continue;
+    candidates.push({
+      page_id: String(p.id),
+      page_name: p.name || null,
+      page_token: String(p.access_token),
+      ig_user_id: String(iba.id),
+      ig_username: iba.username ? String(iba.username) : null
+    });
+  }
+  return { ok: true, candidates, primary_ig_user_id: primaryId || null };
+}
+
+/**
+ * Ek hesabı doğrular, webhook'a abone eder ve tabloya yazar (panel POST ile aynı kurallar).
+ * @returns {{ ok: boolean, item?: object, error?: string, message?: string, subscription?: object }}
+ */
+export async function saveExtraInstagramAccount({ institutionId, pageId, pageToken, createdBy }) {
+  const check = await verifyPageInstagramAccount({ pageId, token: pageToken });
+  if (!check.ok) return { ok: false, error: 'verify_failed', message: check.error };
+  const primaryId = await primaryInstagramIgUserId(institutionId);
+  if (primaryId && primaryId === check.ig_user_id) {
+    return { ok: false, error: 'primary_account', message: 'Bu hesap zaten ana Instagram hesabı.' };
+  }
+  const existing = await getInstagramAccountRow(check.ig_user_id);
+  if (existing && !sameInstitution(existing.institution_id, institutionId)) {
+    return { ok: false, error: 'account_taken', message: 'Bu Instagram hesabı başka bir kuruma bağlı.' };
+  }
+  const subscription = await subscribePageToApp({ pageId, token: pageToken });
+  const now = new Date().toISOString();
+  const row = {
+    institution_id: storedInstitutionId(institutionId),
+    ig_user_id: check.ig_user_id,
+    ig_username: check.ig_username,
+    page_id: String(pageId),
+    page_token: String(pageToken),
+    is_active: true,
+    last_verified_at: now,
+    last_verify_error: subscription.ok ? null : `Webhook aboneliği: ${String(subscription.error || '').slice(0, 300)}`,
+    updated_at: now
+  };
+  if (!existing) row.created_by = createdBy || null;
+  const { data, error } = await supabaseAdmin
+    .from(INSTAGRAM_ACCOUNTS_TABLE)
+    .upsert(row, { onConflict: 'ig_user_id' })
+    .select('*')
+    .maybeSingle();
+  if (error) return { ok: false, error: 'db_error', message: error.message };
+  clearInstagramAccountCaches();
+  return { ok: true, item: publicAccountRow(data), page_name: check.page_name || null, subscription };
+}

@@ -41,7 +41,7 @@ function stripFb(id) {
 /**
  * @returns {Promise<{ name: string|null, username: string|null, profile_pic: string|null, error: string|null }>}
  */
-export async function lookupSocialProfile(scopedId, { channel = 'instagram' } = {}) {
+export async function lookupSocialProfile(scopedId, { channel = 'instagram', token: tokenOverride } = {}) {
   const id = stripFb(scopedId);
   if (!id) return { name: null, username: null, profile_pic: null, error: 'id_missing' };
   const key = `${channel}:${id}`;
@@ -49,7 +49,8 @@ export async function lookupSocialProfile(scopedId, { channel = 'instagram' } = 
   if (hit && Date.now() - hit.at < (hit.value.error ? ERR_TTL_MS : OK_TTL_MS)) return hit.value;
 
   await loadMetaWhatsAppSecretsFromDb().catch(() => null);
-  const tok = resolveSocialToken().token;
+  // Ek Instagram hesabı: kişinin kimliği o hesaba özgü, o hesabın anahtarıyla sorulur
+  const tok = String(tokenOverride || '').trim() || resolveSocialToken().token;
   if (!tok) {
     const value = { name: null, username: null, profile_pic: null, error: 'page_token_missing' };
     cache.set(key, { at: Date.now(), value });
@@ -158,7 +159,21 @@ export async function refreshMissingSocialProfiles({ limit = 15 } = {}) {
       c.channel === 'facebook' ||
       String(c.contact_identifier || '').startsWith(FB_PREFIX) ||
       c.ad_source_data?.source_platform === 'facebook';
-    const profile = await lookupSocialProfile(c.contact_identifier, { channel: isFb ? 'facebook' : 'instagram' });
+    let token;
+    const accountIg = String(c.ad_source_data?.ig_account_id || '').trim();
+    if (accountIg) {
+      try {
+        const { resolveInstagramAccountCached } = await import('./crm-instagram-accounts.js');
+        const acc = await resolveInstagramAccountCached(accountIg);
+        if (acc && acc.isPrimary === false) token = acc.token;
+      } catch {
+        /* ana anahtarla denenir */
+      }
+    }
+    const profile = await lookupSocialProfile(c.contact_identifier, {
+      channel: isFb ? 'facebook' : 'instagram',
+      ...(token ? { token } : {})
+    });
     await applyConversationProfile(c.id, profile, { usernameHint: c.ad_source_data?.username || null });
     if (profile.name || profile.username) updated += 1;
     else if (profile.error) {

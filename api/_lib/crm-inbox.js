@@ -652,22 +652,60 @@ export async function syncWhatsAppEchoesToCrm(value, { institutionId } = {}) {
   return { processed, skipped, issues };
 }
 
-export async function syncInstagramMessagingToCrm(events, { institutionId, channel = 'instagram' } = {}) {
+export async function syncInstagramMessagingToCrm(
+  events,
+  { institutionId, channel = 'instagram', accountIgUserId = null } = {}
+) {
   const ch = normalizeCrmChannel(channel) === 'whatsapp' ? 'instagram' : normalizeCrmChannel(channel);
   const list = Array.isArray(events) ? events : [];
   let processed = 0;
   let skipped = 0;
   const issues = [];
+  const baseInstitutionId = institutionId;
   for (const ev of list) {
     const norm = normalizeInstagramMessagingEvent(ev);
     if (norm.isEcho) continue;
     if (!norm.senderId || !norm.hasInboundContent) continue;
+
+    /**
+     * Ek Instagram hesabı: mesajı alan hesap (recipient.id ya da webhook
+     * entry.id) crm_instagram_accounts'ta kayıtlıysa konuşmaya hesap notu
+     * düşülür; profil sorgusu ve sonraki yanıtlar o hesabın anahtarıyla yapılır.
+     * Ana hesapta davranış aynen korunur.
+     */
+    let accountMeta = {};
+    let accountToken;
+    institutionId = baseInstitutionId;
+    const recipientIg = String(accountIgUserId || ev?.recipient?.id || '').trim();
+    if (recipientIg) {
+      try {
+        const { extraInstagramIgUserIds, resolveInstagramAccountCached } = await import('./crm-instagram-accounts.js');
+        const extraIds = await extraInstagramIgUserIds();
+        if (extraIds.has(recipientIg)) {
+          const account = await resolveInstagramAccountCached(recipientIg);
+          if (account && account.isPrimary === false) {
+            accountMeta = {
+              ig_account_id: recipientIg,
+              ...(account.username ? { ig_account_username: account.username } : {})
+            };
+            accountToken = account.token;
+            if (account.institutionId && !institutionId) institutionId = account.institutionId;
+          }
+        }
+      } catch (e) {
+        console.warn('[crm-inbox] ig hesap (dm) çözümü:', e?.message || e);
+      }
+    }
+
     // FAZ 1: ad + kullanıcı adı + fotoğraf; isim yoksa @kullanıcıadı
     const { lookupSocialProfile, applyConversationProfile } = await import('./social-profile.js');
-    const profile = await lookupSocialProfile(norm.senderId, { channel: ch }).catch(() => null);
+    const profile = await lookupSocialProfile(norm.senderId, {
+      channel: ch,
+      ...(accountToken ? { token: accountToken } : {})
+    }).catch(() => null);
     const contactName =
       profile?.name || (profile?.username ? `@${profile.username}` : null) ||
-      (await lookupSocialProfileName(norm.senderId).catch(() => null));
+      (accountToken ? null : await lookupSocialProfileName(norm.senderId).catch(() => null));
     const attach = instagramAttachmentSummary(ev?.message);
     let body = norm.text || attach.body || '[Medya / ek]';
     if (norm.isAd && ch === 'facebook' && body.startsWith('[Instagram reklamından')) {
@@ -685,8 +723,8 @@ export async function syncInstagramMessagingToCrm(events, { institutionId, chann
       direction: 'inbound',
       senderType: 'lead',
       institutionId,
-      adSourceData: extractAdSourceData({ channel: ch, messagingEvent: ev }),
-      payload: ev
+      adSourceData: { ...(extractAdSourceData({ channel: ch, messagingEvent: ev }) || {}), ...accountMeta },
+      payload: accountMeta.ig_account_id ? { ...ev, ...accountMeta } : ev
     });
     if (r?.conversation_id && profile) {
       await applyConversationProfile(r.conversation_id, profile).catch(() => null);
@@ -958,9 +996,22 @@ export async function sendCrmWhatsAppInteractive({ phone, interactive, instituti
  * override verilmezse (veya boşsa) eski platform/env çözümü aynen kullanılır.
  * @param {{ token?: string, pageId?: string, igUserId?: string }|undefined} override
  */
-async function resolveInstagramSendCreds(override) {
+async function resolveInstagramSendCreds(override, igScopedId) {
   await loadMetaWhatsAppSecretsFromDb();
   const { resolveSocialToken, resolvePageId, igBusinessIdEnv } = await import('./meta-social-inbound.js');
+  /**
+   * Override verilmediyse kişinin konuşmasından hesabı bul: ek Instagram
+   * hesabına gelen bir DM'e yanıt o hesabın anahtarıyla gitmeli (IGSID hesaba
+   * özgüdür; ana hesabın anahtarıyla gönderim reddedilir).
+   */
+  if (!String(override?.token || '').trim() && igScopedId) {
+    try {
+      const { sendOverrideForContact } = await import('./crm-instagram-accounts.js');
+      override = (await sendOverrideForContact(igScopedId)) || override;
+    } catch (e) {
+      console.warn('[crm-inbox] ig hesap (kişi) çözümü:', e?.message || e);
+    }
+  }
   const overrideToken = String(override?.token || '').trim();
   if (overrideToken) {
     return {
@@ -1091,7 +1142,7 @@ export function normalizeQuickReplies(quickReplies) {
 }
 
 export async function sendCrmInstagramQuickReplies({ igScopedId, text, quickReplies, override }) {
-  const { token, pageId } = await resolveInstagramSendCreds(override);
+  const { token, pageId } = await resolveInstagramSendCreds(override, igScopedId);
   if (!token || !pageId) {
     const err = new Error('instagram_not_configured');
     err.code = 'ENV';
@@ -1203,7 +1254,7 @@ export function instagramWindowClosedError(json, status) {
  * eskiden ham Meta metni geliyordu ve temsilci ne yapacağını bilmiyordu.
  */
 export async function sendCrmInstagramDm({ igScopedId, text, allowHumanAgentTag = true, override }) {
-  const { token, source: tokenSource, pageId } = await resolveInstagramSendCreds(override);
+  const { token, source: tokenSource, pageId } = await resolveInstagramSendCreds(override, igScopedId);
   if (!token || !pageId) {
     const err = new Error(
       'instagram_not_configured — META_BOUND_PAGE_TOKEN (veya META_PAGE_ACCESS_TOKEN) + META_PAGE_ID gerekli'
@@ -1280,9 +1331,7 @@ export async function sendCrmSocialMedia({
   allowHumanAgentTag = true
 }) {
   await loadMetaWhatsAppSecretsFromDb();
-  const { resolveSocialToken, resolvePageId } = await import('./meta-social-inbound.js');
-  const { token, source: tokenSource } = resolveSocialToken();
-  const pageId = resolvePageId();
+  const { token, source: tokenSource, pageId } = await resolveInstagramSendCreds(undefined, igScopedId);
   if (!token || !pageId) {
     const err = new Error(
       'instagram_not_configured — META_BOUND_PAGE_TOKEN (veya META_PAGE_ACCESS_TOKEN) + META_PAGE_ID gerekli'

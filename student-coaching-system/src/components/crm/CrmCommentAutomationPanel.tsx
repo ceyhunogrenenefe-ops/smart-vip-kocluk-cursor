@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Instagram, Loader2, Plus, Save, Trash2, Users, Wand2 } from 'lucide-react';
+import { Facebook, Instagram, Loader2, Plus, Save, Trash2, Users, Wand2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiFetch } from '../../lib/session';
 
@@ -107,6 +107,82 @@ function IgHesaplariBolumu({
   const [pageId, setPageId] = useState('');
   const [pageToken, setPageToken] = useState('');
   const [mesgul, setMesgul] = useState(false);
+  const [fbMesgul, setFbMesgul] = useState(false);
+  const [adaylar, setAdaylar] = useState<
+    Array<{ page_id: string; page_name: string | null; ig_user_id: string; ig_username: string | null }>
+  >([]);
+  const [seciliyor, setSeciliyor] = useState<string | null>(null);
+
+  /** Facebook ile ekleme dönüşü: ?ig_extra=added|pick / ?ig_extra_error=… */
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const durum = params.get('ig_extra');
+    const hata = params.get('ig_extra_error');
+    if (!durum && !hata) return;
+    setAcik(true);
+    if (durum === 'added') {
+      const u = params.get('ig_username');
+      toast.success(`${u ? `@${u}` : 'Instagram hesabı'} CRM'e eklendi`);
+      void onDegisti();
+    } else if (hata) {
+      toast.error(
+        hata === 'no_candidates'
+          ? 'Eklenecek Instagram hesabı bulunamadı. Facebook penceresinde yeni hesabın bağlı olduğu sayfayı seçtiğinizden emin olun.'
+          : `Instagram hesabı eklenemedi: ${hata}`,
+        { duration: 10000 }
+      );
+    }
+    for (const k of ['ig_extra', 'ig_extra_error', 'ig_username']) params.delete(k);
+    const q = params.toString();
+    window.history.replaceState(null, '', `${window.location.pathname}${q ? `?${q}` : ''}`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const adaylariYukle = useCallback(async () => {
+    try {
+      const res = await apiFetch('/api/crm-comment-automations?op=accounts_pending');
+      const j = await res.json().catch(() => ({}));
+      setAdaylar(Array.isArray(j.items) ? j.items : []);
+    } catch {
+      setAdaylar([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (acik) void adaylariYukle();
+  }, [acik, adaylariYukle]);
+
+  const facebookIleEkle = async () => {
+    setFbMesgul(true);
+    try {
+      const res = await apiFetch('/api/meta/facebook-oauth?start=1&purpose=extra_ig');
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || !j.authorize_url) throw new Error(j.error || 'Facebook girişi başlatılamadı');
+      window.location.href = j.authorize_url;
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Facebook girişi başlatılamadı');
+      setFbMesgul(false);
+    }
+  };
+
+  const adaySec = async (pid: string) => {
+    setSeciliyor(pid);
+    try {
+      const res = await apiFetch('/api/crm-comment-automations?op=accounts_pick', {
+        method: 'POST',
+        body: JSON.stringify({ page_id: pid })
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j.message || j.error || 'Hesap eklenemedi');
+      toast.success(`${j.item ? hesapAdi(j.item) : 'Hesap'} eklendi`);
+      await adaylariYukle();
+      await onDegisti();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Hesap eklenemedi');
+    } finally {
+      setSeciliyor(null);
+    }
+  };
 
   const ekle = async () => {
     if (!pageId.trim() || !pageToken.trim()) {
@@ -246,7 +322,46 @@ function IgHesaplariBolumu({
           ) : (
             <div className="space-y-2 rounded-lg border border-dashed border-slate-300 bg-white p-2.5">
               <p className="text-[11px] font-medium text-slate-600">Yeni hesap ekle</p>
-              <div className="grid gap-2 sm:grid-cols-2">
+              <button
+                type="button"
+                disabled={fbMesgul}
+                onClick={() => void facebookIleEkle()}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-[#1877F2] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#166fe0] disabled:opacity-60"
+              >
+                {fbMesgul ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Facebook className="h-3.5 w-3.5" />}
+                Facebook ile Instagram hesabı ekle
+              </button>
+              <p className="text-[11px] text-slate-500">
+                Açılan Facebook penceresinde yeni Instagram hesabının bağlı olduğu sayfayı da seçin. Ana hesap
+                değişmez; yeni hesabın yorumları ve DM'leri aynı gelen kutusuna düşer, yanıtlar o hesaptan gider.
+              </p>
+
+              {adaylar.length ? (
+                <div className="space-y-1.5 rounded-lg border border-indigo-200 bg-indigo-50/60 p-2">
+                  <p className="text-[11px] font-semibold text-indigo-900">Eklemek istediğiniz hesabı seçin</p>
+                  {adaylar.map((a) => (
+                    <div key={a.page_id} className="flex items-center justify-between gap-2 rounded-md bg-white px-2 py-1.5 text-xs">
+                      <span className="min-w-0 truncate">
+                        <b>{a.ig_username ? `@${a.ig_username}` : a.ig_user_id}</b>
+                        <span className="ml-1 text-slate-500">· {a.page_name || a.page_id}</span>
+                      </span>
+                      <button
+                        type="button"
+                        disabled={seciliyor !== null}
+                        onClick={() => void adaySec(a.page_id)}
+                        className="inline-flex items-center gap-1 rounded-md border border-indigo-200 bg-indigo-50 px-2 py-1 font-semibold text-indigo-800 hover:bg-indigo-100 disabled:opacity-60"
+                      >
+                        {seciliyor === a.page_id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Plus className="h-3 w-3" />}
+                        Ekle
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+
+              <details className="text-xs">
+                <summary className="cursor-pointer text-[11px] text-slate-500">Elle ekle (sayfa anahtarı ile)</summary>
+              <div className="mt-2 grid gap-2 sm:grid-cols-2">
                 <label className="block text-xs font-medium text-slate-600">
                   Facebook Sayfa ID
                   <input
@@ -281,6 +396,7 @@ function IgHesaplariBolumu({
                 {mesgul ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
                 Hesap ekle
               </button>
+              </details>
             </div>
           )}
         </div>
