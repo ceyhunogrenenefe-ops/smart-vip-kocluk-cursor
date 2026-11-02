@@ -3560,10 +3560,8 @@ export default function ClassLiveLessons() {
                 })}
 
                 {/*
-                  Misafir öğrenciler — derse kayıtlı öğrenci listesi dışından
-                  katılanlar. Otomatik tespit kesin karar vermez: "Muhtemel
-                  Misafir" tek tıkla onaylanır. Bu bölüm yalnız öğretmen ve
-                  yönetici ekranında görünür; öğrenci panelinde yok.
+                  Misafir öğrenciler — yalnız öğretmenin manuel işaretledikleri.
+                  Davet linkiyle derse girenler otomatik burada listelenmez.
                 */}
                 <div className="rounded-xl border border-amber-200 bg-amber-50/60 px-3 py-2.5 space-y-2">
                   <div className="flex flex-wrap items-center justify-between gap-2">

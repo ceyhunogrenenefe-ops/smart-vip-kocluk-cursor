@@ -92,10 +92,7 @@ import { buildBbbAttendeeJoinUrl, buildStaffBbbJoinUrl, parseBbbJoinCredentials,
 import { pollBbbPresenceForSession, applyAutoAttendanceForClassSession, mergeSeenNames } from '../api/_lib/bbb-attendance.js';
 import { fetchLiveAttendees } from '../api/_lib/live-attendance-source.js';
 import { buildLiveAttendanceDraft } from '../api/_lib/live-attendance-draft.js';
-import {
-  detectGuestsForSession,
-  listGuestsForSession
-} from '../api/_lib/class-session-guest-store.js';
+import { listGuestsForSession } from '../api/_lib/class-session-guest-store.js';
 import { isBbbAutoAttendanceEnabled } from '../api/_lib/bbb-auto-attendance-enabled.js';
 import { applyEarlyBbbAbsentCheck } from '../api/_lib/bbb-early-absent.js';
 import {
@@ -1709,20 +1706,12 @@ export default async function handler(req, res) {
         console.warn('[class-live-lessons] canlı yoklama:', liveErr?.message || liveErr);
         live = { provider: '', running: false, attendees: [], note: 'live_error', suggestions: [] };
       }
-      /**
-       * Misafir öğrenciler: katılımcı listesinde kayıtlı öğrenciyle eşleşmeyen
-       * adlar "muhtemel misafir" olarak tazelenir ve yoklamayla aynı yanıtta
-       * döner — öğretmen ayrı bir istek beklemeden etiketi görür.
-       *
-       * Tespit ya da misafir tablosu sorun çıkarırsa yoklama ekranı eskisi
-       * gibi çalışmaya devam eder.
-       */
+      /** Misafir kayıtları — yalnız öğretmenin manuel işaretledikleri. */
       let guests = [];
       try {
-        await detectGuestsForSession(session);
         guests = await listGuestsForSession(sessionId, session);
       } catch (guestErr) {
-        console.warn('[class-live-lessons] misafir tespiti:', guestErr?.message || guestErr);
+        console.warn('[class-live-lessons] misafir listesi:', guestErr?.message || guestErr);
       }
       return res.status(200).json({ data: data || [], roster, guests, live });
     }
@@ -2720,13 +2709,7 @@ export default async function handler(req, res) {
         force: String(row.status) === 'completed'
       });
 
-      // Katılımcı listesi tazelendi; eşleşmeyen adlar muhtemel misafir olarak işaretlenir
-      let guests = null;
-      try {
-        guests = await detectGuestsForSession(row);
-      } catch (guestErr) {
-        guests = { ok: false, reason: guestErr?.message || 'guest_detect_failed' };
-      }
+      const guests = { ok: true, detected: 0, reason: 'manual_only' };
 
       return res.status(200).json({
         ok: true,

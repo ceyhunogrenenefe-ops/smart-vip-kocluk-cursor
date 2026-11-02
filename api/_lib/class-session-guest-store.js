@@ -7,10 +7,7 @@
  */
 import { supabaseAdmin } from './supabase-admin.js';
 import { errorMessage } from './error-msg.js';
-import { buildClassSessionAttendanceRoster } from './class-session-attendance-roster.js';
-import { mergeSeenNames } from './bbb-attendance.js';
 import {
-  detectGuestNames,
   guestVisitStats,
   minutesPresent
 } from './class-session-guest-core.js';
@@ -30,78 +27,13 @@ export class GuestSchemaMissing extends Error {
   }
 }
 
-/** Dersin öğretmen adları — misafir tespitinde listeden düşmeleri için. */
-async function loadSessionTeacherNames(session) {
-  const ids = [String(session?.teacher_id || '').trim()].filter(Boolean);
-  if (!ids.length) return [];
-  const { data } = await supabaseAdmin.from('users').select('id,name').in('id', ids);
-  return (data || []).map((u) => String(u.name || '')).filter(Boolean);
-}
-
 /**
- * Otomatik tespit: katılımcı listesinde kayıtlı öğrenciyle eşleşmeyen adları
- * "muhtemel misafir" olarak yazar.
- *
- * Kesin karar vermez. Zaten onaylanmış (confirmed) veya reddedilmiş (dismissed)
- * satırların durumuna DOKUNMAZ; yalnız son görülme zamanını tazeler. Böylece
- * öğretmenin verdiği karar otomatik tespitle ezilmez.
+ * Misafir kaydı yalnız öğretmen/yönetici manuel işaretler (mark / add).
+ * Davet linki veya BBB katılımcı listesi otomatik misafir satırı oluşturmaz;
+ * aksi halde linkle giren herkes "misafir" sayılırdı.
  */
-export async function detectGuestsForSession(session) {
-  if (!session?.id) return { ok: false, reason: 'no_session' };
-  const seen = mergeSeenNames(session.bbb_seen_names, []);
-  if (!seen.length) return { ok: true, detected: 0, reason: 'no_attendees' };
-
-  const [roster, teacherNames] = await Promise.all([
-    buildClassSessionAttendanceRoster({
-      classId: session.class_id,
-      subject: session.subject
-    }),
-    loadSessionTeacherNames(session)
-  ]);
-
-  const candidates = detectGuestNames(seen, roster, teacherNames);
-  if (!candidates.length) return { ok: true, detected: 0 };
-
-  const now = new Date().toISOString();
-  let written = 0;
-  for (const c of candidates) {
-    try {
-      const { data: existing } = await supabaseAdmin
-        .from(TABLE)
-        .select('id,status')
-        .eq('session_id', session.id)
-        .eq('normalized_name', c.normalized_name)
-        .maybeSingle();
-
-      if (existing?.id) {
-        // Öğretmenin kararına dokunulmaz; yalnız son görülme tazelenir
-        await supabaseAdmin
-          .from(TABLE)
-          .update({ last_seen_at: now, updated_at: now })
-          .eq('id', existing.id);
-        continue;
-      }
-
-      const { error } = await supabaseAdmin.from(TABLE).insert({
-        session_id: session.id,
-        class_id: session.class_id || null,
-        institution_id: session.institution_id ? String(session.institution_id) : null,
-        display_name: c.display_name,
-        normalized_name: c.normalized_name,
-        status: 'suspected',
-        source: 'auto',
-        first_seen_at: now,
-        last_seen_at: now
-      });
-      if (error) throw error;
-      written += 1;
-    } catch (e) {
-      if (guestsTableMissing(e)) return { ok: false, reason: 'schema_missing' };
-      // Tek bir adın yazılamaması yoklama akışını durdurmasın
-      console.warn('[guests] tespit yazılamadı:', errorMessage(e));
-    }
-  }
-  return { ok: true, detected: written, candidates: candidates.length };
+export async function detectGuestsForSession(_session) {
+  return { ok: true, detected: 0, reason: 'manual_only' };
 }
 
 /** Bir dersin misafir kayıtları (öğretmen ekranı). */
