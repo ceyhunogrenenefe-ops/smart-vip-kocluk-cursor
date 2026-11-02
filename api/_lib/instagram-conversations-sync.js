@@ -144,7 +144,9 @@ async function fetchThreadMessages(conversationId, tok, messagesPerThread) {
 
 /**
  * Son IG konuşmalarını Graph’tan çekip CRM’e yazar.
- * @param {{ limit?: number, messagesPerThread?: number, apply?: boolean }} opts
+ * @param {{ limit?: number, messagesPerThread?: number, apply?: boolean,
+ *   account?: { token: string, pageId: string, igUserId: string } }} opts
+ *   account verilirse (ek Instagram hesabı) o hesabın anahtarı/sayfası kullanılır.
  */
 export async function syncInstagramConversationsFromGraph(opts = {}) {
   const limit = Math.min(Math.max(Number(opts.limit) || 8, 1), 20);
@@ -152,9 +154,12 @@ export async function syncInstagramConversationsFromGraph(opts = {}) {
   const apply = opts.apply !== false;
 
   await loadMetaWhatsAppSecretsFromDb().catch(() => null);
-  const { token, source } = resolveSocialToken();
-  const pageId = resolvePageId();
-  const igId = igBusinessIdEnv();
+  const acct = opts.account && String(opts.account.token || '').trim() ? opts.account : null;
+  const { token, source } = acct
+    ? { token: String(acct.token).trim(), source: 'crm_instagram_accounts' }
+    : resolveSocialToken();
+  const pageId = acct ? String(acct.pageId || '').trim() : resolvePageId();
+  const igId = acct ? String(acct.igUserId || '').trim() : igBusinessIdEnv();
 
   const out = {
     ok: false,
@@ -238,7 +243,10 @@ export async function syncInstagramConversationsFromGraph(opts = {}) {
   }
 
   try {
-    const crm = await syncInstagramMessagingToCrm(events, { channel: 'instagram' });
+    const crm = await syncInstagramMessagingToCrm(events, {
+      channel: 'instagram',
+      ...(acct ? { accountIgUserId: igId } : {})
+    });
     out.crm = crm;
     out.ok = true;
     out.hint = `IG Graph sync: ${crm?.processed || 0} yazıldı, ${crm?.skipped || 0} atlandı (${events.length} aday).`;
@@ -247,4 +255,36 @@ export async function syncInstagramConversationsFromGraph(opts = {}) {
     out.hint = 'CRM yazımı başarısız.';
   }
   return out;
+}
+
+/**
+ * Ek Instagram hesapları (crm_instagram_accounts) için aynı backfill.
+ * Webhook kaçırılan reklam DM'leri ek hesaplarda da CRM'e düşer.
+ */
+export async function syncExtraInstagramAccountsFromGraph(opts = {}) {
+  const { supabaseAdmin } = await import('./supabase-admin.js');
+  const { INSTAGRAM_ACCOUNTS_TABLE, accountsTableMissing } = await import('./crm-instagram-accounts.js');
+  const { data, error } = await supabaseAdmin
+    .from(INSTAGRAM_ACCOUNTS_TABLE)
+    .select('ig_user_id, ig_username, page_id, page_token, is_active')
+    .limit(20);
+  if (error) {
+    if (accountsTableMissing(error)) return { ok: true, accounts: [] };
+    return { ok: false, error: error.message, accounts: [] };
+  }
+  const accounts = [];
+  for (const row of data || []) {
+    if (row.is_active === false || !row.page_token) continue;
+    const r = await syncInstagramConversationsFromGraph({
+      ...opts,
+      account: { token: row.page_token, pageId: row.page_id, igUserId: row.ig_user_id }
+    }).catch((e) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }));
+    accounts.push({
+      ig_username: row.ig_username || null,
+      ok: Boolean(r?.ok),
+      processed: r?.crm?.processed || 0,
+      error: r?.error || null
+    });
+  }
+  return { ok: accounts.every((a) => a.ok), accounts };
 }

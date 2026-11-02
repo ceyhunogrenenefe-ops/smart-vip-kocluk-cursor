@@ -231,6 +231,53 @@ export default async function handler(req, res) {
   const op = String(req.query?.op || '').trim();
 
   try {
+    /** Facebook ile ekleme sonrası birden fazla aday sayfa → seçim */
+    if (op === 'accounts_pending' || op === 'accounts_pick') {
+      const acc = await import('../api/_lib/crm-instagram-accounts.js');
+      const { data: settingsRow } = await supabaseAdmin
+        .from('commerce_settings')
+        .select('id, meta')
+        .is('institution_id', null)
+        .maybeSingle();
+      const meta = settingsRow?.meta && typeof settingsRow.meta === 'object' ? settingsRow.meta : {};
+      const pending = meta.ig_extra_pending;
+      const valid =
+        pending &&
+        Date.parse(pending.expires_at || 0) > Date.now() &&
+        acc.sameInstitution(pending.institution_id, institutionId);
+      if (op === 'accounts_pending') {
+        return res.status(200).json({
+          ok: true,
+          items: valid
+            ? (pending.candidates || []).map((c) => ({
+                page_id: c.page_id,
+                page_name: c.page_name,
+                ig_user_id: c.ig_user_id,
+                ig_username: c.ig_username
+              }))
+            : []
+        });
+      }
+      if (req.method !== 'POST') return res.status(405).json({ error: 'method_not_allowed' });
+      if (!valid) return res.status(410).json({ error: 'expired', message: 'Seçim süresi doldu, Facebook ile yeniden ekleyin.' });
+      const pageId = String(readBody(req).page_id || '').trim();
+      const cand = (pending.candidates || []).find((c) => c.page_id === pageId);
+      if (!cand) return res.status(404).json({ error: 'not_found', message: 'Seçilen sayfa listede yok.' });
+      const saved = await acc.saveExtraInstagramAccount({
+        institutionId,
+        pageId: cand.page_id,
+        pageToken: cand.page_token,
+        createdBy: actor.sub || null
+      });
+      if (!saved.ok) return res.status(400).json(saved);
+      const rest = (pending.candidates || []).filter((c) => c.page_id !== pageId);
+      const nextMeta = { ...meta };
+      if (rest.length) nextMeta.ig_extra_pending = { ...pending, candidates: rest };
+      else delete nextMeta.ig_extra_pending;
+      await supabaseAdmin.from('commerce_settings').update({ meta: nextMeta }).eq('id', settingsRow.id);
+      return res.status(200).json(saved);
+    }
+
     /** Ek Instagram hesapları */
     if (op === 'accounts') {
       return await handleAccounts(req, res, { institutionId, actor });

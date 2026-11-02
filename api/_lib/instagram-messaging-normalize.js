@@ -178,11 +178,17 @@ export function resolveSocialChannelFromWebhook({
   objectType,
   event,
   igBusinessId,
-  pageId
+  pageId,
+  extraIgUserIds = null
 } = {}) {
   const obj = String(objectType || '').toLowerCase();
   if (obj === 'instagram') return 'instagram';
   if (obj !== 'page') return obj === 'facebook' ? 'facebook' : 'instagram';
+  // Ek Instagram hesabına (crm_instagram_accounts) gelen mesaj → instagram
+  const rcpt = String(event?.recipient?.id || '').trim();
+  if (rcpt && extraIgUserIds && typeof extraIgUserIds.has === 'function' && extraIgUserIds.has(rcpt)) {
+    return 'instagram';
+  }
 
   const igBiz = String(
     igBusinessId || process.env.META_IG_BUSINESS_ID || process.env.INSTAGRAM_BUSINESS_ACCOUNT_ID || ''

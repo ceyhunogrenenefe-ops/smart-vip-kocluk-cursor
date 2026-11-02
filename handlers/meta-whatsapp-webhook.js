@@ -595,13 +595,21 @@ export default async function handler(req, res) {
         ).trim();
         const pageId = String(process.env.META_PAGE_ID || process.env.FACEBOOK_PAGE_ID || entry?.id || '').trim();
         // Per-event channel: IG business recipient → instagram; page recipient → facebook (CTM ads included)
+        let extraIgUserIds = null;
+        try {
+          const { extraInstagramIgUserIds } = await import('../api/_lib/crm-instagram-accounts.js');
+          extraIgUserIds = await extraInstagramIgUserIds();
+        } catch {
+          extraIgUserIds = null;
+        }
         const byChannel = new Map();
         for (const evt of messaging) {
           const socialChannel = resolveSocialChannelFromWebhook({
             objectType,
             event: evt,
             igBusinessId,
-            pageId
+            pageId,
+            extraIgUserIds
           });
           if (!byChannel.has(socialChannel)) byChannel.set(socialChannel, []);
           byChannel.get(socialChannel).push(evt);

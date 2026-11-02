@@ -1,5 +1,8 @@
 import { authorizeVercelOrCronSecret, rejectUnauthorizedCron } from '../api/_lib/cron-auth.js';
-import { syncInstagramConversationsFromGraph } from '../api/_lib/instagram-conversations-sync.js';
+import {
+  syncExtraInstagramAccountsFromGraph,
+  syncInstagramConversationsFromGraph
+} from '../api/_lib/instagram-conversations-sync.js';
 import { recordCronRun } from '../api/_lib/cron-run-log.js';
 import { refreshMissingSocialProfiles } from '../api/_lib/social-profile.js';
 
@@ -17,6 +20,12 @@ export default async function handler(req, res) {
       limit: 25,
       messagesPerThread: 25
     });
+    // Ek Instagram hesapları (varsa) — ana hesabın sonucunu etkilemez
+    try {
+      result.extra_accounts = await syncExtraInstagramAccountsFromGraph({ apply: true, limit: 15, messagesPerThread: 15 });
+    } catch (e) {
+      result.extra_accounts = { ok: false, error: e instanceof Error ? e.message : String(e) };
+    }
     // FAZ 1: ismi / kullanıcı adı eksik konuşmaları yeniden dene (senkron başarısız olsa da çalışır)
     try {
       result.profiles = await refreshMissingSocialProfiles({ limit: 15 });

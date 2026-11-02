@@ -828,7 +828,7 @@ export async function ensureAppSocialSubscriptions({ apply = false } = {}) {
   return out;
 }
 
-async function exchangeLongLivedUserToken(userToken) {
+export async function exchangeLongLivedUserToken(userToken) {
   const id = appIdEnv();
   const secret = appSecretEnv();
   if (!id || !secret || !userToken) return userToken;
@@ -870,7 +870,16 @@ export async function bindMetaSocialFromUserToken(userAccessToken) {
       hint: 'Bu Facebook kullanıcısının yönettiği Sayfa yok. BM’de sayfa yöneticisi ile giriş yapın.'
     };
   }
-  const preferred = accounts.find((a) => a?.instagram_business_account?.id) || accounts[0];
+  /**
+   * Birden fazla sayfa yönetiliyorsa ana hesap yerinde kalmalı: önce şu an bağlı
+   * sayfa, yoksa Instagram'ı olan ilk sayfa. (Ek Instagram hesabı eklendikten
+   * sonra "Bağla"ya basmak ana hesabı başka sayfaya kaydırıyordu.)
+   */
+  const currentPageId = String(process.env.META_PAGE_ID || '').trim();
+  const preferred =
+    (currentPageId && accounts.find((a) => String(a?.id || '') === currentPageId)) ||
+    accounts.find((a) => a?.instagram_business_account?.id) ||
+    accounts[0];
   const pageTok = String(preferred.access_token || '').trim();
   const pageId = String(preferred.id || '').trim();
   if (!pageTok || !pageId) {
