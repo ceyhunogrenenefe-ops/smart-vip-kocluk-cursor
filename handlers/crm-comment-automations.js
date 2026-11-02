@@ -3,6 +3,7 @@ import { requireAuthenticatedActor } from '../api/_lib/auth.js';
 import { errorMessage } from '../api/_lib/error-msg.js';
 import { normalizedUserRolesFromDb } from '../api/_lib/user-roles-fetch.js';
 import { matchKeyword } from '../api/_lib/crm-comment-automation-core.js';
+import { PLATFORM_PRIMARY_INSTITUTION_ID } from '../api/_lib/quota-enforce.js';
 
 const TABLE = 'crm_comment_automations';
 const LOG_TABLE = 'crm_comment_automation_logs';
@@ -16,6 +17,30 @@ function canManage(actor, tags) {
     list.includes('admin') ||
     list.includes('super_admin')
   );
+}
+
+/**
+ * Otomasyon sorgusunu kuruma göre daraltır.
+ *
+ * Platform kurumu (Online Vip Dershane) sistemin geri kalanında "kurumsuz"
+ * (institution_id = null) ile aynı sayılır; otomasyonlar da null ile kayıtlı.
+ * Eskiden burada düz eşitlik vardı: platform kurumuna bağlı bir hesapla
+ * girildiğinde liste boş geliyor, otomasyonlar "kaybolmuş" görünüyordu.
+ * Kurumu olmayan (süper yönetici) hepsini görmeye devam eder.
+ */
+function scopeAutomations(q, institutionId) {
+  const id = String(institutionId || '').trim();
+  if (!id) return q;
+  if (id === PLATFORM_PRIMARY_INSTITUTION_ID) {
+    return q.or(`institution_id.is.null,institution_id.eq.${PLATFORM_PRIMARY_INSTITUTION_ID}`);
+  }
+  return q.eq('institution_id', id);
+}
+
+/** Kayda yazılacak kurum: platform kurumu null olarak saklanır (webhook ile aynı). */
+function storedAutomationInstitution(institutionId) {
+  const id = String(institutionId || '').trim();
+  return !id || id === PLATFORM_PRIMARY_INSTITUTION_ID ? null : id;
 }
 
 function readBody(req) {
@@ -178,7 +203,7 @@ async function handleAccounts(req, res, { institutionId, actor }) {
       .from(TABLE)
       .update({ is_active: false, updated_at: new Date().toISOString() })
       .eq('ig_user_id', current.ig_user_id);
-    q = institutionId ? q.eq('institution_id', institutionId) : q;
+    q = scopeAutomations(q, institutionId);
     await q.then(() => null, () => null);
     return res.status(200).json({ ok: true });
   }
@@ -346,8 +371,10 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'GET') {
-      let q = supabaseAdmin.from(TABLE).select('*').order('created_at', { ascending: false }).limit(100);
-      if (institutionId) q = q.eq('institution_id', institutionId);
+      const q = scopeAutomations(
+        supabaseAdmin.from(TABLE).select('*').order('created_at', { ascending: false }).limit(100),
+        institutionId
+      );
       const { data, error } = await q;
       if (error) return res.status(500).json({ error: error.message });
 
@@ -374,7 +401,7 @@ export default async function handler(req, res) {
       const id = String(body.id || '').trim();
 
       const row = {
-        institution_id: institutionId,
+        institution_id: storedAutomationInstitution(institutionId),
         name: String(body.name || '').trim().slice(0, 120) || 'Yorum otomasyonu',
         platform: 'instagram',
         media_id: String(body.media_id || '').trim() || null,
@@ -424,8 +451,7 @@ export default async function handler(req, res) {
        */
       const save = async (r) => {
         if (id) {
-          let q = supabaseAdmin.from(TABLE).update(r).eq('id', id);
-          if (institutionId) q = q.eq('institution_id', institutionId);
+          const q = scopeAutomations(supabaseAdmin.from(TABLE).update(r).eq('id', id), institutionId);
           return q.select('*').maybeSingle();
         }
         return supabaseAdmin
@@ -453,9 +479,7 @@ export default async function handler(req, res) {
     if (req.method === 'DELETE') {
       const id = String(req.query?.id || '').trim();
       if (!id) return res.status(400).json({ error: 'id_required' });
-      let q = supabaseAdmin.from(TABLE).delete().eq('id', id);
-      if (institutionId) q = q.eq('institution_id', institutionId);
-      const { error } = await q;
+      const { error } = await scopeAutomations(supabaseAdmin.from(TABLE).delete().eq('id', id), institutionId);
       if (error) return res.status(500).json({ error: error.message });
       return res.status(200).json({ ok: true });
     }

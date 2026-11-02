@@ -14,6 +14,7 @@
  *   bozulmaz.
  */
 import { supabaseAdmin } from './supabase-admin.js';
+import { PLATFORM_PRIMARY_INSTITUTION_ID } from './quota-enforce.js';
 import { yorumIcinPlan } from './ig-takip-kapisi.js';
 import {
   ADIMLAR,
@@ -47,7 +48,13 @@ function accountColumnMissing(error) {
 export async function loadActiveCommentAutomations(institutionId) {
   try {
     let q = supabaseAdmin.from(TABLE).select('*').eq('platform', 'instagram').eq('is_active', true);
-    if (institutionId) q = q.eq('institution_id', institutionId);
+    const inst = String(institutionId || '').trim();
+    // Platform kurumu = kurumsuz (null) kayıtlar; panel ile aynı kural
+    if (inst === PLATFORM_PRIMARY_INSTITUTION_ID) {
+      q = q.or(`institution_id.is.null,institution_id.eq.${PLATFORM_PRIMARY_INSTITUTION_ID}`);
+    } else if (inst) {
+      q = q.eq('institution_id', inst);
+    }
     const { data, error } = await q;
     if (error) {
       if (tableMissing(error)) return [];
