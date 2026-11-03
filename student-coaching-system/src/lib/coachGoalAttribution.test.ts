@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import {
   attributeCoachGoalCompletions,
   completedForCoachGoal,
+  computePlannerWeekTotals,
   dedupeCoachGoalsForAnalytics,
   effectivePlannerEntryDone,
   totalCoachQuestionTargetsInRange
@@ -195,4 +196,25 @@ const goals = [A, B];
   assert.equal(totalCoachQuestionTargetsInRange([m, pr, pb], FROM, TO), 160);
 }
 
-console.log('coachGoalAttribution tests ok (14 senaryo)');
+// 15) Aynı günlük kayıt iki bloğa bağlıysa hedefe bir kez sayılır
+{
+  const entries = [entry('e1', 'Matematik', '2026-09-15', 60)];
+  const planner = [
+    block('blok-a', 'A', '2026-09-15', 30, { weekly_entry_id: 'e1' }),
+    block('blok-b', 'A', '2026-09-16', 30, { weekly_entry_id: 'e1' })
+  ];
+  const done = attributeCoachGoalCompletions([A], entries, FROM, TO, planner);
+  assert.equal(done.get('A'), 60);
+}
+
+// 16) Haftalık plan özeti = Pazartesi + … günlük parçaların toplamı
+{
+  const entries = [
+    entry('e1', 'Matematik', '2026-09-15', 40),
+    entry('e2', 'Matematik', '2026-09-16', 25)
+  ];
+  const totals = computePlannerWeekTotals([A], [], entries, FROM, TO);
+  assert.equal(totals.soru.done, 65);
+}
+
+console.log('coachGoalAttribution tests ok (16 senaryo)');

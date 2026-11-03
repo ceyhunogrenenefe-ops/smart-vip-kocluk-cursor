@@ -197,7 +197,7 @@ export function totalCoachQuestionCompletedInRange(
 /** Haftalık grafik: koç hedefi dersinde, gün dilimindeki çözülen (takvim şart değil) */
 export function coachQuestionCompletedInYmdRange(
   goals: CoachWeeklyGoalRow[],
-  _plannerEntries: WeeklyPlannerEntryRow[],
+  plannerEntries: WeeklyPlannerEntryRow[],
   weeklyEntries: WeeklyEntry[],
   ymdFrom: string,
   ymdTo: string,
@@ -205,7 +205,7 @@ export function coachQuestionCompletedInYmdRange(
   analysisRangeTo: string
 ): number {
   const deduped = dedupeCoachGoalsForAnalytics(goals, analysisRangeFrom, analysisRangeTo);
-  const done = attributeCoachGoalCompletions(deduped, weeklyEntries, ymdFrom, ymdTo);
+  const done = attributeCoachGoalCompletions(deduped, weeklyEntries, ymdFrom, ymdTo, plannerEntries);
   let sum = 0;
   for (const g of deduped) {
     if (!isQuestionCoachGoal(g)) continue;
@@ -479,11 +479,31 @@ export function attributeCoachGoalCompletions(
   const out = new Map<string, number>();
   for (const g of goals) {
     let manual = 0;
+    const linkedKeysSeen = new Set<string>();
     if (clipOf.has(g.id)) {
+      const kind = amountTypeForGoal(g);
       for (const p of plannerEntries) {
         if (p.coach_goal_id !== g.id || isAutoSyncedPlannerRow(p)) continue;
         if (!inClip(g.id, clipYmd(p.planner_date))) continue;
-        manual += effectivePlannerEntryDone(g, p, entries);
+        const full = effectivePlannerEntryDone(g, p, entries);
+        const wid = p.weekly_entry_id ? String(p.weekly_entry_id) : '';
+        if (wid && explicitLink.get(wid) === g.id) {
+          const lk = `${g.id}::${wid}`;
+          if (!linkedKeysSeen.has(lk)) {
+            linkedKeysSeen.add(lk);
+            manual += full;
+          } else {
+            // Aynı günlük kayıt birden fazla bloğa bağlanmış — kayıt zaten sayıldı
+            const planned = Math.max(0, Number(p.planned_quantity || 0));
+            let plannerOnly = Math.max(0, Number(p.completed_quantity || 0));
+            if (String(p.status || '').toLowerCase() === 'completed' && planned > 0) {
+              plannerOnly = Math.max(plannerOnly, planned);
+            }
+            manual += plannerOnly;
+          }
+        } else {
+          manual += full;
+        }
       }
     }
     out.set(g.id, Math.max(fromEntries.get(g.id) || 0, manual));
@@ -934,6 +954,33 @@ export type PlannerWeekTotals = {
   sayfa: PlannerAmountTotals;
 };
 
+/** Tek takvim gününde koç hedefi + hedefsiz bloklardan çözülen soru (haftalık özetle uyumlu) */
+export function dayCoachQuestionDoneInWeek(
+  goals: CoachWeeklyGoalRow[],
+  plannerEntries: WeeklyPlannerEntryRow[],
+  weeklyEntries: WeeklyEntry[],
+  ymd: string,
+  weekFrom: string,
+  weekTo: string
+): number {
+  const rf = clipYmd(weekFrom);
+  const rt = clipYmd(weekTo);
+  const y = clipYmd(ymd);
+  if (!y || y < rf || y > rt) return 0;
+  const activeGoals = dedupeCoachGoalsForAnalytics(goals, rf, rt);
+  const allGoalIds = new Set(goals.map((g) => g.id));
+  const dayEntries = weeklyEntries.filter((e) => clipYmd(e.date) === y);
+  const dayPlanner = plannerEntries.filter((p) => clipYmd(p.planner_date) === y);
+  let done = totalCoachQuestionCompletedInRange(activeGoals, dayEntries, y, y, dayPlanner);
+  for (const row of dayPlanner) {
+    if (row.coach_goal_id && allGoalIds.has(row.coach_goal_id)) continue;
+    if (isAutoSyncedPlannerRow(row)) continue;
+    if (freeBlockAmountType(row) !== 'soru') continue;
+    done += plannerBlockDoneQuantity(row, goals, weeklyEntries);
+  }
+  return Math.round(done);
+}
+
 /** Koç hedefi olmayan blok için birim: kitap okuma → sayfa, diğerleri → soru */
 function freeBlockAmountType(row: WeeklyPlannerEntryRow): GoalAmountType {
   const sub = String(row.subject || '').trim();
@@ -962,24 +1009,49 @@ export function computePlannerWeekTotals(
   };
 
   const activeGoals = dedupeCoachGoalsForAnalytics(goals, rf, rt);
-  const doneByGoal = attributeCoachGoalCompletions(activeGoals, weeklyEntries, rf, rt, plannerEntries);
+  const allGoalIds = new Set(goals.map((g) => g.id));
+
   for (const g of activeGoals) {
     const t = amountTypeForGoal(g);
     acc[t].target += coachTargetInAnalysisRange(g, rf, rt);
-    acc[t].done += doneByGoal.get(g.id) ?? 0;
   }
 
-  const allGoalIds = new Set(goals.map((g) => g.id));
-  for (const row of plannerEntries) {
-    const d = clipYmd(row.planner_date);
-    if (d < rf || d > rt) continue;
-    // Koç hedefine bağlı bloklar yukarıda hedef üzerinden sayıldı
-    if (row.coach_goal_id && allGoalIds.has(row.coach_goal_id)) continue;
-    if (isAutoSyncedPlannerRow(row)) continue;
-    const t = freeBlockAmountType(row);
-    const planned = Math.max(0, Number(row.planned_quantity || 0));
-    acc[t].target += planned;
-    acc[t].done += plannerBlockDoneQuantity(row, goals, weeklyEntries);
+  const weekEntries = weeklyEntries.filter((e) => {
+    const d = clipYmd(e.date);
+    return d >= rf && d <= rt;
+  });
+  const days = eachDayOfInterval({
+    start: parseISO(`${rf}T12:00:00`),
+    end: parseISO(`${rt}T12:00:00`),
+  });
+
+  /**
+   * Haftalık özet = gün gün toplam. Böylece Pazartesi + Salı + … takvimde
+   * görünen günlük ilerlemeyle üstteki “soru çözüldü” satırı aynı kalır.
+   */
+  for (const day of days) {
+    const ymd = format(day, 'yyyy-MM-dd');
+    const dayEntries = weekEntries.filter((e) => clipYmd(e.date) === ymd);
+    const dayPlanner = plannerEntries.filter((p) => clipYmd(p.planner_date) === ymd);
+
+    acc.soru.done += dayCoachQuestionDoneInWeek(goals, dayPlanner, dayEntries, ymd, rf, rt);
+
+    const doneByGoal = attributeCoachGoalCompletions(activeGoals, dayEntries, ymd, ymd, dayPlanner);
+    for (const g of activeGoals) {
+      const t = amountTypeForGoal(g);
+      if (t === 'dakika' || t === 'sayfa') {
+        acc[t].done += doneByGoal.get(g.id) ?? 0;
+      }
+    }
+
+    for (const row of dayPlanner) {
+      if (row.coach_goal_id && allGoalIds.has(row.coach_goal_id)) continue;
+      if (isAutoSyncedPlannerRow(row)) continue;
+      const t = freeBlockAmountType(row);
+      const planned = Math.max(0, Number(row.planned_quantity || 0));
+      acc[t].target += planned;
+      acc[t].done += plannerBlockDoneQuantity(row, goals, weekEntries);
+    }
   }
 
   const fin = (t: GoalAmountType): PlannerAmountTotals => {

@@ -39,8 +39,12 @@ import {
   plannerCardDisplayTitle,
 } from '../../lib/weeklyPlannerApi';
 import { COACH_GOAL_QUANTITY_UNITS } from '../../lib/coachGoalUnits';
-import { computePlannerWeekTotals,
-  plannerBlockDoneQuantity, attributeCoachGoalCompletions } from '../../lib/coachGoalAnalytics';
+import {
+  computePlannerWeekTotals,
+  dayCoachQuestionDoneInWeek,
+  plannerBlockDoneQuantity,
+  attributeCoachGoalCompletions,
+} from '../../lib/coachGoalAnalytics';
 import {
   defaultGoalUnitForSubject,
   isBransDenemesiTitle,
@@ -826,6 +830,24 @@ export function WeeklyPlannerCalendar({
     setMobileCreateSlotIdx(freeIdx >= 0 ? freeIdx : Math.max(0, fallbackIdx));
   }, [mobileDayDate, showMobileDayView, entries, timeSlots]);
 
+  const weekStudyEntries = useMemo(
+    () =>
+      studentWeeklyEntries.filter((e) => {
+        const d = String(e.date || '').slice(0, 10);
+        return d >= weekStartStr && d <= weekEndStr;
+      }),
+    [studentWeeklyEntries, weekStartStr, weekEndStr]
+  );
+
+  const questionDoneByDay = useMemo(() => {
+    const out: Record<string, number> = {};
+    for (const d of dayDates) {
+      const n = dayCoachQuestionDoneInWeek(goals, entries, weekStudyEntries, d, weekStartStr, weekEndStr);
+      if (n > 0) out[d] = n;
+    }
+    return out;
+  }, [goals, entries, weekStudyEntries, dayDates, weekStartStr, weekEndStr]);
+
   /** Soru, süre (dk) ve sayfa hedefleri ayrı: dakika soru toplamına karışmaz */
   const weekStats = useMemo(() => {
     let minutes = 0;
@@ -833,9 +855,9 @@ export function WeeklyPlannerCalendar({
       if (e.planner_date < weekStartStr || e.planner_date > weekEndStr) continue;
       minutes += slotMinutes(e.start_time, e.end_time);
     }
-    const totals = computePlannerWeekTotals(goals, entries, studentWeeklyEntries, weekStartStr, weekEndStr);
+    const totals = computePlannerWeekTotals(goals, entries, weekStudyEntries, weekStartStr, weekEndStr);
     return { ...totals, minutes };
-  }, [entries, weekStartStr, weekEndStr, goals, studentWeeklyEntries]);
+  }, [entries, weekStartStr, weekEndStr, goals, weekStudyEntries]);
 
   const openCreate = (date: string, slot: PlannerTimeSlot) => {
     setSlotContext({ date, startTime: slot.start, endTime: slot.end });
@@ -2319,6 +2341,14 @@ export function WeeklyPlannerCalendar({
                     <span className="mt-0.5 inline-flex items-center rounded-md bg-white/85 px-1.5 py-0 text-[11px] font-semibold tabular-nums text-slate-600 shadow-sm ring-1 ring-slate-200/80 dark:bg-slate-800/90 dark:text-slate-400 dark:ring-slate-600/80">
                       {format(parseISO(date), 'd MMM', { locale: tr })}
                     </span>
+                    {questionDoneByDay[date] ? (
+                      <span
+                        className="mt-0.5 text-[10px] font-bold tabular-nums text-emerald-700 dark:text-emerald-400"
+                        title="Bu gün çözülen soru (üstteki haftalık toplamla aynı hesap)"
+                      >
+                        {questionDoneByDay[date]} soru
+                      </span>
+                    ) : null}
                   </div>
                   );
                 })}
