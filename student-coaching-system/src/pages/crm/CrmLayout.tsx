@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { BarChart3, Bell, CalendarCheck, FileBarChart, Inbox, LayoutGrid, LogOut, Puzzle, Send, Users } from 'lucide-react';
+import { BarChart3, Bell, CalendarCheck, ClipboardList, FileBarChart, Inbox, LayoutGrid, LogOut, Puzzle, Send, Users } from 'lucide-react';
 import CrmAlarmHost from './CrmAlarmHost';
 import CrmLiveOpsHost from './CrmLiveOpsHost';
 import CrmNotificationBell from './CrmNotificationBell';
@@ -110,6 +110,19 @@ export default function CrmLayout() {
                 <Inbox className="h-4 w-4" />
                 Gelen Kutusu
               </NavLink>
+              {canSeePipeline && (
+              <NavLink
+                to="/crm/etkinlik-formlari"
+                className={({ isActive }) =>
+                  `inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition ${
+                    isActive ? 'bg-emerald-600 text-white' : 'text-slate-600 hover:bg-slate-100'
+                  }`
+                }
+              >
+                <ClipboardList className="h-4 w-4" />
+                Etkinlik formları
+              </NavLink>
+              )}
               {isAdmin && (
                 <NavLink
                   to="/crm/widgetler"

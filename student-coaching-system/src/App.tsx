@@ -104,6 +104,8 @@ import NotificationsPage from './pages/NotificationsPage';
 import EventsPage from './pages/EventsPage';
 import MeetingTrackerPage from './pages/MeetingTrackerPage';
 import CrmLayout from './pages/crm/CrmLayout';
+import CrmEventFormsPage from './pages/crm/CrmEventFormsPage';
+import EventFormPublicPage from './pages/eventForm/EventFormPublicPage';
 import HomeworkSharePage from './pages/HomeworkSharePage';
 import CrmInboxPage from './pages/crm/CrmInboxPage';
 import CrmAgentsPage from './pages/crm/CrmAgentsPage';
@@ -218,6 +220,9 @@ function App() {
               <Route path="/c" element={<VideoSolutionPublicHome />} />
               <Route path="/c/:slug" element={<VideoSolutionSetPage />} />
               <Route path="/c/:slug/s/:questionNumber" element={<VideoSolutionQuestionPage />} />
+
+              {/* Etkinlik kayıt formu — oturum yok */}
+              <Route path="/f/:slug" element={<EventFormPublicPage />} />
 
             {/* Ana sayfa yönlendirmesi */}
             <Route path="/" element={<HomeRedirect />} />
@@ -500,6 +505,14 @@ function App() {
               <Route path="toplu-mesaj" element={<CrmBulkMessagePage />} />
               <Route path="gunluk-rapor" element={<CrmDailyReportPage />} />
               <Route path="inbox" element={<CrmInboxPage />} />
+              <Route
+                path="etkinlik-formlari"
+                element={
+                  <ProtectedRoute allowedRoles={rolesForProtectedRoute('/crm/etkinlik-formlari')}>
+                    <CrmEventFormsPage />
+                  </ProtectedRoute>
+                }
+              />
               <Route
                 path="widgetler"
                 element={

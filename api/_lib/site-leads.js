@@ -257,6 +257,8 @@ export function formatSiteLeadMessage(parsed) {
         ? 'Ücretsiz öğrenci analizi'
         : parsed.formKind === 'teklif'
           ? 'Teklif formu'
+          : parsed.formKind === 'etkinlik'
+            ? 'Etkinlik kayıt formu'
           : parsed.formKind === 'iletisim'
             ? 'İletişim formu'
             : 'Website formu';
