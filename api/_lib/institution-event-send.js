@@ -79,6 +79,14 @@ export function buildEventTemplateVars(event, participant) {
     base.veli = formParent;
     base.veli_adi = formParent;
   }
+  // Etkinlik sonrası anket: {{link}} kişiye özel anket bağlantısı olur
+  const surveyUrl = String(participant.survey_url || '').trim();
+  if (surveyUrl) {
+    base.link = surveyUrl;
+    base.baglanti = surveyUrl;
+    base.anket_link = surveyUrl;
+    base.anket = surveyUrl;
+  }
   const extras = event.template_vars && typeof event.template_vars === 'object' ? event.template_vars : {};
   for (const [key, raw] of Object.entries(extras)) {
     const v = String(raw ?? '').trim();

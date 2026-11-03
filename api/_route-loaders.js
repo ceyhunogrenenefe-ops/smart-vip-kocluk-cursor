@@ -116,6 +116,7 @@ export const routeLoaders = {
   'institution-events': () => import('../handlers/institution-events.js'),
   'event-form': () => import('../handlers/event-form-public.js'),
   'event-forms': () => import('../handlers/event-forms-admin.js'),
+  'event-survey': () => import('../handlers/event-survey-public.js'),
   'edu-panel': () => import('../handlers/edu-panel.js'),
   'edesis-sync': () => import('../handlers/edesis-sync.js'),
   'edesis-analysis': () => import('../handlers/edesis-analysis.js'),

@@ -6,12 +6,17 @@ import { normalizePhoneToE164 } from './phone-whatsapp.js';
 import { wallTimeToUtcMs } from './teacher-lesson-start-ms.js';
 
 export const DEFAULT_REMINDER_TEMPLATE = 'institution_event_invite';
+/** Etkinlik sonrası anket mesajı (Meta onaylı şablon) */
+export const SURVEY_TEMPLATE_TYPE = 'institution_event_survey';
+/** Etkinlik sonrası hatırlatma: zaman geçtikten sonra en fazla bu kadar gecikmeyle gider */
+export const AFTER_REMINDER_LATE_GRACE_MS = 6 * 60 * 60 * 1000;
 
 /** Varsayılan hatırlatmalar: 1 gün önce, aynı gün 10:00, 10 dk önce */
 export const DEFAULT_REMINDERS = Object.freeze([
   { kind: 'before', offset_minutes: 1440, at_time: null, template_type: DEFAULT_REMINDER_TEMPLATE, enabled: true },
   { kind: 'day_of', offset_minutes: null, at_time: '10:00', template_type: DEFAULT_REMINDER_TEMPLATE, enabled: true },
-  { kind: 'before', offset_minutes: 10, at_time: null, template_type: DEFAULT_REMINDER_TEMPLATE, enabled: true }
+  { kind: 'before', offset_minutes: 10, at_time: null, template_type: DEFAULT_REMINDER_TEMPLATE, enabled: true },
+  { kind: 'after', offset_minutes: 120, at_time: null, template_type: SURVEY_TEMPLATE_TYPE, enabled: true }
 ]);
 
 /** Hatırlatma zamanı geçtikten sonra en fazla bu kadar gecikmeyle gönderilir (cron kaçırırsa). */
@@ -151,10 +156,11 @@ export function eventStartMs(event) {
 
 export function normalizeReminderInput(raw) {
   if (!raw || typeof raw !== 'object') return null;
-  const kind = raw.kind === 'day_of' ? 'day_of' : 'before';
-  const template_type = str(raw.template_type, 120) || DEFAULT_REMINDER_TEMPLATE;
+  const kind = raw.kind === 'day_of' ? 'day_of' : raw.kind === 'after' ? 'after' : 'before';
+  const template_type =
+    str(raw.template_type, 120) || (kind === 'after' ? SURVEY_TEMPLATE_TYPE : DEFAULT_REMINDER_TEMPLATE);
   const enabled = raw.enabled !== false;
-  if (kind === 'before') {
+  if (kind === 'before' || kind === 'after') {
     const n = Math.round(Number(raw.offset_minutes));
     if (!Number.isFinite(n) || n < 0 || n > 60 * 24 * 14) return null;
     return { kind, offset_minutes: n, at_time: null, template_type, enabled };
@@ -185,6 +191,7 @@ export function reminderFireMs(event, reminder) {
   }
   const off = Number(reminder.offset_minutes);
   if (!Number.isFinite(off)) return null;
+  if (reminder.kind === 'after') return start + off * 60 * 1000;
   return start - off * 60 * 1000;
 }
 
@@ -195,6 +202,7 @@ export function isReminderDue(event, reminder, nowMs) {
   const start = eventStartMs(event);
   if (fire == null || start == null) return false;
   if (nowMs < fire) return false;
+  if (reminder.kind === 'after') return nowMs <= fire + AFTER_REMINDER_LATE_GRACE_MS;
   if (nowMs > fire + REMINDER_LATE_GRACE_MS) return false;
   if (nowMs > start) return false; // etkinlik başladıysa artık hatırlatma yok
   return true;
@@ -215,8 +223,68 @@ export function describeReminder(r) {
   if (!r) return '';
   if (r.kind === 'day_of') return `Etkinlik günü saat ${String(r.at_time || '').slice(0, 5)}`;
   const m = Number(r.offset_minutes);
+  if (r.kind === 'after') {
+    if (m === 0) return 'Etkinlik başlar başlamaz (sonrası)';
+    if (m % 1440 === 0) return `Etkinlikten ${m / 1440} gün sonra`;
+    if (m % 60 === 0) return `Etkinlikten ${m / 60} saat sonra`;
+    return `Etkinlikten ${m} dakika sonra`;
+  }
   if (m === 0) return 'Etkinlik başlarken';
   if (m % 1440 === 0) return `${m / 1440} gün önce`;
   if (m % 60 === 0) return `${m / 60} saat önce`;
   return `${m} dakika önce`;
+}
+
+/* ---------- Etkinlik sonrası anket ---------- */
+
+export const EXPECTATION_OPTIONS = ['evet', 'kismen', 'hayir'];
+
+/**
+ * Anket gönderimini doğrular.
+ * @returns {{ ok: true, data: object } | { ok: false, errors: Record<string,string> }}
+ */
+export function validateSurvey(body) {
+  const b = body && typeof body === 'object' ? body : {};
+  const errors = {};
+  const rating = Math.round(Number(b.rating));
+  if (!Number.isFinite(rating) || rating < 1 || rating > 5) errors.rating = 'Lütfen 1–5 arası puan verin.';
+  const expectation = EXPECTATION_OPTIONS.includes(b.expectation) ? b.expectation : null;
+  const want_info = b.want_info === true ? true : b.want_info === false ? false : null;
+  if (Object.keys(errors).length) return { ok: false, errors };
+  return {
+    ok: true,
+    data: {
+      rating,
+      expectation,
+      want_info,
+      topics: str(b.topics, 500) || null,
+      comment: str(b.comment, 2000) || null
+    }
+  };
+}
+
+/** Anket yanıtlarından özet */
+export function summarizeSurvey(responses) {
+  const list = Array.isArray(responses) ? responses : [];
+  const n = list.length;
+  const dist = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+  const expectation = { evet: 0, kismen: 0, hayir: 0 };
+  let sum = 0;
+  let wantInfo = 0;
+  for (const r of list) {
+    const v = Number(r.rating);
+    if (v >= 1 && v <= 5) {
+      dist[v] += 1;
+      sum += v;
+    }
+    if (r.expectation && expectation[r.expectation] != null) expectation[r.expectation] += 1;
+    if (r.want_info === true) wantInfo += 1;
+  }
+  return {
+    count: n,
+    average: n ? Math.round((sum / n) * 10) / 10 : null,
+    distribution: dist,
+    expectation,
+    want_info: wantInfo
+  };
 }

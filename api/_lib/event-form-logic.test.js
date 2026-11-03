@@ -11,7 +11,11 @@ import {
   participantEligibleForReminder,
   normalizeReminderInput,
   describeReminder,
-  REMINDER_LATE_GRACE_MS
+  REMINDER_LATE_GRACE_MS,
+  AFTER_REMINDER_LATE_GRACE_MS,
+  validateSurvey,
+  summarizeSurvey,
+  DEFAULT_REMINDERS
 } from './event-form-logic.js';
 
 // slug
@@ -92,5 +96,40 @@ assert.equal(describeReminder(dayBefore), '1 gün önce');
 assert.equal(describeReminder(tenMin), '10 dakika önce');
 assert.equal(describeReminder({ kind: 'before', offset_minutes: 120 }), '2 saat önce');
 assert.equal(describeReminder(morning), 'Etkinlik günü saat 10:00');
+
+// etkinlik sonrası (anket)
+const after2h = { kind: 'after', offset_minutes: 120, enabled: true };
+assert.equal(new Date(reminderFireMs(ev, after2h)).toISOString(), '2026-11-10T20:00:00.000Z');
+const fireAfter = reminderFireMs(ev, after2h);
+assert.equal(isReminderDue(ev, after2h, fireAfter - 1), false);
+assert.equal(isReminderDue(ev, after2h, fireAfter), true); // etkinlik başlamış olsa da gider
+assert.equal(isReminderDue(ev, after2h, fireAfter + 3 * 3600 * 1000), true);
+assert.equal(isReminderDue(ev, after2h, fireAfter + AFTER_REMINDER_LATE_GRACE_MS + 1), false);
+assert.equal(describeReminder(after2h), 'Etkinlikten 2 saat sonra');
+assert.equal(normalizeReminderInput({ kind: 'after', offset_minutes: 90 }).template_type, 'institution_event_survey');
+assert.equal(normalizeReminderInput({ kind: 'after', offset_minutes: 90 }).kind, 'after');
+assert.ok(DEFAULT_REMINDERS.some((r) => r.kind === 'after'));
+// kayıt, anket gönderiminden önce olduysa alır
+assert.equal(participantEligibleForReminder({ phone: '+90', created_at: '2026-11-10T17:00:00Z' }, fireAfter), true);
+
+// anket doğrulama
+assert.equal(validateSurvey({}).ok, false);
+assert.equal(validateSurvey({ rating: 6 }).ok, false);
+const sv = validateSurvey({ rating: '4', expectation: 'kismen', want_info: true, comment: '  güzeldi ' });
+assert.equal(sv.ok, true);
+assert.deepEqual(sv.data, { rating: 4, expectation: 'kismen', want_info: true, topics: null, comment: 'güzeldi' });
+assert.equal(validateSurvey({ rating: 5, expectation: 'xx' }).data.expectation, null);
+
+const sum = summarizeSurvey([
+  { rating: 5, expectation: 'evet', want_info: true },
+  { rating: 4, expectation: 'kismen', want_info: false },
+  { rating: 3, expectation: null, want_info: null }
+]);
+assert.equal(sum.count, 3);
+assert.equal(sum.average, 4);
+assert.equal(sum.distribution[5], 1);
+assert.equal(sum.expectation.kismen, 1);
+assert.equal(sum.want_info, 1);
+assert.equal(summarizeSurvey([]).average, null);
 
 console.log('event-form-logic ok');
