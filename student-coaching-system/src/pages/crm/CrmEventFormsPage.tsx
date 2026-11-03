@@ -9,7 +9,9 @@ import {
   Loader2,
   Plus,
   RefreshCw,
+  MessageSquareHeart,
   Save,
+  Star,
   Trash2,
   Users
 } from 'lucide-react';
@@ -38,7 +40,7 @@ type FormSettings = {
 
 type ReminderRow = {
   id?: string;
-  kind: 'before' | 'day_of';
+  kind: 'before' | 'day_of' | 'after';
   offset_minutes: number | null;
   at_time: string | null;
   template_type: string;
@@ -64,6 +66,27 @@ type Participant = {
   form_meta?: { contact_consent?: boolean | null } | null;
   reminder_sends: { reminder_id: string; status: string; error: string | null }[];
 };
+
+type SurveyResponse = {
+  participant_id: string;
+  rating: number;
+  expectation: 'evet' | 'kismen' | 'hayir' | null;
+  want_info: boolean | null;
+  topics: string | null;
+  comment: string | null;
+  created_at: string;
+  parent_name: string | null;
+  student_name: string | null;
+  phone: string | null;
+};
+type SurveySummary = {
+  count: number;
+  average: number | null;
+  distribution: Record<string, number>;
+  expectation: { evet: number; kismen: number; hayir: number };
+  want_info: number;
+};
+type SurveyTemplateState = 'missing' | 'draft' | 'pending' | 'approved' | 'rejected';
 
 type EventListRow = {
   id: string;
@@ -92,6 +115,7 @@ type EventDetail = {
   form_settings: FormSettings;
   reminders: ReminderRow[];
   participants: Participant[];
+  survey?: { summary: SurveySummary; responses: SurveyResponse[] };
 };
 
 type Template = { type: string; name: string; content: string };
@@ -114,6 +138,8 @@ type Draft = {
 /* ---------- yardımcılar ---------- */
 
 const DEFAULT_TEMPLATE = 'institution_event_invite';
+const SURVEY_TEMPLATE = 'institution_event_survey';
+const EXPECTATION_LABEL: Record<string, string> = { evet: 'Evet', kismen: 'Kısmen', hayir: 'Hayır' };
 
 const DEFAULT_SETTINGS: FormSettings = {
   heading: '',
@@ -138,7 +164,8 @@ const DEFAULT_SETTINGS: FormSettings = {
 const DEFAULT_REMINDERS: ReminderRow[] = [
   { kind: 'before', offset_minutes: 1440, at_time: null, template_type: DEFAULT_TEMPLATE, enabled: true },
   { kind: 'day_of', offset_minutes: null, at_time: '10:00', template_type: DEFAULT_TEMPLATE, enabled: true },
-  { kind: 'before', offset_minutes: 10, at_time: null, template_type: DEFAULT_TEMPLATE, enabled: true }
+  { kind: 'before', offset_minutes: 10, at_time: null, template_type: DEFAULT_TEMPLATE, enabled: true },
+  { kind: 'after', offset_minutes: 120, at_time: null, template_type: SURVEY_TEMPLATE, enabled: true }
 ];
 
 function emptyDraft(): Draft {
@@ -293,6 +320,8 @@ export default function CrmEventFormsPage() {
   const [saving, setSaving] = useState(false);
   const [schemaHint, setSchemaHint] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [surveyTpl, setSurveyTpl] = useState<{ state: SurveyTemplateState; content: string | null; rejected_reason?: string | null } | null>(null);
+  const [surveyTplBusy, setSurveyTplBusy] = useState(false);
 
   const loadList = useCallback(async () => {
     setListLoading(true);
@@ -326,6 +355,9 @@ export default function CrmEventFormsPage() {
     void loadList();
     api<{ data: Template[] }>('/api/event-forms?op=templates')
       .then((j) => setTemplates(j.data || []))
+      .catch(() => undefined);
+    api<{ state: SurveyTemplateState; content: string | null; rejected_reason?: string | null }>('/api/event-forms?op=survey-template')
+      .then(setSurveyTpl)
       .catch(() => undefined);
   }, [loadList]);
 
@@ -399,6 +431,47 @@ export default function CrmEventFormsPage() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const submitSurveyTemplate = async () => {
+    setSurveyTplBusy(true);
+    try {
+      const j = await api<{ state: SurveyTemplateState; content: string | null }>('/api/event-forms?op=survey-template-submit', {
+        method: 'POST',
+        body: '{}'
+      });
+      setSurveyTpl(j);
+      toast.success(j.state === 'approved' ? 'Anket şablonu onaylı' : 'Anket şablonu Meta onayına gönderildi');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSurveyTplBusy(false);
+    }
+  };
+
+  const exportSurveyCsv = () => {
+    if (!detail?.survey) return;
+    const rows = [
+      ['Veli', 'Öğrenci', 'Telefon', 'Puan', 'Beklenti', 'Bilgi almak istiyor', 'İstenen konular', 'Yorum', 'Tarih'],
+      ...detail.survey.responses.map((r) => [
+        r.parent_name || '',
+        r.student_name || '',
+        r.phone || '',
+        r.rating,
+        r.expectation ? EXPECTATION_LABEL[r.expectation] : '',
+        r.want_info === true ? 'Evet' : r.want_info === false ? 'Hayır' : '',
+        r.topics || '',
+        r.comment || '',
+        formatDateTime(r.created_at)
+      ])
+    ];
+    const csv = rows.map((r) => r.map((c) => `"${String(c ?? '').replace(/"/g, '""')}"`).join(';')).join('\n');
+    const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `${detail.form_slug || 'etkinlik'}-anket.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
   };
 
   const deleteParticipant = async (p: Participant) => {
@@ -785,15 +858,29 @@ export default function CrmEventFormsPage() {
                                 className="rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
                                 value={r.kind}
                                 onChange={(e) =>
-                                  patchReminder(i, e.target.value === 'day_of'
-                                    ? { kind: 'day_of', at_time: r.at_time || '10:00' }
-                                    : { kind: 'before', offset_minutes: r.offset_minutes ?? 60 })
+                                  patchReminder(
+                                    i,
+                                    e.target.value === 'day_of'
+                                      ? { kind: 'day_of', at_time: r.at_time || '10:00' }
+                                      : e.target.value === 'after'
+                                        ? {
+                                            kind: 'after',
+                                            offset_minutes: r.offset_minutes ?? 120,
+                                            template_type: SURVEY_TEMPLATE
+                                          }
+                                        : {
+                                            kind: 'before',
+                                            offset_minutes: r.offset_minutes ?? 60,
+                                            template_type: r.template_type === SURVEY_TEMPLATE ? draft.template_type : r.template_type
+                                          }
+                                  )
                                 }
                               >
                                 <option value="before">Etkinlikten önce</option>
                                 <option value="day_of">Etkinlik günü saat</option>
+                                <option value="after">Etkinlikten sonra (anket)</option>
                               </select>
-                              {r.kind === 'before' ? (
+                              {r.kind === 'before' || r.kind === 'after' ? (
                                 <>
                                   <input
                                     type="number"
@@ -828,7 +915,11 @@ export default function CrmEventFormsPage() {
                                 onChange={(e) => patchReminder(i, { template_type: e.target.value })}
                                 aria-label="Şablon"
                               >
-                                {!templateByType.has(r.template_type) && <option value={r.template_type}>{r.template_type}</option>}
+                                {!templateByType.has(r.template_type) && (
+                                  <option value={r.template_type}>
+                                    {r.template_type === SURVEY_TEMPLATE ? 'Etkinlik sonrası anket (link)' : r.template_type}
+                                  </option>
+                                )}
                                 {templates.map((t) => (
                                   <option key={t.type} value={t.type}>
                                     {t.name || t.type}
@@ -878,8 +969,56 @@ export default function CrmEventFormsPage() {
                     </button>
                     <p className="mt-1 text-xs text-slate-500">
                       Hatırlatma saatinden sonra kayıt olan kişi o hatırlatmayı almaz (kayıtta zaten onay mesajı alır). Aynı
-                      telefona aynı hatırlatma bir kez gider.
+                      telefona aynı hatırlatma bir kez gider. "Etkinlikten sonra" hatırlatması her kişiye özel anket linki
+                      gönderir.
                     </p>
+                    {draft.reminders.some((r) => r.kind === 'after' && r.enabled) && (
+                      <div
+                        className={`mt-3 rounded-xl border p-3 text-sm ${
+                          surveyTpl?.state === 'approved'
+                            ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
+                            : surveyTpl?.state === 'rejected'
+                              ? 'border-rose-200 bg-rose-50 text-rose-900'
+                              : 'border-amber-200 bg-amber-50 text-amber-900'
+                        }`}
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <span className="font-semibold">
+                            Anket mesaj şablonu:{' '}
+                            {surveyTpl?.state === 'approved'
+                              ? 'Meta onaylı ✓'
+                              : surveyTpl?.state === 'pending'
+                                ? 'Meta onayı bekleniyor'
+                                : surveyTpl?.state === 'rejected'
+                                  ? 'Meta reddetti'
+                                  : 'Henüz onaya gönderilmedi'}
+                          </span>
+                          {surveyTpl?.state !== 'approved' && surveyTpl?.state !== 'pending' && (
+                            <button
+                              type="button"
+                              onClick={() => void submitSurveyTemplate()}
+                              disabled={surveyTplBusy}
+                              className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
+                            >
+                              {surveyTplBusy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                              Meta onayına gönder
+                            </button>
+                          )}
+                        </div>
+                        {surveyTpl?.state !== 'approved' && (
+                          <p className="mt-1 text-xs">
+                            Onay gelene kadar anket mesajı gönderilmez; onay geldikten sonra hatırlatma saatinden itibaren 6 saat
+                            içinde otomatik gider.
+                            {surveyTpl?.rejected_reason ? ` Ret nedeni: ${surveyTpl.rejected_reason}` : ''}
+                          </p>
+                        )}
+                        {surveyTpl?.content && (
+                          <p className="mt-2 whitespace-pre-line rounded-lg bg-white/70 p-2 text-xs text-slate-700">
+                            {surveyTpl.content}
+                          </p>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
                 <div>
@@ -895,6 +1034,98 @@ export default function CrmEventFormsPage() {
                 </div>
               </div>
             </Section>
+
+            {/* Anket sonuçları */}
+            {detail?.survey && (detail.survey.summary.count > 0 || detail.reminders.some((r) => r.kind === 'after')) && (
+              <Section
+                title={`Anket sonuçları (${detail.survey.summary.count})`}
+                icon={<MessageSquareHeart className="h-4 w-4 text-rose-500" />}
+                right={
+                  <button
+                    type="button"
+                    onClick={exportSurveyCsv}
+                    disabled={!detail.survey.summary.count}
+                    className="inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-100 disabled:opacity-40"
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                    Excel (CSV)
+                  </button>
+                }
+              >
+                {!detail.survey.summary.count ? (
+                  <p className="py-6 text-center text-sm text-slate-500">
+                    Henüz yanıt yok. Anket linki etkinlik bittikten sonra otomatik gönderilir.
+                  </p>
+                ) : (
+                  <>
+                    <div className="grid gap-3 sm:grid-cols-4">
+                      <div className="rounded-xl bg-amber-50 p-3">
+                        <p className="text-xs font-semibold uppercase text-amber-700">Ortalama puan</p>
+                        <p className="mt-1 flex items-center gap-1 text-2xl font-bold text-amber-900">
+                          {detail.survey.summary.average ?? '—'}
+                          <Star className="h-5 w-5 fill-amber-400 text-amber-400" />
+                        </p>
+                        <p className="text-xs text-amber-700">{detail.survey.summary.count} yanıt</p>
+                      </div>
+                      <div className="rounded-xl bg-slate-50 p-3 sm:col-span-2">
+                        <p className="text-xs font-semibold uppercase text-slate-500">Puan dağılımı</p>
+                        <div className="mt-1 space-y-1">
+                          {[5, 4, 3, 2, 1].map((n) => {
+                            const c = detail.survey!.summary.distribution[n] || 0;
+                            const pct = detail.survey!.summary.count ? Math.round((c / detail.survey!.summary.count) * 100) : 0;
+                            return (
+                              <div key={n} className="flex items-center gap-2 text-xs">
+                                <span className="w-6 text-slate-600">{n}★</span>
+                                <div className="h-2 flex-1 overflow-hidden rounded-full bg-slate-200">
+                                  <div className="h-full rounded-full bg-amber-400" style={{ width: `${pct}%` }} />
+                                </div>
+                                <span className="w-8 text-right text-slate-600">{c}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                      <div className="rounded-xl bg-emerald-50 p-3">
+                        <p className="text-xs font-semibold uppercase text-emerald-700">Bilgi almak istiyor</p>
+                        <p className="mt-1 text-2xl font-bold text-emerald-900">{detail.survey.summary.want_info}</p>
+                        <p className="text-xs text-emerald-700">Kayıt Takibi'ne düştü</p>
+                        <p className="mt-2 text-xs text-slate-600">
+                          Beklenti: {detail.survey.summary.expectation.evet} evet · {detail.survey.summary.expectation.kismen} kısmen ·{' '}
+                          {detail.survey.summary.expectation.hayir} hayır
+                        </p>
+                      </div>
+                    </div>
+                    <ul className="mt-4 divide-y divide-slate-100">
+                      {detail.survey.responses.map((r) => (
+                        <li key={r.participant_id} className="py-3 text-sm">
+                          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                            <span className="font-semibold text-slate-900">{r.parent_name || '—'}</span>
+                            {r.student_name && <span className="text-slate-500">({r.student_name})</span>}
+                            <span className="text-amber-500" aria-label={`${r.rating} puan`}>
+                              {'★'.repeat(r.rating)}
+                              <span className="text-slate-300">{'★'.repeat(5 - r.rating)}</span>
+                            </span>
+                            {r.expectation && (
+                              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600">
+                                Beklenti: {EXPECTATION_LABEL[r.expectation]}
+                              </span>
+                            )}
+                            {r.want_info && (
+                              <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-700">
+                                Bilgi istiyor · {r.phone}
+                              </span>
+                            )}
+                            <span className="ml-auto text-xs text-slate-400">{formatDateTime(r.created_at)}</span>
+                          </div>
+                          {r.topics && <p className="mt-1 text-slate-600">Konu isteği: {r.topics}</p>}
+                          {r.comment && <p className="mt-1 whitespace-pre-line text-slate-700">“{r.comment}”</p>}
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                )}
+              </Section>
+            )}
 
             {/* Katılımcılar */}
             {detail && (

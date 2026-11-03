@@ -18,6 +18,7 @@ export function isGuestPublicPath(pathname?: string): boolean {
     path.startsWith('/veli-kayit-metin/') ||
     path.startsWith('/d/') ||
     path.startsWith('/f/') ||
+    path.startsWith('/anket/') ||
     path.startsWith('/misafir-katil') ||
     path === '/marketing' ||
     path === '/hakkimizda' ||

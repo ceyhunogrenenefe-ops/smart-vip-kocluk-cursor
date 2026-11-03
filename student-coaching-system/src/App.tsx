@@ -107,6 +107,7 @@ import CrmLayout from './pages/crm/CrmLayout';
 import ScrollToTopOnNavigate from './components/routing/ScrollToTopOnNavigate';
 import CrmEventFormsPage from './pages/crm/CrmEventFormsPage';
 import EventFormPublicPage from './pages/eventForm/EventFormPublicPage';
+import EventSurveyPublicPage from './pages/eventForm/EventSurveyPublicPage';
 import HomeworkSharePage from './pages/HomeworkSharePage';
 import CrmInboxPage from './pages/crm/CrmInboxPage';
 import CrmAgentsPage from './pages/crm/CrmAgentsPage';
@@ -225,6 +226,7 @@ function App() {
 
               {/* Etkinlik kayıt formu — oturum yok */}
               <Route path="/f/:slug" element={<EventFormPublicPage />} />
+              <Route path="/anket/:token" element={<EventSurveyPublicPage />} />
 
             {/* Ana sayfa yönlendirmesi */}
             <Route path="/" element={<HomeRedirect />} />

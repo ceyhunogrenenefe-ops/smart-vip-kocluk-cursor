@@ -3,6 +3,7 @@
  * Kural başına (institution_event_reminders) her katılımcıya en fazla bir mesaj
  * (institution_event_reminder_sends unique(reminder_id, participant_id)).
  */
+import { randomBytes } from 'node:crypto';
 import { supabaseAdmin } from './supabase-admin.js';
 import { getIstanbulDateString, addCalendarDaysYmd } from './istanbul-time.js';
 import {
@@ -15,6 +16,42 @@ import {
   participantEligibleForReminder,
   reminderFireMs
 } from './event-form-logic.js';
+
+export const SURVEY_PUBLIC_ORIGIN = 'https://www.dersonlinevipkocluk.com';
+
+export function newSurveyToken() {
+  return randomBytes(9).toString('base64url');
+}
+
+/** Katılımcının anket bağlantısı — yoksa üretir ve kaydeder */
+export async function ensureSurveyUrl(participant) {
+  let token = String(participant.survey_token || '').trim();
+  if (!token) {
+    for (let i = 0; i < 3 && !token; i += 1) {
+      const candidate = newSurveyToken();
+      const { error } = await supabaseAdmin
+        .from('institution_event_participants')
+        .update({ survey_token: candidate })
+        .eq('id', participant.id)
+        .is('survey_token', null);
+      if (!error) {
+        const { data } = await supabaseAdmin
+          .from('institution_event_participants')
+          .select('survey_token')
+          .eq('id', participant.id)
+          .maybeSingle();
+        token = String(data?.survey_token || '');
+      }
+    }
+  }
+  return token ? `${SURVEY_PUBLIC_ORIGIN}/anket/${token}` : null;
+}
+
+function templateApprovedForSend(tpl) {
+  const st = String(tpl?.whatsapp_template_status || '').toUpperCase();
+  // Durum boşsa eski/manuel şablon: gönderime izin ver (mevcut davranış)
+  return !st || st === 'APPROVED' || st === 'ACTIVE';
+}
 
 /** Bir çalıştırmada en fazla bu kadar mesaj (fonksiyon süre sınırı) — kalan bir sonraki turda gider */
 const MAX_SENDS_PER_RUN = 150;
@@ -35,7 +72,7 @@ export async function processEventReminders({ now = new Date(), log = [] } = {})
   const { data: events, error: evErr } = await supabaseAdmin
     .from('institution_events')
     .select('*')
-    .gte('event_date', today)
+    .gte('event_date', addCalendarDaysYmd(today, -15))
     .lte('event_date', addCalendarDaysYmd(tomorrow, 14))
     .not('event_time', 'is', null);
   if (evErr) throw evErr;
@@ -77,7 +114,13 @@ export async function processEventReminders({ now = new Date(), log = [] } = {})
       log.push({ reminder_id: reminder.id, event_id: event.id, skip: 'template_not_found' });
       continue;
     }
-    if (templateBindingsNeedLink(tpl) && !resolveEventMeetingLink(event)) {
+    const isAfter = reminder.kind === 'after';
+    if (!templateApprovedForSend(tpl)) {
+      // Onay gelince gecikme payı içinde gönderilir
+      log.push({ reminder_id: reminder.id, event_id: event.id, skip: 'template_not_approved' });
+      continue;
+    }
+    if (!isAfter && templateBindingsNeedLink(tpl) && !resolveEventMeetingLink(event)) {
       log.push({ reminder_id: reminder.id, event_id: event.id, skip: 'no_meeting_link' });
       continue;
     }
@@ -125,7 +168,19 @@ export async function processEventReminders({ now = new Date(), log = [] } = {})
       seenPhones.add(p.phone);
       let sent;
       try {
-        sent = await sendParticipantWhatsApp(event, p, templateType, tpl, 'institution_event_reminder');
+        let target = p;
+        if (isAfter) {
+          const survey_url = await ensureSurveyUrl(p);
+          if (!survey_url) throw new Error('survey_token_failed');
+          target = { ...p, survey_url };
+        }
+        sent = await sendParticipantWhatsApp(
+          event,
+          target,
+          templateType,
+          tpl,
+          isAfter ? 'institution_event_survey' : 'institution_event_reminder'
+        );
       } catch (e) {
         sent = { ok: false, error: String(e?.message || e) };
       }

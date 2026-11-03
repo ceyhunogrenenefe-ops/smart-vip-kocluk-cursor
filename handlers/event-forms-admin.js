@@ -6,6 +6,8 @@
  *   GET    /api/event-forms?op=slug-check&slug=… → link adı uygun mu
  *   POST   /api/event-forms?op=save              → etkinlik + form + hatırlatmalar (oluştur/güncelle)
  *   POST   /api/event-forms?op=delete-participant&id=…&participant_id=…
+ *   GET    /api/event-forms?op=survey-template       → anket WhatsApp şablonunun durumu
+ *   POST   /api/event-forms?op=survey-template-submit → şablonu oluştur + Meta onayına gönder
  */
 import { requireAuthenticatedActor } from '../api/_lib/auth.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
@@ -19,8 +21,10 @@ import {
   normalizeFormSettings,
   normalizeReminderInput,
   reminderFireMs,
-  slugifyTr
+  slugifyTr,
+  summarizeSurvey
 } from '../api/_lib/event-form-logic.js';
+import { ensureSurveyTemplate, getSurveyTemplateRow, surveyTemplateState } from '../api/_lib/event-survey-template.js';
 
 const ALLOWED_ROLES = ['super_admin', 'admin', 'crm_agent', 'coach'];
 const PLATFORM_PRIMARY_INSTITUTION_ID = '73323d75-eea1-4552-8bba-d50555423589';
@@ -142,6 +146,17 @@ async function loadDetail(id, institutionId, isSuper) {
       }
     };
   });
+  let surveyResponses = [];
+  {
+    const { data: sr, error: srErr } = await supabaseAdmin
+      .from('institution_event_survey_responses')
+      .select('participant_id, rating, expectation, want_info, topics, comment, created_at, updated_at')
+      .eq('event_id', id)
+      .order('created_at', { ascending: false });
+    if (srErr && !isSchemaError(srErr)) throw srErr;
+    surveyResponses = sr || [];
+  }
+  const pById = new Map((participants || []).map((p) => [p.id, p]));
   const byParticipant = {};
   for (const s of sends) {
     (byParticipant[s.participant_id] ||= []).push({ reminder_id: s.reminder_id, status: s.status, error: s.error });
@@ -150,7 +165,19 @@ async function loadDetail(id, institutionId, isSuper) {
     ...event,
     form_settings: normalizeFormSettings(event.form_settings),
     reminders: remindersOut,
-    participants: (participants || []).map((p) => ({ ...p, reminder_sends: byParticipant[p.id] || [] }))
+    participants: (participants || []).map((p) => ({ ...p, reminder_sends: byParticipant[p.id] || [] })),
+    survey: {
+      summary: summarizeSurvey(surveyResponses),
+      responses: surveyResponses.map((r) => {
+        const p = pById.get(r.participant_id);
+        return {
+          ...r,
+          parent_name: p ? p.parent_name || p.display_name : null,
+          student_name: p?.student_name || null,
+          phone: p?.phone || null
+        };
+      })
+    }
   };
 }
 
@@ -187,6 +214,33 @@ export default async function handler(req, res) {
           (!t.whatsapp_template_status || String(t.whatsapp_template_status).toUpperCase() === 'APPROVED')
       );
       return res.status(200).json({ data: list, default_type: DEFAULT_REMINDER_TEMPLATE });
+    }
+
+    if (req.method === 'GET' && op === 'survey-template') {
+      const row = await getSurveyTemplateRow();
+      return res.status(200).json({
+        state: surveyTemplateState(row),
+        content: row?.content || null,
+        rejected_reason: row?.rejected_reason || null
+      });
+    }
+
+    if (req.method === 'POST' && op === 'survey-template-submit') {
+      if (!roles.has('super_admin') && !roles.has('admin')) {
+        return res.status(403).json({ error: 'forbidden', hint: 'Şablonu yalnızca yönetici onaya gönderebilir.' });
+      }
+      const out = await ensureSurveyTemplate({ submit: true });
+      if (!out.ok) {
+        return res.status(400).json({
+          error: out.error,
+          hint:
+            out.error === 'meta_not_configured'
+              ? 'WhatsApp (Meta) bağlantısı ayarlı değil.'
+              : `Meta onaya gönderilemedi: ${out.error}`,
+          state: out.state
+        });
+      }
+      return res.status(200).json({ state: out.state, submitted: out.submitted, content: out.row?.content || null });
     }
 
     if (req.method === 'GET' && op === 'slug-check') {
