@@ -104,6 +104,7 @@ import NotificationsPage from './pages/NotificationsPage';
 import EventsPage from './pages/EventsPage';
 import MeetingTrackerPage from './pages/MeetingTrackerPage';
 import CrmLayout from './pages/crm/CrmLayout';
+import ScrollToTopOnNavigate from './components/routing/ScrollToTopOnNavigate';
 import CrmEventFormsPage from './pages/crm/CrmEventFormsPage';
 import EventFormPublicPage from './pages/eventForm/EventFormPublicPage';
 import HomeworkSharePage from './pages/HomeworkSharePage';
@@ -196,6 +197,7 @@ function App() {
       <OrganizationProvider>
         <AppProvider>
           <Router>
+            <ScrollToTopOnNavigate />
             <Routes>
               {/* Public Pages */}
               <Route path="/marketing" element={<Marketing />} />
