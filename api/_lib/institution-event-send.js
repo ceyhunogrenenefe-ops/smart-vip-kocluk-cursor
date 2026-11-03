@@ -67,6 +67,18 @@ export function buildEventTemplateVars(event, participant) {
     aciklama,
     description: aciklama
   };
+  // Etkinlik formundan gelen katılımcı: veli ve öğrenci adı ayrı tutulur
+  const formStudent = String(participant.student_name || '').trim();
+  const formParent = String(participant.parent_name || '').trim();
+  if (formStudent) {
+    base.ogrenci = formStudent;
+    base.ogrenci_adi = formStudent;
+    base.student_name = formStudent;
+  }
+  if (formParent) {
+    base.veli = formParent;
+    base.veli_adi = formParent;
+  }
   const extras = event.template_vars && typeof event.template_vars === 'object' ? event.template_vars : {};
   for (const [key, raw] of Object.entries(extras)) {
     const v = String(raw ?? '').trim();
@@ -75,7 +87,13 @@ export function buildEventTemplateVars(event, participant) {
   return base;
 }
 
-async function sendParticipantWhatsApp(event, participant, templateType, templateRow) {
+export async function sendParticipantWhatsApp(
+  event,
+  participant,
+  templateType,
+  templateRow,
+  logKind = 'institution_event_invite'
+) {
   const phone = normalizePhoneToE164(participant.phone);
   if (!phone) {
     return { ok: false, error: 'invalid_phone' };
@@ -90,7 +108,7 @@ async function sendParticipantWhatsApp(event, participant, templateType, templat
   try {
     await supabaseAdmin.from('message_logs').insert({
       student_id: participant.student_id || null,
-      kind: 'institution_event_invite',
+      kind: logKind,
       related_id: event.id,
       message: preview,
       status: sent.ok ? 'sent' : 'failed',
