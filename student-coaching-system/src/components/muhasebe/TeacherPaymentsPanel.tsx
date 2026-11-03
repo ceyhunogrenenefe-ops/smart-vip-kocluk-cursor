@@ -45,9 +45,14 @@ function calendarMonthOf(iso: string): { from: string; to: string } | null {
   return { from: `${y}-${mm}-01`, to: `${y}-${mm}-${String(last).padStart(2, '0')}` };
 }
 
-function todayIso(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+function monthEndIso(fromIso: string): string {
+  return calendarMonthOf(fromIso)?.to ?? fromIso;
+}
+
+/** Tam takvim ayı mı? (Öğretmen beyanı yalnızca bu durumda eşleşir) */
+function isFullCalendarMonth(from: string, to: string): boolean {
+  const b = calendarMonthOf(from);
+  return Boolean(b && b.from === from && b.to === to);
 }
 
 type DraftState = {
@@ -120,7 +125,7 @@ export function TeacherPaymentsPanel({ onTeacherTotalChange }: Props) {
   const [varsayilan, setVarsayilan] = useState<{ ders: string; gorusme: string } | null>(null);
   const [varsayilanKaydet, setVarsayilanKaydet] = useState(false);
   const [from, setFrom] = useState(monthStartIso);
-  const [to, setTo] = useState(todayIso);
+  const [to, setTo] = useState(() => monthEndIso(monthStartIso()));
   const [teacherId, setTeacherId] = useState('');
   const [cards, setCards] = useState<PayrollTeacherCard[]>([]);
   // Tip, uç noktanın döndürdüğü özetle aynı kalsın diye API tipinden türetilir
@@ -133,6 +138,14 @@ export function TeacherPaymentsPanel({ onTeacherTotalChange }: Props) {
   const [schemaHint, setSchemaHint] = useState<string | null>(null);
   const [view, setView] = useState<'cards' | 'table'>('cards');
   const [duzeltmeNotu, setDuzeltmeNotu] = useState<Record<string, string>>({});
+  const [declarationPeriod, setDeclarationPeriod] = useState<string | null>(null);
+
+  const applyCalendarMonth = useCallback((anchorYmd: string) => {
+    const bounds = calendarMonthOf(anchorYmd);
+    if (!bounds) return;
+    setFrom(bounds.from);
+    setTo(bounds.to);
+  }, []);
 
   useEffect(() => {
     let cancel = false;
@@ -180,6 +193,7 @@ export function TeacherPaymentsPanel({ onTeacherTotalChange }: Props) {
       setCards(data.teachers || []);
       setOverview(data.overview || null);
       setSchemaHint(data.schema_hint || null);
+      setDeclarationPeriod(data.declaration_period ?? null);
       if (data.default_rates) {
         setVarsayilan({
           ders: String(data.default_rates.group_unit_price_tl ?? ''),
@@ -370,6 +384,11 @@ export function TeacherPaymentsPanel({ onTeacherTotalChange }: Props) {
     return cards.filter((c) => (odemeFiltre === 'paid' ? odendi(c) : !odendi(c)));
   }, [cards, odemeFiltre]);
 
+  const beyanliOgretmenSayisi = useMemo(
+    () => cards.filter((c) => c.declaration).length,
+    [cards]
+  );
+
   const summaryLive = useMemo(() => {
     // Kart yoksa sunucu özeti aynen; varsa taslaktaki canlı sayılar üstüne yazılır
     if (!cards.length) return overview;
@@ -417,12 +436,7 @@ export function TeacherPaymentsPanel({ onTeacherTotalChange }: Props) {
           </Link>
           <button
             type="button"
-            onClick={() => {
-              const bounds = calendarMonthOf(from);
-              if (!bounds) return;
-              setFrom(bounds.from);
-              setTo(bounds.to);
-            }}
+            onClick={() => applyCalendarMonth(from)}
             className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
           >
             Takvim ayı
@@ -452,8 +466,50 @@ export function TeacherPaymentsPanel({ onTeacherTotalChange }: Props) {
         </div>
       ) : null}
 
+      {!isFullCalendarMonth(from, to) ? (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+          Öğretmen beyanları yalnızca <strong>tam takvim ayı</strong> seçildiğinde görünür (ör. 1–31 Ekim).
+          Bitiş tarihi ayın son günü değilse beyan kutuları gizlenir.{' '}
+          <button
+            type="button"
+            onClick={() => applyCalendarMonth(from)}
+            className="font-semibold text-amber-900 underline underline-offset-2"
+          >
+            Bu ayın tamamını seç
+          </button>
+        </div>
+      ) : declarationPeriod && beyanliOgretmenSayisi > 0 ? (
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-950">
+          <strong>{beyanliOgretmenSayisi}</strong> öğretmenin{' '}
+          {new Date(`${declarationPeriod}T12:00:00`).toLocaleDateString('tr-TR', {
+            month: 'long',
+            year: 'numeric'
+          })}{' '}
+          beyanı kartlarda listeleniyor. Her kartta <strong>Beyanı hakedişe uygula</strong> ile onaylı sayılara
+          aktarabilirsiniz.
+        </div>
+      ) : declarationPeriod && beyanliOgretmenSayisi === 0 && !loading ? (
+        <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+          Seçilen ay için gönderilmiş öğretmen beyanı bulunamadı (henüz form doldurulmamış veya onay bekliyor
+          olabilir).
+        </div>
+      ) : null}
+
       <div className="rounded-2xl border border-slate-200/80 bg-gradient-to-br from-slate-50 via-white to-teal-50/40 p-4 shadow-sm dark:border-slate-700 dark:from-slate-900 dark:via-slate-900 dark:to-slate-800">
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+          <label className="block text-sm sm:col-span-2">
+            <span className="mb-1 block font-medium text-slate-700 dark:text-slate-200">Hakediş ayı</span>
+            <input
+              type="month"
+              value={from.slice(0, 7)}
+              onChange={(e) => {
+                const ym = e.target.value;
+                if (!ym) return;
+                applyCalendarMonth(`${ym}-01`);
+              }}
+              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-800"
+            />
+          </label>
           <label className="block text-sm">
             <span className="mb-1 block font-medium text-slate-700 dark:text-slate-200">Öğretmen</span>
             <select
@@ -474,7 +530,13 @@ export function TeacherPaymentsPanel({ onTeacherTotalChange }: Props) {
             <input
               type="date"
               value={from}
-              onChange={(e) => setFrom(e.target.value)}
+              onChange={(e) => {
+                const v = e.target.value;
+                setFrom(v);
+                if (isFullCalendarMonth(v, to)) return;
+                const bounds = calendarMonthOf(v);
+                if (bounds) setTo(bounds.to);
+              }}
               className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-800"
             />
           </label>

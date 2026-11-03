@@ -54,7 +54,7 @@ export async function loadDeclarationsForPayroll({ from, to, institutionId = nul
       .eq('period_month', period)
       .in('status', ['submitted', 'reopened'])
       .limit(1000);
-    if (institutionId) q = q.eq('institution_id', institutionId);
+    if (institutionId) q = q.or(`institution_id.eq.${institutionId},institution_id.is.null`);
     if (Array.isArray(teacherIds) && teacherIds.length) q = q.in('teacher_id', teacherIds);
     let { data: decls, error } = await q;
     if (error && /correction_note/i.test(error.message || '')) {
@@ -64,7 +64,7 @@ export async function loadDeclarationsForPayroll({ from, to, institutionId = nul
         .eq('period_month', period)
         .in('status', ['submitted', 'reopened'])
         .limit(1000);
-      if (institutionId) again = again.eq('institution_id', institutionId);
+      if (institutionId) again = again.or(`institution_id.eq.${institutionId},institution_id.is.null`);
       if (Array.isArray(teacherIds) && teacherIds.length) again = again.in('teacher_id', teacherIds);
       ({ data: decls, error } = await again);
     }
