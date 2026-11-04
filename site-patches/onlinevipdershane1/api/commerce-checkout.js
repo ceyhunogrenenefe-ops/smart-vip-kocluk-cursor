@@ -160,6 +160,13 @@ module.exports = async function handler(req, res) {
         return res.status(400).json({ error: 'Geçerli bir telefon numarası girin.' });
       }
 
+      const addr = body.address && typeof body.address === 'object' ? body.address : {};
+      const line1 = String(addr.address_line1 || '').trim();
+      const city = String(addr.city || '').trim();
+      if (!line1 || !city) {
+        return res.status(400).json({ error: 'Teslimat adresi ve il zorunludur.' });
+      }
+
       const updated = await panelCommerce('checkout.update_customer', {
         token,
         customer_name: parentName,
