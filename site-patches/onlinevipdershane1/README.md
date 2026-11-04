@@ -13,7 +13,7 @@ PayTR checkout `onlinevipdershane1` reposunda. Bu klasördeki dosyaları o repoy
 | `api/garanti-callback.js` | `api/garanti-callback.js` |
 | `api/payment-provider.js` | `api/payment-provider.js` (üzerine yaz) |
 | `api/commerce-checkout.js` | `api/commerce-checkout.js` (üzerine yaz — `apply_coupon`) |
-| `odeme.html` | `odeme.html` (üzerine yaz) |
+| `odeme.html` | `odeme.html` (üzerine yaz — Deneme Kulübü teslimat adresi) |
 | `odeme-kitap.html` | `odeme-kitap.html` (üzerine yaz — `/odeme/kitap` kupon kutusu) |
 
 ## 2) Vercel env — **iki proje**

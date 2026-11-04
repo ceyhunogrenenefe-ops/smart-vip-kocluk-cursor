@@ -39,7 +39,25 @@ h1{font-family:'Bricolage Grotesque',sans-serif;font-size:clamp(28px,4vw,36px);m
 .secure{font-size:12px;color:var(--muted);margin-top:12px;text-align:center;}
 .error{background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;padding:12px 14px;border-radius:10px;font-size:13px;margin-bottom:14px;display:none;}
 .back-link{display:inline-block;margin-bottom:20px;color:var(--navy);font-weight:700;font-size:14px;}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+@media(max-width:520px){.row2{grid-template-columns:1fr;}}
+.ship-box{margin:4px 0 14px;padding:14px;border:1px solid #fcd34d;border-radius:12px;background:#fffbeb;}
+.ship-box h3{font-size:13px;font-weight:800;margin-bottom:10px;color:#92400e;}
+.pay-methods{display:none;gap:10px;margin-bottom:16px;}
+.pay-methods.show{display:grid;grid-template-columns:1fr 1fr;}
+@media(max-width:520px){.pay-methods.show{grid-template-columns:1fr;}}
+.pay-method{display:flex;align-items:center;gap:10px;padding:12px 14px;border:2px solid var(--border);border-radius:12px;cursor:pointer;font-size:13px;font-weight:700;background:#fff;}
+.pay-method:has(input:checked){border-color:var(--navy);background:#f4f7ff;}
 </style>
+<script>
+(function(){
+  var p=new URLSearchParams(location.search);
+  var t=(p.get('token')||'').trim();
+  if(t && t.indexOf('.')>0 && p.get('source')!=='coaching'){
+    location.replace('/odeme/kitap?token='+encodeURIComponent(t));
+  }
+})();
+</script>
   <link rel="stylesheet" href="assets/nav-logo.css">
   <link rel="stylesheet" href="assets/welcome-modal.css">
   <meta name="google-site-verification" content="3zMZ-JrvFsPWEUs_bzeFJOH-kmWIVfx9A-Ibq21w-Rs">
@@ -65,7 +83,7 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
   <p class="lead" id="pay-lead">Veli bilgilerinizi girin; güvenli ödeme ekranına yönlendirileceksiniz.</p>
   <div class="grid" id="checkout-grid">
     <form class="card" id="checkout-form">
-      <h2>Veli Bilgileri</h2>
+      <h2>Veli / Teslimat Bilgileri</h2>
       <div class="error" id="form-error"></div>
       <div class="field">
         <label for="parentName">Veli Adı Soyadı *</label>
@@ -80,9 +98,36 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
         <input id="email" name="email" required type="email" autocomplete="email" placeholder="ornek@email.com">
         <small>Ödeme makbuzu bu adrese gönderilir.</small>
       </div>
+      <div id="ship-fields" class="ship-box" style="display:none">
+        <h3>📦 Teslimat adresi (Deneme Kulübü / kargo) *</h3>
+        <div class="field">
+          <label for="addressLine1">Adres *</label>
+          <input id="addressLine1" name="addressLine1" autocomplete="street-address" placeholder="Mahalle, cadde, kapı no">
+        </div>
+        <div class="row2">
+          <div class="field">
+            <label for="district">İlçe</label>
+            <input id="district" name="district" autocomplete="address-level2" placeholder="İlçe">
+          </div>
+          <div class="field">
+            <label for="city">İl *</label>
+            <input id="city" name="city" autocomplete="address-level1" placeholder="İl">
+          </div>
+        </div>
+      </div>
       <div class="field">
-        <label for="studentInfo">Öğrenci Bilgisi (isteğe bağlı)</label>
-        <textarea id="studentInfo" name="studentInfo" rows="3" placeholder="Öğrenci adı, sınıf seviyesi vb."></textarea>
+        <label for="studentInfo">Not (isteğe bağlı)</label>
+        <textarea id="studentInfo" name="studentInfo" rows="3" placeholder="Kapı kodu, öğrenci adı, sınıf vb."></textarea>
+      </div>
+      <div class="pay-methods" id="pay-methods" role="radiogroup" aria-label="Ödeme yöntemi">
+        <label class="pay-method">
+          <input type="radio" name="payProvider" value="garanti" id="pay-garanti">
+          <span>Garanti Bonus POS</span>
+        </label>
+        <label class="pay-method">
+          <input type="radio" name="payProvider" value="paytr" id="pay-paytr" checked>
+          <span>PayTR</span>
+        </label>
       </div>
       <button type="submit" class="btn-pay" id="pay-btn">🔒 Kredi Kartı ile Öde</button>
       <p class="secure" id="pay-secure">256-bit SSL · Güvenli ödeme · Visa, Mastercard, Troy</p>
@@ -108,6 +153,7 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
   var provider='none';
   var selectedTeacherSlug='';
   var coachingCheckout=null;
+  var commerceCheckoutToken='';
 
   function formatKurus(kurus){
     var lira=(kurus||0)/100;
@@ -233,6 +279,144 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
     return (new URLSearchParams(location.search).get('token')||'').trim();
   }
 
+  function isCommerceStoreToken(tok){
+    return !!(tok && tok.indexOf('.')>0);
+  }
+
+  function haystackNeedsShipping(text){
+    var hay=String(text||'').toLowerCase();
+    return hay.indexOf('deneme')>=0 || hay.indexOf('kulüb')>=0 || hay.indexOf('kulub')>=0
+      || hay.indexOf('kitap')>=0 || hay.indexOf('kargo')>=0 || hay.indexOf('magaza')>=0;
+  }
+
+  function needsShipping(){
+    if(coachingCheckout) return true;
+    var items=OVD_CART.read();
+    return items.some(function(item){
+      var p=VIP_getProduct(item.id);
+      return haystackNeedsShipping(String(p&&p.name||'')) || haystackNeedsShipping(String(item.id||''));
+    });
+  }
+
+  function syncShipFields(){
+    var box=document.getElementById('ship-fields');
+    if(!box) return;
+    var show=needsShipping() || !!commerceCheckoutToken;
+    box.style.display=show?'block':'none';
+    document.getElementById('addressLine1').required=show;
+    document.getElementById('city').required=show;
+  }
+
+  function addressPayload(){
+    return {
+      address_line1:document.getElementById('addressLine1').value.trim(),
+      district:document.getElementById('district').value.trim(),
+      city:document.getElementById('city').value.trim()
+    };
+  }
+
+  function assertShipping(){
+    if(!needsShipping() && !commerceCheckoutToken) return true;
+    var addr=addressPayload();
+    if(!addr.address_line1 || !addr.city){
+      showError('Deneme Kulübü ve kargo ürünleri için teslimat adresi ve il zorunludur.');
+      return false;
+    }
+    return true;
+  }
+
+  function selectedProvider(){
+    var checked=document.querySelector('input[name="payProvider"]:checked');
+    if(checked) return checked.value;
+    return provider==='garanti'?'garanti':'paytr';
+  }
+
+  function postGarantiForm(action, fields){
+    var form=document.createElement('form');
+    form.method='POST';
+    form.action=action;
+    form.acceptCharset='UTF-8';
+    Object.keys(fields||{}).forEach(function(key){
+      var input=document.createElement('input');
+      input.type='hidden';
+      input.name=key;
+      input.value=fields[key]==null?'':String(fields[key]);
+      form.appendChild(input);
+    });
+    document.body.appendChild(form);
+    form.submit();
+  }
+
+  async function tryLoadCommerceCheckout(){
+    var tok=checkoutToken();
+    if(!isCommerceStoreToken(tok)) return false;
+    commerceCheckoutToken=tok;
+    try{
+      var res=await fetch('/api/commerce-checkout',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({op:'resolve', token:tok})
+      });
+      var data=await res.json();
+      if(!res.ok||!data.order) throw new Error(data.error||'Sipariş yüklenemedi');
+      var o=data.order;
+      applyCoachingCheckout({
+        totalKurus:o.total_kurus,
+        items:(o.items||[]).map(function(it){
+          return { title:it.title_snapshot, qty:it.quantity, unit_kurus:it.unit_price_kurus };
+        }),
+        subtotalKurus:o.subtotal_kurus,
+        shippingKurus:o.shipping_kurus,
+        discountKurus:o.discount_kurus,
+        ref:'commerce',
+        coupon:o.coupon_code||'',
+        userId:null,
+        studentId:null
+      });
+      if(o.customer_name) document.getElementById('parentName').value=o.customer_name;
+      if(o.customer_email) document.getElementById('email').value=o.customer_email;
+      if(o.customer_phone) document.getElementById('phone').value=o.customer_phone;
+      if(o.shipping_address){
+        if(o.shipping_address.address_line1) document.getElementById('addressLine1').value=o.shipping_address.address_line1;
+        if(o.shipping_address.district) document.getElementById('district').value=o.shipping_address.district;
+        if(o.shipping_address.city) document.getElementById('city').value=o.shipping_address.city;
+      }
+      var cbox=document.getElementById('coupon-box');
+      if(cbox) cbox.style.display='block';
+      return true;
+    }catch(e){
+      commerceCheckoutToken='';
+      return false;
+    }
+  }
+
+  async function startCommercePay(btn){
+    var tok=commerceCheckoutToken||checkoutToken();
+    if(!isCommerceStoreToken(tok)) throw new Error('Geçersiz ödeme oturumu');
+    var res=await fetch('/api/commerce-checkout',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        op:'pay',
+        token:tok,
+        provider:selectedProvider(),
+        customer:customerPayload(),
+        address:addressPayload()
+      })
+    });
+    var data=await res.json();
+    if(!res.ok) throw new Error(data.error||'Ödeme başlatılamadı');
+    if(data.provider==='garanti'){
+      if(!data.action||!data.fields) throw new Error('Garanti ödeme formu alınamadı');
+      btn.textContent='Garanti sayfasına yönlendiriliyorsunuz…';
+      postGarantiForm(data.action, data.fields);
+      return;
+    }
+    if(!data.token) throw new Error('PayTR token alınamadı');
+    btn.textContent='PayTR sayfasına yönlendiriliyorsunuz…';
+    window.location.assign('https://www.paytr.com/odeme/guvenli/'+encodeURIComponent(data.token));
+  }
+
   function showCouponMsg(text, ok){
     var el=document.getElementById('coupon-msg');
     if(!el) return;
@@ -333,12 +517,17 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
   }
 
   function customerPayload(){
+    var addr=addressPayload();
     var base={
       parentName:document.getElementById('parentName').value.trim(),
       phone:document.getElementById('phone').value.trim(),
       email:document.getElementById('email').value.trim(),
       studentInfo:document.getElementById('studentInfo').value.trim(),
-      teacherSlug:selectedTeacherSlug||''
+      teacherSlug:selectedTeacherSlug||'',
+      address:addr,
+      address_line1:addr.address_line1,
+      city:addr.city,
+      district:addr.district
     };
     if(coachingCheckout){
       var lines=(coachingCheckout.items||[]).map(function(it){
@@ -353,6 +542,10 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
       if(extra) base.studentInfo=[base.studentInfo,extra].filter(Boolean).join(' · ');
       base.checkoutSource='coaching';
       base.checkoutRef=coachingCheckout.ref||'';
+    }
+    if((needsShipping()||commerceCheckoutToken) && addr.address_line1){
+      var line=[addr.address_line1, addr.district, addr.city].filter(Boolean).join(', ');
+      base.studentInfo=[base.studentInfo, 'Teslimat: '+line].filter(Boolean).join(' · ');
     }
     return base;
   }
@@ -388,9 +581,11 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
       box.innerHTML='<p style="color:#6e6e73;font-size:14px">Sepet yükleniyor…</p>';
     }
     var loaded=await loadCoachingCheckoutFromToken();
+    if(!loaded) loaded=await tryLoadCommerceCheckout();
     if(!loaded) loadCoachingCheckoutFromQuery();
     ensurePackageFromQuery();
     renderSummary();
+    syncShipFields();
     var couponBtn=document.getElementById('coupon-apply');
     if(couponBtn) couponBtn.addEventListener('click', applyPayPageCoupon);
     var couponIn=document.getElementById('coupon-code');
@@ -398,9 +593,14 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
     try{
       var cfg=await fetch('/api/payment-provider').then(function(r){return r.json();});
       provider=cfg.provider||'none';
+      var methods=document.getElementById('pay-methods');
+      var list=cfg.providers||[];
+      if((commerceCheckoutToken||coachingCheckout) && methods && list.indexOf('garanti')>=0 && list.indexOf('paytr')>=0){
+        methods.classList.add('show');
+      }
       if(provider==='paytr'){
         if(!coachingCheckout){
-          document.getElementById('pay-lead').textContent='Veli bilgilerinizi girin; PayTR güvenli ödeme sayfasına yönlendirileceksiniz.';
+          document.getElementById('pay-lead').textContent='Veli ve teslimat bilgilerinizi girin; güvenli ödeme sayfasına yönlendirileceksiniz.';
         }
         document.getElementById('pay-secure').textContent='PayTR güvenli ödeme · Visa, Mastercard, Troy';
       }else if(provider==='stripe'){
@@ -418,6 +618,15 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
       btn.disabled=true;
       btn.textContent='Yönlendiriliyor...';
       try{
+        if(!assertShipping()){
+          btn.disabled=false;
+          btn.textContent='🔒 Kredi Kartı ile Öde';
+          return;
+        }
+        if(commerceCheckoutToken || isCommerceStoreToken(checkoutToken())){
+          await startCommercePay(btn);
+          return;
+        }
         if(provider==='paytr') await startPaytr(btn);
         else if(provider==='stripe') await startStripe(btn);
         else throw new Error('Ödeme sistemi yapılandırılmamış. Lütfen bizimle iletişime geçin.');
