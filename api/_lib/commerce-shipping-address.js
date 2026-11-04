@@ -84,6 +84,15 @@ export function formatShippingOneLine(addr) {
     .join(', ');
 }
 
+/**
+ * Kitap mağazası sepeti: kitap, set paketi ve Deneme Kulübü paketi fiziksel kargodur.
+ */
+export function cartItemsRequireShipping(items = []) {
+  const list = Array.isArray(items) ? items : [];
+  if (!list.length) return false;
+  return list.every((it) => Boolean(it?.vendor_offer_id || it?.package_id));
+}
+
 /** Çok satıcılı sepette her kitapçı yalnız kendi kalemlerini görsün. */
 export function itemsForVendor(items, vendorId) {
   const list = Array.isArray(items) ? items : [];

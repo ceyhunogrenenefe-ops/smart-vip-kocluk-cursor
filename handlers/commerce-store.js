@@ -1278,6 +1278,16 @@ async function handleCheckout(op, body, req) {
     }
     const pub = orderPublic(order);
     pub.order_number = decorateOrderNumberForCouponWidget(pub.order_number);
+    const savedShip = await loadShippingAddress(payload.oid);
+    if (savedShip) {
+      pub.shipping_address = {
+        address_line1: savedShip.address_line1,
+        address_line2: savedShip.address_line2,
+        district: savedShip.district,
+        city: savedShip.city,
+        postal_code: savedShip.postal_code,
+      };
+    }
     return {
       ok: true,
       order: pub,

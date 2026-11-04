@@ -1,23 +1,48 @@
 /**
- * Kitap Mağazası Ödeme — /kitap-odeme
- * Sepet her zaman panelde gösterilir (onlinevipdershane odeme.html yamasına bağımlı değil).
+ * Kitap Mağazası Ödemesi — /kitap-odeme
+ * odeme/kitap ile aynı akış: checkout token + teslimat adresi → PayTR / Garanti
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, BookOpen, CreditCard, Loader2, ShieldCheck } from 'lucide-react';
+import { ArrowLeft, BookOpen, CreditCard, Loader2, MapPin, ShieldCheck } from 'lucide-react';
 import { toast } from 'sonner';
 import BrandLogo from '../../components/brand/BrandLogo';
-import { apiFetch, resolveApiUrl } from '../../lib/session';
+import { apiFetch } from '../../lib/session';
 import { formatCommerceTry } from '../../types/commerce.types';
-import type { CheckoutHandoffPayload } from '../../lib/commerceStoreApi';
 
-async function fetchHandoff(token: string): Promise<CheckoutHandoffPayload> {
-  const res = await fetch(resolveApiUrl(`/api/commerce-checkout-handoff?token=${encodeURIComponent(token)}`));
+type CheckoutOrder = {
+  order_number: string;
+  total_kurus: number;
+  subtotal_kurus: number;
+  shipping_kurus: number;
+  discount_kurus: number;
+  coupon_code?: string | null;
+  customer_name?: string | null;
+  customer_email?: string | null;
+  customer_phone?: string | null;
+  items?: Array<{
+    title_snapshot?: string | null;
+    quantity?: number;
+    unit_price_kurus?: number;
+    line_total_kurus?: number;
+  }>;
+  shipping_address?: {
+    address_line1?: string | null;
+    district?: string | null;
+    city?: string | null;
+  } | null;
+};
+
+async function checkoutStore<T>(op: string, payload: Record<string, unknown>): Promise<T> {
+  const res = await apiFetch('/api/commerce-store', {
+    method: 'POST',
+    body: JSON.stringify({ op, ...payload }),
+  });
   const data = await res.json().catch(() => ({}));
   if (!res.ok || !data.ok) {
-    throw new Error(String(data.error || 'Ödeme oturumu yüklenemedi.'));
+    throw new Error(String(data.error || 'İşlem başarısız'));
   }
-  return data.checkout as CheckoutHandoffPayload;
+  return data as T;
 }
 
 function postGarantiForm(gatewayUrl: string, fields: Record<string, string>) {
@@ -37,33 +62,12 @@ function postGarantiForm(gatewayUrl: string, fields: Record<string, string>) {
   form.submit();
 }
 
-async function startCheckout(body: Record<string, unknown>) {
-  const res = await apiFetch('/api/commerce-checkout-start', {
-    method: 'POST',
-    body: JSON.stringify(body),
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok || !data.ok) {
-    const hint = data.hint ? ` ${data.hint}` : '';
-    throw new Error(String(data.error || 'Ödeme başlatılamadı.') + hint);
-  }
-  return data as {
-    ok: true;
-    method: 'paytr' | 'garanti_form' | 'garanti_link';
-    redirect_url?: string;
-    token?: string;
-    pay_url?: string;
-    gateway_url?: string;
-    fields?: Record<string, string>;
-  };
-}
-
 export default function KitapOdemePage() {
   const [params] = useSearchParams();
   const navigate = useNavigate();
   const token = params.get('token') || '';
 
-  const [checkout, setCheckout] = useState<CheckoutHandoffPayload | null>(null);
+  const [order, setOrder] = useState<CheckoutOrder | null>(null);
   const [loading, setLoading] = useState(true);
   const [paying, setPaying] = useState(false);
   const [error, setError] = useState('');
@@ -71,6 +75,9 @@ export default function KitapOdemePage() {
   const [parentName, setParentName] = useState('');
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
+  const [addressLine1, setAddressLine1] = useState('');
+  const [district, setDistrict] = useState('');
+  const [city, setCity] = useState('');
   const [studentInfo, setStudentInfo] = useState('');
 
   const load = useCallback(async () => {
@@ -82,11 +89,18 @@ export default function KitapOdemePage() {
     setLoading(true);
     setError('');
     try {
-      const data = await fetchHandoff(token);
-      setCheckout(data);
+      const data = await checkoutStore<{ order: CheckoutOrder }>('checkout.resolve', { token });
+      setOrder(data.order);
+      if (data.order.customer_name) setParentName(data.order.customer_name);
+      if (data.order.customer_email) setEmail(data.order.customer_email);
+      if (data.order.customer_phone) setPhone(data.order.customer_phone);
+      const addr = data.order.shipping_address;
+      if (addr?.address_line1) setAddressLine1(addr.address_line1);
+      if (addr?.district) setDistrict(addr.district);
+      if (addr?.city) setCity(addr.city);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Ödeme oturumu yüklenemedi.');
-      setCheckout(null);
+      setOrder(null);
     } finally {
       setLoading(false);
     }
@@ -96,47 +110,53 @@ export default function KitapOdemePage() {
     void load();
   }, [load]);
 
-  const items = checkout?.items || [];
-  const total = checkout?.total_kurus ?? 0;
-  const shipping = checkout?.shipping_kurus ?? 0;
-  const discount = checkout?.discount_kurus ?? 0;
-  const subtotal = checkout?.subtotal_kurus ?? total;
-
-  const itemLines = useMemo(
-    () =>
-      items.map((it, idx) => ({
-        key: `${it.title}-${idx}`,
-        title: it.title || 'Kitap',
-        qty: it.qty || 1,
-        line: (it.unit_kurus || 0) * (it.qty || 1),
-      })),
-    [items]
-  );
+  const itemLines = useMemo(() => {
+    const items = order?.items || [];
+    return items.map((it, idx) => ({
+      key: `${it.title_snapshot}-${idx}`,
+      title: it.title_snapshot || 'Kitap',
+      qty: it.quantity || 1,
+      line: it.line_total_kurus ?? (it.unit_price_kurus || 0) * (it.quantity || 1),
+    }));
+  }, [order]);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!token || !checkout) return;
+    if (!token || !order) return;
+    if (!addressLine1.trim() || !city.trim()) {
+      toast.error('Teslimat adresi ve il zorunludur');
+      return;
+    }
     setPaying(true);
     setError('');
     try {
-      const result = await startCheckout({
-        handoff_token: token,
-        parentName: parentName.trim(),
-        phone: phone.trim(),
-        email: email.trim(),
-        studentInfo: studentInfo.trim(),
+      const result = await checkoutStore<{
+        provider: 'paytr' | 'garanti';
+        token?: string;
+        action?: string;
+        fields?: Record<string, string>;
+      }>('checkout.pay', {
+        token,
+        provider: 'paytr',
+        customer: {
+          parentName: parentName.trim(),
+          phone: phone.trim(),
+          email: email.trim(),
+          studentInfo: studentInfo.trim(),
+        },
+        address: {
+          address_line1: addressLine1.trim(),
+          district: district.trim() || undefined,
+          city: city.trim(),
+        },
       });
 
-      if (result.method === 'paytr' && result.redirect_url) {
-        window.location.assign(result.redirect_url);
+      if (result.provider === 'paytr' && result.token) {
+        window.location.assign(`https://www.paytr.com/odeme/guvenli/${encodeURIComponent(result.token)}`);
         return;
       }
-      if (result.method === 'garanti_link' && result.pay_url) {
-        window.location.assign(result.pay_url);
-        return;
-      }
-      if (result.method === 'garanti_form' && result.gateway_url && result.fields) {
-        postGarantiForm(result.gateway_url, result.fields);
+      if (result.provider === 'garanti' && result.action && result.fields) {
+        postGarantiForm(result.action, result.fields);
         return;
       }
       throw new Error('Ödeme yönlendirmesi alınamadı.');
@@ -147,6 +167,11 @@ export default function KitapOdemePage() {
       setPaying(false);
     }
   }
+
+  const total = order?.total_kurus ?? 0;
+  const shipping = order?.shipping_kurus ?? 0;
+  const discount = order?.discount_kurus ?? 0;
+  const subtotal = order?.subtotal_kurus ?? total;
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-50 to-indigo-50/40">
@@ -161,13 +186,15 @@ export default function KitapOdemePage() {
 
       <main className="mx-auto max-w-4xl px-4 py-8">
         <h1 className="text-2xl font-bold text-gray-900">Kitap Mağazası Ödemesi</h1>
-        <p className="mt-1 text-sm text-gray-500">Sepetiniz yüklendi. Veli bilgilerinizi girip güvenli ödemeye geçin.</p>
+        <p className="mt-1 text-sm text-gray-500">
+          Deneme Kulübü ve kitap siparişleri için veli bilgileri ile teslimat adresini girin.
+        </p>
 
         {loading ? (
           <div className="flex justify-center py-20">
             <Loader2 className="h-8 w-8 animate-spin text-indigo-500" />
           </div>
-        ) : error && !checkout ? (
+        ) : error && !order ? (
           <div className="mt-6 rounded-xl border border-red-200 bg-red-50 p-5 text-sm text-red-700">
             {error}
             <button
@@ -178,10 +205,10 @@ export default function KitapOdemePage() {
               Sepete dön
             </button>
           </div>
-        ) : checkout ? (
+        ) : order ? (
           <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-5">
             <form onSubmit={(e) => void onSubmit(e)} className="lg:col-span-3 rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
-              <h2 className="font-semibold text-gray-800">Veli Bilgileri</h2>
+              <h2 className="font-semibold text-gray-800">Veli / Teslimat Bilgileri</h2>
               {error ? <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</p> : null}
               <div className="mt-4 space-y-3">
                 <label className="block text-sm">
@@ -192,6 +219,7 @@ export default function KitapOdemePage() {
                     onChange={(e) => setParentName(e.target.value)}
                     className="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-indigo-400"
                     placeholder="Örn. Ayşe Yılmaz"
+                    autoComplete="name"
                   />
                 </label>
                 <label className="block text-sm">
@@ -203,6 +231,7 @@ export default function KitapOdemePage() {
                     onChange={(e) => setPhone(e.target.value)}
                     className="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-indigo-400"
                     placeholder="05xx xxx xx xx"
+                    autoComplete="tel"
                   />
                 </label>
                 <label className="block text-sm">
@@ -214,16 +243,47 @@ export default function KitapOdemePage() {
                     onChange={(e) => setEmail(e.target.value)}
                     className="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-indigo-400"
                     placeholder="ornek@email.com"
+                    autoComplete="email"
                   />
                 </label>
+                <div className="rounded-xl border border-amber-200 bg-amber-50/80 p-3 space-y-3">
+                  <div className="flex items-center gap-1.5 text-sm font-semibold text-amber-900">
+                    <MapPin className="h-4 w-4" /> Teslimat adresi *
+                  </div>
+                  <input
+                    required
+                    value={addressLine1}
+                    onChange={(e) => setAddressLine1(e.target.value)}
+                    className="w-full rounded-xl border border-amber-200 bg-white px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+                    placeholder="Mahalle, cadde, kapı no"
+                    autoComplete="street-address"
+                  />
+                  <div className="grid grid-cols-2 gap-2">
+                    <input
+                      value={district}
+                      onChange={(e) => setDistrict(e.target.value)}
+                      className="w-full rounded-xl border border-amber-200 bg-white px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+                      placeholder="İlçe"
+                      autoComplete="address-level2"
+                    />
+                    <input
+                      required
+                      value={city}
+                      onChange={(e) => setCity(e.target.value)}
+                      className="w-full rounded-xl border border-amber-200 bg-white px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+                      placeholder="İl"
+                      autoComplete="address-level1"
+                    />
+                  </div>
+                </div>
                 <label className="block text-sm">
-                  <span className="font-medium text-gray-700">Öğrenci Bilgisi (isteğe bağlı)</span>
+                  <span className="font-medium text-gray-700">Not (isteğe bağlı)</span>
                   <textarea
                     rows={2}
                     value={studentInfo}
                     onChange={(e) => setStudentInfo(e.target.value)}
                     className="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-indigo-400"
-                    placeholder="Öğrenci adı, sınıf seviyesi vb."
+                    placeholder="Kapı kodu, öğrenci adı vb."
                   />
                 </label>
               </div>
@@ -237,12 +297,17 @@ export default function KitapOdemePage() {
               </button>
               <p className="mt-3 flex items-start gap-2 text-xs text-gray-500">
                 <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-indigo-500" />
-                Kart bilgileriniz PayTR veya Garanti BBVA güvenli ödeme sayfasında alınır.
+                Adres sipariş detayına kaydedilir. Kart bilgileri PayTR veya Garanti sayfasında alınır.
               </p>
             </form>
 
             <aside className="lg:col-span-2 rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
               <h2 className="font-semibold text-gray-800">Sipariş Özeti</h2>
+              {order.order_number ? (
+                <p className="mt-1 text-xs text-gray-500">
+                  Sipariş no: <strong>{order.order_number}</strong>
+                </p>
+              ) : null}
               <div className="mt-4 space-y-3">
                 {itemLines.length ? (
                   itemLines.map((it) => (
@@ -271,10 +336,15 @@ export default function KitapOdemePage() {
                     <span>Kargo</span>
                     <span>{formatCommerceTry(shipping)}</span>
                   </div>
-                ) : null}
+                ) : (
+                  <div className="flex justify-between text-gray-600">
+                    <span>Kargo</span>
+                    <span className="text-green-600">Ücretsiz</span>
+                  </div>
+                )}
                 {discount > 0 ? (
                   <div className="flex justify-between text-green-600">
-                    <span>İndirim</span>
+                    <span>İndirim{order.coupon_code ? ` (${order.coupon_code})` : ''}</span>
                     <span>-{formatCommerceTry(discount)}</span>
                   </div>
                 ) : null}

@@ -7,7 +7,8 @@ import {
   parseShippingFromBody,
   resolveCheckoutShipping,
   shippingInsertRow,
-  shippingIsComplete
+  shippingIsComplete,
+  cartItemsRequireShipping,
 } from './commerce-shipping-address.js';
 
 describe('parseShippingFromBody', () => {
@@ -81,6 +82,18 @@ describe('resolveCheckoutShipping', () => {
       { required: true }
     );
     expect(ship.city).toBe('İstanbul');
+  });
+});
+
+describe('cartItemsRequireShipping', () => {
+  it('requires shipping for Deneme Kulübü and book cart lines', () => {
+    expect(
+      cartItemsRequireShipping([
+        { vendor_offer_id: 'off-1', title_snapshot: 'Deneme Kulübü 40+ Paketi' },
+      ])
+    ).toBe(true);
+    expect(cartItemsRequireShipping([{ package_id: 'pkg-1' }])).toBe(true);
+    expect(cartItemsRequireShipping([])).toBe(false);
   });
 });
 
