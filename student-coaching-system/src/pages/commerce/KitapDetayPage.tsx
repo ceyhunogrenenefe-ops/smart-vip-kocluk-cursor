@@ -16,7 +16,7 @@ import {
   Truck,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { csAddToCart, csGetBook, csMarkOwned } from '../../lib/commerceStoreApi';
+import { csAddToCart, csBuyNow, csGetBook, csMarkOwned } from '../../lib/commerceStoreApi';
 import type { CommerceBook, CommerceVendorOffer } from '../../types/commerce.types';
 import { formatCommerceTry } from '../../types/commerce.types';
 import { useAuth } from '../../context/AuthContext';
@@ -38,6 +38,7 @@ export default function KitapDetayPage() {
   const [markingOwned, setMarkingOwned] = useState(false);
   const [owned, setOwned] = useState(false);
   const [cartAdded, setCartAdded] = useState(false);
+  const [buyingNow, setBuyingNow] = useState(false);
 
   useEffect(() => {
     if (!slug) return;
@@ -63,6 +64,19 @@ export default function KitapDetayPage() {
       toast.success('Sepete eklendi');
     } catch (e: unknown) { toast.error((e as Error).message); }
     finally { setAddingCart(false); }
+  };
+
+  const handleBuyNow = async () => {
+    if (!selectedOfferId || !selectedOffer || selectedOffer.stock_quantity === 0) return;
+    setBuyingNow(true);
+    try {
+      const r = await csBuyNow({ vendor_offer_id: selectedOfferId });
+      if (!r.checkout_url) throw new Error('Ödeme linki oluşmadı');
+      window.location.assign(r.checkout_url);
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Satın alma başlatılamadı');
+      setBuyingNow(false);
+    }
   };
 
   const handleMarkOwned = async () => {
@@ -231,13 +245,26 @@ export default function KitapDetayPage() {
               {/* Sepete Ekle */}
               <div className="mt-5 flex gap-3 flex-wrap">
                 <button
+                  type="button"
+                  onClick={() => void handleBuyNow()}
+                  disabled={buyingNow || !selectedOffer || selectedOffer.stock_quantity === 0}
+                  className="flex-1 min-w-[8rem] flex items-center justify-center gap-2 bg-emerald-600 text-white py-3 rounded-xl font-semibold hover:bg-emerald-700 disabled:opacity-50 transition-colors"
+                >
+                  {buyingNow ? <Loader2 className="w-5 h-5 animate-spin" /> : <ShoppingCart className="w-5 h-5" />}
+                  {buyingNow ? 'Yönlendiriliyor…' : 'Hemen Al'}
+                </button>
+                <button
+                  type="button"
                   onClick={handleAddToCart}
                   disabled={addingCart || !selectedOffer || selectedOffer.stock_quantity === 0}
-                  className="flex-1 flex items-center justify-center gap-2 bg-indigo-600 text-white py-3 rounded-xl font-semibold hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+                  className="flex-1 min-w-[8rem] flex items-center justify-center gap-2 bg-indigo-600 text-white py-3 rounded-xl font-semibold hover:bg-indigo-700 disabled:opacity-50 transition-colors"
                 >
                   {addingCart ? <Loader2 className="w-5 h-5 animate-spin" /> : cartAdded ? <CheckCircle2 className="w-5 h-5" /> : <ShoppingCart className="w-5 h-5" />}
                   {cartAdded ? 'Sepete Eklendi' : selectedOffer?.stock_quantity === 0 ? 'Stok Yok' : 'Sepete Ekle'}
                 </button>
+                <p className="w-full text-xs text-gray-500 -mt-1">
+                  Hemen Al veya sepetten ödeme: teslimat adresi ödeme adımında zorunludur (Deneme Kulübü kargosu dahil).
+                </p>
                 <button
                   onClick={handleMarkOwned}
                   disabled={markingOwned || owned}
