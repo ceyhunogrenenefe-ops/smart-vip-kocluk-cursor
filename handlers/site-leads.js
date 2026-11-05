@@ -15,6 +15,7 @@ import {
   isSiteLeadHoneypot,
   siteLeadOrigins
 } from '../api/_lib/site-leads.js';
+import { queueCrmWebsiteOrderSync, syncRegistrationLeadById } from '../api/_lib/crm-website-orders.js';
 
 function parseBody(req) {
   const b = req.body;
@@ -96,6 +97,9 @@ export default async function handler(req, res) {
     const result = await ingestSiteLead(body);
     if (!result.ok) {
       return res.status(result.status || 400).json({ error: result.error || 'invalid' });
+    }
+    if (result.lead_id) {
+      queueCrmWebsiteOrderSync(() => syncRegistrationLeadById(result.lead_id));
     }
     return res.status(200).json({
       ok: true,

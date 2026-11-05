@@ -30,8 +30,10 @@ describe('parseShippingFromBody', () => {
       customer_email: 'm@k.com',
       address: { address_line1: 'Atatürk Mah. 5', city: 'Ankara' }
     });
-    expect(shippingIsComplete(ship)).toBe(true);
-    expect(formatShippingOneLine(ship)).toBe('Atatürk Mah. 5, Ankara');
+    expect(shippingIsComplete(ship)).toBe(false);
+    const complete = { ...ship, district: 'Çankaya' };
+    expect(shippingIsComplete(complete)).toBe(true);
+    expect(formatShippingOneLine(complete)).toBe('Atatürk Mah. 5, Çankaya, Ankara');
   });
 });
 
@@ -77,11 +79,12 @@ describe('resolveCheckoutShipping', () => {
         customer_name: 'Ayşe Yılmaz',
         customer_phone: '05551234567',
         customer_email: 'a@b.com',
-        address: { address_line1: 'Bağdat Cad. 10', city: 'İstanbul' }
+        address: { address_line1: 'Bağdat Cad. 10', district: 'Kadıköy', city: 'İstanbul' }
       },
       { required: true }
     );
     expect(ship.city).toBe('İstanbul');
+    expect(ship.district).toBe('Kadıköy');
   });
 });
 

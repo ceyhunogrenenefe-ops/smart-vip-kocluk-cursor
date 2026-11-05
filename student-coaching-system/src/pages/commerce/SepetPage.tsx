@@ -223,8 +223,8 @@ export default function SepetPage() {
       toast.error('Kargo için geçerli e-posta girin');
       return false;
     }
-    if (!ship.line1.trim() || !ship.city.trim()) {
-      toast.error('Deneme ve kitap kargosu için teslimat adresi ve il girin');
+    if (!ship.line1.trim() || !ship.district.trim() || !ship.city.trim()) {
+      toast.error('Deneme ve kitap kargosu için açık adres, ilçe ve il girin');
       return false;
     }
     return true;
@@ -554,7 +554,7 @@ export default function SepetPage() {
                 <div className="grid grid-cols-2 gap-2">
                   <input
                     className="w-full border border-amber-200 rounded-lg px-2.5 py-1.5 text-sm bg-white"
-                    placeholder="İlçe"
+                    placeholder="İlçe *"
                     value={ship.district}
                     onChange={(e) => setShip({ ...ship, district: e.target.value })}
                   />

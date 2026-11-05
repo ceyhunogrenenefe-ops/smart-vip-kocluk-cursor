@@ -33,6 +33,7 @@ export function assertShippingComplete(ship, { requireEmail = true } = {}) {
     throw new Error('Geçerli e-posta girin');
   }
   if (!s.address_line1) throw new Error('Teslimat adresi gerekli');
+  if (!s.district) throw new Error('İlçe gerekli');
   if (!s.city) throw new Error('İl gerekli');
   return s;
 }
