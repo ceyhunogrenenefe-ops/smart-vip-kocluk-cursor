@@ -13,6 +13,7 @@ import { getMetaWhatsAppEnvStatus, getMetaWebhookEnvStatus, loadMetaWhatsAppSecr
 import { fetchMetaTemplatesFromPhoneWaba } from '../api/_lib/meta-templates-sync.js';
 import { getGatewaySendEnvStatus, getGatewaySessionStatus, bookOrderGatewaySessionId, resolveBookOrderGatewaySessionId, listConnectedGatewaySessionIds, probeGatewayHealth } from '../api/_lib/whatsapp-gateway-send.js';
 import { ensureBooksellerPortalToken } from '../api/_lib/kitapci-portal.js';
+import { queueCrmWebsiteOrderSync, syncKitapSiparisById } from '../api/_lib/crm-website-orders.js';
 
 const ADMIN_ROLES = new Set(['super_admin', 'admin']);
 const ORDER_STATUSES = new Set(['pending', 'approved', 'notified', 'confirmed', 'shipped', 'cancelled']);
@@ -327,6 +328,9 @@ async function insertBookOrder(payload) {
       .maybeSingle());
   }
   if (error) throw error;
+  if (data?.id) {
+    queueCrmWebsiteOrderSync(() => syncKitapSiparisById(data.id));
+  }
   return data;
 }
 

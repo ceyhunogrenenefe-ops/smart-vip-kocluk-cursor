@@ -106,7 +106,7 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
         </div>
         <div class="row2">
           <div class="field">
-            <label for="district">İlçe</label>
+            <label for="district">İlçe *</label>
             <input id="district" name="district" autocomplete="address-level2" placeholder="İlçe">
           </div>
           <div class="field">
@@ -304,6 +304,7 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
     var show=needsShipping() || !!commerceCheckoutToken;
     box.style.display=show?'block':'none';
     document.getElementById('addressLine1').required=show;
+    document.getElementById('district').required=show;
     document.getElementById('city').required=show;
   }
 
@@ -318,8 +319,8 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
   function assertShipping(){
     if(!needsShipping() && !commerceCheckoutToken) return true;
     var addr=addressPayload();
-    if(!addr.address_line1 || !addr.city){
-      showError('Deneme Kulübü ve kargo ürünleri için teslimat adresi ve il zorunludur.');
+    if(!addr.address_line1 || !addr.district || !addr.city){
+      showError('Deneme Kulübü ve kargo ürünleri için açık adres, ilçe ve il zorunludur.');
       return false;
     }
     return true;

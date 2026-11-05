@@ -308,6 +308,7 @@ const ORG_SYSTEM_ORDER = [
 /** CRM — tek açılır grup; sıra: günlük kullanım önce */
 const CRM_ORDER = [
   '/crm/inbox',
+  '/crm/web-siparisler',
   '/crm',
   '/crm/gorevler',
   '/crm/toplu-mesaj',
@@ -320,6 +321,7 @@ const CRM_PATHS = new Set<string>(CRM_ORDER);
 /** Grup başlığı "CRM" olduğu için alt öğelerde tekrar edilmez */
 const CRM_LABELS: Record<string, string> = {
   '/crm/inbox': 'Gelen Kutusu',
+  '/crm/web-siparisler': 'Web Sitesinden Gelen Siparişler',
   '/crm': 'Pipeline',
   '/crm/gorevler': 'Görevler',
   '/crm/toplu-mesaj': 'Toplu Mesaj',

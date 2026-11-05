@@ -93,6 +93,7 @@ export const ROUTE_ALLOWED_ROLES = {
   '/crm/gorevler': ['super_admin', 'admin', 'crm_agent'],
   '/crm/toplu-mesaj': ['super_admin', 'admin', 'crm_agent'],
   '/crm/etkinlik-formlari': ['super_admin', 'admin', 'crm_agent'],
+  '/crm/web-siparisler': ['super_admin', 'admin', 'crm_agent'],
   '/crm/gunluk-rapor': ['super_admin', 'admin', 'crm_agent'],
   '/crm/inbox': ['super_admin', 'admin', 'crm_agent', 'coach'],
   '/crm/widgetler': ['super_admin', 'admin'],
