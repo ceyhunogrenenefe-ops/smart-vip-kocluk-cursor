@@ -14,6 +14,7 @@ import { actorRoleSet, roleSetHasAdmin, roleSetHasSuperAdmin } from '../api/_lib
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { errorMessage } from '../api/_lib/error-msg.js';
 import { authorizeVercelOrCronSecret } from '../api/_lib/cron-auth.js';
+import { queueCrmWebsiteOrderSync, syncOzelDersTalepById } from '../api/_lib/crm-website-orders.js';
 
 const TABLE = 'ozel_ders_talepleri';
 const STATUSES = new Set(['pending', 'paid', 'contacted', 'enrolled', 'cancelled']);
@@ -129,8 +130,10 @@ async function handleWebhook(req, res) {
           .select()
           .single();
         if (insErr) throw insErr;
+        queueCrmWebsiteOrderSync(() => syncOzelDersTalepById(data.id));
         return res.status(200).json({ ok: true, created: true, data });
       }
+      queueCrmWebsiteOrderSync(() => syncOzelDersTalepById(updated[0].id));
       return res.status(200).json({ ok: true, updated: true, data: updated[0] });
     }
 
@@ -164,6 +167,7 @@ async function handleWebhook(req, res) {
       result = await supabaseAdmin.from(TABLE).insert(row).select().single();
     }
     if (result.error) throw result.error;
+    queueCrmWebsiteOrderSync(() => syncOzelDersTalepById(result.data.id));
     return res.status(200).json({ ok: true, data: result.data });
   } catch (e) {
     if (isSchemaMissing(e)) return schemaHint(res);

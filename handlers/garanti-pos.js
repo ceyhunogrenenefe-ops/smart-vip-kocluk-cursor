@@ -14,6 +14,10 @@ import { actorRoleSet, roleSetHasAdmin, roleSetHasSuperAdmin } from '../api/_lib
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { errorMessage } from '../api/_lib/error-msg.js';
 import {
+  queueCrmWebsiteOrderSync,
+  syncGarantiPaymentOrderById,
+} from '../api/_lib/crm-website-orders.js';
+import {
   getGarantiConfig,
   tryToKurus,
   kurusToTry,
@@ -409,6 +413,8 @@ async function handleCallback(req, res) {
   } catch (e) {
     console.error('[garanti-pos] mark linked payment failed', errorMessage(e));
   }
+
+  queueCrmWebsiteOrderSync(() => syncGarantiPaymentOrderById(order.id));
 
   return okRedirect(orderId);
 }

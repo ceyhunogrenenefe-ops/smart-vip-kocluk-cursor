@@ -98,6 +98,7 @@ import {
 } from '../api/_lib/commerce-shipping-address.js';
 import { canonicalBookSeries, classKeyMatchesLevels, listStoreBrowse, publicStoreBrowseNav } from '../api/_lib/commerce-store-browse.js';
 import { notifyVendorWhatsAppForPaidOrder } from '../api/_lib/commerce-vendor-order-notify.js';
+import { queueCrmWebsiteOrderSync, syncCommerceOrderById } from '../api/_lib/crm-website-orders.js';
 import { computeCouponDiscount } from '../api/_lib/commerce-coupon-discount.js';
 import { applyCors, handleCorsPreflight } from '../api/_lib/cors-mobile.js';
 
@@ -1128,6 +1129,8 @@ async function fulfillPaidOrder(order, { provider = 'paytr', ref = null, raw = n
     vendor_whatsapp = { ok: false, error: e?.message || 'whatsapp_failed' };
   }
 
+  queueCrmWebsiteOrderSync(() => syncCommerceOrderById(order.id));
+
   return { ok: true, order_id: order.id, order_number: order.order_number, vendor_whatsapp };
 }
 
@@ -1262,6 +1265,8 @@ async function applyCheckoutCustomer(body, orderId) {
     const existing = await loadShippingAddress(orderId);
     if (!existing) throw new Error('Teslimat adresi gerekli');
   }
+
+  queueCrmWebsiteOrderSync(() => syncCommerceOrderById(orderId));
 
   return { name, email, phone, notes: fields.notes || ship.notes };
 }

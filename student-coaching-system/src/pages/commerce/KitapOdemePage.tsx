@@ -260,10 +260,11 @@ export default function KitapOdemePage() {
                   />
                   <div className="grid grid-cols-2 gap-2">
                     <input
+                      required
                       value={district}
                       onChange={(e) => setDistrict(e.target.value)}
                       className="w-full rounded-xl border border-amber-200 bg-white px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
-                      placeholder="İlçe"
+                      placeholder="İlçe *"
                       autoComplete="address-level2"
                     />
                     <input

@@ -106,6 +106,7 @@ import MeetingTrackerPage from './pages/MeetingTrackerPage';
 import CrmLayout from './pages/crm/CrmLayout';
 import ScrollToTopOnNavigate from './components/routing/ScrollToTopOnNavigate';
 import CrmEventFormsPage from './pages/crm/CrmEventFormsPage';
+import CrmWebsiteOrdersPage from './pages/crm/CrmWebsiteOrdersPage';
 import EventFormPublicPage from './pages/eventForm/EventFormPublicPage';
 import EventSurveyPublicPage from './pages/eventForm/EventSurveyPublicPage';
 import HomeworkSharePage from './pages/HomeworkSharePage';
@@ -514,6 +515,14 @@ function App() {
                 element={
                   <ProtectedRoute allowedRoles={rolesForProtectedRoute('/crm/etkinlik-formlari')}>
                     <CrmEventFormsPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="web-siparisler"
+                element={
+                  <ProtectedRoute allowedRoles={rolesForProtectedRoute('/crm/web-siparisler')}>
+                    <CrmWebsiteOrdersPage />
                   </ProtectedRoute>
                 }
               />
