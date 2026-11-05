@@ -52,6 +52,7 @@ import {
   type StoreBrowseCategoryWithBooks,
   type StoreCollectionBook,
 } from '../../lib/commerceStoreApi';
+import { rememberStoreClass } from '../../lib/commerce/orderSinif';
 import {
   copyTextToClipboard,
   kitapBookShareUrl,
@@ -1915,6 +1916,7 @@ export default function KitapMagazasiPage() {
                 type="button"
                 onClick={() => {
                   setFilters({ ...filters, class_level: cl.key });
+                  rememberStoreClass(cl.key);
                   setActiveClassKey(cl.key);
                   setActiveCategoryKey(null);
                 }}

@@ -28,22 +28,7 @@ import {
 } from '../api/_lib/commerce-vendor-orders.js';
 import { attachPackageContents, loadPackageContentsByIds } from '../api/_lib/commerce-package-contents.js';
 import { attachFormImportPackageContents } from '../api/_lib/commerce-kitap-form-import.js';
-
-function formatSinifLabel(level) {
-  const raw = String(level || '').trim();
-  if (!raw) return '';
-  if (/^\d+$/.test(raw)) return `${raw}. Sınıf`;
-  return raw;
-}
-
-function inferSinifFromText(...parts) {
-  const hay = parts.map((p) => String(p || '')).join(' ');
-  const m = hay.match(/\b([5-8]|9|1[0-2])\s*\.?\s*s[iı]n[iı]f\b/i)
-    || hay.match(/\b(LGS|TYT|AYT|YKS|YÖS|YOS)\b/i)
-    || hay.match(/\b([5-8]|9|1[0-2])\b/);
-  if (!m) return '';
-  return formatSinifLabel(m[1]);
-}
+import { resolveOrderSinif } from '../api/_lib/commerce-order-sinif.js';
 
 async function decorateVendorOrdersWithPackageContents(rows) {
   const list = Array.isArray(rows) ? rows : [];
@@ -64,7 +49,7 @@ async function decorateVendorOrdersWithPackageContents(rows) {
   ]);
   const classByStudent = new Map(
     (studentsRes.data || [])
-      .map((s) => [String(s.id), formatSinifLabel(s.class_level)])
+      .map((s) => [String(s.id), String(s.class_level || '').trim()])
       .filter(([, level]) => Boolean(level))
   );
   const nameByStudent = new Map(
@@ -84,25 +69,27 @@ async function decorateVendorOrdersWithPackageContents(rows) {
     );
     const parent = vo.commerce_orders || {};
     const sid = parent.student_id ? String(parent.student_id) : '';
-    let sinif = (sid && classByStudent.get(sid)) || '';
-    if (!sinif) {
-      for (const it of vo.commerce_order_items || []) {
-        const pid = it.package_id;
-        const level = pid
-          ? (classLevelByPackageId?.get(pid) || classLevelByPackageId?.get(String(pid)) || '')
-          : '';
-        if (level) {
-          sinif = formatSinifLabel(level);
-          break;
-        }
+    let packageClassLevel = '';
+    for (const it of vo.commerce_order_items || []) {
+      const pid = it.package_id;
+      const level = pid
+        ? (classLevelByPackageId?.get(pid) || classLevelByPackageId?.get(String(pid)) || '')
+        : '';
+      if (level) {
+        packageClassLevel = level;
+        break;
       }
     }
-    if (!sinif) {
-      const titles = (vo.commerce_order_items || [])
-        .map((it) => [it.package_name, it.title_snapshot].filter(Boolean).join(' '))
-        .join(' ');
-      sinif = inferSinifFromText(parent.notes, titles);
-    }
+    // Alıcının seçtiği sınıf (not etiketi) her zaman önce; çok sınıflı ürün adından tahmin yok.
+    const resolved = resolveOrderSinif({
+      notes: parent.notes,
+      studentClassLevel: (sid && classByStudent.get(sid)) || '',
+      packageClassLevel,
+      titles: (vo.commerce_order_items || []).map((it) =>
+        [it.package_name, it.title_snapshot].filter(Boolean).join(' ')
+      ),
+    });
+    const sinif = resolved.label;
     vo.sinif = sinif || '';
     if (sid && nameByStudent.get(sid)) {
       parent.student_name = nameByStudent.get(sid);

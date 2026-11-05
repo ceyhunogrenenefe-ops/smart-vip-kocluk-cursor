@@ -37,6 +37,14 @@ import {
 import type { CommerceIbanPayment, CommerceSettings } from '../../types/commerce.types';
 import { formatCommerceTry } from '../../types/commerce.types';
 import { useAuth } from '../../context/AuthContext';
+import {
+  isMultiClassLevels,
+  lastStoreClass,
+  numericClassChoices,
+  ORDER_SINIF_OPTIONS,
+  OrderSinifSelect,
+  toSinifOption,
+} from '../../lib/commerce/orderSinif';
 
 const FALLBACK_IBAN: CommerceIbanPayment = {
   enabled: true,
@@ -83,6 +91,7 @@ export default function SepetPage() {
     city: '',
     notes: '',
   });
+  const [studentClass, setStudentClass] = useState('');
 
   useEffect(() => {
     if (!effectiveUser) return;
@@ -127,6 +136,38 @@ export default function SepetPage() {
   }, [coupon, subtotal]);
 
   const total = subtotal + shippingCost - discountAmount;
+
+  // Çok sınıflı ürün (5-6-7 deneme, 9-10 paketi): satıcıya hangi sınıfın gideceği seçilmeli.
+  const multiClassItems = useMemo(
+    () => items.filter((i) => isMultiClassLevels(i.commerce_vendor_offers?.commerce_books?.class_levels)),
+    [items]
+  );
+  const classOptions = useMemo(() => {
+    if (!multiClassItems.length) return ORDER_SINIF_OPTIONS;
+    const sets = multiClassItems.map((i) => numericClassChoices(i.commerce_vendor_offers?.commerce_books?.class_levels));
+    const common = sets.reduce((acc, cur) => acc.filter((c) => cur.includes(c)));
+    return common.length ? common : ORDER_SINIF_OPTIONS;
+  }, [multiClassItems]);
+  const classRequired = multiClassItems.length > 0;
+
+  useEffect(() => {
+    if (studentClass) return;
+    const fromUser = toSinifOption((effectiveUser as { class_level?: string } | null)?.class_level, classOptions);
+    const fromStore = toSinifOption(lastStoreClass(), classOptions);
+    const only = classOptions.length === 1 ? classOptions[0] : '';
+    const pick = fromUser || fromStore || only;
+    if (pick) setStudentClass(pick);
+  }, [effectiveUser, classOptions, studentClass]);
+
+  const assertClassReady = () => {
+    if (classRequired && !studentClass) {
+      toast.error(
+        `"${multiClassItems[0]?.commerce_vendor_offers?.commerce_books?.title || 'Ürün'}" birden fazla sınıf içeriyor — öğrencinin sınıfını seçin`
+      );
+      return false;
+    }
+    return true;
+  };
   const needsShipping = useMemo(
     () => items.length > 0 && items.every((i) => i.vendor_offer_id || i.package_id),
     [items]
@@ -158,6 +199,7 @@ export default function SepetPage() {
     customer_phone: ship.phone.trim(),
     customer_email: ship.email.trim(),
     notes: ship.notes.trim(),
+    ...(studentClass ? { student_class: studentClass } : {}),
     address: {
       full_name: ship.name.trim(),
       phone: ship.phone.trim(),
@@ -190,6 +232,7 @@ export default function SepetPage() {
 
   const handleCheckout = async () => {
     if (items.some((i) => i.out_of_stock) || items.length === 0) return;
+    if (!assertClassReady()) return;
     if (needsShipping && !assertShipReady()) return;
     setCheckoutLoading(true);
     try {
@@ -197,7 +240,7 @@ export default function SepetPage() {
       const prepared = await csCheckoutPrepare(
         coupon?.code ?? null,
         studentId,
-        needsShipping ? shippingPayload() : undefined
+        needsShipping ? shippingPayload() : studentClass ? { student_class: studentClass } : undefined
       );
       window.location.href = prepared.checkout_url;
     } catch (e: unknown) {
@@ -216,6 +259,7 @@ export default function SepetPage() {
   };
 
   const handleIbanPay = async () => {
+    if (!assertClassReady()) return;
     if (!assertShipReady()) return;
     if (!ibanReceipt) {
       toast.error('Havale dekontunu ekleyin');
@@ -522,6 +566,17 @@ export default function SepetPage() {
                     autoComplete="address-level1"
                   />
                 </div>
+                <OrderSinifSelect
+                  value={studentClass}
+                  onChange={setStudentClass}
+                  options={classOptions}
+                  required={classRequired}
+                  hint={
+                    classRequired
+                      ? 'Bu deneme/kitap birden fazla sınıf için satılıyor. Satıcıya bu sınıf iletilecek.'
+                      : undefined
+                  }
+                />
                 <textarea
                   className="w-full border border-amber-200 rounded-lg px-2.5 py-1.5 text-sm bg-white"
                   rows={2}

@@ -98,6 +98,12 @@ import {
 } from '../api/_lib/commerce-shipping-address.js';
 import { canonicalBookSeries, classKeyMatchesLevels, listStoreBrowse, publicStoreBrowseNav } from '../api/_lib/commerce-store-browse.js';
 import { notifyVendorWhatsAppForPaidOrder } from '../api/_lib/commerce-vendor-order-notify.js';
+import {
+  extractSinifFromNotes,
+  isMultiClassBook,
+  normalizeOrderSinif,
+  withSinifTag,
+} from '../api/_lib/commerce-order-sinif.js';
 import { computeCouponDiscount } from '../api/_lib/commerce-coupon-discount.js';
 import { applyCors, handleCorsPreflight } from '../api/_lib/cors-mobile.js';
 
@@ -798,13 +804,14 @@ async function prepareCheckout(body, actor, opts = {}) {
   });
 
   const lines = [];
+  const multiClassTitles = [];
   for (const item of items) {
     if (item.vendor_offer_id) {
       const { data: offer, error } = await supabaseAdmin
         .from('commerce_vendor_offers')
         .select(`
           id, vendor_id, book_id, price_kurus, compare_at_price_kurus, stock_quantity, status,
-          commerce_books(id, title, isbn),
+          commerce_books(id, title, isbn, class_levels),
           commerce_vendors(id, name, commission_rate)
         `)
         .eq('id', item.vendor_offer_id)
@@ -814,6 +821,9 @@ async function prepareCheckout(body, actor, opts = {}) {
       }
       if (offer.stock_quantity < item.quantity) {
         throw new Error(`"${offer.commerce_books?.title || item.title_snapshot}" için yeterli stok yok`);
+      }
+      if (isMultiClassBook(offer.commerce_books?.class_levels)) {
+        multiClassTitles.push(offer.commerce_books?.title || item.title_snapshot || 'Ürün');
       }
       lines.push({
         vendor_offer_id: offer.id,
@@ -915,9 +925,24 @@ async function prepareCheckout(body, actor, opts = {}) {
   const orderNumber = await nextOrderNumber(settings.order_number_prefix);
   const studentId = actor?.student_id || body.student_id || null;
   let institutionId = actor?.institution_id || null;
-  if (!institutionId && studentId) {
-    const { data: st } = await supabaseAdmin.from('students').select('institution_id').eq('id', studentId).maybeSingle();
-    institutionId = st?.institution_id || null;
+  let studentClassLevel = '';
+  if (studentId) {
+    const { data: st } = await supabaseAdmin
+      .from('students')
+      .select('institution_id, class_level')
+      .eq('id', studentId)
+      .maybeSingle();
+    if (!institutionId) institutionId = st?.institution_id || null;
+    studentClassLevel = String(st?.class_level || '').trim();
+  }
+  // Satıcıya hangi sınıfın gönderileceği: alıcının seçimi, yoksa öğrenci kartı.
+  // Çok sınıflı üründe (5-6-7 deneme, 9-10 paketi) sınıf seçilmeden sipariş açılmaz.
+  const chosenSinif = normalizeOrderSinif(body.student_class ?? body.class_level ?? body.sinif)
+    || normalizeOrderSinif(studentClassLevel);
+  if (!chosenSinif && multiClassTitles.length) {
+    throw new Error(
+      `"${multiClassTitles[0]}" birden fazla sınıf içeriyor. Satıcıya doğru sınıfın gitmesi için öğrencinin sınıfını seçin.`
+    );
   }
 
   const { data: order, error: orderErr } = await supabaseAdmin
@@ -941,7 +966,7 @@ async function prepareCheckout(body, actor, opts = {}) {
       customer_name: ship?.full_name || null,
       customer_email: ship?.email || null,
       customer_phone: ship?.phone || null,
-      notes: (opts.orderPatch && opts.orderPatch.notes) || ship?.notes || null,
+      notes: withSinifTag((opts.orderPatch && opts.orderPatch.notes) || ship?.notes || null, chosenSinif),
     })
     .select('id, order_number, total_kurus, subtotal_kurus, shipping_kurus, discount_kurus')
     .single();
@@ -1242,13 +1267,24 @@ async function applyCheckoutCustomer(body, orderId) {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('Geçerli e-posta girin');
   if (phone.replace(/\D/g, '').length < 10) throw new Error('Geçerli telefon girin');
 
+  // /odeme/kitap notu ezerken sepetteki sınıf seçimi (Sınıf: X) kaybolmasın.
+  const { data: current } = await supabaseAdmin
+    .from('commerce_orders')
+    .select('notes')
+    .eq('id', orderId)
+    .maybeSingle();
+  const keptSinif =
+    normalizeOrderSinif(body.student_class ?? body.class_level ?? body.sinif) ||
+    extractSinifFromNotes(current?.notes);
+  const newNotes = withSinifTag(fields.notes || ship.notes || current?.notes || null, keptSinif);
+
   const { error } = await supabaseAdmin
     .from('commerce_orders')
     .update({
       customer_name: name,
       customer_email: email,
       customer_phone: phone,
-      notes: fields.notes || ship.notes || null,
+      notes: newNotes,
       payment_status: 'processing',
       updated_at: new Date().toISOString(),
     })
@@ -1263,7 +1299,7 @@ async function applyCheckoutCustomer(body, orderId) {
     if (!existing) throw new Error('Teslimat adresi gerekli');
   }
 
-  return { name, email, phone, notes: fields.notes || ship.notes };
+  return { name, email, phone, notes: newNotes };
 }
 
 async function handleCheckout(op, body, req) {
