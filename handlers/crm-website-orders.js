@@ -10,6 +10,7 @@ import {
   backfillCrmWebsiteOrders,
   CRM_WEBSITE_ORDERS_SETUP_SQL,
   CRM_WEBSITE_ORDERS_TABLE,
+  ensureCrmWebsiteOrdersSchema,
   isSchemaMissing,
   listCrmWebsiteOrders,
 } from '../api/_lib/crm-website-orders.js';
@@ -40,18 +41,40 @@ export default async function handler(req, res) {
     const auth = authorizeVercelOrCronSecret(req);
     if (!auth.ok) return res.status(401).json({ error: 'unauthorized' });
     try {
-      const { error } = await supabaseAdmin.from(CRM_WEBSITE_ORDERS_TABLE).select('id').limit(1);
-      if (error && isSchemaMissing(error)) {
+      const ensured = await ensureCrmWebsiteOrdersSchema();
+      if (!ensured.ok) {
         return res.status(503).json({
           ok: false,
           error: 'schema_missing',
           sql: CRM_WEBSITE_ORDERS_SETUP_SQL,
           hint: "student-coaching-system/sql/2026-11-05-crm-website-orders.sql dosyasını Supabase'de çalıştırın.",
+          ...ensured,
         });
       }
-      return res.status(200).json({ ok: true, table: CRM_WEBSITE_ORDERS_TABLE });
+      return res.status(200).json({ ok: true, table: CRM_WEBSITE_ORDERS_TABLE, ...ensured });
     } catch (e) {
       return res.status(500).json({ ok: false, error: errorMessage(e) });
+    }
+  }
+
+  if (op === 'backfill' && authorizeVercelOrCronSecret(req).ok) {
+    try {
+      await ensureCrmWebsiteOrdersSchema();
+      const result = await backfillCrmWebsiteOrders({
+        source: req.query.source || body.source,
+        cursor: req.query.cursor || body.cursor,
+      });
+      return res.status(200).json({ ok: true, ...result });
+    } catch (e) {
+      if (isSchemaMissing(e)) {
+        return res.status(503).json({
+          error: 'schema_missing',
+          hint: "Supabase'de 2026-11-05-crm-website-orders.sql çalıştırın veya ?op=setup",
+          sql: CRM_WEBSITE_ORDERS_SETUP_SQL,
+        });
+      }
+      console.error('[crm-website-orders backfill]', errorMessage(e));
+      return res.status(500).json({ error: errorMessage(e) });
     }
   }
 

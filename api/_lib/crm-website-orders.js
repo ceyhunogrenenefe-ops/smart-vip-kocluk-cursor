@@ -97,6 +97,76 @@ function normalizePhone(p) {
   return d || null;
 }
 
+function buildDatabaseUrl() {
+  const direct =
+    process.env.SUPABASE_DB_URL?.trim() ||
+    process.env.DATABASE_URL?.trim() ||
+    process.env.POSTGRES_URL?.trim() ||
+    process.env.POSTGRES_URL_NON_POOLING?.trim() ||
+    process.env.SUPABASE_DATABASE_URL?.trim();
+  if (direct) return direct;
+  const password =
+    process.env.SUPABASE_DB_PASSWORD?.trim() ||
+    process.env.POSTGRES_PASSWORD?.trim() ||
+    process.env.SUPABASE_DATABASE_PASSWORD?.trim();
+  const url = String(process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '').trim();
+  const m = url.match(/https:\/\/([^.]+)\.supabase\.co/);
+  const ref = m?.[1] || '';
+  if (!password || !ref) return '';
+  return `postgresql://postgres:${encodeURIComponent(password)}@db.${ref}.supabase.co:5432/postgres`;
+}
+
+export async function ensureCrmWebsiteOrdersSchema() {
+  const { error } = await supabaseAdmin.from(CRM_WEBSITE_ORDERS_TABLE).select('id').limit(1);
+  if (!error) return { ok: true, created: false };
+  if (error && !isSchemaMissing(error)) throw error;
+
+  const dbUrl = buildDatabaseUrl();
+  if (!dbUrl) {
+    return { ok: false, code: 'schema_missing', sql: CRM_WEBSITE_ORDERS_SETUP_SQL };
+  }
+  const postgres = (await import('postgres')).default;
+  const sql = postgres(dbUrl, { ssl: 'require', max: 1 });
+  try {
+    await sql.unsafe(CRM_WEBSITE_ORDERS_SETUP_SQL);
+    await sql.unsafe(`
+      CREATE INDEX IF NOT EXISTS crm_website_orders_payment_idx
+        ON public.crm_website_orders (payment_status, order_placed_at DESC);
+      CREATE INDEX IF NOT EXISTS crm_website_orders_category_idx
+        ON public.crm_website_orders (product_category, order_placed_at DESC);
+    `);
+    return { ok: true, created: true, via: 'postgres' };
+  } finally {
+    await sql.end({ timeout: 5 }).catch(() => {});
+  }
+}
+
+/** PayTR student_info içindeki «Teslimat: …» satırından adres okur. */
+export function parseShippingFromStudentInfo(text) {
+  const raw = String(text || '');
+  const m = raw.match(/Teslimat:\s*([^·\n]+)/i);
+  if (!m) return null;
+  const parts = m[1]
+    .split(',')
+    .map((p) => p.trim())
+    .filter(Boolean);
+  if (parts.length >= 3) {
+    return {
+      address_line1: parts.slice(0, -2).join(', ') || parts[0],
+      district: parts[parts.length - 2],
+      city: parts[parts.length - 1],
+    };
+  }
+  if (parts.length === 2) {
+    return { address_line1: parts[0], district: null, city: parts[1] };
+  }
+  return { address_line1: m[1].trim(), district: null, city: null };
+}
+
+function productTextFromOzelDersRow(row) {
+  return [row.package_title, row.package_id, row.student_info, row.source].filter(Boolean).join(' ');
+}
+
 async function upsertCrmWebsiteOrder(row) {
   const now = new Date().toISOString();
   const payload = {
@@ -294,8 +364,20 @@ export async function syncOzelDersTalepById(talepId) {
   if (error) throw error;
   if (!row) return null;
 
-  const productSummary = row.package_title || row.package_id || 'Özel ders / site paketi';
+  const productSummary =
+    row.package_title || row.package_id || row.student_info?.slice(0, 120) || 'Web sitesi siparişi';
   const isPaid = row.status === 'paid';
+  const productBlob = productTextFromOzelDersRow(row);
+  const category = inferProductCategory(productBlob);
+  const requiresShipping =
+    category === 'deneme' || category === 'kitap' || String(row.package_id || '').toLowerCase().startsWith('deneme');
+  const ship = parseShippingFromStudentInfo(row.student_info) || {};
+  const addrFields = computeAddressFields({
+    requiresShipping,
+    line1: ship.address_line1,
+    district: ship.district,
+    city: ship.city,
+  });
 
   return upsertCrmWebsiteOrder({
     source_system: 'ozel_ders',
@@ -304,22 +386,105 @@ export async function syncOzelDersTalepById(talepId) {
     customer_name: row.parent_name,
     customer_phone: row.phone,
     customer_email: row.email,
+    address_line1: ship.address_line1 || null,
+    address_line2: null,
+    district: ship.district || null,
+    city: ship.city || null,
+    address_status: addrFields.address_status,
+    product_summary: productSummary,
+    product_category: category === 'diger' && requiresShipping ? 'deneme' : category,
+    amount_kurus: row.amount_kurus,
+    currency: 'TRY',
+    payment_status: isPaid ? 'paid' : 'pending',
+    order_status: row.status || 'pending',
+    payment_provider: 'paytr',
+    requires_shipping: requiresShipping,
+    order_placed_at: row.created_at,
+    paid_at: row.paid_at,
+    metadata: {
+      ozel_ders_id: row.id,
+      source: row.source,
+      address_missing: addrFields.address_missing,
+    },
+  });
+}
+
+async function backfillSiteRegistrationLeads(cursor = null, limit = BACKFILL_BATCH) {
+  let q = supabaseAdmin
+    .from('registration_leads')
+    .select('id, created_at')
+    .is('deleted_at', null)
+    .or(
+      'source.ilike.%website%,source.ilike.%onlinevip%,source.eq.website_form,source.eq.website_form_ad'
+    )
+    .order('created_at', { ascending: true })
+    .limit(limit);
+  if (cursor) q = q.gt('created_at', cursor);
+  const { data, error } = await q;
+  if (error) throw error;
+  for (const row of data || []) {
+    await syncRegistrationLeadById(row.id);
+  }
+  const next =
+    data && data.length === limit ? data[data.length - 1].created_at : null;
+  return { synced: (data || []).length, next_cursor: next, done: !data || data.length < limit };
+}
+
+export async function syncRegistrationLeadById(leadId) {
+  const id = String(leadId || '').trim();
+  if (!id) return null;
+
+  const { data: row, error } = await supabaseAdmin
+    .from('registration_leads')
+    .select(
+      'id, first_name, last_name, parent_full_name, phone, email, grade_program, interested_package, source, stage, primary_status, final_offer_amount, offered_price, notes, confirmed_at, created_at'
+    )
+    .eq('id', id)
+    .maybeSingle();
+  if (error) throw error;
+  if (!row) return null;
+
+  const src = String(row.source || '').toLowerCase();
+  if (!src.includes('website') && !src.includes('onlinevip') && src !== 'website_form' && src !== 'website_form_ad') {
+    return null;
+  }
+
+  const customerName =
+    row.parent_full_name || `${row.first_name || ''} ${row.last_name || ''}`.trim() || null;
+  const productSummary = [row.interested_package, row.grade_program, 'Web sitesi kaydı']
+    .filter(Boolean)
+    .join(' · ');
+  const amountKurus =
+    row.final_offer_amount != null
+      ? Math.round(Number(row.final_offer_amount) * 100)
+      : row.offered_price != null
+        ? Math.round(Number(row.offered_price) * 100)
+        : null;
+  const isPaid = row.primary_status === 'confirmed' || row.stage === 'confirmed';
+
+  return upsertCrmWebsiteOrder({
+    source_system: 'site_registration',
+    source_id: row.id,
+    order_number: `WEB-LEAD-${String(row.id).slice(0, 8)}`,
+    customer_name: customerName,
+    customer_phone: row.phone,
+    customer_email: row.email,
     address_line1: null,
     address_line2: null,
     district: null,
     city: null,
     address_status: 'not_required',
     product_summary: productSummary,
-    product_category: 'ozel_ders',
-    amount_kurus: row.amount_kurus,
+    product_category: inferProductCategory(productSummary),
+    amount_kurus: Number.isFinite(amountKurus) ? amountKurus : null,
     currency: 'TRY',
     payment_status: isPaid ? 'paid' : 'pending',
-    order_status: row.status || 'pending',
-    payment_provider: 'paytr',
+    order_status: row.stage || row.primary_status || 'new_lead',
+    payment_provider: null,
     requires_shipping: false,
     order_placed_at: row.created_at,
-    paid_at: row.paid_at,
-    metadata: { ozel_ders_id: row.id, source: row.source, address_missing: false },
+    paid_at: row.confirmed_at,
+    metadata: { registration_lead_id: row.id, source: row.source, address_missing: false },
   });
 }
 
@@ -418,6 +583,7 @@ export async function backfillCrmWebsiteOrders(opts = {}) {
   if (source === 'kitap_form') return { source, ...(await backfillKitapSiparisleri(cursor)) };
   if (source === 'garanti') return { source, ...(await backfillGaranti(cursor)) };
   if (source === 'ozel_ders') return { source, ...(await backfillOzelDers(cursor)) };
+  if (source === 'site_registration') return { source, ...(await backfillSiteRegistrationLeads(cursor)) };
 
   const commerce = await backfillCommerceOrders(cursor);
   if (!commerce.done) {
@@ -432,7 +598,11 @@ export async function backfillCrmWebsiteOrders(opts = {}) {
     return { source: 'all', phase: 'garanti', ...garanti };
   }
   const ozel = await backfillOzelDers(null);
-  return { source: 'all', phase: 'ozel_ders', ...ozel, done: ozel.done };
+  if (!ozel.done) {
+    return { source: 'all', phase: 'ozel_ders', ...ozel };
+  }
+  const siteReg = await backfillSiteRegistrationLeads(null);
+  return { source: 'all', phase: 'site_registration', ...siteReg, done: siteReg.done };
 }
 
 export async function listCrmWebsiteOrders(filters = {}) {
