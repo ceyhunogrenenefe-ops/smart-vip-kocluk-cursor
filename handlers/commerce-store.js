@@ -16,6 +16,7 @@
  *  catalog.settings      — genel mağaza ayarları (kargo eşiği vs)
  *  staff.roster          — sınıf/öğrenci listesi (öğretmen/koç/admin)
  *  staff.assign          — sınıfa veya kişiye kitap öner/ata
+ *  staff.gift_order      — öğrenciye HEDİYE kitap/paket (yalnız admin; ödemesiz, satıcıya düşer)
  *  staff.orders          — koç/öğretmen kapsamındaki öğrenci mağaza siparişleri
  *  staff.orders_delete   — kapsam içi siparişleri tek/toplu sil
  *  staff.package_create  — sınıf paketi oluştur
@@ -105,6 +106,13 @@ import {
   withSinifTag,
 } from '../api/_lib/commerce-order-sinif.js';
 import { queueCrmWebsiteOrderSync, syncCommerceOrderById } from '../api/_lib/crm-website-orders.js';
+import {
+  canSendGift,
+  GIFT_COUPON_CODE,
+  GIFT_PROVIDER,
+  giftLineFromBody,
+  giftOrderNotes,
+} from '../api/_lib/commerce-gift.js';
 import { computeCouponDiscount } from '../api/_lib/commerce-coupon-discount.js';
 import { applyCors, handleCorsPreflight } from '../api/_lib/cors-mobile.js';
 
@@ -801,7 +809,7 @@ async function prepareCheckout(body, actor, opts = {}) {
   // Kart: teslimat /odeme/kitap'ta. IBAN: sepetten biter, adres zorunlu.
   const ship = resolveCheckoutShipping(body, {
     required: checkoutRequiresShipping(opts),
-    requireEmail: true
+    requireEmail: opts.requireEmail !== false
   });
 
   const lines = [];
@@ -1769,6 +1777,75 @@ async function handleStaff(op, body, actor) {
       if (!found.has(id)) skipped.push({ id, order_number: null, reason: 'bulunamadı' });
     }
     return { ok: true, deleted, skipped, deleted_count: deleted.length };
+  }
+
+  if (op === 'staff.gift_order') {
+    // Hediye: yalnız admin / super_admin. Ödeme yok, sipariş doğrudan satıcıya düşer.
+    if (!canSendGift(roleSet)) throw new Error('Hediye gönderme yetkisi yalnız yöneticidedir');
+    const studentId = String(body.student_id || '').trim();
+    if (!studentId) throw new Error('Hediye gönderilecek öğrenciyi seçin');
+    const { data: student } = await supabaseAdmin
+      .from('students')
+      .select('id, name, class_level, institution_id')
+      .eq('id', studentId)
+      .maybeSingle();
+    if (!student) throw new Error('Öğrenci bulunamadı');
+    if (!roleSet.has('super_admin') && institutionId && student.institution_id && student.institution_id !== institutionId) {
+      throw new Error('Bu öğrenci kurumunuzda değil');
+    }
+
+    const line = giftLineFromBody(body);
+    const notes = giftOrderNotes({ studentName: student.name, note: body.note ?? body.notes });
+    const giftBody = {
+      student_id: student.id,
+      student_class: body.student_class || student.class_level || '',
+      customer_name: body.customer_name,
+      customer_phone: body.customer_phone,
+      customer_email: body.customer_email,
+      address: body.address,
+      notes,
+    };
+    const prepared = await prepareCheckout(giftBody, actor, {
+      guestItems: [line],
+      provider: GIFT_PROVIDER,
+      requireShipping: true,
+      requireEmail: false,
+      skipRedirect: true,
+      orderPatch: { notes },
+    });
+
+    // Veliden tahsilat yok: sipariş tutarı 0. Satıcı hakedişi (vendor_orders) gerçek fiyatta kalır.
+    const fullAmount = Number(prepared.subtotal_kurus || 0) + Number(prepared.shipping_kurus || 0);
+    await supabaseAdmin
+      .from('commerce_orders')
+      .update({
+        discount_kurus: fullAmount,
+        total_kurus: 0,
+        coupon_code: GIFT_COUPON_CODE,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', prepared.order_id);
+    await supabaseAdmin.from('commerce_payments').update({ amount_kurus: 0 }).eq('order_id', prepared.order_id);
+
+    const paid = await fulfillPaidOrder(
+      // user_id null: yöneticinin kendi sepeti silinmesin.
+      { id: prepared.order_id, user_id: null, payment_status: 'pending', order_number: prepared.order_number },
+      {
+        provider: GIFT_PROVIDER,
+        ref: prepared.payment_ref,
+        raw: { method: GIFT_PROVIDER, gifted_by: actor.sub, student_id: student.id },
+      }
+    );
+
+    return {
+      ok: true,
+      gift: true,
+      order_id: prepared.order_id,
+      order_number: prepared.order_number,
+      student_name: student.name,
+      gift_value_kurus: fullAmount,
+      vendor_whatsapp: paid.vendor_whatsapp || null,
+    };
   }
 
   if (op === 'staff.assign') {

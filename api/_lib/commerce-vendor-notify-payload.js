@@ -6,6 +6,7 @@ import { normalizePhoneToE164 } from './phone-whatsapp.js';
 import { formatShippingOneLine, itemsForVendor } from './commerce-shipping-address.js';
 import { formatSellerItemLabel } from './commerce-package-contents.js';
 import { resolveOrderSinif } from './commerce-order-sinif.js';
+import { isGiftOrder } from './commerce-gift.js';
 
 export function vendorNotifyPhone(vendor) {
   if (!vendor || typeof vendor !== 'object') return null;
@@ -67,7 +68,7 @@ export function buildVendorOrderNotifyPayload({
     ogrenci_ad_soyad: studentName || order?.customer_name || '-',
     sinif: sinif || '-',
     kitap_seti,
-    ucret_durumu: '-',
+    ucret_durumu: isGiftOrder(order) ? 'HEDİYE (ücretsiz — kurum gönderiyor)' : '-',
     telefon: order?.customer_phone || addr.phone || '-',
     adres: street || '-',
     ilce: addr.district || '-',

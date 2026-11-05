@@ -8,6 +8,7 @@ import {
   BookOpen,
   CheckCircle2,
   ChevronRight,
+  Gift,
   Eye,
   LayoutGrid,
   List,
@@ -62,6 +63,8 @@ import type { CommerceBookPackage, CommerceSettings, CommerceStudentBookAssignme
 import { COMMERCE_ORDER_STATUS_LABELS, formatCommerceTry } from '../../types/commerce.types';
 import { useAuth } from '../../context/AuthContext';
 import BookCoverImage from '../../components/commerce/BookCoverImage';
+import GiftOrderModal from '../../components/commerce/GiftOrderModal';
+import { userHasAnyRole } from '../../config/rolePermissions';
 
 type Tab = 'tum-kitaplar' | 'onerilen' | 'paketler' | 'atanmis' | 'siparisler';
 
@@ -1103,7 +1106,10 @@ function PaketlerTab({ classLevel, staffRole }: { classLevel?: string; staffRole
   const [loading, setLoading] = useState(true);
   const [addingId, setAddingId] = useState<string | null>(null);
   const [editing, setEditing] = useState<CommerceBookPackage | null>(null);
+  const [giftPkg, setGiftPkg] = useState<CommerceBookPackage | null>(null);
   const { effectiveUser } = useAuth();
+  // Hediye gönderme yalnız yöneticide.
+  const canGift = userHasAnyRole(effectiveUser, ['super_admin', 'admin']);
 
   const reload = useCallback(() => {
     setLoading(true);
@@ -1136,6 +1142,15 @@ function PaketlerTab({ classLevel, staffRole }: { classLevel?: string; staffRole
 
   return (
     <>
+      {canGift && giftPkg && (
+        <GiftOrderModal
+          open={Boolean(giftPkg)}
+          onClose={() => setGiftPkg(null)}
+          title={giftPkg.name}
+          packageId={giftPkg.id}
+          priceKurus={giftPkg.price_kurus ?? null}
+        />
+      )}
       {staffRole && (
         <p className="text-xs text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-xl px-3 py-2 mb-3">
           Yanlış paket: karttaki <b>Düzenle</b> ile düzeltin. Veliye göndermek için <b>Link</b> ile paylaşım URL’sini kopyalayın — veli giriş yapmadan satın alabilir.
@@ -1177,6 +1192,16 @@ function PaketlerTab({ classLevel, staffRole }: { classLevel?: string; staffRole
                         <Link2 className="w-3 h-3" /> Link
                       </button>
                     ) : null}
+                    {canGift && (
+                      <button
+                        type="button"
+                        onClick={() => setGiftPkg(pkg)}
+                        className="flex items-center gap-1 text-xs font-medium text-rose-700 bg-rose-50 px-2 py-1 rounded-lg"
+                        title="Öğrenciye hediye olarak gönder — ödeme alınmaz, satıcıya düşer"
+                      >
+                        <Gift className="w-3 h-3" /> Hediye
+                      </button>
+                    )}
                     {staffRole && (
                       <button
                         type="button"

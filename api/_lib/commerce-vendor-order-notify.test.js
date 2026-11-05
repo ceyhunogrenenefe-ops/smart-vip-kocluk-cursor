@@ -141,4 +141,19 @@ describe('commerce-vendor-order-notify', () => {
     expect(payload.sinif).not.toBe('10. Sınıf');
     expect(payload.sinif).toContain('sınıf belirtilmedi');
   });
+
+  it('labels gift orders for the seller', () => {
+    const payload = buildVendorOrderNotifyPayload({
+      order: {
+        order_number: 'VIP-KTP-2026-000400',
+        customer_name: 'Veli',
+        notes: 'HEDİYE (ücretsiz — kurum gönderiyor) · Öğrenci: Ali · Sınıf: 9. Sınıf',
+      },
+      items: [{ title_snapshot: 'Online VIP Dershane – 9. Sınıf Kurumsal Deneme Kulübü Paketi', quantity: 1 }],
+      vendor: { name: 'Yankı Kitapevi' },
+    });
+    expect(payload.ucret_durumu).toContain('HEDİYE');
+    expect(payload.siparis_notu).toContain('HEDİYE');
+    expect(payload.sinif).toBe('9. Sınıf');
+  });
 });
