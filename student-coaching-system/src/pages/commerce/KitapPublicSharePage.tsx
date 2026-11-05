@@ -10,6 +10,7 @@ import { csBuyNow, csGetBook, csGetPackage } from '../../lib/commerceStoreApi';
 import type { CommerceBookPackage } from '../../types/commerce.types';
 import { formatCommerceTry } from '../../types/commerce.types';
 import BookCoverImage from '../../components/commerce/BookCoverImage';
+import { isMultiClassLevels, numericClassChoices, OrderSinifSelect } from '../../lib/commerce/orderSinif';
 
 type Mode = 'package' | 'book';
 
@@ -33,6 +34,7 @@ export default function KitapPublicSharePage({ mode }: { mode: Mode }) {
   const [error, setError] = useState('');
   const [pkg, setPkg] = useState<CommerceBookPackage | null>(null);
   const [book, setBook] = useState<Awaited<ReturnType<typeof csGetBook>>['book'] | null>(null);
+  const [studentClass, setStudentClass] = useState('');
 
   useEffect(() => {
     if (!slug) return;
@@ -76,6 +78,9 @@ export default function KitapPublicSharePage({ mode }: { mode: Mode }) {
       : Number(offer?.compare_at_price_kurus || 0);
   const items = pkg ? packageItemsOf(pkg) : [];
   const canBuy = Boolean(title) && price > 0 && (mode === 'package' ? Boolean(pkg?.id) : Boolean(offer?.id));
+  // Çok sınıflı üründe (5-6-7 deneme gibi) satıcıya gidecek sınıf seçilir.
+  const multiClass = mode === 'book' && isMultiClassLevels(book?.class_levels);
+  const classChoices = numericClassChoices(book?.class_levels);
   const description =
     mode === 'package'
       ? String(pkg?.description || '').trim()
@@ -96,13 +101,16 @@ export default function KitapPublicSharePage({ mode }: { mode: Mode }) {
 
   const handleBuy = async () => {
     if (!canBuy) return;
+    if (multiClass && !studentClass) {
+      toast.error('Bu ürün birden fazla sınıf için — önce öğrencinin sınıfını seçin');
+      return;
+    }
     setBuying(true);
     try {
-      const r = await csBuyNow(
-        mode === 'package'
-          ? { package_id: pkg!.id }
-          : { vendor_offer_id: offer!.id }
-      );
+      const r = await csBuyNow({
+        ...(mode === 'package' ? { package_id: pkg!.id } : { vendor_offer_id: offer!.id }),
+        ...(studentClass ? { student_class: studentClass } : {}),
+      });
       if (!r.checkout_url) throw new Error('Ödeme linki oluşmadı');
       window.location.assign(r.checkout_url);
     } catch (e) {
@@ -222,6 +230,16 @@ export default function KitapPublicSharePage({ mode }: { mode: Mode }) {
                     ))}
                   </ul>
                 </div>
+              ) : null}
+
+              {multiClass ? (
+                <OrderSinifSelect
+                  value={studentClass}
+                  onChange={setStudentClass}
+                  options={classChoices}
+                  required
+                  hint="Bu paket birden fazla sınıf için satılıyor; satıcıya seçtiğiniz sınıf iletilir."
+                />
               ) : null}
 
               <div className="flex flex-wrap items-end justify-between gap-3 rounded-2xl border border-slate-100 bg-slate-50 px-4 py-4">

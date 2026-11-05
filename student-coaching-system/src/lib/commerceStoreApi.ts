@@ -74,7 +74,7 @@ export const csGetPackage = (slugOrId: string) => {
 };
 
 /** Girişsiz tek ürün/paket satın alma → odeme/kitap URL */
-export const csBuyNow = (params: { package_id?: string; vendor_offer_id?: string; quantity?: number }) =>
+export const csBuyNow = (params: { package_id?: string; vendor_offer_id?: string; quantity?: number; student_class?: string }) =>
   post<{
     ok: true;
     token: string;
@@ -129,7 +129,7 @@ export type CartItem = {
   package_id: string | null;
   price_changed?: boolean;
   out_of_stock?: boolean;
-  commerce_vendor_offers?: (CommerceVendorOffer & { commerce_books?: { id: string; slug: string; title: string; cover_image_url: string | null; author: string | null }; commerce_vendors?: { id: string; name: string } }) | null;
+  commerce_vendor_offers?: (CommerceVendorOffer & { commerce_books?: { id: string; slug: string; title: string; cover_image_url: string | null; author: string | null; class_levels?: string[] | null }; commerce_vendors?: { id: string; name: string } }) | null;
   commerce_book_packages?: Pick<CommerceBookPackage, 'id' | 'name' | 'slug' | 'price_kurus' | 'cover_image_url'> | null;
 };
 
@@ -214,6 +214,7 @@ export const csCheckoutIban = (params: {
   mime_type: string;
   coupon_code?: string | null;
   student_id?: string | null;
+  student_class?: string;
   customer_name?: string;
   customer_email?: string;
   customer_phone?: string;
@@ -237,6 +238,7 @@ export const csCheckoutIban = (params: {
     ...(params.customer_email ? { customer_email: params.customer_email } : {}),
     ...(params.customer_phone ? { customer_phone: params.customer_phone } : {}),
     ...(params.notes ? { notes: params.notes } : {}),
+    ...(params.student_class ? { student_class: params.student_class } : {}),
     ...(params.address ? { address: params.address } : {}),
   });
 
@@ -249,6 +251,38 @@ export type StaffRosterClass = { id: string; name: string | null; class_level: s
 
 export const csStaffRoster = () =>
   post<{ classes: StaffRosterClass[]; students: StaffRosterStudent[]; can_manage: boolean }>('staff.roster');
+
+/** Öğrenciye HEDİYE kitap/paket — yalnız admin. Ödeme alınmaz, sipariş satıcıya düşer. */
+export type StaffGiftOrderParams = {
+  student_id: string;
+  vendor_offer_id?: string;
+  package_id?: string;
+  quantity?: number;
+  student_class?: string;
+  customer_name: string;
+  customer_phone: string;
+  customer_email?: string;
+  note?: string;
+  address: {
+    full_name: string;
+    phone: string;
+    address_line1: string;
+    address_line2?: string;
+    district?: string;
+    city: string;
+  };
+};
+
+export const csStaffGiftOrder = (params: StaffGiftOrderParams) =>
+  post<{
+    ok: true;
+    gift: true;
+    order_id: string;
+    order_number: string;
+    student_name: string | null;
+    gift_value_kurus: number;
+    vendor_whatsapp: { ok?: boolean; reason?: string | null } | null;
+  }>('staff.gift_order', params);
 
 export type StaffStoreOrder = {
   id: string;

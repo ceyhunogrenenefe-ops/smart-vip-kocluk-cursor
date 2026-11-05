@@ -8,6 +8,7 @@ import {
   BookOpen,
   Check,
   CheckCircle2,
+  Gift,
   Link2,
   Loader2,
   Package,
@@ -21,7 +22,17 @@ import type { CommerceBook, CommerceVendorOffer } from '../../types/commerce.typ
 import { formatCommerceTry } from '../../types/commerce.types';
 import { useAuth } from '../../context/AuthContext';
 import BookCoverImage from '../../components/commerce/BookCoverImage';
+import GiftOrderModal from '../../components/commerce/GiftOrderModal';
+import { userHasAnyRole } from '../../config/rolePermissions';
 import { copyTextToClipboard, kitapBookShareUrl } from '../../lib/kitapShareLinks';
+import {
+  isMultiClassLevels,
+  lastStoreClass,
+  numericClassChoices,
+  OrderSinifSelect,
+  rememberStoreClass,
+  toSinifOption,
+} from '../../lib/commerce/orderSinif';
 
 export default function KitapDetayPage() {
   const { slug } = useParams<{ slug: string }>();
@@ -39,6 +50,10 @@ export default function KitapDetayPage() {
   const [owned, setOwned] = useState(false);
   const [cartAdded, setCartAdded] = useState(false);
   const [buyingNow, setBuyingNow] = useState(false);
+  const [studentClass, setStudentClass] = useState('');
+  const [giftOpen, setGiftOpen] = useState(false);
+  // Hediye gönderme yalnız yöneticide.
+  const canGift = userHasAnyRole(effectiveUser, ['super_admin', 'admin']);
 
   useEffect(() => {
     if (!slug) return;
@@ -54,6 +69,22 @@ export default function KitapDetayPage() {
 
   const selectedOffer = book?.commerce_vendor_offers?.find((o) => o.id === selectedOfferId) ?? null;
 
+  // «5-6-7. sınıf deneme» gibi ürünlerde hangi sınıfın gönderileceği seçilir.
+  const multiClass = isMultiClassLevels(book?.class_levels);
+  const classChoices = numericClassChoices(book?.class_levels);
+  useEffect(() => {
+    if (!multiClass || studentClass) return;
+    const pick =
+      toSinifOption((effectiveUser as { class_level?: string } | null)?.class_level, classChoices) ||
+      toSinifOption(lastStoreClass(), classChoices);
+    if (pick) setStudentClass(pick);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [multiClass, book?.id, effectiveUser]);
+  const pickClass = (v: string) => {
+    setStudentClass(v);
+    rememberStoreClass(v);
+  };
+
   const handleAddToCart = async () => {
     if (!effectiveUser) { toast.error('Sepete eklemek için giriş yapın'); return; }
     if (!selectedOfferId) return;
@@ -68,9 +99,16 @@ export default function KitapDetayPage() {
 
   const handleBuyNow = async () => {
     if (!selectedOfferId || !selectedOffer || selectedOffer.stock_quantity === 0) return;
+    if (multiClass && !studentClass) {
+      toast.error('Bu ürün birden fazla sınıf için — önce öğrencinin sınıfını seçin');
+      return;
+    }
     setBuyingNow(true);
     try {
-      const r = await csBuyNow({ vendor_offer_id: selectedOfferId });
+      const r = await csBuyNow({
+        vendor_offer_id: selectedOfferId,
+        ...(studentClass ? { student_class: studentClass } : {}),
+      });
       if (!r.checkout_url) throw new Error('Ödeme linki oluşmadı');
       window.location.assign(r.checkout_url);
     } catch (e: unknown) {
@@ -242,8 +280,29 @@ export default function KitapDetayPage() {
                 ))}
               </div>
 
+              {multiClass && (
+                <OrderSinifSelect
+                  className="mt-4"
+                  value={studentClass}
+                  onChange={pickClass}
+                  options={classChoices}
+                  required
+                  hint="Bu paket birden fazla sınıf için satılıyor; satıcıya seçtiğiniz sınıf iletilir."
+                />
+              )}
+
               {/* Sepete Ekle */}
               <div className="mt-5 flex gap-3 flex-wrap">
+                {canGift && (
+                  <button
+                    type="button"
+                    onClick={() => setGiftOpen(true)}
+                    disabled={!selectedOffer || selectedOffer.stock_quantity === 0}
+                    className="w-full flex items-center justify-center gap-2 border border-rose-200 bg-rose-50 text-rose-700 py-3 rounded-xl font-semibold hover:bg-rose-100 disabled:opacity-50 transition-colors"
+                  >
+                    <Gift className="w-5 h-5" /> Hediye olarak gönder
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => void handleBuyNow()}
@@ -282,6 +341,16 @@ export default function KitapDetayPage() {
           )}
         </div>
       </div>
+      {canGift && book && (
+        <GiftOrderModal
+          open={giftOpen}
+          onClose={() => setGiftOpen(false)}
+          title={book.title}
+          vendorOfferId={selectedOfferId}
+          priceKurus={selectedOffer?.price_kurus ?? null}
+          classLevels={book.class_levels ?? null}
+        />
+      )}
     </div>
   );
 }

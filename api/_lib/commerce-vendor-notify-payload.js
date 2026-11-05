@@ -5,6 +5,8 @@
 import { normalizePhoneToE164 } from './phone-whatsapp.js';
 import { formatShippingOneLine, itemsForVendor } from './commerce-shipping-address.js';
 import { formatSellerItemLabel } from './commerce-package-contents.js';
+import { resolveOrderSinif } from './commerce-order-sinif.js';
+import { isGiftOrder } from './commerce-gift.js';
 
 export function vendorNotifyPhone(vendor) {
   if (!vendor || typeof vendor !== 'object') return null;
@@ -54,13 +56,19 @@ export function buildVendorOrderNotifyPayload({
   const street = formatShippingOneLine(addr) || [addr.address_line1, addr.address_line2].filter(Boolean).join(' ').trim();
   const note = sellerFacingNote(order?.notes);
   const siparis_notu = note || (order?.order_number ? `Sipariş ${order.order_number}` : '-');
+  // Eskiden öğrenci yoksa sabit «8. Sınıf / LGS» yazılıyordu; artık alıcının seçimi okunur.
+  const sinif = resolveOrderSinif({
+    notes: order?.notes,
+    studentClassLevel: student?.class_level || student?.classLevel || '',
+    titles: (scoped || []).map((it) => [it.package_name, it.title_snapshot].filter(Boolean).join(' ')),
+  }).label;
 
   return {
     veli_ad_soyad: order?.customer_name || addr.full_name || '-',
     ogrenci_ad_soyad: studentName || order?.customer_name || '-',
-    sinif: student?.class_level || student?.classLevel || '8. Sınıf / LGS',
+    sinif: sinif || '-',
     kitap_seti,
-    ucret_durumu: '-',
+    ucret_durumu: isGiftOrder(order) ? 'HEDİYE (ücretsiz — kurum gönderiyor)' : '-',
     telefon: order?.customer_phone || addr.phone || '-',
     adres: street || '-',
     ilce: addr.district || '-',

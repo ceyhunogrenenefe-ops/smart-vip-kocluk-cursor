@@ -48,7 +48,7 @@ describe('commerce-vendor-order-notify', () => {
     });
     expect(payload.veli_ad_soyad).toBe('Ayşe Yılmaz');
     expect(payload.ogrenci_ad_soyad).toBe('Safiye');
-    expect(payload.sinif).toBe('8');
+    expect(payload.sinif).toBe('8. Sınıf');
     expect(payload.kitap_seti).toContain('Fen Bilimleri');
     expect(payload.kitap_seti).toContain('× 2');
     expect(payload.kitap_seti).toContain('VIP Matematik');
@@ -116,5 +116,44 @@ describe('commerce-vendor-order-notify', () => {
     });
     expect(payload.adres).toBe('-');
     expect(payload.siparis_notu).toBe('Sipariş VIP-KTP-2026-000043');
+  });
+
+  it('sends the class the buyer chose, not the last number in a multi-class title', () => {
+    const payload = buildVendorOrderNotifyPayload({
+      order: {
+        order_number: 'VIP-KTP-2026-000300',
+        customer_name: 'Veli',
+        notes: 'IBAN havale · dekont yüklendi · Sınıf: 6. Sınıf',
+      },
+      items: [{ title_snapshot: '5-6-7.SINIF DENEME KULÜBÜ 2O Lİ DENEME PAKETİ', quantity: 1 }],
+      vendor: { name: 'Yankı Kitapevi' },
+    });
+    expect(payload.sinif).toBe('6. Sınıf');
+    expect(payload.siparis_notu).toContain('Sınıf: 6. Sınıf');
+  });
+
+  it('does not guess 10 for a 9-10 package when no class was chosen', () => {
+    const payload = buildVendorOrderNotifyPayload({
+      order: { order_number: 'VIP-KTP-2026-000301', notes: null },
+      items: [{ title_snapshot: 'Online VIP Dershane – 9. ve 10. Sınıf Kurumsal Deneme Kulübü Paketi', quantity: 1 }],
+      vendor: { name: 'Yankı Kitapevi' },
+    });
+    expect(payload.sinif).not.toBe('10. Sınıf');
+    expect(payload.sinif).toContain('sınıf belirtilmedi');
+  });
+
+  it('labels gift orders for the seller', () => {
+    const payload = buildVendorOrderNotifyPayload({
+      order: {
+        order_number: 'VIP-KTP-2026-000400',
+        customer_name: 'Veli',
+        notes: 'HEDİYE (ücretsiz — kurum gönderiyor) · Öğrenci: Ali · Sınıf: 9. Sınıf',
+      },
+      items: [{ title_snapshot: 'Online VIP Dershane – 9. Sınıf Kurumsal Deneme Kulübü Paketi', quantity: 1 }],
+      vendor: { name: 'Yankı Kitapevi' },
+    });
+    expect(payload.ucret_durumu).toContain('HEDİYE');
+    expect(payload.siparis_notu).toContain('HEDİYE');
+    expect(payload.sinif).toBe('9. Sınıf');
   });
 });

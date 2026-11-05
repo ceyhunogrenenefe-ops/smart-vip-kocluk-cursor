@@ -16,6 +16,7 @@
  *  catalog.settings      — genel mağaza ayarları (kargo eşiği vs)
  *  staff.roster          — sınıf/öğrenci listesi (öğretmen/koç/admin)
  *  staff.assign          — sınıfa veya kişiye kitap öner/ata
+ *  staff.gift_order      — öğrenciye HEDİYE kitap/paket (yalnız admin; ödemesiz, satıcıya düşer)
  *  staff.orders          — koç/öğretmen kapsamındaki öğrenci mağaza siparişleri
  *  staff.orders_delete   — kapsam içi siparişleri tek/toplu sil
  *  staff.package_create  — sınıf paketi oluştur
@@ -98,7 +99,20 @@ import {
 } from '../api/_lib/commerce-shipping-address.js';
 import { canonicalBookSeries, classKeyMatchesLevels, listStoreBrowse, publicStoreBrowseNav } from '../api/_lib/commerce-store-browse.js';
 import { notifyVendorWhatsAppForPaidOrder } from '../api/_lib/commerce-vendor-order-notify.js';
+import {
+  extractSinifFromNotes,
+  isMultiClassBook,
+  normalizeOrderSinif,
+  withSinifTag,
+} from '../api/_lib/commerce-order-sinif.js';
 import { queueCrmWebsiteOrderSync, syncCommerceOrderById } from '../api/_lib/crm-website-orders.js';
+import {
+  canSendGift,
+  GIFT_COUPON_CODE,
+  GIFT_PROVIDER,
+  giftLineFromBody,
+  giftOrderNotes,
+} from '../api/_lib/commerce-gift.js';
 import { computeCouponDiscount } from '../api/_lib/commerce-coupon-discount.js';
 import { applyCors, handleCorsPreflight } from '../api/_lib/cors-mobile.js';
 
@@ -795,17 +809,18 @@ async function prepareCheckout(body, actor, opts = {}) {
   // Kart: teslimat /odeme/kitap'ta. IBAN: sepetten biter, adres zorunlu.
   const ship = resolveCheckoutShipping(body, {
     required: checkoutRequiresShipping(opts),
-    requireEmail: true
+    requireEmail: opts.requireEmail !== false
   });
 
   const lines = [];
+  const multiClassTitles = [];
   for (const item of items) {
     if (item.vendor_offer_id) {
       const { data: offer, error } = await supabaseAdmin
         .from('commerce_vendor_offers')
         .select(`
           id, vendor_id, book_id, price_kurus, compare_at_price_kurus, stock_quantity, status,
-          commerce_books(id, title, isbn),
+          commerce_books(id, title, isbn, class_levels),
           commerce_vendors(id, name, commission_rate)
         `)
         .eq('id', item.vendor_offer_id)
@@ -815,6 +830,9 @@ async function prepareCheckout(body, actor, opts = {}) {
       }
       if (offer.stock_quantity < item.quantity) {
         throw new Error(`"${offer.commerce_books?.title || item.title_snapshot}" için yeterli stok yok`);
+      }
+      if (isMultiClassBook(offer.commerce_books?.class_levels)) {
+        multiClassTitles.push(offer.commerce_books?.title || item.title_snapshot || 'Ürün');
       }
       lines.push({
         vendor_offer_id: offer.id,
@@ -916,9 +934,24 @@ async function prepareCheckout(body, actor, opts = {}) {
   const orderNumber = await nextOrderNumber(settings.order_number_prefix);
   const studentId = actor?.student_id || body.student_id || null;
   let institutionId = actor?.institution_id || null;
-  if (!institutionId && studentId) {
-    const { data: st } = await supabaseAdmin.from('students').select('institution_id').eq('id', studentId).maybeSingle();
-    institutionId = st?.institution_id || null;
+  let studentClassLevel = '';
+  if (studentId) {
+    const { data: st } = await supabaseAdmin
+      .from('students')
+      .select('institution_id, class_level')
+      .eq('id', studentId)
+      .maybeSingle();
+    if (!institutionId) institutionId = st?.institution_id || null;
+    studentClassLevel = String(st?.class_level || '').trim();
+  }
+  // Satıcıya hangi sınıfın gönderileceği: alıcının seçimi, yoksa öğrenci kartı.
+  // Çok sınıflı üründe (5-6-7 deneme, 9-10 paketi) sınıf seçilmeden sipariş açılmaz.
+  const chosenSinif = normalizeOrderSinif(body.student_class ?? body.class_level ?? body.sinif)
+    || normalizeOrderSinif(studentClassLevel);
+  if (!chosenSinif && multiClassTitles.length) {
+    throw new Error(
+      `"${multiClassTitles[0]}" birden fazla sınıf içeriyor. Satıcıya doğru sınıfın gitmesi için öğrencinin sınıfını seçin.`
+    );
   }
 
   const { data: order, error: orderErr } = await supabaseAdmin
@@ -942,7 +975,7 @@ async function prepareCheckout(body, actor, opts = {}) {
       customer_name: ship?.full_name || null,
       customer_email: ship?.email || null,
       customer_phone: ship?.phone || null,
-      notes: (opts.orderPatch && opts.orderPatch.notes) || ship?.notes || null,
+      notes: withSinifTag((opts.orderPatch && opts.orderPatch.notes) || ship?.notes || null, chosenSinif),
     })
     .select('id, order_number, total_kurus, subtotal_kurus, shipping_kurus, discount_kurus')
     .single();
@@ -1245,13 +1278,24 @@ async function applyCheckoutCustomer(body, orderId) {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('Geçerli e-posta girin');
   if (phone.replace(/\D/g, '').length < 10) throw new Error('Geçerli telefon girin');
 
+  // /odeme/kitap notu ezerken sepetteki sınıf seçimi (Sınıf: X) kaybolmasın.
+  const { data: current } = await supabaseAdmin
+    .from('commerce_orders')
+    .select('notes')
+    .eq('id', orderId)
+    .maybeSingle();
+  const keptSinif =
+    normalizeOrderSinif(body.student_class ?? body.class_level ?? body.sinif) ||
+    extractSinifFromNotes(current?.notes);
+  const newNotes = withSinifTag(fields.notes || ship.notes || current?.notes || null, keptSinif);
+
   const { error } = await supabaseAdmin
     .from('commerce_orders')
     .update({
       customer_name: name,
       customer_email: email,
       customer_phone: phone,
-      notes: fields.notes || ship.notes || null,
+      notes: newNotes,
       payment_status: 'processing',
       updated_at: new Date().toISOString(),
     })
@@ -1268,7 +1312,7 @@ async function applyCheckoutCustomer(body, orderId) {
 
   queueCrmWebsiteOrderSync(() => syncCommerceOrderById(orderId));
 
-  return { name, email, phone, notes: fields.notes || ship.notes };
+  return { name, email, phone, notes: newNotes };
 }
 
 async function handleCheckout(op, body, req) {
@@ -1733,6 +1777,75 @@ async function handleStaff(op, body, actor) {
       if (!found.has(id)) skipped.push({ id, order_number: null, reason: 'bulunamadı' });
     }
     return { ok: true, deleted, skipped, deleted_count: deleted.length };
+  }
+
+  if (op === 'staff.gift_order') {
+    // Hediye: yalnız admin / super_admin. Ödeme yok, sipariş doğrudan satıcıya düşer.
+    if (!canSendGift(roleSet)) throw new Error('Hediye gönderme yetkisi yalnız yöneticidedir');
+    const studentId = String(body.student_id || '').trim();
+    if (!studentId) throw new Error('Hediye gönderilecek öğrenciyi seçin');
+    const { data: student } = await supabaseAdmin
+      .from('students')
+      .select('id, name, class_level, institution_id')
+      .eq('id', studentId)
+      .maybeSingle();
+    if (!student) throw new Error('Öğrenci bulunamadı');
+    if (!roleSet.has('super_admin') && institutionId && student.institution_id && student.institution_id !== institutionId) {
+      throw new Error('Bu öğrenci kurumunuzda değil');
+    }
+
+    const line = giftLineFromBody(body);
+    const notes = giftOrderNotes({ studentName: student.name, note: body.note ?? body.notes });
+    const giftBody = {
+      student_id: student.id,
+      student_class: body.student_class || student.class_level || '',
+      customer_name: body.customer_name,
+      customer_phone: body.customer_phone,
+      customer_email: body.customer_email,
+      address: body.address,
+      notes,
+    };
+    const prepared = await prepareCheckout(giftBody, actor, {
+      guestItems: [line],
+      provider: GIFT_PROVIDER,
+      requireShipping: true,
+      requireEmail: false,
+      skipRedirect: true,
+      orderPatch: { notes },
+    });
+
+    // Veliden tahsilat yok: sipariş tutarı 0. Satıcı hakedişi (vendor_orders) gerçek fiyatta kalır.
+    const fullAmount = Number(prepared.subtotal_kurus || 0) + Number(prepared.shipping_kurus || 0);
+    await supabaseAdmin
+      .from('commerce_orders')
+      .update({
+        discount_kurus: fullAmount,
+        total_kurus: 0,
+        coupon_code: GIFT_COUPON_CODE,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', prepared.order_id);
+    await supabaseAdmin.from('commerce_payments').update({ amount_kurus: 0 }).eq('order_id', prepared.order_id);
+
+    const paid = await fulfillPaidOrder(
+      // user_id null: yöneticinin kendi sepeti silinmesin.
+      { id: prepared.order_id, user_id: null, payment_status: 'pending', order_number: prepared.order_number },
+      {
+        provider: GIFT_PROVIDER,
+        ref: prepared.payment_ref,
+        raw: { method: GIFT_PROVIDER, gifted_by: actor.sub, student_id: student.id },
+      }
+    );
+
+    return {
+      ok: true,
+      gift: true,
+      order_id: prepared.order_id,
+      order_number: prepared.order_number,
+      student_name: student.name,
+      gift_value_kurus: fullAmount,
+      vendor_whatsapp: paid.vendor_whatsapp || null,
+    };
   }
 
   if (op === 'staff.assign') {
