@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Download, Loader2, RefreshCw, Search, ShoppingBag } from 'lucide-react';
 import { toast } from 'sonner';
 import {
+  crmWebsiteOrdersBackfill,
   crmWebsiteOrdersExport,
   crmWebsiteOrdersList,
   type CrmWebsiteOrderRow,
@@ -62,6 +63,7 @@ export default function CrmWebsiteOrdersPage() {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
+  const [backfilling, setBackfilling] = useState(false);
   const [search, setSearch] = useState('');
   const [debouncedQ, setDebouncedQ] = useState('');
   const [paymentStatus, setPaymentStatus] = useState('');
@@ -109,6 +111,29 @@ export default function CrmWebsiteOrdersPage() {
     return { missing, paid };
   }, [rows]);
 
+  const handleBackfill = async () => {
+    setBackfilling(true);
+    try {
+      let cursor: string | null = null;
+      let rounds = 0;
+      let synced = 0;
+      while (rounds < 80) {
+        rounds += 1;
+        const r = await crmWebsiteOrdersBackfill({ cursor });
+        synced += Number(r.synced || 0);
+        if (r.done) break;
+        cursor = r.next_cursor || null;
+        if (!cursor) break;
+      }
+      toast.success(`Geçmiş aktarım tamamlandı (${synced} kayıt işlendi)`);
+      await load();
+    } catch (e) {
+      toast.error((e as Error).message || 'Geçmiş aktarım başarısız');
+    } finally {
+      setBackfilling(false);
+    }
+  };
+
   const handleExport = async () => {
     setExporting(true);
     try {
@@ -152,6 +177,17 @@ export default function CrmWebsiteOrdersPage() {
             <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
             Yenile
           </button>
+          {isAdmin && (
+            <button
+              type="button"
+              disabled={backfilling}
+              onClick={() => void handleBackfill()}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-900 hover:bg-emerald-100 disabled:opacity-60"
+            >
+              {backfilling ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              Geçmişi aktar
+            </button>
+          )}
           <button
             type="button"
             disabled={exporting}
@@ -238,12 +274,6 @@ export default function CrmWebsiteOrdersPage() {
         />
       </div>
 
-      {isAdmin && (
-        <p className="text-xs text-slate-500">
-          Geçmiş sipariş aktarımı sunucuda <code className="rounded bg-slate-100 px-1">?op=backfill</code>{' '}
-          ile yapılır; yeni siparişler ödeme adımında otomatik düşer.
-        </p>
-      )}
 
       <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
         {loading ? (
