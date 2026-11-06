@@ -63,6 +63,21 @@ export default async function handler(req, res) {
     if (op === 'complete') {
       const code = String(b.code || '').trim();
       if (!code) return res.status(400).json({ error: 'code_missing' });
+      // Kurum (platform dışı): numara kurumun kendi bağlantısına yazılır,
+      // ana hesabın WhatsApp ayarına dokunulmaz.
+      if (String(b.target || '') === 'institution') {
+        const { completeInstitutionWhatsApp, resolveTargetInstitution } = await import(
+          '../api/_lib/crm-institution-meta-connect.js'
+        );
+        const result = await completeInstitutionWhatsApp({
+          institutionId: await resolveTargetInstitution(actor, roleSet, b.institution_id),
+          code,
+          waba_id: String(b.waba_id || '').trim(),
+          phone_number_id: String(b.phone_number_id || '').trim(),
+          actorId: actor.sub || null
+        });
+        return res.status(result.ok ? 200 : 400).json(result);
+      }
       const result = await completeCoexistenceOnboarding({
         code,
         waba_id: String(b.waba_id || '').trim(),

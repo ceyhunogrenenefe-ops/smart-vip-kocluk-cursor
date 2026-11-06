@@ -715,6 +715,19 @@ export function crmSaveMetaConnection(payload: {
   return inboxPost<{ ok: boolean; data: CrmMetaConnection }>('save_meta_connection', payload);
 }
 
+/** Facebook ile girişte birden fazla Instagram'lı sayfa çıktıysa seçim listesi */
+export function crmGetIgPending() {
+  return inboxGet<{ ok: boolean; items: Array<{ page_id: string; page_name: string | null; ig_username: string | null }> }>(
+    'meta_ig_pending'
+  );
+}
+
+export function crmPickIg(pageId: string) {
+  return inboxPost<{ ok: boolean; ig_username?: string | null; data: CrmMetaConnection }>('meta_ig_pick', {
+    page_id: pageId
+  });
+}
+
 export function crmVerifyMetaConnection() {
   return inboxPost<{
     ok: boolean;
