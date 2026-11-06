@@ -83,6 +83,36 @@ async function finishExtraInstagram(res, shortUserToken, statePayload) {
   return redirectToWidgets(res, { ig_extra: 'pick' });
 }
 
+/**
+ * Kurum (platform dışı) Instagram'ı: Facebook ile giriş → kurumun sayfası.
+ * Tek uygun sayfa varsa doğrudan bağlanır; birden fazlaysa panelden seçilir.
+ */
+async function finishInstitutionInstagram(res, shortUserToken, statePayload) {
+  const lib = await import('../api/_lib/crm-institution-meta-connect.js');
+  const institutionId = statePayload?.institution_id || null;
+  const userTok = await exchangeLongLivedUserToken(shortUserToken);
+  const listed = await lib.listInstitutionInstagramCandidates(userTok, institutionId);
+  if (!listed.ok) return redirectToWidgets(res, { inst_ig_error: listed.error || 'page_list_failed' });
+  const candidates = listed.candidates || [];
+  if (!candidates.length) {
+    const seen = (listed.seen || [])
+      .map((p) => `${p.page_name} (${p.ig_username ? `@${p.ig_username}` : 'Instagram bağlı değil'}${p.taken ? `, ${p.taken}` : ''})`)
+      .join('; ');
+    return redirectToWidgets(res, { inst_ig_error: 'no_candidates', ig_seen: seen || 'hiç sayfa yok' });
+  }
+  if (candidates.length === 1) {
+    const saved = await lib.saveInstitutionInstagram({
+      institutionId,
+      candidate: candidates[0],
+      actorId: statePayload?.sub || null
+    });
+    if (!saved.ok) return redirectToWidgets(res, { inst_ig_error: saved.message || saved.error });
+    return redirectToWidgets(res, { inst_ig: 'added', ig_username: saved.ig_username || '' });
+  }
+  await lib.storeInstagramPending(institutionId, candidates, statePayload?.sub || null);
+  return redirectToWidgets(res, { inst_ig: 'pick' });
+}
+
 export default async function handler(req, res) {
   try {
     if (req.method !== 'GET' && req.method !== 'POST') {
@@ -93,9 +123,10 @@ export default async function handler(req, res) {
 
     if (String(q.start || '') === '1') {
       let actor;
+      let roleSet;
       try {
         actor = requireAuthenticatedActor(req);
-        const roleSet = await actorRoleSet(actor);
+        roleSet = await actorRoleSet(actor);
         if (!actorIsAdminLike(actor, roleSet)) {
           return res.status(403).json({ error: 'forbidden' });
         }
@@ -103,17 +134,31 @@ export default async function handler(req, res) {
         return res.status(401).json({ error: 'unauthorized' });
       }
       // purpose=extra_ig → ana hesaba dokunmadan ek Instagram hesabı eklenir
-      const extra = String(q.purpose || '') === 'extra_ig';
+      // purpose=institution_ig → kurumun (platform dışı) kendi Instagram'ı
+      const purpose = String(q.purpose || '');
+      const extra = purpose === 'extra_ig';
+      const institutionIg = purpose === 'institution_ig';
+      let targetInstitution = null;
+      if (institutionIg) {
+        const { isPlatformInstitutionId } = await import('../api/_lib/crm-meta-connection.js');
+        const { resolveTargetInstitution } = await import('../api/_lib/crm-institution-meta-connect.js');
+        targetInstitution = await resolveTargetInstitution(actor, roleSet, q.institution_id);
+        if (isPlatformInstitutionId(targetInstitution)) {
+          return res.status(400).json({ error: 'platform_institution', message: 'Ana hesap kendi ekranından bağlanır.' });
+        }
+      }
       const state = signAuthToken(
         extra
           ? { oauth_purpose: 'facebook_login_extra_ig', institution_id: actor.institution_id || null, sub: actor.sub }
-          : { oauth_purpose: 'facebook_login_widget' }
+          : institutionIg
+            ? { oauth_purpose: 'facebook_login_institution_ig', institution_id: targetInstitution, sub: actor.sub }
+            : { oauth_purpose: 'facebook_login_widget' }
       );
       return res.status(200).json({
         authorize_url: buildFacebookLoginUrl({
           responseType: 'code',
           state,
-          ...(extra ? { authType: 'rerequest' } : {})
+          ...(extra || institutionIg ? { authType: 'rerequest' } : {})
         })
       });
     }
@@ -145,7 +190,11 @@ export default async function handler(req, res) {
     if (state) {
       try {
         statePayload = verifyAuthToken(state);
-        if (!['facebook_login_widget', 'facebook_login_extra_ig'].includes(statePayload?.oauth_purpose)) {
+        if (
+          !['facebook_login_widget', 'facebook_login_extra_ig', 'facebook_login_institution_ig'].includes(
+            statePayload?.oauth_purpose
+          )
+        ) {
           return redirectToWidgets(res, { error: 'oauth_state_invalid' });
         }
       } catch {
@@ -160,6 +209,9 @@ export default async function handler(req, res) {
 
     if (statePayload?.oauth_purpose === 'facebook_login_extra_ig') {
       return await finishExtraInstagram(res, exchanged.access_token, statePayload);
+    }
+    if (statePayload?.oauth_purpose === 'facebook_login_institution_ig') {
+      return await finishInstitutionInstagram(res, exchanged.access_token, statePayload);
     }
 
     const bound = await bindMetaSocialFromUserToken(exchanged.access_token);

@@ -691,6 +691,41 @@ export default async function handler(req, res) {
       return res.status(200).json({ data });
     }
 
+    /** Kurum Instagram'ı: Facebook ile girişte birden fazla sayfa çıktıysa seçim */
+    if (op === 'meta_ig_pending') {
+      if (!isAdmin) return res.status(403).json({ error: 'forbidden' });
+      const lib = await import('../api/_lib/crm-institution-meta-connect.js');
+      try {
+        const items = await lib.readInstagramPending(institutionId);
+        return res.status(200).json({
+          ok: true,
+          items: items.map((c) => ({ page_id: c.page_id, page_name: c.page_name, ig_username: c.ig_username }))
+        });
+      } catch (e) {
+        return res.status(400).json({ error: e instanceof Error ? e.message : String(e) });
+      }
+    }
+
+    if (op === 'meta_ig_pick' && req.method === 'POST') {
+      if (!isAdmin) return res.status(403).json({ error: 'forbidden' });
+      const lib = await import('../api/_lib/crm-institution-meta-connect.js');
+      try {
+        const items = await lib.readInstagramPending(institutionId);
+        const pageId = String(body.page_id || '').trim();
+        const cand = items.find((c) => c.page_id === pageId);
+        if (!cand) {
+          return res.status(410).json({ error: 'expired', message: 'Seçim süresi doldu, Facebook ile yeniden bağlayın.' });
+        }
+        const saved = await lib.saveInstitutionInstagram({ institutionId, candidate: cand, actorId: actor.sub });
+        if (!saved.ok) return res.status(400).json(saved);
+        await lib.clearInstagramPending(institutionId);
+        const { describeMetaConnection } = await import('../api/_lib/crm-meta-connection.js');
+        return res.status(200).json({ ...saved, data: await describeMetaConnection(institutionId) });
+      } catch (e) {
+        return res.status(400).json({ error: e instanceof Error ? e.message : String(e) });
+      }
+    }
+
     if (op === 'save_meta_connection' && req.method === 'POST') {
       if (!isAdmin) {
         return res.status(403).json({ error: 'forbidden', hint: 'Meta bağlantısını yalnızca yönetici kaydeder.' });

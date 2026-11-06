@@ -52,6 +52,9 @@ export async function completeWaCoexistence(input: {
   waba_id?: string;
   phone_number_id?: string;
   event?: string;
+  /** 'institution' → numara kurumun kendi bağlantısına yazılır (ana hesaba dokunmaz) */
+  target?: 'institution';
+  institution_id?: string | null;
 }): Promise<WaCoexistenceResult> {
   const res = await apiFetch(BASE, {
     method: 'POST',
