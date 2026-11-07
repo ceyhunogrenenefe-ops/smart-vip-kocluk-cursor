@@ -3325,6 +3325,9 @@ export function listEdesisBookletCodes(structure) {
   for (const c of structure?.answerKeyBookletCodes || []) {
     pushKitapcikLetter(c, codes);
   }
+  for (const row of structure?.answerKeyLessons || []) {
+    pushKitapcikLetter(row.kitapcikTuru, codes);
+  }
   for (const c of structure?.bookletEndpointCodes || []) {
     pushKitapcikLetter(c, codes);
   }
@@ -3340,9 +3343,15 @@ export function listEdesisBookletCodes(structure) {
 export function denemeOnlyBookletCodes(structure) {
   const offered = new Set(listEdesisBookletCodes(structure));
   const extra = [];
-  for (const c of structure?.answerKeyBookletCodes || []) {
-    const n = normalizeKitapcikCode(c);
+  const pushExtra = (value) => {
+    const n = normalizeKitapcikCode(value);
     if (KITAPCIK_LETTERS.includes(n) && !offered.has(n) && !extra.includes(n)) extra.push(n);
+  };
+  for (const c of structure?.answerKeyBookletCodes || []) {
+    pushExtra(c);
+  }
+  for (const row of structure?.answerKeyLessons || []) {
+    pushExtra(row.kitapcikTuru);
   }
   return extra.sort();
 }
@@ -3356,6 +3365,12 @@ export function kitapcikAllowedForExam(structure, kitapcikTuru) {
   const hasOwnRows = (structure?.rows || []).some((r) => kitapcikCodesMatch(r.kitapcikTuru, want));
   const hasOwnBook = (structure?.booklets || []).some((b) => kitapcikCodesMatch(b.kitapcikTuru, want));
   if ((hasOwnRows || hasOwnBook) && matched.length) {
+    return { ok: true, available: [...new Set([...available, want])].sort() };
+  }
+  const hasAnswerKeyLessons = (structure?.answerKeyLessons || []).some((r) =>
+    kitapcikCodesMatch(r.kitapcikTuru, want)
+  );
+  if (hasAnswerKeyLessons && matched.length) {
     return { ok: true, available: [...new Set([...available, want])].sort() };
   }
   return { ok: false, available };

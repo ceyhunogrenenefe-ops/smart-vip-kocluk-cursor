@@ -148,6 +148,17 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
 
   const [activeExam, setActiveExam] = useState<EdesisAvailableExam | null>(null);
   const [booklets, setBooklets] = useState<EdesisExamBooklet[]>([]);
+  const [bookletLessonLayouts, setBookletLessonLayouts] = useState<
+    Record<
+      string,
+      {
+        lessonName: string | null;
+        lessonId: number;
+        dersGrupId: number;
+        questionCount: number;
+      }[]
+    >
+  >({});
   const [availableBookletCodes, setAvailableBookletCodes] = useState<string[]>([]);
   const [bookletPdfs, setBookletPdfs] = useState<EdesisBookletPdf[]>([]);
   const [kitapcik, setKitapcik] = useState('');
@@ -396,9 +407,13 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
           )].sort();
         const fromApi = letters(r.availableBookletCodes);
         const fromKeys = letters(r.answerKeyBookletCodes);
+        const fromDenemeOnly = letters(r.denemeOnlyBookletCodes);
+        const fromLayoutKeys = letters(Object.keys(r.bookletLessonLayouts || {}));
         const fromBooks = letters(books.map((b) => b.kitapcikTuru));
         const fromItems = letters((r.items || []).map((row) => row.kitapcikTuru));
-        const merged = [...new Set([...fromApi, ...fromKeys, ...fromBooks, ...fromItems])].sort();
+        const merged = [
+          ...new Set([...fromApi, ...fromKeys, ...fromDenemeOnly, ...fromLayoutKeys, ...fromBooks, ...fromItems])
+        ].sort();
         if (merged.length) return merged;
         return ['A'];
       })();
@@ -448,6 +463,7 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
       const firstLetter = uniqueCodes[0] || 'A';
       setActiveExam(exam);
       setBooklets(booksForUi);
+      setBookletLessonLayouts(r.bookletLessonLayouts || {});
       setAvailableBookletCodes(uniqueCodes);
       setBookletPdfs(r.bookletPdfs || exam.bookletPdfs || []);
       setExamFamily(family);
@@ -608,12 +624,20 @@ export default function StudentEdesisExamPanel({ onActiveExamChange }: Props) {
     }
   };
 
-  const activeLessons =
-    booklets.find(
-      (b) => String(b.kitapcikTuru || '').trim().toUpperCase() === String(kitapcik || '').trim().toUpperCase()
-    )?.lessons ||
-    booklets[0]?.lessons ||
-    [];
+  const activeLessons = useMemo(() => {
+    const want = String(kitapcik || '').trim().toUpperCase();
+    const fromBook = booklets.find((b) => String(b.kitapcikTuru || '').trim().toUpperCase() === want)?.lessons;
+    if (fromBook?.length) return fromBook;
+    const fromServer = (bookletLessonLayouts[want] || []).map((l) => ({
+      kitapcikTuru: want,
+      lessonId: l.lessonId,
+      lessonName: l.lessonName || '',
+      dersGrupId: l.dersGrupId,
+      questionCount: l.questionCount
+    }));
+    if (fromServer.length) return fromServer;
+    return booklets[0]?.lessons || [];
+  }, [booklets, bookletLessonLayouts, kitapcik]);
   const takeableAll = useMemo(
     () => available.filter((exam) => !exam.hasStudentResult && exam.canTake !== false),
     [available]
