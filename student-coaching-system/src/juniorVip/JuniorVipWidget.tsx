@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Loader2, Mic, MicOff, Send, Volume2, VolumeX, X } from 'lucide-react';
 import { toast } from 'sonner';
@@ -9,10 +9,14 @@ import { useApp } from '../context/AppContext';
 import { userRoleTags } from '../config/rolePermissions';
 import { JuniorVipMascot } from './JuniorVipMascot';
 import {
+  fetchJuniorVipCapabilities,
   juniorVipChat,
   saveJuniorVipStudyLog,
+  type JuniorVipCapabilities,
   type JuniorVipChatMessage,
   type JuniorVipNavigateAction,
+  type JuniorVipPanel,
+  type JuniorVipScope,
   type JuniorVipStudyLogProposal
 } from './juniorVipApi';
 import { useJuniorVipSpeech } from './useJuniorVipSpeech';
@@ -20,6 +24,27 @@ import { inferJuniorVipMascotGender } from './inferMascotGender';
 import { JUNIOR_VIP_THEME } from './juniorVipTheme';
 
 const STORAGE_SPEAK = 'junior_vip_speak_on';
+
+const PANEL_COPY: Record<JuniorVipPanel, { subtitle: string; greeting: string; placeholder: string }> = {
+  student: {
+    subtitle: 'Akıllı Öğrenci Asistanı',
+    greeting:
+      'Merhaba! Ben Junior VIP. Menüde nereye gideceğini sorabilir, bugün çözdüğün soruları birlikte planına yazabiliriz.',
+    placeholder: 'Yaz veya mikrofona bas…'
+  },
+  coach: {
+    subtitle: 'Koç Asistanı',
+    greeting:
+      'Merhaba! Ben Junior VIP. “Bugün görüşmelerim neler?”, “Bu hafta çalışmayan öğrencilerim kim?” ya da “Haftalık planı aç” diyebilirsin.',
+    placeholder: 'Yaz veya mikrofona bas…'
+  },
+  teacher: {
+    subtitle: 'Öğretmen Asistanı',
+    greeting:
+      'Merhaba! Ben Junior VIP. “Bugün derslerim neler?”, “Sınıflarım hangileri?” ya da “Yoklama raporunu aç” diyebilirsin.',
+    placeholder: 'Yaz veya mikrofona bas…'
+  }
+};
 
 function splitNavigatePath(path: string) {
   const q = path.indexOf('?');
@@ -44,8 +69,26 @@ export default function JuniorVipWidget() {
       { roles: tags }
     )?.trim() || '';
 
+  /** Koç+öğretmen çift rolde koç paneli (Sidebar ile aynı öncelik). Yalnız yönetici: asistan yok. */
+  const panel: JuniorVipPanel | null = isStudent
+    ? 'student'
+    : tags.includes('coach')
+      ? 'coach'
+      : tags.includes('teacher')
+        ? 'teacher'
+        : null;
+  const copy = PANEL_COPY[panel || 'student'];
+
+  const scope = useMemo<JuniorVipScope>(
+    () => (panel === 'student' ? { panel, studentId } : { panel: panel || 'student' }),
+    [panel, studentId]
+  );
+
   const studentRow = students.find((s) => s.id === studentId);
-  const mascotGender = inferJuniorVipMascotGender(studentRow?.name);
+  const mascotGender = inferJuniorVipMascotGender(
+    panel === 'student' ? studentRow?.name : effectiveUser?.name
+  );
+  const [caps, setCaps] = useState<JuniorVipCapabilities | null>(null);
 
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState('');
@@ -58,11 +101,7 @@ export default function JuniorVipWidget() {
     }
   });
   const [messages, setMessages] = useState<JuniorVipChatMessage[]>([
-    {
-      role: 'assistant',
-      content:
-        'Merhaba! Ben Junior VIP. Menüde nereye gideceğini sorabilir, bugün çözdüğün soruları birlikte planına yazabiliriz.'
-    }
+    { role: 'assistant', content: copy.greeting }
   ]);
   const [pendingLog, setPendingLog] = useState<JuniorVipStudyLogProposal | null>(null);
   const [guideBanner, setGuideBanner] = useState<string | null>(null);
@@ -73,17 +112,46 @@ export default function JuniorVipWidget() {
     listening,
     transcribing,
     desktopRecorderMode,
+    isMobile,
+    level,
+    devices,
+    selectedDeviceId,
+    setSelectedDeviceId,
     startListening,
     stopListening,
     finishListening,
-    ensureMicReady,
+    warmupMic,
     releaseMicWarmup,
     speak
   } = useJuniorVipSpeech({
     mascotGender,
-    studentId,
-    onError: (msg) => toast.error(msg, { duration: 5000 })
+    scope,
+    serverTranscribe: caps ? caps.server_transcribe : null,
+    onError: (msg) => toast.error(msg, { duration: 9000 }),
+    onInfo: (msg) => toast.message(msg, { duration: 6000 })
   });
+
+  /** Panel / taklit edilen kullanıcı değişince sohbeti sıfırla (başka kullanıcının geçmişi taşınmasın). */
+  const scopeKey = `${panel || ''}:${panel === 'student' ? studentId : effectiveUser?.id || ''}`;
+  useEffect(() => {
+    setMessages([{ role: 'assistant', content: PANEL_COPY[panel || 'student'].greeting }]);
+    setPendingLog(null);
+    setCaps(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scopeKey]);
+
+  useEffect(() => {
+    if (!open || caps || !panel) return;
+    let cancelled = false;
+    fetchJuniorVipCapabilities(scope)
+      .then((c) => {
+        if (!cancelled) setCaps(c);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [open, caps, panel, scope]);
 
   useEffect(() => {
     try {
@@ -103,8 +171,8 @@ export default function JuniorVipWidget() {
       releaseMicWarmup();
       return;
     }
-    void ensureMicReady();
-  }, [open, ensureMicReady, releaseMicWarmup]);
+    warmupMic();
+  }, [open, warmupMic, releaseMicWarmup]);
 
   const runNavigate = useCallback(
     (actions: JuniorVipNavigateAction[]) => {
@@ -128,9 +196,9 @@ export default function JuniorVipWidget() {
       setBusy(true);
       setPendingLog(null);
       try {
-        const res = await juniorVipChat(trimmed, messages, studentId);
+        const res = await juniorVipChat(trimmed, messages, scope);
         setMessages((m) => [...m, { role: 'assistant', content: res.reply }]);
-        if (res.proposed_study_log) setPendingLog(res.proposed_study_log);
+        if (res.proposed_study_log && panel === 'student') setPendingLog(res.proposed_study_log);
         if (res.actions?.length) runNavigate(res.actions);
         if (speakReplies) speak(res.reply);
       } catch (e) {
@@ -144,11 +212,11 @@ export default function JuniorVipWidget() {
         setBusy(false);
       }
     },
-    [busy, messages, runNavigate, speak, speakReplies]
+    [busy, messages, panel, runNavigate, scope, speak, speakReplies]
   );
 
   const confirmStudyLog = async () => {
-    if (!pendingLog || !studentId) return;
+    if (!pendingLog || !studentId || panel !== 'student') return;
     setBusy(true);
     try {
       await saveJuniorVipStudyLog(studentId, pendingLog);
@@ -169,7 +237,7 @@ export default function JuniorVipWidget() {
     }
   };
 
-  if (!isStudent || !studentId) return null;
+  if (!panel || (panel === 'student' && !studentId)) return null;
 
   return (
     <>
@@ -206,7 +274,7 @@ export default function JuniorVipWidget() {
             <JuniorVipMascot size="sm" gender={mascotGender} listening={listening} className="hidden sm:flex" />
             <div className="min-w-0 flex-1">
               <p className="truncate text-xs font-bold text-slate-900 dark:text-white sm:text-sm">Junior VIP</p>
-              <p className="hidden truncate text-[10px] text-slate-500 sm:block">Akıllı Öğrenci Asistanı</p>
+              <p className="hidden truncate text-[10px] text-slate-500 sm:block">{copy.subtitle}</p>
             </div>
             <button
               type="button"
@@ -277,6 +345,43 @@ export default function JuniorVipWidget() {
             ) : null}
           </div>
 
+          {!isMobile && micSupported && (devices.length > 1 || (listening && desktopRecorderMode)) ? (
+            <div className="flex items-center gap-2 border-t border-slate-100 px-2 pt-1.5 text-[11px] text-slate-500 dark:border-slate-800">
+              {devices.length > 1 ? (
+                <select
+                  value={selectedDeviceId}
+                  onChange={(e) => setSelectedDeviceId(e.target.value)}
+                  disabled={listening || transcribing}
+                  className="min-w-0 flex-1 truncate rounded-md border border-slate-200 bg-white px-1.5 py-1 text-[11px] dark:border-slate-600 dark:bg-slate-950"
+                  aria-label="Mikrofon seç"
+                  title="Mikrofon seç"
+                >
+                  <option value="">Varsayılan mikrofon</option>
+                  {devices
+                    .filter((d) => d.deviceId && d.deviceId !== 'default')
+                    .map((d) => (
+                      <option key={d.deviceId} value={d.deviceId}>
+                        {d.label}
+                      </option>
+                    ))}
+                </select>
+              ) : (
+                <span className="flex-1" />
+              )}
+              {listening && desktopRecorderMode ? (
+                <span className="flex items-center gap-1" title="Mikrofon ses seviyesi">
+                  <Mic className="h-3 w-3" />
+                  <span className="h-1.5 w-16 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
+                    <span
+                      className="block h-full rounded-full bg-emerald-500 transition-[width] duration-75"
+                      style={{ width: `${Math.round(level * 100)}%` }}
+                    />
+                  </span>
+                </span>
+              ) : null}
+            </div>
+          ) : null}
+
           <form
             className="flex items-end gap-1 border-t border-slate-100 p-1.5 dark:border-slate-800 sm:gap-1.5 sm:p-2"
             onSubmit={(e) => {
@@ -293,9 +398,9 @@ export default function JuniorVipWidget() {
                   ? 'Sesin yazıya çevriliyor…'
                   : listening
                     ? desktopRecorderMode
-                      ? 'Konuş… bitince mikrofona tekrar bas (PC kayıt)'
+                      ? 'Konuş… bitince mikrofona tekrar bas (kayıt)'
                       : 'Konuş… bitince mikrofona tekrar bas'
-                    : 'Yaz veya mikrofona bas…'
+                    : copy.placeholder
               }
               className="max-h-16 min-h-[34px] flex-1 resize-none rounded-lg border border-slate-200 px-2 py-1.5 text-xs dark:border-slate-600 dark:bg-slate-950 sm:max-h-24 sm:min-h-[40px] sm:rounded-xl sm:px-2.5 sm:py-2 sm:text-sm"
             />
@@ -310,8 +415,8 @@ export default function JuniorVipWidget() {
                       if (text) {
                         setInput(text);
                         void submitMessage(text);
-                      } else if (desktopRecorderMode) {
-                        toast.message('Kayıt boş. Daha uzun konuşup tekrar dene.');
+                      } else if (!desktopRecorderMode) {
+                        toast.message('Seni duyamadım. Mikrofona basıp tekrar konuş ya da yaz.');
                       }
                     });
                     return;
@@ -366,7 +471,7 @@ export default function JuniorVipWidget() {
           open && cn('ring-2 sm:ring-4', JUNIOR_VIP_THEME.bubbleRing)
         )}
         aria-expanded={open}
-        aria-label="Junior VIP – Akıllı Öğrenci Asistanı"
+        aria-label={`Junior VIP – ${copy.subtitle}`}
       >
         <JuniorVipMascot size="xs" gender={mascotGender} listening={listening && open} className="sm:hidden" />
         <JuniorVipMascot size="md" gender={mascotGender} listening={listening && open} className="hidden sm:flex" />

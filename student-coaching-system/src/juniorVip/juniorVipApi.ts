@@ -26,9 +26,34 @@ export type JuniorVipChatResponse = {
 
 export type JuniorVipChatMessage = { role: 'user' | 'assistant'; content: string };
 
-export async function fetchJuniorVipContext(studentId: string): Promise<Record<string, unknown>> {
-  const sid = encodeURIComponent(studentId.trim());
-  const res = await apiFetch(`/api/junior-vip?op=context&student_id=${sid}`);
+export type JuniorVipPanel = 'student' | 'coach' | 'teacher';
+
+/** Sunucu paneli JWT + DB rolleriyle yeniden doğrular; buradaki değer yalnızca istektir. */
+export type JuniorVipScope = { panel: JuniorVipPanel; studentId?: string };
+
+function scopeQuery(scope: JuniorVipScope): string {
+  const q = new URLSearchParams({ panel: scope.panel });
+  if (scope.panel === 'student' && scope.studentId?.trim()) q.set('student_id', scope.studentId.trim());
+  return q.toString();
+}
+
+function scopeBody(scope: JuniorVipScope): Record<string, string> {
+  const b: Record<string, string> = { panel: scope.panel };
+  if (scope.panel === 'student' && scope.studentId?.trim()) b.student_id = scope.studentId.trim();
+  return b;
+}
+
+export type JuniorVipCapabilities = { server_transcribe: boolean; ai_chat: boolean };
+
+export async function fetchJuniorVipCapabilities(scope: JuniorVipScope): Promise<JuniorVipCapabilities> {
+  const res = await apiFetch(`/api/junior-vip?op=capabilities&${scopeQuery(scope)}`);
+  const j = (await res.json().catch(() => ({}))) as Partial<JuniorVipCapabilities>;
+  if (!res.ok) throw new Error('capabilities_failed');
+  return { server_transcribe: Boolean(j.server_transcribe), ai_chat: Boolean(j.ai_chat) };
+}
+
+export async function fetchJuniorVipContext(scope: JuniorVipScope): Promise<Record<string, unknown>> {
+  const res = await apiFetch(`/api/junior-vip?op=context&${scopeQuery(scope)}`);
   const j = (await res.json().catch(() => ({}))) as { data?: Record<string, unknown>; error?: string };
   if (!res.ok) throw new Error(j.error || 'Junior VIP bağlamı yüklenemedi');
   return j.data || {};
@@ -47,7 +72,15 @@ function blobToBase64(blob: Blob): Promise<string> {
   });
 }
 
-export async function juniorVipTranscribeAudio(blob: Blob, studentId: string): Promise<string> {
+export class JuniorVipTranscribeError extends Error {
+  code: string;
+  constructor(code: string, message: string) {
+    super(message);
+    this.code = code;
+  }
+}
+
+export async function juniorVipTranscribeAudio(blob: Blob, scope: JuniorVipScope): Promise<string> {
   const audio_base64 = await blobToBase64(blob);
   const res = await apiFetch('/api/junior-vip?op=transcribe', {
     method: 'POST',
@@ -55,23 +88,30 @@ export async function juniorVipTranscribeAudio(blob: Blob, studentId: string): P
     body: JSON.stringify({
       audio_base64,
       mime: blob.type || 'audio/webm',
-      student_id: studentId.trim()
+      ...scopeBody(scope)
     })
   });
   const j = (await res.json().catch(() => ({}))) as { text?: string; error?: string; hint?: string };
   if (!res.ok) {
     if (res.status === 403) {
-      throw new Error(
-        j.hint || 'Yetki yok — öğrenci olarak giriş yapın veya taklit ettiğiniz öğrenciyi doğrulayın.'
+      throw new JuniorVipTranscribeError(
+        'forbidden',
+        j.hint || 'Yetki yok — kendi hesabınızla giriş yaptığınızdan emin olun.'
       );
     }
     if (j.error === 'transcribe_unavailable') {
-      throw new Error('Sunucuda ses çözümü kapalı. Telefondan dene veya yaz.');
+      throw new JuniorVipTranscribeError(
+        'transcribe_unavailable',
+        'Sunucu ses çözümü kapalı (yönetici: Vercel’de OPENAI_API_KEY tanımlanmalı). Şimdilik yazarak devam edebilirsin.'
+      );
     }
     if (j.error === 'audio_too_short') {
-      throw new Error('Kayıt çok kısa. Biraz daha konuşup tekrar dene.');
+      throw new JuniorVipTranscribeError('audio_too_short', 'Kayıt çok kısa. Biraz daha konuşup tekrar dene.');
     }
-    throw new Error(j.error || 'Ses metne çevrilemedi');
+    if (j.error === 'audio_too_large') {
+      throw new JuniorVipTranscribeError('audio_too_large', 'Kayıt çok uzun. Daha kısa bir komutla tekrar dene.');
+    }
+    throw new JuniorVipTranscribeError('failed', j.error || 'Ses metne çevrilemedi');
   }
   return String(j.text || '').trim();
 }
@@ -79,15 +119,15 @@ export async function juniorVipTranscribeAudio(blob: Blob, studentId: string): P
 export async function juniorVipChat(
   message: string,
   history: JuniorVipChatMessage[],
-  studentId: string
+  scope: JuniorVipScope
 ): Promise<JuniorVipChatResponse> {
   const res = await apiFetch('/api/junior-vip?op=chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message, history, student_id: studentId.trim() })
+    body: JSON.stringify({ message, history, ...scopeBody(scope) })
   });
-  const j = (await res.json().catch(() => ({}))) as JuniorVipChatResponse & { error?: string };
-  if (!res.ok) throw new Error(j.error || 'Junior VIP yanıt veremedi');
+  const j = (await res.json().catch(() => ({}))) as JuniorVipChatResponse & { error?: string; hint?: string };
+  if (!res.ok) throw new Error(j.hint || j.error || 'Junior VIP yanıt veremedi');
   return {
     reply: String(j.reply || ''),
     actions: Array.isArray(j.actions) ? j.actions : [],
