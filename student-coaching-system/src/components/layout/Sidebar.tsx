@@ -25,6 +25,7 @@ import {
   usesStaffSettingsGroup,
   STUDENT_PANEL_SUBMENU_ITEMS,
   STUDENT_LESSON_NAV_ITEMS,
+  STUDENT_ACADEMIC_CENTER_NAV_ITEMS,
   STUDENT_NAV_ACADEMIC_CENTER,
   STUDENT_NAV_SORU_SOR,
   STUDENT_NAV_YARDIM,
@@ -179,15 +180,14 @@ export default function Sidebar({
       <nav className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto overflow-x-hidden px-2 py-3">
         {isStudentOnlyNav ? (
           <>
-            <SidebarNavLink
+            <SidebarNavGroup
+              id="studentAcademicCenter"
               label={STUDENT_NAV_ACADEMIC_CENTER.label}
               icon={STUDENT_NAV_ACADEMIC_CENTER.icon}
-              active={
-                location.pathname === STUDENT_NAV_ACADEMIC_CENTER.path ||
-                location.pathname.startsWith(`${STUDENT_NAV_ACADEMIC_CENTER.path}/`)
-              }
+              items={STUDENT_ACADEMIC_CENTER_NAV_ITEMS}
+              pathname={location.pathname}
               collapsed={railCollapsed}
-              onNavigate={() => go(STUDENT_NAV_ACADEMIC_CENTER.path)}
+              onNavigate={go}
             />
             <SidebarNavGroup
               id="studentLessons"

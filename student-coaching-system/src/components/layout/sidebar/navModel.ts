@@ -39,7 +39,8 @@ import {
   ShoppingBag,
   Store,
   Puzzle,
-  PhoneCall
+  PhoneCall,
+  School
 } from 'lucide-react';
 import type { UserRole } from '../../../types';
 
@@ -80,12 +81,19 @@ export const NAV_TEACHER_AVAILABILITY: FlatNavItem = {
   label: 'Müsaitlik Takvimim'
 };
 
-/** Öğrenci — Akademik Merkez (Öğrenci Paneli üstünde, tek link) */
+/** Öğrenci — Akademik Merkez (grup başlığı; alt menü STUDENT_ACADEMIC_CENTER_NAV_ITEMS) */
 export const STUDENT_NAV_ACADEMIC_CENTER: FlatNavItem = {
   path: '/academic-center',
   icon: Sparkles,
   label: 'Akademik Merkez'
 };
+
+/** Öğrenci — Akademik Merkez alt menüsü (mevcut ?tab= rotaları) */
+export const STUDENT_ACADEMIC_CENTER_NAV_ITEMS: FlatNavItem[] = [
+  { path: '/academic-center?tab=study', icon: School, label: 'Etüt Sınıfları' },
+  { path: '/academic-center?tab=exam', icon: ClipboardList, label: 'Deneme Optik' },
+  { path: '/academic-center?tab=pool', icon: BookOpen, label: 'Soru Havuzları' }
+];
 
 /** Öğrenci — Soru Sor (sidebar’da yalnız, grup dışı) */
 export const NAV_MY_PROFILE: FlatNavItem = {
@@ -663,6 +671,8 @@ export type NavGroupKind =
   | 'org'
   | 'settings'
   | 'studentPanel'
+  | 'studentLessons'
+  | 'studentAcademicCenter'
   | 'team'
   | 'whatsapp'
   | 'crm';
@@ -829,7 +839,47 @@ export function structureNavFromFlat(
   return { dashboards, panels, academicCenter, lessons, team, academic, whatsapp, crm, orgSystem, settings, rest };
 }
 
-export function pathnameMatchesGroup(pathname: string, kind: NavGroupKind, items: FlatNavItem[]): boolean {
+/** Sidebar alt öğesi aktif mi? (path içinde ?tab= gibi sorgu destekler) */
+export function pathnameAndSearchMatchNavItem(
+  pathname: string,
+  search: string,
+  itemPath: string,
+  itemMatchExact = false
+): boolean {
+  const qIdx = itemPath.indexOf('?');
+  if (qIdx >= 0) {
+    const base = itemPath.slice(0, qIdx);
+    if (pathname !== base && !pathname.startsWith(`${base}/`)) return false;
+    const want = new URLSearchParams(itemPath.slice(qIdx + 1));
+    const cur = new URLSearchParams(search.replace(/^\?/, ''));
+    const wantTab = want.get('tab');
+    if (wantTab) {
+      const curTab = cur.get('tab');
+      if (wantTab === 'study') return !curTab || curTab === 'study';
+      return curTab === wantTab;
+    }
+    for (const [k, v] of want.entries()) {
+      if (cur.get(k) !== v) return false;
+    }
+    return true;
+  }
+  if (itemMatchExact) return pathname === itemPath;
+  return pathname === itemPath || pathname.startsWith(`${itemPath}/`);
+}
+
+export function pathnameMatchesGroup(
+  pathname: string,
+  kind: NavGroupKind,
+  items: FlatNavItem[],
+  search = ''
+): boolean {
+  if (kind === 'studentAcademicCenter') {
+    return (
+      pathname === '/academic-center' ||
+      pathname.startsWith('/academic-center/') ||
+      items.some((it) => pathnameAndSearchMatchNavItem(pathname, search, it.path))
+    );
+  }
   if (kind === 'studentPanel') {
     return (
       pathname === '/student-dashboard' ||
