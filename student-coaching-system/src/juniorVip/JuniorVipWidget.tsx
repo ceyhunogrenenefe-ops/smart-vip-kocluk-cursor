@@ -81,6 +81,7 @@ export default function JuniorVipWidget() {
     speak
   } = useJuniorVipSpeech({
     mascotGender,
+    studentId,
     onError: (msg) => toast.error(msg, { duration: 5000 })
   });
 
@@ -127,7 +128,7 @@ export default function JuniorVipWidget() {
       setBusy(true);
       setPendingLog(null);
       try {
-        const res = await juniorVipChat(trimmed, messages);
+        const res = await juniorVipChat(trimmed, messages, studentId);
         setMessages((m) => [...m, { role: 'assistant', content: res.reply }]);
         if (res.proposed_study_log) setPendingLog(res.proposed_study_log);
         if (res.actions?.length) runNavigate(res.actions);

@@ -96,9 +96,10 @@ function mapSpeechError(code: string): string {
 
 export function useJuniorVipSpeech(opts: {
   mascotGender: JuniorVipMascotGender;
+  studentId: string;
   onError?: (message: string) => void;
 }) {
-  const { mascotGender, onError } = opts;
+  const { mascotGender, studentId, onError } = opts;
   const [listening, setListening] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const [micSupported, setMicSupported] = useState(false);
@@ -375,7 +376,7 @@ export function useJuniorVipSpeech(opts: {
             resolve('');
             return;
           }
-          void juniorVipTranscribeAudio(blob)
+          void juniorVipTranscribeAudio(blob, studentId)
             .then(resolve)
             .catch((e) => {
               onErrorRef.current?.(e instanceof Error ? e.message : 'Ses çözülemedi');
@@ -408,7 +409,7 @@ export function useJuniorVipSpeech(opts: {
     lastHeardRef.current = '';
     setListening(false);
     return heard;
-  }, [abortRecognition, releaseMicStream]);
+  }, [abortRecognition, releaseMicStream, studentId]);
 
   return {
     micSupported,

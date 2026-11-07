@@ -1,8 +1,8 @@
-import { requireAuthenticatedActor } from '../api/_lib/auth.js';
 import { errorMessage } from '../api/_lib/error-msg.js';
 import { buildJuniorVipStudentContext } from '../api/_lib/junior-vip-context.js';
 import { juniorVipChatTurn } from '../api/_lib/junior-vip-chat.js';
 import { juniorVipTranscribeFromBase64 } from '../api/_lib/junior-vip-transcribe.js';
+import { resolveJuniorVipStudentId } from '../api/_lib/junior-vip-access.js';
 
 function parseBody(req) {
   const b = req.body;
@@ -17,25 +17,22 @@ function parseBody(req) {
   return {};
 }
 
-function isStudentActor(actor) {
-  return String(actor?.role || '').toLowerCase() === 'student' && Boolean(actor?.student_id);
-}
-
 export default async function handler(req, res) {
-  let actor;
-  try {
-    actor = requireAuthenticatedActor(req);
-  } catch {
-    return res.status(401).json({ error: 'Missing token' });
-  }
-
-  if (!isStudentActor(actor)) {
-    return res.status(403).json({ error: 'student_only' });
-  }
-
-  const studentId = String(actor.student_id);
   const opRaw = req.query?.op;
   const op = String((Array.isArray(opRaw) ? opRaw[0] : opRaw) || '').trim();
+
+  let studentId;
+  try {
+    const body = req.method === 'POST' ? parseBody(req) : {};
+    ({ studentId } = await resolveJuniorVipStudentId(req, body));
+  } catch (e) {
+    const status = e?.status || 401;
+    if (status === 401) return res.status(401).json({ error: 'Missing token' });
+    return res.status(status).json({
+      error: e?.message || 'forbidden',
+      hint: e?.hint || undefined
+    });
+  }
 
   try {
     if (req.method === 'GET' && (op === 'context' || !op)) {
