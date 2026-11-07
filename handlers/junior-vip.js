@@ -2,6 +2,7 @@ import { requireAuthenticatedActor } from '../api/_lib/auth.js';
 import { errorMessage } from '../api/_lib/error-msg.js';
 import { buildJuniorVipStudentContext } from '../api/_lib/junior-vip-context.js';
 import { juniorVipChatTurn } from '../api/_lib/junior-vip-chat.js';
+import { juniorVipTranscribeFromBase64 } from '../api/_lib/junior-vip-transcribe.js';
 
 function parseBody(req) {
   const b = req.body;
@@ -40,6 +41,26 @@ export default async function handler(req, res) {
     if (req.method === 'GET' && (op === 'context' || !op)) {
       const ctx = await buildJuniorVipStudentContext(studentId);
       return res.status(200).json({ data: ctx });
+    }
+
+    if (req.method === 'POST' && op === 'transcribe') {
+      const body = parseBody(req);
+      try {
+        const text = await juniorVipTranscribeFromBase64({
+          audio_base64: body.audio_base64,
+          mime: body.mime
+        });
+        return res.status(200).json({ text });
+      } catch (e) {
+        const code = e?.code || '';
+        if (code === 'transcribe_unavailable') {
+          return res.status(503).json({ error: 'transcribe_unavailable' });
+        }
+        if (code === 'audio_too_short') {
+          return res.status(400).json({ error: 'audio_too_short' });
+        }
+        return res.status(502).json({ error: e?.message || 'transcribe_failed' });
+      }
     }
 
     if (req.method === 'POST' && (op === 'chat' || !op)) {
