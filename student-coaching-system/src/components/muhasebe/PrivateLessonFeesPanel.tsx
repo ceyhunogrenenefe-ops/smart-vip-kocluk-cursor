@@ -1,5 +1,17 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { GraduationCap, Loader2, MessageCircle, Plus, RefreshCw, Save, Trash2, UserPlus, X } from 'lucide-react';
+import {
+  Building2,
+  GraduationCap,
+  Loader2,
+  MessageCircle,
+  Plus,
+  RefreshCw,
+  Save,
+  Trash2,
+  UserPlus,
+  X
+} from 'lucide-react';
+import PaymentBankAccountsModal from './PaymentBankAccountsModal';
 import { toast } from 'sonner';
 import { useAuth } from '../../context/AuthContext';
 import { useApp } from '../../context/AppContext';
@@ -98,11 +110,20 @@ function kalemBirimi(kinds: PrivateLessonFeeExtraKind[], kind: string) {
   return kinds.find((k) => k.id === kind)?.unit || 'adet';
 }
 
+function formatIbanPreview(iban?: string | null) {
+  const s = String(iban || '')
+    .replace(/\s+/g, '')
+    .toUpperCase();
+  if (!s) return '';
+  return s.replace(/(.{4})/g, '$1 ').trim();
+}
+
 function accountOptionLabel(acc: PaymentAccount) {
   const bank = String(acc.bank_name || '').trim();
   const label = String(acc.label || '').trim();
-  if (bank && label && bank !== label) return `${label} · ${bank}`;
-  return label || bank || acc.id;
+  const ibanMark = acc.iban ? '' : ' · IBAN yok';
+  if (bank && label && bank !== label) return `${label} · ${bank}${ibanMark}`;
+  return (label || bank || acc.id) + ibanMark;
 }
 
 function paymentAccountFromDraft(
@@ -120,9 +141,12 @@ function paymentAccountFromDraft(
 }
 
 type WaPaymentModalState = {
+  rowKey: string;
   rowLabel: string;
   phone: string;
   message: string;
+  /** Kullanıcı metni elle değiştirdiyse IBAN güncellemesi üzerine yazmaz. */
+  userEditedMessage: boolean;
 };
 
 function buildWaMessageForRow(
@@ -179,6 +203,16 @@ export default function PrivateLessonFeesPanel() {
   const [extAccountId, setExtAccountId] = useState('');
   const [extStatus, setExtStatus] = useState<PrivateLessonFeeStatus>('unpaid');
   const [waModal, setWaModal] = useState<WaPaymentModalState | null>(null);
+  const [bankAccountsOpen, setBankAccountsOpen] = useState(false);
+
+  const refreshBankAccounts = useCallback(async () => {
+    try {
+      const accPack = await listPaymentAccounts(institutionId || undefined, 'bank');
+      setAccounts((accPack.data || []).filter((a) => a.active !== false));
+    } catch {
+      setAccounts([]);
+    }
+  }, [institutionId]);
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -189,7 +223,7 @@ export default function PrivateLessonFeesPanel() {
           month,
           institutionId: institutionId || undefined
         }),
-        listPaymentAccounts(institutionId || undefined).catch(() => ({ data: [] as PaymentAccount[] }))
+        listPaymentAccounts(institutionId || undefined, 'bank').catch(() => ({ data: [] as PaymentAccount[] }))
       ]);
       if (data.hint) {
         setSchemaHint(`Supabase SQL Editor’da \`${data.hint}\` dosyasını çalıştırın.`);
@@ -214,6 +248,15 @@ export default function PrivateLessonFeesPanel() {
     void reload();
   }, [reload]);
 
+  useEffect(() => {
+    if (!waModal?.rowKey || waModal.userEditedMessage) return;
+    const row = rows.find((r) => privateLessonFeeRowKey(r) === waModal.rowKey);
+    const draft = drafts[waModal.rowKey];
+    if (!row || !draft) return;
+    const next = buildWaMessageForRow(row, draft, month, accounts);
+    setWaModal((m) => (m && m.message !== next ? { ...m, message: next } : m));
+  }, [accounts, drafts, month, rows, waModal?.rowKey, waModal?.userEditedMessage]);
+
   const patchDraft = (key: string, patch: Partial<Draft>) => {
     setDrafts((prev) => {
       const row = rows.find((r) => privateLessonFeeRowKey(r) === key);
@@ -225,10 +268,17 @@ export default function PrivateLessonFeesPanel() {
 
   const openPaymentWaModal = (row: PrivateLessonFeeRow, draft: Draft) => {
     const phone = String(row.contact_phone_resolved || row.parent_phone || '').trim();
+    const rowKey = privateLessonFeeRowKey(row);
+    const acc = paymentAccountFromDraft(draft, row, accounts);
+    if (draft.payment_account_id && !acc?.iban) {
+      toast.message('Seçili hesapta IBAN yok — «Banka hesapları (IBAN)» ile bir kez ekleyin.');
+    }
     setWaModal({
+      rowKey,
       rowLabel: row.student_name,
       phone,
-      message: buildWaMessageForRow(row, draft, month, accounts)
+      message: buildWaMessageForRow(row, draft, month, accounts),
+      userEditedMessage: false
     });
   };
 
@@ -502,6 +552,15 @@ export default function PrivateLessonFeesPanel() {
             <RefreshCw className="h-4 w-4" />
             Yenile
           </button>
+          <button
+            type="button"
+            onClick={() => setBankAccountsOpen(true)}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-semibold text-indigo-800 hover:bg-indigo-100 dark:border-indigo-900 dark:bg-indigo-950/40 dark:text-indigo-200"
+            title="IBAN'ı bir kez kaydedin; veli mesajlarında otomatik kullanılır"
+          >
+            <Building2 className="h-4 w-4" />
+            Banka hesapları (IBAN)
+          </button>
         </div>
       </div>
 
@@ -663,6 +722,8 @@ export default function PrivateLessonFeesPanel() {
                 : '—';
             const busy = savingId === key || deletingId === key;
             const canDelete = Boolean(row.fee_row_id) || Boolean(row.is_external);
+            const seciliBanka = paymentAccountFromDraft(draft, row, accounts);
+            const seciliIban = formatIbanPreview(seciliBanka?.iban);
             return (
               <div
                 key={key}
@@ -821,7 +882,22 @@ export default function PrivateLessonFeesPanel() {
                         </option>
                       ))}
                     </select>
-                    {row.payment_account && !draft.dirty ? (
+                    {seciliBanka ? (
+                      <span className="mt-1 block text-[10px] font-normal leading-snug text-slate-500">
+                        {seciliBanka.bank_name ? <span className="block">{seciliBanka.bank_name}</span> : null}
+                        {seciliIban ? (
+                          <span className="font-mono text-slate-600 dark:text-slate-400">IBAN: {seciliIban}</span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setBankAccountsOpen(true)}
+                            className="text-left font-semibold text-amber-700 underline decoration-dotted hover:text-amber-800"
+                          >
+                            IBAN eksik — hesaba ekle
+                          </button>
+                        )}
+                      </span>
+                    ) : row.payment_account && !draft.dirty ? (
                       <span className="mt-0.5 block truncate text-[10px] font-normal text-slate-400">
                         {formatPaymentAccountLabel(row.payment_account)}
                       </span>
@@ -1133,14 +1209,18 @@ export default function PrivateLessonFeesPanel() {
                 Mesaj (düzenleyebilirsiniz)
                 <textarea
                   value={waModal.message}
-                  onChange={(e) => setWaModal((m) => (m ? { ...m, message: e.target.value } : m))}
+                  onChange={(e) =>
+                    setWaModal((m) =>
+                      m ? { ...m, message: e.target.value, userEditedMessage: true } : m
+                    )
+                  }
                   rows={14}
                   className="mt-1 w-full rounded-lg border border-slate-200 px-2.5 py-2 font-mono text-[13px] leading-relaxed dark:border-slate-600 dark:bg-slate-950"
                 />
               </label>
               <p className="text-[11px] text-slate-500">
-                Banka hesabı satırda seçiliyse ad ve IBAN mesaja eklenir. Kaydetmeden önce de gönderebilirsiniz;
-                tutarlar formdaki güncel değerlerden alınır.
+                Banka hesabı satırda seçiliyse ad ve IBAN (hesap kartında kayıtlı) mesaja eklenir. IBAN&apos;ı üstteki
+                «Banka hesapları (IBAN)» ile bir kez girin; sonra her mesajda otomatik gelir.
               </p>
             </div>
             <div className="flex flex-wrap justify-end gap-2 border-t border-slate-200 px-4 py-3 dark:border-slate-700">
@@ -1163,6 +1243,13 @@ export default function PrivateLessonFeesPanel() {
           </div>
         </div>
       ) : null}
+
+      <PaymentBankAccountsModal
+        open={bankAccountsOpen}
+        onClose={() => setBankAccountsOpen(false)}
+        institutionId={institutionId}
+        onSaved={() => void refreshBankAccounts()}
+      />
     </div>
   );
 }
