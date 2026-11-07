@@ -117,18 +117,30 @@ async function loadAssignedPrivateStudents(institutionId) {
 
 async function loadNames(studentIds, teacherIds) {
   const studentMap = new Map();
+  const studentContactMap = new Map();
   const teacherMap = new Map();
   const sids = [...new Set((studentIds || []).map((x) => String(x || '').trim()).filter(Boolean))];
   const tids = [...new Set((teacherIds || []).map((x) => String(x || '').trim()).filter(Boolean))];
   if (sids.length) {
-    const { data } = await supabaseAdmin.from('students').select('id,name').in('id', sids);
-    for (const s of data || []) studentMap.set(String(s.id), String(s.name || s.id));
+    const { data } = await supabaseAdmin
+      .from('students')
+      .select('id,name,phone,parent_phone,parent_name')
+      .in('id', sids);
+    for (const s of data || []) {
+      const id = String(s.id);
+      studentMap.set(id, String(s.name || s.id));
+      studentContactMap.set(id, {
+        parent_name: s.parent_name || null,
+        parent_phone: s.parent_phone || null,
+        phone: s.phone || null
+      });
+    }
   }
   if (tids.length) {
     const { data } = await supabaseAdmin.from('users').select('id,name,email').in('id', tids);
     for (const u of data || []) teacherMap.set(String(u.id), String(u.name || u.email || u.id));
   }
-  return { studentMap, teacherMap };
+  return { studentMap, studentContactMap, teacherMap };
 }
 
 async function loadPaymentAccountMap(accountIds) {
@@ -168,6 +180,7 @@ function buildRow({
   fee,
   assignedTeacherIds,
   studentMap,
+  studentContactMap,
   teacherMap,
   accountMap
 }) {
@@ -221,6 +234,13 @@ function buildRow({
   const displayName = isExternal
     ? externalName || fee?.external_student_name || 'Dış öğrenci'
     : studentMap.get(studentId) || studentId;
+  const contact = studentId ? studentContactMap?.get(String(studentId)) : null;
+  const parentName = contact?.parent_name
+    ? String(contact.parent_name).trim()
+    : isExternal
+      ? displayName
+      : null;
+  const parentPhone = contact?.parent_phone || contact?.phone || null;
 
   return {
     row_key: key,
@@ -228,6 +248,9 @@ function buildRow({
     external_student_name: isExternal ? externalName || fee?.external_student_name || null : null,
     is_external: Boolean(isExternal),
     student_name: displayName,
+    parent_name: parentName,
+    parent_phone: parentPhone,
+    contact_phone_resolved: parentPhone,
     teachers,
     system_hours: systemHours,
     declared_hours: declaredHours,
@@ -331,7 +354,7 @@ async function handleList(req, res, actor, roleSet) {
   }
 
   const accountIds = feePack.rows.map((r) => r.payment_account_id).filter(Boolean);
-  const [{ studentMap, teacherMap }, accountMap] = await Promise.all([
+  const [{ studentMap, studentContactMap, teacherMap }, accountMap] = await Promise.all([
     loadNames([...systemStudentIds], [...teacherIds]),
     loadPaymentAccountMap(accountIds)
   ]);
@@ -358,6 +381,7 @@ async function handleList(req, res, actor, roleSet) {
       fee: feeByKey.get(key) || null,
       assignedTeacherIds: assignedTeachersByStudent.get(sid) || [],
       studentMap,
+      studentContactMap,
       teacherMap,
       accountMap
     });
@@ -386,6 +410,7 @@ async function handleList(req, res, actor, roleSet) {
       fee,
       assignedTeacherIds: [],
       studentMap,
+      studentContactMap,
       teacherMap,
       accountMap
     });

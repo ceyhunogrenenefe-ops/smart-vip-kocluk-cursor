@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { GraduationCap, Loader2, Plus, RefreshCw, Save, Trash2, UserPlus } from 'lucide-react';
+import { GraduationCap, Loader2, MessageCircle, Plus, RefreshCw, Save, Trash2, UserPlus, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '../../context/AuthContext';
 import { useApp } from '../../context/AppContext';
@@ -9,7 +9,9 @@ import {
   LESSON_DURATION_MINUTES
 } from '../../lib/groupLessonPaymentUnits';
 import { listPaymentAccounts, type PaymentAccount } from '../../lib/studentPaymentTrackerApi';
+import { normalizeWhatsAppPhoneForSend } from '../../lib/whatsappOutbound';
 import {
+  buildPrivateLessonFeeWhatsAppMessage,
   deletePrivateLessonFee,
   fetchPrivateLessonFees,
   formatPaymentAccountLabel,
@@ -103,6 +105,45 @@ function accountOptionLabel(acc: PaymentAccount) {
   return label || bank || acc.id;
 }
 
+function paymentAccountFromDraft(
+  draft: Draft,
+  row: PrivateLessonFeeRow,
+  accounts: PaymentAccount[]
+): PaymentAccount | PrivateLessonFeeRow['payment_account'] | null {
+  const id = String(draft.payment_account_id || '').trim();
+  if (id) {
+    const hit = accounts.find((a) => a.id === id);
+    if (hit) return hit;
+  }
+  if (!draft.dirty && row.payment_account) return row.payment_account;
+  return null;
+}
+
+type WaPaymentModalState = {
+  rowLabel: string;
+  phone: string;
+  message: string;
+};
+
+function buildWaMessageForRow(
+  row: PrivateLessonFeeRow,
+  draft: Draft,
+  monthYm: string,
+  accounts: PaymentAccount[]
+) {
+  const acc = paymentAccountFromDraft(draft, row, accounts);
+  return buildPrivateLessonFeeWhatsAppMessage({
+    parentName: row.parent_name,
+    studentName: row.student_name,
+    periodYm: monthYm,
+    lessonHours: Number(draft.hours) || 0,
+    unitPriceTl: Number(draft.unit_price_tl) || 0,
+    totalTl: liveTotal(draft),
+    bankName: acc?.bank_name,
+    iban: acc?.iban
+  });
+}
+
 const fieldCls =
   'mt-1 w-full min-w-0 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-950';
 
@@ -137,6 +178,7 @@ export default function PrivateLessonFeesPanel() {
   const [extCollected, setExtCollected] = useState('0');
   const [extAccountId, setExtAccountId] = useState('');
   const [extStatus, setExtStatus] = useState<PrivateLessonFeeStatus>('unpaid');
+  const [waModal, setWaModal] = useState<WaPaymentModalState | null>(null);
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -179,6 +221,31 @@ export default function PrivateLessonFeesPanel() {
       if (!base) return prev;
       return { ...prev, [key]: { ...base, ...patch, dirty: true } };
     });
+  };
+
+  const openPaymentWaModal = (row: PrivateLessonFeeRow, draft: Draft) => {
+    const phone = String(row.contact_phone_resolved || row.parent_phone || '').trim();
+    setWaModal({
+      rowLabel: row.student_name,
+      phone,
+      message: buildWaMessageForRow(row, draft, month, accounts)
+    });
+  };
+
+  const sendPaymentWa = () => {
+    if (!waModal) return;
+    const normalized = normalizeWhatsAppPhoneForSend(waModal.phone);
+    if (!normalized) {
+      toast.error('Geçerli bir WhatsApp numarası girin (örn. 05xx…)');
+      return;
+    }
+    const text = waModal.message.trim();
+    if (!text) {
+      toast.error('Mesaj boş olamaz');
+      return;
+    }
+    window.open(`https://wa.me/${normalized}?text=${encodeURIComponent(text)}`, '_blank', 'noopener,noreferrer');
+    setWaModal(null);
   };
 
   /** Ek kalem listesini değiştiren yardımcılar — hepsi satırı "kaydedilmedi" işaretler */
@@ -730,6 +797,15 @@ export default function PrivateLessonFeesPanel() {
                       onChange={(e) => patchDraft(key, { amount_collected_tl: e.target.value })}
                       className={fieldCls}
                     />
+                    <button
+                      type="button"
+                      onClick={() => openPaymentWaModal(row, draft)}
+                      className="mt-1.5 inline-flex w-full items-center justify-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1.5 text-[11px] font-semibold text-emerald-800 hover:bg-emerald-100 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200"
+                      title="Ödeme bilgisi mesajını düzenleyip WhatsApp ile gönder"
+                    >
+                      <MessageCircle className="h-3.5 w-3.5 shrink-0" />
+                      Veliye ödeme mesajı gönder
+                    </button>
                   </label>
                   <label className="text-[11px] font-medium text-slate-500 sm:col-span-2 lg:col-span-1">
                     Banka hesabı
@@ -1019,6 +1095,74 @@ export default function PrivateLessonFeesPanel() {
           })}
         </div>
       )}
+
+      {waModal ? (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/50 p-4 sm:items-center"
+          role="dialog"
+          aria-labelledby="private-lesson-wa-title"
+        >
+          <div className="max-h-[90vh] w-full max-w-lg overflow-hidden rounded-2xl bg-white shadow-xl dark:bg-slate-900">
+            <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3 dark:border-slate-700">
+              <div>
+                <h2 id="private-lesson-wa-title" className="text-sm font-bold text-slate-900 dark:text-white">
+                  Veliye ödeme mesajı
+                </h2>
+                <p className="text-xs text-slate-500">{waModal.rowLabel}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setWaModal(null)}
+                className="rounded-lg p-1 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
+                aria-label="Kapat"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="space-y-3 overflow-y-auto p-4">
+              <label className="block text-xs font-medium text-slate-600 dark:text-slate-300">
+                WhatsApp numarası
+                <input
+                  value={waModal.phone}
+                  onChange={(e) => setWaModal((m) => (m ? { ...m, phone: e.target.value } : m))}
+                  placeholder="05xx… veya veli kaydındaki numara"
+                  className="mt-1 w-full rounded-lg border border-slate-200 px-2.5 py-2 text-sm dark:border-slate-600 dark:bg-slate-950"
+                />
+              </label>
+              <label className="block text-xs font-medium text-slate-600 dark:text-slate-300">
+                Mesaj (düzenleyebilirsiniz)
+                <textarea
+                  value={waModal.message}
+                  onChange={(e) => setWaModal((m) => (m ? { ...m, message: e.target.value } : m))}
+                  rows={14}
+                  className="mt-1 w-full rounded-lg border border-slate-200 px-2.5 py-2 font-mono text-[13px] leading-relaxed dark:border-slate-600 dark:bg-slate-950"
+                />
+              </label>
+              <p className="text-[11px] text-slate-500">
+                Banka hesabı satırda seçiliyse ad ve IBAN mesaja eklenir. Kaydetmeden önce de gönderebilirsiniz;
+                tutarlar formdaki güncel değerlerden alınır.
+              </p>
+            </div>
+            <div className="flex flex-wrap justify-end gap-2 border-t border-slate-200 px-4 py-3 dark:border-slate-700">
+              <button
+                type="button"
+                onClick={() => setWaModal(null)}
+                className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium dark:border-slate-600"
+              >
+                Vazgeç
+              </button>
+              <button
+                type="button"
+                onClick={sendPaymentWa}
+                className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
+              >
+                <MessageCircle className="h-4 w-4" />
+                WhatsApp ile gönder
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
