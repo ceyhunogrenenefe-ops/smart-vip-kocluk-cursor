@@ -176,7 +176,7 @@ export default function JuniorVipWidget() {
       {guideBanner ? (
         <div
           className={cn(
-            'pointer-events-none fixed inset-x-3 top-20 z-[240] mx-auto max-w-md animate-in fade-in slide-in-from-top-2 rounded-2xl border px-4 py-3 text-center text-sm font-semibold shadow-lg',
+            'pointer-events-none fixed inset-x-3 top-16 z-[240] mx-auto max-w-md animate-in fade-in slide-in-from-top-2 rounded-xl border px-3 py-2 text-center text-xs font-semibold shadow-lg max-sm:max-w-[16rem]',
             JUNIOR_VIP_THEME.guideBanner
           )}
         >
@@ -190,26 +190,28 @@ export default function JuniorVipWidget() {
             'fixed z-[245] flex flex-col overflow-hidden rounded-2xl border bg-white shadow-2xl dark:bg-slate-900',
             JUNIOR_VIP_THEME.panelBorder,
             JUNIOR_VIP_THEME.bubbleShadow,
-            'inset-x-3 bottom-[calc(5.5rem+env(safe-area-inset-bottom))] max-h-[min(70vh,520px)] sm:inset-x-auto sm:right-4 sm:bottom-24 sm:w-[min(100vw-2rem,380px)]'
+            'bottom-[calc(4.25rem+env(safe-area-inset-bottom))] left-auto right-2 w-[min(17rem,76vw)] max-h-[min(42vh,320px)]',
+            'sm:right-4 sm:bottom-24 sm:w-[min(100vw-2rem,380px)] sm:max-h-[min(70vh,520px)]'
           )}
           role="dialog"
           aria-label="Junior VIP asistan"
         >
           <div
             className={cn(
-              'flex items-center gap-2 border-b border-indigo-100 bg-gradient-to-r px-3 py-2.5 dark:border-indigo-900/40',
+              'flex items-center gap-1.5 border-b border-indigo-100 bg-gradient-to-r px-2 py-2 dark:border-indigo-900/40 sm:gap-2 sm:px-3 sm:py-2.5',
               JUNIOR_VIP_THEME.panelHeader
             )}
           >
-            <JuniorVipMascot size="sm" gender={mascotGender} listening={listening} />
+            <JuniorVipMascot size="xs" gender={mascotGender} listening={listening} className="sm:hidden" />
+            <JuniorVipMascot size="sm" gender={mascotGender} listening={listening} className="hidden sm:flex" />
             <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-bold text-slate-900 dark:text-white">Junior VIP</p>
-              <p className="truncate text-[10px] text-slate-500">Akıllı Öğrenci Asistanı</p>
+              <p className="truncate text-xs font-bold text-slate-900 dark:text-white sm:text-sm">Junior VIP</p>
+              <p className="hidden truncate text-[10px] text-slate-500 sm:block">Akıllı Öğrenci Asistanı</p>
             </div>
             <button
               type="button"
               onClick={() => setSpeakReplies((v) => !v)}
-              className="rounded-lg p-2 text-slate-600 hover:bg-white/80"
+              className="rounded-lg p-1.5 text-slate-600 hover:bg-white/80 sm:p-2"
               title={speakReplies ? 'Junior sesli konuşsun' : 'Junior yalnızca yazsın'}
             >
               {speakReplies ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
@@ -227,12 +229,12 @@ export default function JuniorVipWidget() {
             </button>
           </div>
 
-          <div ref={listRef} className="min-h-0 flex-1 space-y-2 overflow-y-auto px-3 py-3">
+          <div ref={listRef} className="min-h-0 flex-1 space-y-1.5 overflow-y-auto px-2 py-2 sm:space-y-2 sm:px-3 sm:py-3">
             {messages.map((m, i) => (
               <div
                 key={`${m.role}-${i}`}
                 className={cn(
-                  'max-w-[92%] rounded-2xl px-3 py-2 text-[13px] leading-relaxed',
+                  'max-w-[92%] rounded-xl px-2.5 py-1.5 text-[12px] leading-snug sm:rounded-2xl sm:px-3 sm:py-2 sm:text-[13px] sm:leading-relaxed',
                   m.role === 'user'
                     ? cn('ml-auto text-white', JUNIOR_VIP_THEME.userBubble)
                     : 'mr-auto bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-100'
@@ -276,7 +278,7 @@ export default function JuniorVipWidget() {
           </div>
 
           <form
-            className="flex items-end gap-1.5 border-t border-slate-100 p-2 dark:border-slate-800"
+            className="flex items-end gap-1 border-t border-slate-100 p-1.5 dark:border-slate-800 sm:gap-1.5 sm:p-2"
             onSubmit={(e) => {
               e.preventDefault();
               void submitMessage(input);
@@ -295,7 +297,7 @@ export default function JuniorVipWidget() {
                       : 'Konuş… bitince mikrofona tekrar bas'
                     : 'Yaz veya mikrofona bas…'
               }
-              className="max-h-24 min-h-[40px] flex-1 resize-none rounded-xl border border-slate-200 px-2.5 py-2 text-sm dark:border-slate-600 dark:bg-slate-950"
+              className="max-h-16 min-h-[34px] flex-1 resize-none rounded-lg border border-slate-200 px-2 py-1.5 text-xs dark:border-slate-600 dark:bg-slate-950 sm:max-h-24 sm:min-h-[40px] sm:rounded-xl sm:px-2.5 sm:py-2 sm:text-sm"
             />
             {micSupported ? (
               <button
@@ -317,7 +319,7 @@ export default function JuniorVipWidget() {
                   startListening((t) => setInput(t));
                 }}
                 className={cn(
-                  'flex h-10 w-10 shrink-0 items-center justify-center rounded-xl',
+                  'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg sm:h-10 sm:w-10 sm:rounded-xl',
                   listening || transcribing
                     ? 'bg-rose-500 text-white animate-pulse'
                     : JUNIOR_VIP_THEME.micIdle
@@ -336,7 +338,7 @@ export default function JuniorVipWidget() {
               </button>
             ) : (
               <span
-                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-400"
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-400 sm:h-10 sm:w-10 sm:rounded-xl"
                 title="Sesli komut bu tarayıcıda yok — Chrome/Edge kullanın"
               >
                 <MicOff className="h-4 w-4" />
@@ -345,7 +347,7 @@ export default function JuniorVipWidget() {
             <button
               type="submit"
               disabled={busy || !input.trim()}
-              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-violet-600 text-white disabled:opacity-40"
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-violet-600 text-white disabled:opacity-40 sm:h-10 sm:w-10 sm:rounded-xl"
             >
               <Send className="h-4 w-4" />
             </button>
@@ -357,16 +359,17 @@ export default function JuniorVipWidget() {
         type="button"
         onClick={() => setOpen((o) => !o)}
         className={cn(
-          'fixed z-[244] flex items-center gap-2 rounded-full border-2 border-white/90 bg-gradient-to-r pr-3 shadow-xl transition hover:scale-[1.03] active:scale-95',
+          'fixed z-[244] flex items-center rounded-full border-2 border-white/90 bg-gradient-to-r shadow-lg transition active:scale-95',
           JUNIOR_VIP_THEME.bubbleGradient,
           JUNIOR_VIP_THEME.bubbleShadow,
-          'right-3 bottom-[calc(4.25rem+env(safe-area-inset-bottom))] sm:right-5 sm:bottom-6',
-          open && cn('ring-4', JUNIOR_VIP_THEME.bubbleRing)
+          'right-2 bottom-[calc(3.5rem+env(safe-area-inset-bottom))] gap-0 p-0.5 sm:right-5 sm:bottom-6 sm:gap-2 sm:pr-3 sm:shadow-xl sm:hover:scale-[1.03]',
+          open && cn('ring-2 sm:ring-4', JUNIOR_VIP_THEME.bubbleRing)
         )}
         aria-expanded={open}
         aria-label="Junior VIP – Akıllı Öğrenci Asistanı"
       >
-        <JuniorVipMascot size="md" gender={mascotGender} listening={listening && open} />
+        <JuniorVipMascot size="xs" gender={mascotGender} listening={listening && open} className="sm:hidden" />
+        <JuniorVipMascot size="md" gender={mascotGender} listening={listening && open} className="hidden sm:flex" />
         <span className="hidden max-w-[9rem] text-left text-[11px] font-bold leading-tight text-white drop-shadow sm:block">
           Junior VIP
           <span className="block text-[9px] font-medium opacity-90">Asistan</span>

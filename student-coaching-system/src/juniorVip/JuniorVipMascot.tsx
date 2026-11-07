@@ -3,7 +3,7 @@ import { cn } from '../lib/utils';
 import type { JuniorVipMascotGender } from './inferMascotGender';
 
 type Props = {
-  size?: 'sm' | 'md';
+  size?: 'xs' | 'sm' | 'md';
   gender?: JuniorVipMascotGender;
   listening?: boolean;
   className?: string;
@@ -11,7 +11,7 @@ type Props = {
 
 /** Marka renkleri + kız/erkek maskot (hafif animasyon). */
 export function JuniorVipMascot({ size = 'md', gender = 'boy', listening, className }: Props) {
-  const dim = size === 'sm' ? 44 : 56;
+  const dim = size === 'xs' ? 36 : size === 'sm' ? 42 : 52;
   const isGirl = gender === 'girl';
 
   return (
@@ -80,7 +80,12 @@ export function JuniorVipMascot({ size = 'md', gender = 'boy', listening, classN
           fill="#c4b5fd"
         />
       </svg>
-      <span className="pointer-events-none absolute -bottom-0.5 rounded-full bg-white/95 px-1.5 py-0.5 text-[9px] font-bold text-indigo-700 shadow">
+      <span
+        className={cn(
+          'pointer-events-none absolute -bottom-0.5 rounded-full bg-white/95 font-bold text-indigo-700 shadow',
+          size === 'xs' ? 'px-1 py-0 text-[7px]' : 'px-1.5 py-0.5 text-[9px]'
+        )}
+      >
         VIP
       </span>
     </div>
