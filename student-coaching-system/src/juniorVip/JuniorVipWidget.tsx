@@ -266,7 +266,7 @@ export default function JuniorVipWidget() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               rows={1}
-              placeholder="Yaz veya mikrofona bas…"
+              placeholder={listening ? 'Dinliyorum… konuşabilirsin' : 'Yaz veya mikrofona bas…'}
               className="max-h-24 min-h-[40px] flex-1 resize-none rounded-xl border border-slate-200 px-2.5 py-2 text-sm dark:border-slate-600 dark:bg-slate-950"
             />
             {micSupported ? (
