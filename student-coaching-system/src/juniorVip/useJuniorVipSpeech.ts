@@ -44,6 +44,13 @@ function pickTurkishVoice(gender: JuniorVipMascotGender) {
   return tr.find((v) => maleHint.test(v.name)) || tr.find((v) => !femaleHint.test(v.name)) || tr[0];
 }
 
+function transcriptPiece(
+  result: { isFinal: boolean; length: number; 0?: { transcript?: string }; item?: (i: number) => { transcript?: string } }
+): string {
+  const alt = result[0] ?? result.item?.(0);
+  return String(alt?.transcript || '').trim();
+}
+
 function mapSpeechError(code: string): string {
   switch (code) {
     case 'not-allowed':
@@ -71,8 +78,12 @@ export function useJuniorVipSpeech(opts: {
   const [micSupported, setMicSupported] = useState(false);
   const recRef = useRef<SpeechRecognitionInstance | null>(null);
   const pendingStartRef = useRef<((text: string) => void) | null>(null);
+  const onInterimRef = useRef<((text: string) => void) | null>(null);
   const lastHeardRef = useRef('');
   const voicesReadyRef = useRef(false);
+  const listenSessionRef = useRef(0);
+  const noSpeechRetriesRef = useRef(0);
+  const deliveredRef = useRef(false);
 
   useEffect(() => {
     setMicSupported(Boolean(getRecognitionCtor()));
@@ -89,6 +100,11 @@ export function useJuniorVipSpeech(opts: {
   }, []);
 
   const stopListening = useCallback(() => {
+    listenSessionRef.current += 1;
+    pendingStartRef.current = null;
+    onInterimRef.current = null;
+    noSpeechRetriesRef.current = 0;
+    deliveredRef.current = false;
     try {
       recRef.current?.abort();
     } catch {
@@ -100,6 +116,23 @@ export function useJuniorVipSpeech(opts: {
     }
     recRef.current = null;
     setListening(false);
+  }, []);
+
+  const deliverTranscript = useCallback((text: string) => {
+    const t = text.trim();
+    if (!t || deliveredRef.current) return;
+    deliveredRef.current = true;
+    const cb = pendingStartRef.current;
+    pendingStartRef.current = null;
+    onInterimRef.current = null;
+    lastHeardRef.current = '';
+    cb?.(t);
+    listenSessionRef.current += 1;
+    try {
+      recRef.current?.stop();
+    } catch {
+      /* ignore */
+    }
   }, []);
 
   const speak = useCallback(
@@ -120,33 +153,17 @@ export function useJuniorVipSpeech(opts: {
     [mascotGender]
   );
 
-  const startListening = useCallback(
-    async (onFinal: (transcript: string) => void, onInterim?: (transcript: string) => void) => {
+  const armRecognition = useCallback(
+    (sessionId: number) => {
       const Ctor = getRecognitionCtor();
-      if (!Ctor) {
-        onError?.('Bu tarayıcıda sesli komut desteklenmiyor. Chrome veya Edge dene.');
-        return;
-      }
-
-      stopListening();
-      pendingStartRef.current = onFinal;
-
-      try {
-        if (navigator.mediaDevices?.getUserMedia) {
-          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-          for (const track of stream.getTracks()) track.stop();
-        }
-      } catch {
-        onError?.('Mikrofon izni gerekli. İzin verip mikrofona tekrar bas.');
-        return;
-      }
+      if (!Ctor || sessionId !== listenSessionRef.current) return;
 
       const rec = new Ctor();
       rec.lang = 'tr-TR';
-      rec.continuous = true;
+      rec.continuous = false;
       rec.interimResults = true;
-      lastHeardRef.current = '';
       rec.maxAlternatives = 1;
+      lastHeardRef.current = '';
 
       rec.onstart = () => setListening(true);
 
@@ -154,7 +171,7 @@ export function useJuniorVipSpeech(opts: {
         let finalText = '';
         let interim = '';
         for (let i = event.resultIndex; i < event.results.length; i++) {
-          const piece = String(event.results[i][0]?.transcript || '').trim();
+          const piece = transcriptPiece(event.results[i]);
           if (!piece) continue;
           if (event.results[i].isFinal) finalText += (finalText ? ' ' : '') + piece;
           else interim += piece;
@@ -162,35 +179,30 @@ export function useJuniorVipSpeech(opts: {
         const text = (finalText || interim).trim();
         if (text) {
           lastHeardRef.current = text;
-          if (!finalText) onInterim?.(text);
+          if (!finalText) onInterimRef.current?.(text);
         }
-        if (finalText && pendingStartRef.current) {
-          const cb = pendingStartRef.current;
-          pendingStartRef.current = null;
-          lastHeardRef.current = '';
-          try {
-            rec.stop();
-          } catch {
-            /* ignore */
-          }
-          cb(finalText.trim());
-        }
+        if (finalText) deliverTranscript(finalText);
       };
 
       rec.onerror = (ev) => {
-        setListening(false);
         const code = ev?.error || 'unknown';
-        if (code !== 'aborted') onError?.(mapSpeechError(code));
+        if (code === 'aborted') return;
+
+        if (code === 'no-speech' && pendingStartRef.current && noSpeechRetriesRef.current < 2) {
+          noSpeechRetriesRef.current += 1;
+          window.setTimeout(() => armRecognition(sessionId), 120);
+          return;
+        }
+
+        setListening(false);
+        onError?.(mapSpeechError(code));
       };
 
       rec.onend = () => {
+        if (sessionId !== listenSessionRef.current) return;
         const heard = lastHeardRef.current.trim();
-        if (pendingStartRef.current && heard) {
-          const cb = pendingStartRef.current;
-          pendingStartRef.current = null;
-          cb(heard);
-        }
-        setListening(false);
+        if (pendingStartRef.current && heard) deliverTranscript(heard);
+        if (!pendingStartRef.current) setListening(false);
         recRef.current = null;
       };
 
@@ -198,11 +210,64 @@ export function useJuniorVipSpeech(opts: {
       try {
         rec.start();
       } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        if (/already started|InvalidState/i.test(message) && pendingStartRef.current) {
+          try {
+            rec.stop();
+          } catch {
+            /* ignore */
+          }
+          window.setTimeout(() => armRecognition(sessionId), 60);
+          return;
+        }
         setListening(false);
-        onError?.(e instanceof Error ? e.message : 'Mikrofon başlatılamadı');
+        onError?.(message || 'Mikrofon başlatılamadı');
       }
     },
-    [onError, stopListening]
+    [deliverTranscript, onError]
+  );
+
+  const startListening = useCallback(
+    (onFinal: (transcript: string) => void, onInterim?: (transcript: string) => void) => {
+      const Ctor = getRecognitionCtor();
+      if (!Ctor) {
+        onError?.('Bu tarayıcıda sesli komut desteklenmiyor. Chrome veya Edge dene.');
+        return;
+      }
+
+      if (typeof window !== 'undefined' && window.isSecureContext === false) {
+        onError?.('Sesli komut yalnızca güvenli bağlantıda (https) çalışır.');
+        return;
+      }
+
+      stopListening();
+      pendingStartRef.current = onFinal;
+      onInterimRef.current = onInterim ?? null;
+      deliveredRef.current = false;
+      noSpeechRetriesRef.current = 0;
+
+      const sessionId = listenSessionRef.current;
+
+      try {
+        window.speechSynthesis?.cancel();
+      } catch {
+        /* ignore */
+      }
+
+      // ÖNEMLİ: Chrome recognition.start() kullanıcı tıklamasıyla aynı anda çağrılmalı.
+      // await getUserMedia() önce yapılırsa user activation kaybolur ve dinleme sessizce çalışmaz.
+      armRecognition(sessionId);
+
+      void navigator.mediaDevices
+        ?.getUserMedia({ audio: true })
+        .then((stream) => {
+          for (const track of stream.getTracks()) track.stop();
+        })
+        .catch(() => {
+          /* recognition kendi iznini de isteyebilir; hata burada tek başına fatal değil */
+        });
+    },
+    [armRecognition, onError, stopListening]
   );
 
   return { micSupported, listening, startListening, stopListening, speak };
