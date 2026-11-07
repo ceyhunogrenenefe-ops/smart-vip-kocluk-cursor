@@ -26,8 +26,9 @@ export type JuniorVipChatResponse = {
 
 export type JuniorVipChatMessage = { role: 'user' | 'assistant'; content: string };
 
-export async function fetchJuniorVipContext(): Promise<Record<string, unknown>> {
-  const res = await apiFetch('/api/junior-vip?op=context');
+export async function fetchJuniorVipContext(studentId: string): Promise<Record<string, unknown>> {
+  const sid = encodeURIComponent(studentId.trim());
+  const res = await apiFetch(`/api/junior-vip?op=context&student_id=${sid}`);
   const j = (await res.json().catch(() => ({}))) as { data?: Record<string, unknown>; error?: string };
   if (!res.ok) throw new Error(j.error || 'Junior VIP bağlamı yüklenemedi');
   return j.data || {};
@@ -46,15 +47,24 @@ function blobToBase64(blob: Blob): Promise<string> {
   });
 }
 
-export async function juniorVipTranscribeAudio(blob: Blob): Promise<string> {
+export async function juniorVipTranscribeAudio(blob: Blob, studentId: string): Promise<string> {
   const audio_base64 = await blobToBase64(blob);
   const res = await apiFetch('/api/junior-vip?op=transcribe', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ audio_base64, mime: blob.type || 'audio/webm' })
+    body: JSON.stringify({
+      audio_base64,
+      mime: blob.type || 'audio/webm',
+      student_id: studentId.trim()
+    })
   });
-  const j = (await res.json().catch(() => ({}))) as { text?: string; error?: string };
+  const j = (await res.json().catch(() => ({}))) as { text?: string; error?: string; hint?: string };
   if (!res.ok) {
+    if (res.status === 403) {
+      throw new Error(
+        j.hint || 'Yetki yok — öğrenci olarak giriş yapın veya taklit ettiğiniz öğrenciyi doğrulayın.'
+      );
+    }
     if (j.error === 'transcribe_unavailable') {
       throw new Error('Sunucuda ses çözümü kapalı. Telefondan dene veya yaz.');
     }
@@ -68,12 +78,13 @@ export async function juniorVipTranscribeAudio(blob: Blob): Promise<string> {
 
 export async function juniorVipChat(
   message: string,
-  history: JuniorVipChatMessage[]
+  history: JuniorVipChatMessage[],
+  studentId: string
 ): Promise<JuniorVipChatResponse> {
   const res = await apiFetch('/api/junior-vip?op=chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message, history })
+    body: JSON.stringify({ message, history, student_id: studentId.trim() })
   });
   const j = (await res.json().catch(() => ({}))) as JuniorVipChatResponse & { error?: string };
   if (!res.ok) throw new Error(j.error || 'Junior VIP yanıt veremedi');
