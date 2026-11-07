@@ -5223,6 +5223,20 @@ export async function fetchEdesisTermsList(cfgOverride = {}) {
 const examsCatalogCache = new Map();
 const EXAMS_CATALOG_TTL_MS = 90_000;
 
+export function buildEdesisCatalogExamIdSet(rows) {
+  const ids = new Set();
+  for (const row of rows || []) {
+    const id = pickEdesisCatalogExamId(row);
+    if (id) ids.add(String(id));
+  }
+  return ids;
+}
+
+/** Senkron / silinen deneme sonrası anında güncel katalog */
+export function invalidateEdesisExamsCatalogCache() {
+  examsCatalogCache.clear();
+}
+
 export async function fetchEdesisExamsCatalog(cfgOverride = {}, query = {}) {
   const cfg = { ...getEdesisConfig(), ...cfgOverride };
   if (!cfg.apiKey) throw new Error('EDESIS_API_KEY_missing');
