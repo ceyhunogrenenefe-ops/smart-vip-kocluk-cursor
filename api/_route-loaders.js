@@ -34,6 +34,7 @@ export const routeLoaders = {
   'topic-progress': () => import('../handlers/topic-progress.js'),
   'written-exams': () => import('../handlers/written-exams.js'),
   'ai-chat': () => import('../handlers/ai-chat.js'),
+  'junior-vip': () => import('../handlers/junior-vip.js'),
   'ai-agents': () => import('../handlers/ai-agents.js'),
   'ai-exams': () => import('../handlers/ai-exams.js'),
   meetings: () => import('../handlers/meetings.js'),
