@@ -1,4 +1,5 @@
 import { apiFetch } from './session';
+import { formatLessonUnits } from './groupLessonPaymentUnits';
 
 export type PrivateLessonFeeStatus = 'unpaid' | 'partial' | 'paid';
 
@@ -92,6 +93,9 @@ export type PrivateLessonFeeRow = {
   external_student_name?: string | null;
   is_external?: boolean;
   student_name: string;
+  parent_name?: string | null;
+  parent_phone?: string | null;
+  contact_phone_resolved?: string | null;
   teachers: PrivateLessonFeeTeacher[];
   system_hours: number;
   /** Öğretmenin aylık beyanında bildirdiği özel ders adedi */
@@ -177,6 +181,57 @@ export function formatPaymentAccountLabel(acc?: PrivateLessonFeePaymentAccount |
   const label = String(acc.label || '').trim();
   if (bank && label && bank !== label) return `${label} · ${bank}`;
   return label || bank || acc.id;
+}
+
+/** `2026-11` → `Kasım 2026` */
+export function formatPrivateLessonMonthLabel(periodYm: string): string {
+  const m = /^(\d{4})-(\d{2})$/.exec(String(periodYm || '').trim());
+  if (!m) return String(periodYm || '—');
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  if (!Number.isFinite(y) || !Number.isFinite(mo) || mo < 1 || mo > 12) return periodYm;
+  return new Date(y, mo - 1, 1).toLocaleDateString('tr-TR', { month: 'long', year: 'numeric' });
+}
+
+export type PrivateLessonFeeWhatsAppInput = {
+  parentName?: string | null;
+  studentName?: string | null;
+  periodYm: string;
+  lessonHours: number;
+  unitPriceTl: number;
+  totalTl: number;
+  bankName?: string | null;
+  iban?: string | null;
+};
+
+/** Veliye gönderilecek özel ders tahsilat mesajı (WhatsApp). */
+export function buildPrivateLessonFeeWhatsAppMessage(input: PrivateLessonFeeWhatsAppInput): string {
+  const veli = String(input.parentName || input.studentName || 'Veli').trim();
+  const ay = formatPrivateLessonMonthLabel(input.periodYm);
+  const birim = Number(input.unitPriceTl) || 0;
+  const toplam = Number(input.totalTl) || 0;
+  const lines = [
+    `Sayın ${veli},`,
+    '',
+    `${ay} ayına ait özel ders ödeme bilgileriniz:`,
+    `- Toplam Ders: ${formatLessonUnits(input.lessonHours)}`,
+    `- Birim Ücret: ${birim.toLocaleString('tr-TR')} TL`,
+    `- Toplam Ödeme: ${toplam.toLocaleString('tr-TR')} TL`
+  ];
+  const bank = String(input.bankName || '').trim();
+  const iban = String(input.iban || '').trim();
+  if (bank || iban) {
+    lines.push('', 'Ödeme Bilgileri:');
+    if (bank) lines.push(`Banka: ${bank}`);
+    if (iban) lines.push(`IBAN: ${iban}`);
+    lines.push('', 'Ödemenizi belirtilen hesaba gerçekleştirebilirsiniz.');
+  } else {
+    lines.push(
+      '',
+      'Ödeme için banka hesabı bilgisi seçilmedi — lütfen hesabı listeden seçin veya mesaja elle ekleyin.'
+    );
+  }
+  return lines.join('\n');
 }
 
 async function parseJson(res: Response) {
