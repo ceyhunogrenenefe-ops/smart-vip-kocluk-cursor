@@ -33,6 +33,39 @@ export async function fetchJuniorVipContext(): Promise<Record<string, unknown>> 
   return j.data || {};
 }
 
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const data = String(reader.result || '');
+      const comma = data.indexOf(',');
+      resolve(comma >= 0 ? data.slice(comma + 1) : data);
+    };
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+}
+
+export async function juniorVipTranscribeAudio(blob: Blob): Promise<string> {
+  const audio_base64 = await blobToBase64(blob);
+  const res = await apiFetch('/api/junior-vip?op=transcribe', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ audio_base64, mime: blob.type || 'audio/webm' })
+  });
+  const j = (await res.json().catch(() => ({}))) as { text?: string; error?: string };
+  if (!res.ok) {
+    if (j.error === 'transcribe_unavailable') {
+      throw new Error('Sunucuda ses çözümü kapalı. Telefondan dene veya yaz.');
+    }
+    if (j.error === 'audio_too_short') {
+      throw new Error('Kayıt çok kısa. Biraz daha konuşup tekrar dene.');
+    }
+    throw new Error(j.error || 'Ses metne çevrilemedi');
+  }
+  return String(j.text || '').trim();
+}
+
 export async function juniorVipChat(
   message: string,
   history: JuniorVipChatMessage[]

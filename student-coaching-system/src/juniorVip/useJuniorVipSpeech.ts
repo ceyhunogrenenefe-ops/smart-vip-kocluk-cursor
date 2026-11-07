@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { JuniorVipMascotGender } from './inferMascotGender';
+import { juniorVipTranscribeAudio } from './juniorVipApi';
 
 type SpeechResultList = {
   length: number;
@@ -31,6 +32,22 @@ function getRecognitionCtor(): SpeechCtor | null {
   return w.SpeechRecognition || w.webkitSpeechRecognition || null;
 }
 
+/** Telefonda Web Speech iyi; masaüstü Windows Chrome sık bozuk → sunucu Whisper. */
+export function prefersDesktopRecorderMode(): boolean {
+  if (typeof window === 'undefined') return false;
+  const ua = navigator.userAgent || '';
+  if (/Android|iPhone|iPad|iPod|Mobile/i.test(ua)) return false;
+  return typeof MediaRecorder !== 'undefined';
+}
+
+function pickRecorderMime(): string {
+  const candidates = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg'];
+  for (const c of candidates) {
+    if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(c)) return c;
+  }
+  return 'audio/webm';
+}
+
 function pickTurkishVoice(gender: JuniorVipMascotGender) {
   if (typeof window === 'undefined' || !window.speechSynthesis) return null;
   const voices = window.speechSynthesis.getVoices();
@@ -49,7 +66,6 @@ function transcriptPiece(result: SpeechResultList[number]): string {
   return String(alt?.transcript || '').trim();
 }
 
-/** Chrome: tüm result listesinden birleşik metin */
 function transcriptFromResults(results: SpeechResultList): string {
   let out = '';
   for (let i = 0; i < results.length; i++) {
@@ -84,29 +100,24 @@ export function useJuniorVipSpeech(opts: {
 }) {
   const { mascotGender, onError } = opts;
   const [listening, setListening] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
   const [micSupported, setMicSupported] = useState(false);
   const recRef = useRef<SpeechRecognitionInstance | null>(null);
   const onTranscriptRef = useRef<((text: string) => void) | null>(null);
   const lastHeardRef = useRef('');
-  const voicesReadyRef = useRef(false);
   const listenSessionRef = useRef(0);
   const noSpeechRetriesRef = useRef(0);
   const micStreamRef = useRef<MediaStream | null>(null);
+  const useRecorderRef = useRef(prefersDesktopRecorderMode());
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordChunksRef = useRef<Blob[]>([]);
+  const recorderMimeRef = useRef('audio/webm');
   const onErrorRef = useRef(onError);
   onErrorRef.current = onError;
 
   useEffect(() => {
-    setMicSupported(Boolean(getRecognitionCtor()));
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === 'undefined' || !window.speechSynthesis) return;
-    const load = () => {
-      voicesReadyRef.current = window.speechSynthesis.getVoices().length > 0;
-    };
-    load();
-    window.speechSynthesis.addEventListener('voiceschanged', load);
-    return () => window.speechSynthesis.removeEventListener('voiceschanged', load);
+    const ok = prefersDesktopRecorderMode() ? true : Boolean(getRecognitionCtor());
+    setMicSupported(ok);
   }, []);
 
   const releaseMicStream = useCallback(() => {
@@ -129,15 +140,61 @@ export function useJuniorVipSpeech(opts: {
     recRef.current = null;
   }, []);
 
+  const stopRecorder = useCallback(() => {
+    const rec = mediaRecorderRef.current;
+    mediaRecorderRef.current = null;
+    if (rec && rec.state !== 'inactive') {
+      try {
+        rec.stop();
+      } catch {
+        /* ignore */
+      }
+    }
+  }, []);
+
   const stopListening = useCallback(() => {
     listenSessionRef.current += 1;
     onTranscriptRef.current = null;
     noSpeechRetriesRef.current = 0;
     lastHeardRef.current = '';
     abortRecognition();
+    stopRecorder();
+    recordChunksRef.current = [];
     releaseMicStream();
     setListening(false);
-  }, [abortRecognition, releaseMicStream]);
+    setTranscribing(false);
+  }, [abortRecognition, releaseMicStream, stopRecorder]);
+
+  const ensureMicReady = useCallback(async (): Promise<boolean> => {
+    const stream = micStreamRef.current;
+    if (stream?.active && stream.getAudioTracks().some((t) => t.readyState === 'live')) {
+      return true;
+    }
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+      onErrorRef.current?.('Mikrofon API’si yok.');
+      return false;
+    }
+    try {
+      releaseMicStream();
+      const next = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        }
+      });
+      micStreamRef.current = next;
+      return true;
+    } catch {
+      onErrorRef.current?.('Mikrofon izni gerekli (kilit simgesi → İzin ver).');
+      return false;
+    }
+  }, [releaseMicStream]);
+
+  const releaseMicWarmup = useCallback(() => {
+    if (listening || transcribing) return;
+    stopListening();
+  }, [listening, stopListening, transcribing]);
 
   const speak = useCallback(
     (text: string) => {
@@ -155,6 +212,38 @@ export function useJuniorVipSpeech(opts: {
       window.speechSynthesis.speak(u);
     },
     [mascotGender]
+  );
+
+  const startRecorder = useCallback(
+    (sessionId: number) => {
+      const stream = micStreamRef.current;
+      if (!stream || sessionId !== listenSessionRef.current) return;
+
+      recordChunksRef.current = [];
+      const mime = pickRecorderMime();
+      recorderMimeRef.current = mime;
+      let recorder: MediaRecorder;
+      try {
+        recorder = new MediaRecorder(stream, { mimeType: mime });
+      } catch {
+        recorder = new MediaRecorder(stream);
+        recorderMimeRef.current = recorder.mimeType || 'audio/webm';
+      }
+
+      recorder.ondataavailable = (ev) => {
+        if (ev.data?.size) recordChunksRef.current.push(ev.data);
+      };
+
+      recorder.onerror = () => {
+        onErrorRef.current?.('Ses kaydı hatası.');
+        setListening(false);
+      };
+
+      mediaRecorderRef.current = recorder;
+      recorder.start(300);
+      setListening(true);
+    },
+    []
   );
 
   const armRecognition = useCallback(
@@ -223,21 +312,27 @@ export function useJuniorVipSpeech(opts: {
 
   const startListening = useCallback(
     (onTranscript: (text: string) => void) => {
-      const Ctor = getRecognitionCtor();
-      if (!Ctor) {
-        onErrorRef.current?.('Bu tarayıcıda sesli komut desteklenmiyor. Chrome veya Edge dene.');
-        return;
-      }
-
       if (typeof window !== 'undefined' && window.isSecureContext === false) {
         onErrorRef.current?.('Sesli komut yalnızca güvenli bağlantıda (https) çalışır.');
         return;
       }
 
-      stopListening();
+      const desktopRec = prefersDesktopRecorderMode();
+      useRecorderRef.current = desktopRec;
+
+      if (!desktopRec && !getRecognitionCtor()) {
+        onErrorRef.current?.('Bu tarayıcıda sesli komut desteklenmiyor. Chrome veya Edge dene.');
+        return;
+      }
+
+      abortRecognition();
+      stopRecorder();
+      recordChunksRef.current = [];
+      listenSessionRef.current += 1;
+      const sessionId = listenSessionRef.current;
       onTranscriptRef.current = onTranscript;
       noSpeechRetriesRef.current = 0;
-      const sessionId = listenSessionRef.current;
+      lastHeardRef.current = '';
 
       try {
         window.speechSynthesis?.cancel();
@@ -245,34 +340,65 @@ export function useJuniorVipSpeech(opts: {
         /* ignore */
       }
 
+      if (desktopRec) {
+        void ensureMicReady().then((ok) => {
+          if (!ok || sessionId !== listenSessionRef.current) return;
+          startRecorder(sessionId);
+        });
+        return;
+      }
+
       setListening(true);
       armRecognition(sessionId);
 
-      void navigator.mediaDevices
-        ?.getUserMedia({
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true
-          }
-        })
-        .then((stream) => {
-          if (sessionId !== listenSessionRef.current) {
-            for (const track of stream.getTracks()) track.stop();
-            return;
-          }
-          releaseMicStream();
-          micStreamRef.current = stream;
-        })
-        .catch(() => {
-          /* SpeechRecognition ayrı izin kullanır */
-        });
+      void ensureMicReady();
     },
-    [armRecognition, releaseMicStream, stopListening]
+    [armRecognition, ensureMicReady, startRecorder]
   );
 
-  /** Dinlemeyi kapat; varsa son duyulan metni döndür */
-  const finishListening = useCallback((): string => {
+  const finishListening = useCallback(async (): Promise<string> => {
+    const desktopRec = useRecorderRef.current;
+
+    if (desktopRec && mediaRecorderRef.current) {
+      const sessionId = listenSessionRef.current;
+      setListening(false);
+      setTranscribing(true);
+
+      const recorder = mediaRecorderRef.current;
+      const mime = recorderMimeRef.current;
+      const textPromise = new Promise<string>((resolve) => {
+        recorder.onstop = () => {
+          mediaRecorderRef.current = null;
+          const blob = new Blob(recordChunksRef.current, { type: mime });
+          recordChunksRef.current = [];
+          if (blob.size < 200) {
+            resolve('');
+            return;
+          }
+          void juniorVipTranscribeAudio(blob)
+            .then(resolve)
+            .catch((e) => {
+              onErrorRef.current?.(e instanceof Error ? e.message : 'Ses çözülemedi');
+              resolve('');
+            });
+        };
+        try {
+          recorder.stop();
+        } catch {
+          resolve('');
+        }
+      });
+
+      const text = await textPromise;
+      if (sessionId === listenSessionRef.current) {
+        listenSessionRef.current += 1;
+        onTranscriptRef.current = null;
+      }
+      setTranscribing(false);
+      releaseMicStream();
+      return text.trim();
+    }
+
     const heard = (lastHeardRef.current || '').trim();
     listenSessionRef.current += 1;
     onTranscriptRef.current = null;
@@ -284,5 +410,16 @@ export function useJuniorVipSpeech(opts: {
     return heard;
   }, [abortRecognition, releaseMicStream]);
 
-  return { micSupported, listening, startListening, stopListening, finishListening, speak };
+  return {
+    micSupported,
+    listening,
+    transcribing,
+    desktopRecorderMode: useRecorderRef.current,
+    startListening,
+    stopListening,
+    finishListening,
+    ensureMicReady,
+    releaseMicWarmup,
+    speak
+  };
 }
