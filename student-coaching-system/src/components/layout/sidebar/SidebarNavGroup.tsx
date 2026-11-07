@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import * as Collapsible from '@radix-ui/react-collapsible';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { ChevronDown } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { cn } from '../../../lib/utils';
 import type { FlatNavItem, NavGroupKind } from './navModel';
-import { pathnameMatchesGroup } from './navModel';
+import { pathnameAndSearchMatchNavItem, pathnameMatchesGroup } from './navModel';
 
 type Props = {
   /** lessons | academic | org | settings | studentPanel | team | whatsapp | crm */
@@ -20,10 +21,6 @@ type Props = {
   itemMatchExact?: boolean;
 };
 
-function routeInGroup(pathname: string, kind: NavGroupKind, items: FlatNavItem[]) {
-  return pathnameMatchesGroup(pathname, kind, items);
-}
-
 export function SidebarNavGroup({
   id,
   label,
@@ -34,7 +31,9 @@ export function SidebarNavGroup({
   onNavigate,
   itemMatchExact = false
 }: Props) {
-  const routeIn = routeInGroup(pathname, id, items);
+  const location = useLocation();
+  const search = location.search;
+  const routeIn = pathnameMatchesGroup(pathname, id, items, search);
   /** null = otomatik (aktif rota varsa açık); kullanıcı ok ile açıp kapatabilir */
   const [userOpen, setUserOpen] = useState<boolean | null>(null);
 
@@ -74,9 +73,7 @@ export function SidebarNavGroup({
               {label}
             </div>
             {items.map((it) => {
-              const active = itemMatchExact
-                ? pathname === it.path
-                : pathname === it.path || pathname.startsWith(`${it.path}/`);
+              const active = pathnameAndSearchMatchNavItem(pathname, search, it.path, itemMatchExact);
               const SubIcon = it.icon;
               return (
                 <DropdownMenu.Item
@@ -126,9 +123,7 @@ export function SidebarNavGroup({
         <div className="mx-0.5 rounded-xl bg-slate-950/45 py-1 ring-1 ring-white/[0.06]">
         <ul className="space-y-0.5 px-0.5 pb-1 pt-0.5">
           {items.map((it) => {
-            const active = itemMatchExact
-              ? pathname === it.path
-              : pathname === it.path || pathname.startsWith(`${it.path}/`);
+            const active = pathnameAndSearchMatchNavItem(pathname, search, it.path, itemMatchExact);
             const SubIcon = it.icon;
             return (
               <li key={it.path}>
