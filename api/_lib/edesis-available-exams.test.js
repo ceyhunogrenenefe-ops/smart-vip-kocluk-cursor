@@ -2039,6 +2039,19 @@ describe('kitapcikAllowedForExam', () => {
     assert.equal(kitapcikAllowedForExam(structure, 'B').ok, true);
     assert.deepEqual(kitapcikAllowedForExam(structure, 'B').available, ['A', 'B']);
   });
+
+  it('allows B when answer key lessons exist but booklet code list omitted B', () => {
+    const structure = {
+      rows: [{ kitapcikTuru: 'A', lessonId: 1, dersGrupId: 1, lessonName: 'Türkçe', questionCount: 2 }],
+      answerKeyBookletCodes: ['A'],
+      answerKeyLessons: [
+        { kitapcikTuru: 'A', lessonId: 1, dersGrupId: 1, lessonName: 'Türkçe', questionCount: 2 },
+        { kitapcikTuru: 'B', lessonId: 9, dersGrupId: 2, lessonName: 'Türkçe', questionCount: 2 }
+      ]
+    };
+    assert.deepEqual(listEdesisBookletCodes(structure), ['A', 'B']);
+    assert.equal(kitapcikAllowedForExam(structure, 'B').ok, true);
+  });
 });
 
 describe('extractEdesisStructureRows / normalizeKitapcikCode', () => {

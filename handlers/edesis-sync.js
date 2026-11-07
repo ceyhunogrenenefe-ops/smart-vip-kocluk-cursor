@@ -2273,7 +2273,12 @@ export default async function handler(req, res) {
          * Tanı: gönderim sırasında her kitapçık için beklenen ders düzeni.
          * Optikteki düzenle karşılaştırılır; uyuşmazlık "answer_length_mismatch" üretir.
          */
-        bookletLessonLayouts: (structure.availableBookletCodes || listEdesisBookletCodes(structure)).reduce(
+        bookletLessonLayouts: [
+          ...new Set([
+            ...(structure.availableBookletCodes || listEdesisBookletCodes(structure)),
+            ...denemeOnlyBookletCodes(structure)
+          ])
+        ].reduce(
           (acc, code) => {
             try {
               acc[code] = pickEdesisBookletLessons(structure, code).map((l) => ({
