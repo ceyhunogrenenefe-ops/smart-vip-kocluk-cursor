@@ -6,6 +6,7 @@ import MobileTabBar from './MobileTabBar';
 import { useMobileAppShell } from '../../hooks/useMobileAppShell';
 import { cn } from '../../lib/utils';
 import { EtutSessionReturnGate } from '../etut/EtutSessionReturnGate';
+import JuniorVipHost from '../../juniorVip/JuniorVipHost';
 
 function readDesktopWideInitial(): boolean {
   if (typeof window === 'undefined') return true;
@@ -116,6 +117,7 @@ export default function Layout({ children }: LayoutProps) {
 
         {mobileAppShell ? <MobileTabBar /> : null}
         <EtutSessionReturnGate />
+        <JuniorVipHost />
 
         {!mobileAppShell && mobileDrawerOpen ? (
           <button
@@ -153,6 +155,7 @@ export default function Layout({ children }: LayoutProps) {
 
       {mobileAppShell ? <MobileTabBar /> : null}
       <EtutSessionReturnGate />
+      <JuniorVipHost />
 
       {!mobileAppShell && mobileDrawerOpen ? (
         <button
