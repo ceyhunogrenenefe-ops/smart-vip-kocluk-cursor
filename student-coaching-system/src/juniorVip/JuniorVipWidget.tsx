@@ -68,7 +68,7 @@ export default function JuniorVipWidget() {
   const [guideBanner, setGuideBanner] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
-  const { micSupported, listening, startListening, stopListening, speak } = useJuniorVipSpeech({
+  const { micSupported, listening, startListening, stopListening, finishListening, speak } = useJuniorVipSpeech({
     mascotGender,
     onError: (msg) => toast.error(msg, { duration: 5000 })
   });
@@ -266,7 +266,9 @@ export default function JuniorVipWidget() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               rows={1}
-              placeholder={listening ? 'Dinliyorum… konuşabilirsin' : 'Yaz veya mikrofona bas…'}
+              placeholder={
+                listening ? 'Konuş… bitince mikrofona tekrar bas (gönder)' : 'Yaz veya mikrofona bas…'
+              }
               className="max-h-24 min-h-[40px] flex-1 resize-none rounded-xl border border-slate-200 px-2.5 py-2 text-sm dark:border-slate-600 dark:bg-slate-950"
             />
             {micSupported ? (
@@ -274,22 +276,21 @@ export default function JuniorVipWidget() {
                 type="button"
                 onClick={() => {
                   if (listening) {
-                    stopListening();
+                    const heard = finishListening();
+                    const text = (heard || input).trim();
+                    if (text) {
+                      setInput(text);
+                      void submitMessage(text);
+                    }
                     return;
                   }
-                  void startListening(
-                    (t) => {
-                      setInput(t);
-                      void submitMessage(t);
-                    },
-                    (interim) => setInput(interim)
-                  );
+                  startListening((t) => setInput(t));
                 }}
                 className={cn(
                   'flex h-10 w-10 shrink-0 items-center justify-center rounded-xl',
                   listening ? 'bg-rose-500 text-white animate-pulse' : JUNIOR_VIP_THEME.micIdle
                 )}
-                title="Sesli komut — mikrofon izni gerekir"
+                title={listening ? 'Dinlemeyi bitir ve gönder' : 'Sesli komut — konuş, bitince tekrar bas'}
               >
                 {listening ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
               </button>
