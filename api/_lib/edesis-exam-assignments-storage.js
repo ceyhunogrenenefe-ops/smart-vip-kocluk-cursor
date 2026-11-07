@@ -91,6 +91,46 @@ export async function storageUpsertExams(rows) {
   return { upserted: (rows || []).length, total: next.length };
 }
 
+/**
+ * Edesis kataloğunda artık yoksa yerel kopyayı ve atamaları temizle.
+ */
+export async function storagePruneExamsNotInCatalog({ institutionId = null, liveExamIds = [] } = {}) {
+  await ensureEdesisAssignStorageBackend();
+  const live = new Set((liveExamIds || []).map((id) => String(id)).filter(Boolean));
+  if (!live.size) return { prunedExams: 0, prunedAssignments: 0, skipped: 'empty_live_set' };
+
+  const inst = institutionId != null && String(institutionId).trim() ? String(institutionId) : null;
+  const matchesScope = (row) =>
+    !inst || !row.institution_id || String(row.institution_id) === inst;
+
+  let exams = await readJsonFile(EXAMS_PATH, []);
+  if (!Array.isArray(exams)) exams = [];
+  const staleExamIds = new Set();
+  const nextExams = [];
+  for (const row of exams) {
+    const eid = String(row.edesis_exam_id || '');
+    if (eid && matchesScope(row) && !live.has(eid)) {
+      staleExamIds.add(eid);
+      continue;
+    }
+    nextExams.push(row);
+  }
+  const prunedExams = exams.length - nextExams.length;
+  if (prunedExams) await writeJsonFile(EXAMS_PATH, nextExams);
+
+  let assignments = await readJsonFile(ASSIGNMENTS_PATH, []);
+  if (!Array.isArray(assignments)) assignments = [];
+  const nextAssignments = assignments.filter((row) => {
+    const eid = String(row.edesis_exam_id || '');
+    if (!eid || !staleExamIds.has(eid)) return true;
+    return !matchesScope(row);
+  });
+  const prunedAssignments = assignments.length - nextAssignments.length;
+  if (prunedAssignments) await writeJsonFile(ASSIGNMENTS_PATH, nextAssignments);
+
+  return { prunedExams, prunedAssignments, staleExamIds: [...staleExamIds] };
+}
+
 export async function storageListExams({ institutionId = null, limit = 200 } = {}) {
   await ensureEdesisAssignStorageBackend();
   let list = await readJsonFile(EXAMS_PATH, []);

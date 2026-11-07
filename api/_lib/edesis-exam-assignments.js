@@ -4,7 +4,11 @@
  * Şema yoksa SUPABASE_DB_URL / DATABASE_URL / SUPABASE_DB_PASSWORD ile otomatik kurulur.
  */
 import { supabaseAdmin } from './supabase-admin.js';
-import { fetchEdesisExamsCatalog, pickEdesisCatalogExamId } from './edesis-client.js';
+import {
+  fetchEdesisExamsCatalog,
+  invalidateEdesisExamsCatalogCache,
+  pickEdesisCatalogExamId
+} from './edesis-client.js';
 import { errorMessage } from './error-msg.js';
 import {
   ensureEdesisAssignStorageBackend,
@@ -14,7 +18,8 @@ import {
   storageListAssignments,
   storageListExams,
   storageResolveExamIdsForStudent,
-  storageUpsertExams
+  storageUpsertExams,
+  storagePruneExamsNotInCatalog
 } from './edesis-exam-assignments-storage.js';
 
 const EDESIS_ASSIGN_SCHEMA_SQL = `
@@ -362,10 +367,67 @@ function mapCatalogRowToExamUpsert(row, institutionId) {
   };
 }
 
+/**
+ * Edesis'te silinen denemeleri yerel edesis_exams + atamalardan kaldır.
+ * Yalnızca canlı katalog başarıyla dolu geldiğinde çalışır (boş yanıtta silme yok).
+ */
+export async function pruneEdesisCatalogStaleRecords({ institutionId, liveExamIds } = {}) {
+  const live = [...new Set((liveExamIds || []).map((id) => String(id)).filter(Boolean))];
+  if (!live.length) return { prunedExams: 0, prunedAssignments: 0, skipped: 'empty_live_set' };
+
+  const inst = String(institutionId || '').trim() || null;
+  await ensureEdesisExamAssignmentSchema().catch(() => null);
+
+  if (getEdesisAssignBackendMode() === 'storage') {
+    return storagePruneExamsNotInCatalog({ institutionId: inst, liveExamIds: live });
+  }
+
+  let examQuery = supabaseAdmin.from('edesis_exams').select('edesis_exam_id, institution_id');
+  if (inst) {
+    examQuery = examQuery.or(`institution_id.eq.${inst},institution_id.is.null`);
+  }
+  const { data: localRows, error: readErr } = await examQuery.limit(8000);
+  if (readErr) {
+    if (isSchemaMissingError(readErr)) return { prunedExams: 0, prunedAssignments: 0, skipped: 'schema_missing' };
+    throw readErr;
+  }
+  const liveSet = new Set(live);
+  const staleIds = (localRows || [])
+    .map((r) => String(r.edesis_exam_id || ''))
+    .filter((id) => id && !liveSet.has(id));
+  const uniqueStale = [...new Set(staleIds)];
+  if (!uniqueStale.length) return { prunedExams: 0, prunedAssignments: 0 };
+
+  let prunedAssignments = 0;
+  const chunk = 80;
+  for (let i = 0; i < uniqueStale.length; i += chunk) {
+    const slice = uniqueStale.slice(i, i + chunk);
+    const { error: asgErr, count } = await supabaseAdmin
+      .from('edesis_exam_assignments')
+      .delete({ count: 'exact' })
+      .in('edesis_exam_id', slice);
+    if (asgErr && !isSchemaMissingError(asgErr)) throw asgErr;
+    if (typeof count === 'number') prunedAssignments += count;
+  }
+
+  let prunedExams = 0;
+  for (let i = 0; i < uniqueStale.length; i += chunk) {
+    const slice = uniqueStale.slice(i, i + chunk);
+    let del = supabaseAdmin.from('edesis_exams').delete({ count: 'exact' }).in('edesis_exam_id', slice);
+    if (inst) del = del.or(`institution_id.eq.${inst},institution_id.is.null`);
+    const { error: exErr, count } = await del;
+    if (exErr && !isSchemaMissingError(exErr)) throw exErr;
+    if (typeof count === 'number') prunedExams += count;
+  }
+
+  return { prunedExams, prunedAssignments, staleExamIds: uniqueStale.slice(0, 40) };
+}
+
 /** Edesis GET /exams → edesis_exams upsert (veya Storage JSON) */
 export async function syncEdesisExamCatalogToDb({ institutionId, cfg } = {}) {
   const ensured = await ensureEdesisExamAssignmentSchema();
   const inst = String(institutionId || '').trim() || null;
+  invalidateEdesisExamsCatalogCache();
   const catalog = await fetchEdesisExamsCatalog(cfg || {}, {});
   const rows = Array.isArray(catalog.rows) ? catalog.rows : [];
   // Edesis kataloğu aynı sınavı birden çok kez döndürebiliyor (sayfalama tekrarı). Aynı toplu
@@ -378,6 +440,17 @@ export async function syncEdesisExamCatalogToDb({ institutionId, cfg } = {}) {
   }
   const upserts = [...byExamId.values()];
 
+  let prune = { prunedExams: 0, prunedAssignments: 0, skipped: 'not_run' };
+  const liveIds = upserts.map((u) => u.edesis_exam_id);
+  const mayPrune = rows.length > 0 && !catalog.error;
+  if (mayPrune) {
+    try {
+      prune = await pruneEdesisCatalogStaleRecords({ institutionId: inst, liveExamIds: liveIds });
+    } catch (e) {
+      prune = { prunedExams: 0, prunedAssignments: 0, error: errorMessage(e) };
+    }
+  }
+
   if (ensured?.via === 'storage' || schemaBackendMode === 'storage') {
     const result = await storageUpsertExams(upserts);
     return {
@@ -386,7 +459,8 @@ export async function syncEdesisExamCatalogToDb({ institutionId, cfg } = {}) {
       upserted: result.upserted,
       cached: Boolean(catalog.cached),
       totalCount: catalog.totalCount ?? rows.length,
-      backend: 'storage'
+      backend: 'storage',
+      prune
     };
   }
 
@@ -445,8 +519,15 @@ export async function syncEdesisExamCatalogToDb({ institutionId, cfg } = {}) {
     upserted,
     cached: Boolean(catalog.cached),
     totalCount: catalog.totalCount ?? rows.length,
-    backend: 'sql'
+    backend: 'sql',
+    prune
   };
+}
+
+/** Öğrenci / koç listesinden Edesis'te artık olmayan sınavları çıkar */
+export function filterExamItemsToLiveEdesisCatalog(items, liveExamIdSet) {
+  if (!liveExamIdSet || liveExamIdSet.size < 1) return items || [];
+  return (items || []).filter((it) => liveExamIdSet.has(String(it.examId || it.edesisExamId || '')));
 }
 
 

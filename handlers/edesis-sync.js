@@ -20,6 +20,7 @@ import {
   fetchEdesisStudentByOgrenciId,
   fetchEdesisTermsList,
   fetchEdesisExamsCatalog,
+  buildEdesisCatalogExamIdSet,
   fetchEdesisExamsCatalogForStudent,
   fetchEdesisExamsCatalogForClassroom,
   resolveAssignedCatalogRowsForStudentAsync,
@@ -102,6 +103,7 @@ import {
   deleteEdesisExamAssignment,
   resolveLocallyAssignedEdesisExamIdsForStudent,
   filterExamItemsByLocalAssignment,
+  filterExamItemsToLiveEdesisCatalog,
   assertStudentMayAccessEdesisExam
 } from '../api/_lib/edesis-exam-assignments.js';
 
@@ -225,6 +227,7 @@ async function resolveLocalAssignedExamItems({
   edesisStudentId,
   actor,
   catalogRows = [],
+  catalogIdSet = null,
   cfg,
   excludeIds = new Set()
 }) {
@@ -239,7 +242,10 @@ async function resolveLocalAssignedExamItems({
   } catch {
     return { items: [] };
   }
-  const ids = [...(gate?.examIds || [])].map(String).filter((id) => id && !excludeIds.has(id));
+  let ids = [...(gate?.examIds || [])].map(String).filter((id) => id && !excludeIds.has(id));
+  if (catalogIdSet && catalogIdSet.size > 0) {
+    ids = ids.filter((id) => catalogIdSet.has(String(id)));
+  }
   if (!ids.length) return { items: [] };
 
   const byId = new Map();
@@ -269,6 +275,7 @@ async function resolveLocalAssignedExamItems({
     }
   }
   for (const id of ids.filter((x) => !byId.has(x)).slice(0, 12)) {
+    if (catalogIdSet && catalogIdSet.size > 0 && !catalogIdSet.has(String(id))) continue;
     const detail = await fetchEdesisExamCatalogRowDetail(id, cfg).catch(() => null);
     if (detail) byId.set(id, { id, ...detail });
   }
@@ -308,6 +315,8 @@ async function loadAvailableEdesisExamsForStudent({
     }))
   ]);
   const fullRows = catalog.rows || [];
+  const catalogIdSet = buildEdesisCatalogExamIdSet(fullRows);
+  const catalogAuthoritative = fullRows.length > 0 && !catalog.error;
   // StudentId/ClassroomId katalog sorguları Edesis’te yok sayılıp 1972 satır dump eder (~4s ×2).
   const assignedResolved = await resolveAssignedCatalogRowsForStudentAsync(
     {
@@ -423,11 +432,17 @@ async function loadAvailableEdesisExamsForStudent({
     edesisStudentId,
     actor,
     catalogRows: fullRows,
+    catalogIdSet: catalogAuthoritative ? catalogIdSet : null,
     cfg,
     excludeIds: new Set([...visibleItems.map((x) => String(x.examId)), ...resultExamIds.map(String)])
   });
   if (localAssigned.items.length) {
     visibleItems = [...localAssigned.items, ...visibleItems];
+  }
+  if (catalogAuthoritative) {
+    visibleItems = filterExamItemsToLiveEdesisCatalog(visibleItems, catalogIdSet);
+    expired.splice(0, expired.length, ...filterExamItemsToLiveEdesisCatalog(expired, catalogIdSet));
+    openOnline = filterExamItemsToLiveEdesisCatalog(openOnline, catalogIdSet);
   }
   const localAssignedIds = localAssigned.items.map((x) => x.examId);
   const visibleTakeableIds = visibleItems
