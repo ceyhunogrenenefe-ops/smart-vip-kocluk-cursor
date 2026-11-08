@@ -11,14 +11,14 @@ import { JuniorVipMascot } from './JuniorVipMascot';
 import {
   fetchJuniorVipCapabilities,
   juniorVipChat,
-  saveJuniorVipStudyLog,
   type JuniorVipCapabilities,
   type JuniorVipChatMessage,
+  type JuniorVipChatResponse,
   type JuniorVipNavigateAction,
   type JuniorVipPanel,
-  type JuniorVipScope,
-  type JuniorVipStudyLogProposal
+  type JuniorVipScope
 } from './juniorVipApi';
+import { mapWeeklyEntryApiRow, type WeeklyEntryApiRow } from '../lib/weeklyPlannerApi';
 import { useJuniorVipSpeech } from './useJuniorVipSpeech';
 import { inferJuniorVipMascotGender } from './inferMascotGender';
 import { JUNIOR_VIP_THEME } from './juniorVipTheme';
@@ -29,7 +29,7 @@ const PANEL_COPY: Record<JuniorVipPanel, { subtitle: string; greeting: string; p
   student: {
     subtitle: 'Akıllı Öğrenci Asistanı',
     greeting:
-      'Merhaba! Ben Junior VIP. Menüde nereye gideceğini sorabilir, bugün çözdüğün soruları birlikte planına yazabiliriz.',
+      'Merhaba! Ben Junior VIP. "Bugünkü planıma matematik 40 soru ekle", "Bugün 80 soru çözdüm" ya da "Bugün dersim var mı?" diyebilirsin.',
     placeholder: 'Yaz veya mikrofona bas…'
   },
   coach: {
@@ -103,7 +103,8 @@ export default function JuniorVipWidget() {
   const [messages, setMessages] = useState<JuniorVipChatMessage[]>([
     { role: 'assistant', content: copy.greeting }
   ]);
-  const [pendingLog, setPendingLog] = useState<JuniorVipStudyLogProposal | null>(null);
+  /** Sunucunun imzaladığı çok adımlı konuşma durumu (ders/konu/saat soruları arasında bilgi kaybolmasın). */
+  const [stateToken, setStateToken] = useState<string | null>(null);
   const [guideBanner, setGuideBanner] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -135,7 +136,7 @@ export default function JuniorVipWidget() {
   const scopeKey = `${panel || ''}:${panel === 'student' ? studentId : effectiveUser?.id || ''}`;
   useEffect(() => {
     setMessages([{ role: 'assistant', content: PANEL_COPY[panel || 'student'].greeting }]);
-    setPendingLog(null);
+    setStateToken(null);
     setCaps(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scopeKey]);
@@ -164,7 +165,7 @@ export default function JuniorVipWidget() {
   useEffect(() => {
     if (!open) return;
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: 'smooth' });
-  }, [messages, open, pendingLog]);
+  }, [messages, open]);
 
   useEffect(() => {
     if (!open) {
@@ -186,6 +187,24 @@ export default function JuniorVipWidget() {
     [navigate]
   );
 
+  /** Sunucu kaydı doğruladıysa ilgili ekranları yenile (Haftalık plan, çalışma kayıtları). */
+  const applyToolResult = useCallback(
+    (res: JuniorVipChatResponse) => {
+      if (!res.refresh?.includes('weekly-planner') || !res.result || panel !== 'student') return;
+      const raw = (res.result as { entry?: unknown }).entry;
+      const entries =
+        raw && typeof raw === 'object' && (raw as { id?: string }).id
+          ? [mapWeeklyEntryApiRow(raw as WeeklyEntryApiRow)]
+          : [];
+      window.dispatchEvent(
+        new CustomEvent('coaching:planner-study-saved', {
+          detail: { studentId, date: res.result.date, entries, source: 'junior-vip' }
+        })
+      );
+    },
+    [panel, studentId]
+  );
+
   const submitMessage = useCallback(
     async (text: string) => {
       const trimmed = text.trim();
@@ -194,11 +213,11 @@ export default function JuniorVipWidget() {
       const nextHistory: JuniorVipChatMessage[] = [...messages, { role: 'user', content: trimmed }];
       setMessages(nextHistory);
       setBusy(true);
-      setPendingLog(null);
       try {
-        const res = await juniorVipChat(trimmed, messages, scope);
+        const res = await juniorVipChat(trimmed, messages, scope, stateToken);
+        if (res.state_token) setStateToken(res.state_token);
         setMessages((m) => [...m, { role: 'assistant', content: res.reply }]);
-        if (res.proposed_study_log && panel === 'student') setPendingLog(res.proposed_study_log);
+        applyToolResult(res);
         if (res.actions?.length) runNavigate(res.actions);
         if (speakReplies) speak(res.reply);
       } catch (e) {
@@ -206,36 +225,18 @@ export default function JuniorVipWidget() {
         toast.error(msg);
         setMessages((m) => [
           ...m,
-          { role: 'assistant', content: 'Üzgünüm, şu an bağlanamadım. Biraz sonra tekrar dener misin?' }
+          {
+            role: 'assistant',
+            content:
+              'Üzgünüm, şu an bağlanamadım; bu mesajla ilgili bir kayıt yapıldığını varsayma. Biraz sonra tekrar dener misin?'
+          }
         ]);
       } finally {
         setBusy(false);
       }
     },
-    [busy, messages, panel, runNavigate, scope, speak, speakReplies]
+    [applyToolResult, busy, messages, runNavigate, scope, speak, speakReplies, stateToken]
   );
-
-  const confirmStudyLog = async () => {
-    if (!pendingLog || !studentId || panel !== 'student') return;
-    setBusy(true);
-    try {
-      await saveJuniorVipStudyLog(studentId, pendingLog);
-      toast.success('Harika! Çalışma kaydın haftalık plana eklendi.');
-      setMessages((m) => [
-        ...m,
-        {
-          role: 'assistant',
-          content: `Tamamdır! ${pendingLog.date} — ${pendingLog.subject} / ${pendingLog.topic}: ${pendingLog.solved_questions} soru kaydedildi.`
-        }
-      ]);
-      setPendingLog(null);
-      runNavigate([{ type: 'navigate', path: '/weekly-planner', label: 'Haftalık plan' }]);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Kayıt başarısız');
-    } finally {
-      setBusy(false);
-    }
-  };
 
   if (!panel || (panel === 'student' && !studentId)) return null;
 
@@ -311,33 +312,6 @@ export default function JuniorVipWidget() {
                 {m.content}
               </div>
             ))}
-            {pendingLog ? (
-              <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-950">
-                <p className="font-semibold">Planına kaydedeyim mi?</p>
-                <p className="mt-1">
-                  {pendingLog.date} · {pendingLog.subject} · {pendingLog.topic} ·{' '}
-                  <strong>{pendingLog.solved_questions}</strong> soru
-                </p>
-                <div className="mt-2 flex gap-2">
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => void confirmStudyLog()}
-                    className="rounded-lg bg-emerald-600 px-3 py-1.5 text-[11px] font-semibold text-white"
-                  >
-                    Evet, kaydet
-                  </button>
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => setPendingLog(null)}
-                    className="rounded-lg border border-emerald-300 px-3 py-1.5 text-[11px] font-semibold"
-                  >
-                    Vazgeç
-                  </button>
-                </div>
-              </div>
-            ) : null}
             {busy ? (
               <p className="flex items-center gap-1 text-xs text-slate-500">
                 <Loader2 className="h-3.5 w-3.5 animate-spin" /> Düşünüyorum…

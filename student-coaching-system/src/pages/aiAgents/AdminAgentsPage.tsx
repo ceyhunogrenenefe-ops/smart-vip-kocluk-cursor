@@ -34,6 +34,7 @@ import type { AIAgent, AIAgentDocument, AIUsageSummary } from '../../types/aiAge
 import { blobToBase64, hashFile, loadPdf, renderPageToPngBlob } from '../../lib/aiAgents/pdfExtract';
 import QuestionPoolTab from './admin/QuestionPoolTab';
 import PapersTab from './admin/PapersTab';
+import JuniorVipAdminTab from './admin/JuniorVipAdminTab';
 
 const SUBJECT_PRESETS = [
   'Fizik',
@@ -54,7 +55,7 @@ export default function AdminAgentsPage() {
   const [agents, setAgents] = useState<AIAgent[]>([]);
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState<AIAgent | null>(null);
-  const [tab, setTab] = useState<'agents' | 'usage' | 'settings'>('agents');
+  const [tab, setTab] = useState<'agents' | 'usage' | 'settings' | 'junior'>('agents');
 
   const refresh = async () => {
     setLoading(true);
@@ -102,6 +103,12 @@ export default function AdminAgentsPage() {
           >
             <SettingsIcon className="w-4 h-4 inline -mt-0.5 mr-1" /> Ayarlar
           </button>
+          <button
+            onClick={() => setTab('junior')}
+            className={`px-3 py-1.5 rounded-lg text-sm ${tab === 'junior' ? 'bg-blue-600 text-white' : 'bg-white border'}`}
+          >
+            <Bot className="w-4 h-4 inline -mt-0.5 mr-1" /> Junior VIP
+          </button>
         </div>
       </div>
 
@@ -139,6 +146,7 @@ export default function AdminAgentsPage() {
 
       {tab === 'usage' && <UsagePanel />}
       {tab === 'settings' && <SettingsPanel />}
+      {tab === 'junior' && <JuniorVipAdminTab />}
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import HaftaAktarModal from './HaftaAktarModal';
+import { useLocation } from 'react-router-dom';
 import { addDays, format, isBefore, parseISO, startOfWeek } from 'date-fns';
 import { tr } from 'date-fns/locale/tr';
 import { IconTapButton } from '../ui/IconTapButton';
@@ -267,7 +268,15 @@ export function WeeklyPlannerCalendar({
     return sortSubjectsWithStudyTracks(Object.keys(tb.regular));
   }, [classLevel, getTopicsByClass]);
 
+  const location = useLocation();
   const [anchor, setAnchor] = useState(() => new Date());
+  /** ?date=YYYY-MM-DD (ör. Junior VIP "yarına ekledim") → o günün haftasını aç */
+  useEffect(() => {
+    const d = new URLSearchParams(location.search).get('date');
+    if (!d || !/^\d{4}-\d{2}-\d{2}$/.test(d)) return;
+    const parsed = parseISO(d);
+    if (!Number.isNaN(parsed.getTime())) setAnchor(parsed);
+  }, [location.search]);
   const [haftaAktarAcik, setHaftaAktarAcik] = useState(false);
   const weekStartStr = useMemo(
     () => format(startOfWeek(anchor, { weekStartsOn: 1 }), 'yyyy-MM-dd'),

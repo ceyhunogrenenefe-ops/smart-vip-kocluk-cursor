@@ -1,8 +1,7 @@
-const MAX_BYTES = 4 * 1024 * 1024;
+import { budgetedTranscribe, juniorVipOpenAiKey } from './junior-vip-openai.js';
 
-function openAiKey() {
-  return (process.env.OPENAI_API_KEY || process.env.OPEN_API_KEY || '').trim();
-}
+/** Junior VIP ses kaydı üst sınırı (≈ 1 MB ≈ 4 dk opus). Daha büyük kayıt bütçe ayırmasını gereksiz şişirir. */
+const MAX_BYTES = 1024 * 1024;
 
 function extForMime(mime) {
   const m = String(mime || '').toLowerCase();
@@ -14,10 +13,9 @@ function extForMime(mime) {
   return 'webm';
 }
 
-/** Öğrenci ses kaydı → Whisper (masaüstü Chrome yedek yolu). */
-export async function juniorVipTranscribeFromBase64({ audio_base64, mime }) {
-  const key = openAiKey();
-  if (!key) {
+/** Öğrenci ses kaydı → metin (masaüstü yedek yolu). Ücretli çağrı bütçe kontrolünden geçer. */
+export async function juniorVipTranscribeFromBase64({ audio_base64, mime, panel = null }) {
+  if (!juniorVipOpenAiKey()) {
     const err = new Error('transcribe_unavailable');
     err.code = 'transcribe_unavailable';
     throw err;
@@ -43,27 +41,5 @@ export async function juniorVipTranscribeFromBase64({ audio_base64, mime }) {
   }
 
   const type = String(mime || 'audio/webm').trim() || 'audio/webm';
-  const name = `junior-vip.${extForMime(type)}`;
-  const blob = new Blob([buf], { type });
-
-  const form = new FormData();
-  form.append('file', blob, name);
-  form.append('model', 'whisper-1');
-  form.append('language', 'tr');
-
-  const res = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${key}` },
-    body: form
-  });
-
-  const payload = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    const msg = payload?.error?.message || `whisper_${res.status}`;
-    const err = new Error(msg);
-    err.code = 'whisper_failed';
-    throw err;
-  }
-
-  return String(payload?.text || '').trim();
+  return budgetedTranscribe({ buf, mime: type, name: `junior-vip.${extForMime(type)}`, panel });
 }
