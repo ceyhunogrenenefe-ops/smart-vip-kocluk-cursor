@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { BotMessageSquare, Clock, GraduationCap, Loader2, ScrollText, Save } from 'lucide-react';
+import { BotMessageSquare, ChevronDown, Clock, GraduationCap, Loader2, ScrollText, Save } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   crmAutoGreetingLogs,
@@ -67,6 +67,8 @@ export default function CrmAutoGreetingPanel() {
   const [showLogs, setShowLogs] = useState(false);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
+  /** Kapalıyken yalnız başlık ve ok görünür; içerik yer kaplamaz. */
+  const [acik, setAcik] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -144,28 +146,43 @@ export default function CrmAutoGreetingPanel() {
     }
   };
 
-  if (loading) {
-    return (
-      <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-        <Loader2 className="h-5 w-5 animate-spin text-slate-400" />
-      </section>
-    );
-  }
-  if (!form) return null;
-
   return (
-    <section className="space-y-4 rounded-2xl border-2 border-sky-200 bg-gradient-to-r from-sky-50 via-white to-indigo-50 p-4 shadow-sm sm:p-5">
+    <section
+      data-test="otomatik-karsilama"
+      className={
+        acik
+          ? 'space-y-4 rounded-2xl border-2 border-sky-200 bg-gradient-to-r from-sky-50 via-white to-indigo-50 p-4 shadow-sm sm:p-5'
+          : 'rounded-2xl border-2 border-sky-200 bg-gradient-to-r from-sky-50 via-white to-indigo-50 px-4 py-3 shadow-sm'
+      }
+    >
+      <button
+        type="button"
+        onClick={() => setAcik((v) => !v)}
+        aria-expanded={acik}
+        className="flex w-full items-center gap-2 text-left"
+      >
+        <BotMessageSquare className="h-5 w-5 shrink-0 text-sky-700" />
+        <span className="text-lg font-semibold text-slate-900">Otomatik Karşılama</span>
+        <ChevronDown
+          className={`h-5 w-5 shrink-0 text-sky-700 transition-transform ${acik ? '' : '-rotate-90'}`}
+          aria-hidden
+        />
+      </button>
+      {acik ? (
+        <>
       <div>
         <p className="text-xs font-semibold uppercase tracking-wide text-sky-700">Ayarlar</p>
-        <h3 className="mt-1 flex items-center gap-2 text-lg font-semibold text-slate-900">
-          <BotMessageSquare className="h-5 w-5 text-sky-700" />
-          Otomatik Karşılama
-        </h3>
         <p className="mt-1 max-w-3xl text-sm text-slate-600">
           Temsilci çevrim içi değilken gelen yeni adayı karşılar, öğrencinin sınıfını ve uygun arama
           saatini sorar, lead kaydına işler ve satış ekibine görev açar.
         </p>
       </div>
+      {loading ? (
+        <Loader2 className="h-5 w-5 animate-spin text-slate-400" />
+      ) : !form ? (
+        <p className="text-sm text-slate-500">Ayarlar alınamadı.</p>
+      ) : (
+        <>
 
       <div className="space-y-2 rounded-xl border border-slate-200 bg-white p-3">
         <p className="text-sm font-semibold text-slate-900">Otomasyonlar</p>
@@ -475,6 +492,10 @@ export default function CrmAutoGreetingPanel() {
             </ul>
           )}
         </div>
+      ) : null}
+        </>
+      )}
+        </>
       ) : null}
     </section>
   );
