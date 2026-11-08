@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { CLASS_LEVELS } from '../types';
+import { CLASS_LEVELS, type Student } from '../types';
 import { VELI_KAYIT_PROGRAM_SECENEKLERI } from '../lib/veliKayitConstants';
 import {
   VELI_KAYIT_KULLANICI_DOC_HREF,
@@ -14,6 +14,8 @@ import {
 import { buildVeliImzaPublicUrl, formatVeliKayitShareMessage } from '../lib/veliKayitShareMessage';
 import { useAuth } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
+import { apiFetch } from '../lib/session';
+import { branchMatches, normalizeStudentBranchKey, STANDARD_BRANCH_LETTERS } from '../lib/userStats';
 import { isMaarifVeliProgram, resolveSinifFromVeliKayit } from '../lib/veliKayitClassLevel';
 import {
   createParentSignClassPreset,
@@ -418,12 +420,109 @@ function aramaNormal(x: string | null | undefined): string {
     .trim();
 }
 
+/** Grup sınıfı kaydı — şube, sınıf seviyesine bağlı mevcut kayıttan gelir. */
+type SinifSubeKaydi = {
+  class_level?: string | null;
+  branch?: string | null;
+  student_ids?: string[];
+};
+
+/**
+ * Serbest metinden şube. Yalnızca kısa şube kodu (A, 10-A, 9/B).
+ * Okul adı gibi uzun metin şube değildir.
+ */
+function subeAnahtari(ham: string | null | undefined): string {
+  const raw = String(ham || '').trim();
+  if (!raw) return '';
+  const key = normalizeStudentBranchKey(raw);
+  if (/^[A-F]$/.test(key) && (raw.length <= 8 || key.length === 1)) return key;
+  if (raw.length <= 8 && !/\s/.test(raw)) return raw.toLocaleUpperCase('tr-TR');
+  return '';
+}
+
+/** classes.branch alanı — sistemde kayıtlı şube metni olduğu gibi kalır. */
+function sinifKaydiSubesi(branch: string | null | undefined): string {
+  const t = String(branch || '').trim();
+  if (!t) return '';
+  const letter = normalizeStudentBranchKey(t);
+  if (/^[A-F]$/.test(letter) && t.length <= 8) return letter;
+  return t;
+}
+
+function ogrenciSubesi(school: string | null | undefined, bilinen: string[]): string {
+  const direct = subeAnahtari(school);
+  if (direct) return direct;
+  const raw = String(school || '').trim();
+  if (!raw) return '';
+  const hit = bilinen.find(
+    (b) =>
+      branchMatches(raw, b) ||
+      raw.toLocaleUpperCase('tr-TR') === String(b).trim().toLocaleUpperCase('tr-TR')
+  );
+  return hit || '';
+}
+
+function subeSirala(a: string, b: string): number {
+  const ia = (STANDARD_BRANCH_LETTERS as readonly string[]).indexOf(a);
+  const ib = (STANDARD_BRANCH_LETTERS as readonly string[]).indexOf(b);
+  if (ia >= 0 && ib >= 0) return ia - ib;
+  if (ia >= 0) return -1;
+  if (ib >= 0) return 1;
+  return a.localeCompare(b, 'tr');
+}
+
+function ogrenciKaydiBul(r: ParentSignContractRow, students: Student[]): Student | undefined {
+  const sid = String(r.student_id || '').trim();
+  const uid = linkedStudentUserId(r);
+  if (sid || uid) {
+    const byId = students.find((s) => {
+      const ids = [s.id, s.platformUserId, s.authUserId].map((x) => String(x || '').trim());
+      return (sid && ids.includes(sid)) || (uid && ids.includes(uid));
+    });
+    if (byId) return byId;
+  }
+  const ad = aramaNormal(`${r.ogrenci_ad || ''} ${r.ogrenci_soyad || ''}`);
+  if (ad.length < 3) return undefined;
+  const hits = students.filter((s) => aramaNormal(s.name) === ad);
+  if (hits.length === 1) return hits[0];
+  const sinif = sinifAnahtari(r.sinif);
+  const byClass = hits.filter((s) => sinifAnahtari(String(s.classLevel ?? '')) === sinif);
+  return byClass.length === 1 ? byClass[0] : undefined;
+}
+
+/** Kaydın şubesi: grup sınıfı üyeliği, öğrenci şubesi, sonra sınıf metnindeki kod. */
+function kayitSubesi(
+  r: ParentSignContractRow,
+  students: Student[],
+  sinifKayitlari: SinifSubeKaydi[]
+): string {
+  const st = ogrenciKaydiBul(r, students);
+  const sid = String(r.student_id || st?.id || '').trim();
+  const sinifKey = sinifAnahtari(r.sinif);
+  if (sid) {
+    const uyeler = sinifKayitlari.filter(
+      (c) => (c.student_ids || []).map(String).includes(sid) && sinifKaydiSubesi(c.branch)
+    );
+    const ayni = uyeler.filter(
+      (c) => !sinifKey || sinifAnahtari(String(c.class_level || '')) === sinifKey
+    );
+    const pick = ayni[0] || (uyeler.length === 1 ? uyeler[0] : undefined);
+    if (pick) return sinifKaydiSubesi(pick.branch);
+  }
+  const bilinen = sinifKayitlari.map((c) => sinifKaydiSubesi(c.branch)).filter(Boolean);
+  if (st) {
+    const fromSchool = ogrenciSubesi(st.school, bilinen);
+    if (fromSchool) return fromSchool;
+  }
+  return subeAnahtari(r.sinif);
+}
+
 export default function ParentSignFlowPage() {
   const [searchParams] = useSearchParams();
 
 
   const { effectiveUser } = useAuth();
-  const { activeInstitutionId, institution } = useApp();
+  const { activeInstitutionId, institution, students } = useApp();
   const isSuper = effectiveUser?.role === 'super_admin';
   const isInstitutionAdmin = isSuper || effectiveUser?.role === 'admin';
   const [rows, setRows] = useState<ParentSignContractRow[]>([]);
@@ -455,8 +554,12 @@ export default function ParentSignFlowPage() {
   const [kapsamaYukleniyor, setKapsamaYukleniyor] = useState(false);
   const [kapsamaAcik, setKapsamaAcik] = useState(false);
   const [filtreSinif, setFiltreSinif] = useState('');
+  const [filtreSube, setFiltreSube] = useState('');
   const [filtreDurum, setFiltreDurum] = useState('');
   const [filtreArama, setFiltreArama] = useState('');
+  /** Grup sınıfları — şube listesi bu kayıtlardan ve öğrenci şubelerinden gelir. */
+  const [sinifKayitlari, setSinifKayitlari] = useState<SinifSubeKaydi[]>([]);
+  const [sinifKayitlariHazir, setSinifKayitlariHazir] = useState(false);
 
   /** Açılır listedeki sınıflar — kayıtlardan türetilir, sabit liste değil. */
   const sinifSecenekleri = useMemo(() => {
@@ -471,10 +574,48 @@ export default function ParentSignFlowPage() {
       .map(([ad, adet]) => ({ ad, adet }));
   }, [rows]);
 
+  /**
+   * Şube seçenekleri mevcut kayıtlardan gelir.
+   * Sınıf seçiliyse yalnız o sınıfa bağlı şubeler kalır.
+   */
+  const subeSecenekleri = useMemo(() => {
+    const havuz = new Map<string, number>();
+    const ekle = (sube: string) => {
+      const ad = String(sube || '').trim();
+      if (!ad || havuz.has(ad)) return;
+      havuz.set(ad, 0);
+    };
+    for (const c of sinifKayitlari) {
+      const sube = sinifKaydiSubesi(c.branch);
+      const key = sinifAnahtari(String(c.class_level || ''));
+      if (!sube) continue;
+      if (filtreSinif && key !== filtreSinif) continue;
+      ekle(sube);
+    }
+    const bilinen = sinifKayitlari.map((c) => sinifKaydiSubesi(c.branch)).filter(Boolean);
+    for (const s of students) {
+      const sube = ogrenciSubesi(s.school, bilinen);
+      const key = sinifAnahtari(String(s.classLevel ?? ''));
+      if (!sube) continue;
+      if (filtreSinif && key !== filtreSinif) continue;
+      ekle(sube);
+    }
+    for (const r of rows) {
+      if (filtreSinif && sinifAnahtari(r.sinif) !== filtreSinif) continue;
+      const sube = kayitSubesi(r, students, sinifKayitlari);
+      if (!sube) continue;
+      havuz.set(sube, (havuz.get(sube) || 0) + 1);
+    }
+    return [...havuz.entries()]
+      .sort((a, b) => subeSirala(a[0], b[0]))
+      .map(([ad, adet]) => ({ ad, adet }));
+  }, [sinifKayitlari, students, rows, filtreSinif]);
+
   const filtrelenmisRows = useMemo(() => {
     const ara = aramaNormal(filtreArama);
     return rows.filter((r) => {
       if (filtreSinif && sinifAnahtari(r.sinif) !== filtreSinif) return false;
+      if (filtreSube && kayitSubesi(r, students, sinifKayitlari) !== filtreSube) return false;
       if (filtreDurum && String(r.status || '') !== filtreDurum) return false;
       if (!ara) return true;
       const alanlar = [
@@ -488,9 +629,9 @@ export default function ParentSignFlowPage() {
       ];
       return alanlar.some((x) => aramaNormal(x).includes(ara));
     });
-  }, [rows, filtreSinif, filtreDurum, filtreArama]);
+  }, [rows, filtreSinif, filtreSube, filtreDurum, filtreArama, students, sinifKayitlari]);
 
-  const filtreAktif = Boolean(filtreSinif || filtreDurum || filtreArama.trim());
+  const filtreAktif = Boolean(filtreSinif || filtreSube || filtreDurum || filtreArama.trim());
   const [presets, setPresets] = useState<ParentSignClassPresetRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadingPresets, setLoadingPresets] = useState(false);
@@ -509,6 +650,48 @@ export default function ParentSignFlowPage() {
     }
     return String(activeInstitutionId || effectiveUser?.institution_id || '').trim();
   }, [isSuper, institutionId, activeInstitutionId, effectiveUser?.institution_id]);
+
+  useEffect(() => {
+    const inst = String(effectiveInstitutionId || '').trim();
+    if (!inst) {
+      setSinifKayitlari([]);
+      setSinifKayitlariHazir(true);
+      return;
+    }
+    let cancelled = false;
+    setSinifKayitlariHazir(false);
+    const qs = new URLSearchParams({ scope: 'classes', institution_id: inst });
+    void apiFetch(`/api/class-live-lessons?${qs.toString()}`)
+      .then(async (res) => {
+        const j = (await res.json().catch(() => ({}))) as { data?: SinifSubeKaydi[] };
+        if (!res.ok) return [];
+        return Array.isArray(j.data) ? j.data : [];
+      })
+      .then((data) => {
+        if (cancelled) return;
+        setSinifKayitlari(
+          data.map((c) => ({
+            class_level: c.class_level ?? null,
+            branch: c.branch ?? null,
+            student_ids: Array.isArray(c.student_ids) ? c.student_ids.map(String) : []
+          }))
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setSinifKayitlari([]);
+      })
+      .finally(() => {
+        if (!cancelled) setSinifKayitlariHazir(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [effectiveInstitutionId]);
+
+  useEffect(() => {
+    if (!filtreSube || !sinifKayitlariHazir) return;
+    if (!subeSecenekleri.some((s) => s.ad === filtreSube)) setFiltreSube('');
+  }, [filtreSube, sinifKayitlariHazir, subeSecenekleri]);
 
   const headerKurumAdi = useMemo(() => {
     if (isSuper && institutionId.trim()) {
@@ -2433,12 +2616,12 @@ export default function ParentSignFlowPage() {
               Yenile
             </button>
           </div>
-          <div className="mb-3 grid gap-2 sm:grid-cols-[1fr_auto_auto_auto]" data-test="veli-filtreleri">
+          <div className="mb-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_auto_auto_auto_auto]" data-test="veli-filtreleri">
             <input
               value={filtreArama}
               onChange={(e) => setFiltreArama(e.target.value)}
               placeholder="Öğrenci, veli, telefon veya sözleşme no…"
-              className="rounded-lg border border-slate-300 px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-900"
+              className="rounded-lg border border-slate-300 px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-900 sm:col-span-2 lg:col-span-1"
               data-test="veli-arama"
             />
             <select
@@ -2446,9 +2629,22 @@ export default function ParentSignFlowPage() {
               onChange={(e) => setFiltreSinif(e.target.value)}
               className="rounded-lg border border-slate-300 px-2 py-2 text-sm dark:border-slate-600 dark:bg-slate-900"
               data-test="veli-sinif-filtresi"
+              aria-label="Sınıf"
             >
               <option value="">Tüm sınıflar</option>
               {sinifSecenekleri.map((x) => (
+                <option key={x.ad} value={x.ad}>{x.ad} ({x.adet})</option>
+              ))}
+            </select>
+            <select
+              value={filtreSube}
+              onChange={(e) => setFiltreSube(e.target.value)}
+              className="rounded-lg border border-slate-300 px-2 py-2 text-sm dark:border-slate-600 dark:bg-slate-900"
+              data-test="veli-sube-filtresi"
+              aria-label="Şube"
+            >
+              <option value="">Tüm şubeler</option>
+              {subeSecenekleri.map((x) => (
                 <option key={x.ad} value={x.ad}>{x.ad} ({x.adet})</option>
               ))}
             </select>
@@ -2464,7 +2660,7 @@ export default function ParentSignFlowPage() {
             </select>
             <button
               type="button"
-              onClick={() => { setFiltreArama(''); setFiltreSinif(''); setFiltreDurum(''); }}
+              onClick={() => { setFiltreArama(''); setFiltreSinif(''); setFiltreSube(''); setFiltreDurum(''); }}
               disabled={!filtreAktif}
               className="rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-600 disabled:opacity-40 dark:border-slate-600"
             >
