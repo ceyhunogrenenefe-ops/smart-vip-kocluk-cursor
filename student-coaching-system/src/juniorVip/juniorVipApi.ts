@@ -17,11 +17,42 @@ export type JuniorVipStudyLogProposal = {
   blank: number;
 };
 
+/** Sunucu aracının sonucu — yalnız sunucu kaydı doğruladıktan sonra döner. */
+export type JuniorVipToolResult =
+  | {
+      kind: 'study_logged' | 'study_updated';
+      date: string;
+      duplicate?: boolean;
+      entry?: Record<string, unknown> | null;
+      [k: string]: unknown;
+    }
+  | { kind: 'plan_added' | 'plan_updated'; date: string; duplicate?: boolean; [k: string]: unknown }
+  | {
+      kind: 'live_lessons';
+      date: string;
+      ok: boolean;
+      lessons: Array<{
+        kind: 'group' | 'private';
+        title: string;
+        class_name: string | null;
+        start_time: string;
+        end_time: string | null;
+        status: string;
+        teacher_name?: string | null;
+      }>;
+      failed_sources: string[];
+    };
+
 export type JuniorVipChatResponse = {
   reply: string;
   actions: JuniorVipNavigateAction[];
+  /** Eski istemci onay akışı — artık kullanılmıyor (her zaman null). */
   proposed_study_log: JuniorVipStudyLogProposal | null;
-  meta?: { engine?: string; reason?: string; model?: string } | null;
+  result?: JuniorVipToolResult | null;
+  refresh?: string[];
+  /** Çok adımlı konuşmanın imzalı durumu; sonraki mesajla aynen geri gönderilir. */
+  state_token?: string;
+  meta?: { engine?: string; reason?: string; model?: string; budget_reason?: string } | null;
 };
 
 export type JuniorVipChatMessage = { role: 'user' | 'assistant'; content: string };
@@ -108,6 +139,12 @@ export async function juniorVipTranscribeAudio(blob: Blob, scope: JuniorVipScope
     if (j.error === 'audio_too_short') {
       throw new JuniorVipTranscribeError('audio_too_short', 'Kayıt çok kısa. Biraz daha konuşup tekrar dene.');
     }
+    if (res.status === 429 || j.error === 'budget_exhausted') {
+      throw new JuniorVipTranscribeError(
+        'budget_exhausted',
+        'Bu ayın sesli çözümleme sınırına ulaşıldı. Yazarak devam edebilirsin; komutların hepsi çalışıyor.'
+      );
+    }
     if (j.error === 'audio_too_large') {
       throw new JuniorVipTranscribeError('audio_too_large', 'Kayıt çok uzun. Daha kısa bir komutla tekrar dene.');
     }
@@ -116,51 +153,54 @@ export async function juniorVipTranscribeAudio(blob: Blob, scope: JuniorVipScope
   return String(j.text || '').trim();
 }
 
+function newRequestId(): string {
+  try {
+    if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID();
+  } catch {
+    /* ignore */
+  }
+  return `jv-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+/**
+ * Sohbet turu. Her mesaj tek bir `request_id` taşır; bağlantı koparsa AYNI kimlikle bir kez yeniden
+ * denenir — sunucu aynı kimlikli kaydı ikinci kez oluşturmaz.
+ */
 export async function juniorVipChat(
   message: string,
   history: JuniorVipChatMessage[],
-  scope: JuniorVipScope
+  scope: JuniorVipScope,
+  stateToken?: string | null
 ): Promise<JuniorVipChatResponse> {
-  const res = await apiFetch('/api/junior-vip?op=chat', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message, history, ...scopeBody(scope) })
+  const requestId = newRequestId();
+  const body = JSON.stringify({
+    message,
+    history: history.slice(-10),
+    state_token: stateToken || undefined,
+    request_id: requestId,
+    ...scopeBody(scope)
   });
+  const send = () =>
+    apiFetch('/api/junior-vip?op=chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body
+    });
+  let res: Response;
+  try {
+    res = await send();
+  } catch {
+    res = await send();
+  }
   const j = (await res.json().catch(() => ({}))) as JuniorVipChatResponse & { error?: string; hint?: string };
   if (!res.ok) throw new Error(j.hint || j.error || 'Junior VIP yanıt veremedi');
   return {
     reply: String(j.reply || ''),
     actions: Array.isArray(j.actions) ? j.actions : [],
-    proposed_study_log: j.proposed_study_log || null,
+    proposed_study_log: null,
+    result: j.result || null,
+    refresh: Array.isArray(j.refresh) ? j.refresh : [],
+    state_token: typeof j.state_token === 'string' ? j.state_token : undefined,
     meta: j.meta || null
   };
-}
-
-/** Öğrenci onayı sonrası — mevcut weekly-entries API. */
-export async function saveJuniorVipStudyLog(
-  studentId: string,
-  log: JuniorVipStudyLogProposal
-): Promise<void> {
-  const id = `entry-jv-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  const now = new Date().toISOString();
-  const res = await apiFetch('/api/weekly-entries', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      id,
-      student_id: studentId,
-      date: log.date,
-      subject: log.subject,
-      topic: log.topic,
-      target_questions: log.target_questions,
-      solved_questions: log.solved_questions,
-      correct: log.correct,
-      wrong: log.wrong,
-      blank: log.blank,
-      created_at: now,
-      updated_at: now
-    })
-  });
-  const j = (await res.json().catch(() => ({}))) as { error?: string };
-  if (!res.ok) throw new Error(j.error || 'Çalışma kaydı yazılamadı');
 }

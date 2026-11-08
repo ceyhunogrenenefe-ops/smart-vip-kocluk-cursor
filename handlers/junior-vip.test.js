@@ -284,12 +284,11 @@ test('öğretmen: "yoklama raporunu aç" → /attendance-report', async () => {
   assert.equal(body.actions[0].path, '/attendance-report');
 });
 
-test('öğrenci: "haftalık planı aç" → /weekly-planner, "30 soru çözdüm" → onaylı kayıt önerisi', async () => {
+test('öğrenci: "haftalık planı aç" → /weekly-planner (modelsiz yerel yönlendirme)', async () => {
   const nav = await chat(student, 'haftalık planı aç');
   assert.equal(nav.body.actions[0].path, '/weekly-planner');
-  const log = await chat(student, 'matematik kesirler 30 soru çözdüm');
-  assert.equal(log.body.proposed_study_log.solved_questions, 30);
-  assert.equal(log.body.proposed_study_log.subject, 'Matematik');
+  assert.equal(nav.body.proposed_study_log, null, 'eski istemci onaylı öneri akışı kaldırıldı');
+  // Kayıt akışları sunucu araçlarıyla yapılır: bkz. handlers/junior-vip-assistant.test.js
 });
 
 // ---------- Katalog güvenliği ----------

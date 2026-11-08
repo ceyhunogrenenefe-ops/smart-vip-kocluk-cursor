@@ -321,6 +321,11 @@ export default function ClassLiveLessons() {
   /** Öğrenci: grup takvimi | birebir canlı dersler */
   type StudentScheduleTab = 'group' | 'private';
   const [studentScheduleTab, setStudentScheduleTab] = useState<StudentScheduleTab>('group');
+  /** ?tab=private (ör. Junior VIP yalnız birebir ders bulduğunda) → Canlı özel derslerim sekmesi */
+  useEffect(() => {
+    const t = searchParams.get('tab');
+    if (t === 'private' || t === 'group') setStudentScheduleTab(t);
+  }, [searchParams]);
 
   const [classes, setClasses] = useState<ClassRow[]>([]);
   const [slots, setSlots] = useState<SlotRow[]>([]);

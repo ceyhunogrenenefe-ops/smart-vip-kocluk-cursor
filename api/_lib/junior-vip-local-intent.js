@@ -12,13 +12,6 @@ function norm(s) {
     .replace(/ç/g, 'c');
 }
 
-const SUBJECT_ALIASES = [
-  { re: /\b(matematik|mat)\b/i, subject: 'Matematik' },
-  { re: /\b(turkce|türkçe)\b/i, subject: 'Türkçe' },
-  { re: /\b(fen|fen bilimleri)\b/i, subject: 'Fen Bilimleri' },
-  { re: /\b(sosyal|inkilap|inkılap)\b/i, subject: 'Sosyal Bilgiler' },
-  { re: /\b(ingilizce|english)\b/i, subject: 'İngilizce' }
-];
 
 /** Sesli komutlarda yönlendirme fiilleri (normalize edilmiş). */
 const NAV_VERBS = ['nasil', 'nereden', 'gir', 'ac', 'git', 'gotur', 'goster', 'gec'];
@@ -47,44 +40,23 @@ function firstName(full, fallback) {
   return full ? String(full).split(/\s+/)[0] : fallback;
 }
 
+/** Zaman damgası → İstanbul saati "HH:MM" (UTC saatini göstermesin). */
 function timeOf(iso) {
-  const m = String(iso || '').match(/T(\d{2}:\d{2})/);
-  return m ? m[1] : '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) {
+    const m = String(iso || '').match(/T(\d{2}:\d{2})/);
+    return m ? m[1] : '';
+  }
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Europe/Istanbul',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  }).format(d);
 }
 
-function studentIntent(userText, t, ctx) {
-  const name = firstName(ctx?.student?.name, 'arkadaşım');
-
-  const soruMatch = t.match(/(\d+)\s*soru/);
-  if (soruMatch && (t.includes('coz') || t.includes('bitir') || t.includes('yaptim'))) {
-    let subject = 'Genel';
-    for (const a of SUBJECT_ALIASES) {
-      if (a.re.test(userText)) {
-        subject = a.subject;
-        break;
-      }
-    }
-    const topicMatch = userText.match(/(?:konu[sd]?[uü]?\s+)?([^.,!?\d]{3,80})/i);
-    const topic = topicMatch ? String(topicMatch[1]).trim().slice(0, 80) : 'Çalışma';
-    const n = Number(soruMatch[1]) || 0;
-    if (n > 0 && n <= 500) {
-      return {
-        reply: `Harika ${name}! ${subject} — "${topic}" için ${n} soru çözdüğünü anladım. Planına kaydetmemi ister misin? Onaylayınca haftalık çalışma kaydına yazacağım.`,
-        actions: [],
-        proposed_study_log: {
-          date: ctx?.today || new Date().toISOString().slice(0, 10),
-          subject,
-          topic,
-          solved_questions: n,
-          target_questions: n,
-          correct: 0,
-          wrong: 0,
-          blank: 0
-        }
-      };
-    }
-  }
-
+/** Çözülen soru kaydı ve plan ekleme junior-vip-assistant.js sunucu araçlarıyla yapılır. */
+function studentIntent(_userText, t, ctx) {
   if (t.includes('bugun')) {
     const list = (ctx?.today_entries || [])
       .map((e) => `${e.subject}: ${e.solved_questions || 0} soru (${e.topic || '-'})`)

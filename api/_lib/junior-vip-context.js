@@ -2,25 +2,23 @@ import { supabaseAdmin } from './supabase-admin.js';
 import { JUNIOR_VIP_STUDENT_NAV } from './junior-vip-student-nav.js';
 import { JUNIOR_VIP_COACH_NAV, JUNIOR_VIP_TEACHER_NAV } from './junior-vip-nav.js';
 import { getTeacherPanelClassIds, getTeacherPanelStudentScope } from './teacher-class-scope.js';
+import { istanbulToday, weekRangeYmd } from './junior-vip-dates.js';
+import { getIstanbulDateString } from './istanbul-time.js';
 
-function isoDate(d) {
-  return d.toISOString().slice(0, 10);
+/** Bugün ve bu hafta — Europe/Istanbul takvimine göre (UTC değil; gece yarısı kayması olmasın). */
+function todayAndWeek() {
+  const today = istanbulToday();
+  return { today, ...weekRangeYmd(today) };
 }
 
-function weekBoundsUtc() {
-  const now = new Date();
-  const day = now.getUTCDay();
-  const diffToMon = (day + 6) % 7;
-  const mon = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - diffToMon));
-  const sun = new Date(mon);
-  sun.setUTCDate(mon.getUTCDate() + 6);
-  return { from: isoDate(mon), to: isoDate(sun) };
+function istanbulDateOfTimestamp(ts) {
+  const d = new Date(ts);
+  return Number.isNaN(d.getTime()) ? String(ts || '').slice(0, 10) : getIstanbulDateString(d);
 }
 
 export async function buildJuniorVipStudentContext(studentId) {
   const sid = String(studentId || '').trim();
-  const today = isoDate(new Date());
-  const { from, to } = weekBoundsUtc();
+  const { today, from, to } = todayAndWeek();
 
   const [stuRes, entriesRes, plannerRes] = await Promise.all([
     supabaseAdmin
@@ -73,8 +71,7 @@ export async function buildJuniorVipStudentContext(studentId) {
 /** Koç paneli bağlamı — yalnızca bu koça atanmış öğrenciler ve koçun kendi görüşmeleri. */
 export async function buildJuniorVipCoachContext({ coachId, displayName = '' }) {
   const cid = String(coachId || '').trim();
-  const today = isoDate(new Date());
-  const { from, to } = weekBoundsUtc();
+  const { today, from, to } = todayAndWeek();
 
   const [coachRes, studentsRes, meetingsRes] = await Promise.all([
     supabaseAdmin.from('coaches').select('id,name').eq('id', cid).maybeSingle(),
@@ -88,8 +85,8 @@ export async function buildJuniorVipCoachContext({ coachId, displayName = '' }) 
       .from('meetings')
       .select('id,student_id,title,start_time,status')
       .eq('coach_id', cid)
-      .gte('start_time', `${from}T00:00:00Z`)
-      .lte('start_time', `${to}T23:59:59Z`)
+      .gte('start_time', `${from}T00:00:00+03:00`)
+      .lte('start_time', `${to}T23:59:59+03:00`)
       .order('start_time', { ascending: true })
       .limit(40)
   ]);
@@ -143,15 +140,14 @@ export async function buildJuniorVipCoachContext({ coachId, displayName = '' }) 
       .map((s) => s.name)
       .slice(0, 40),
     week_meetings: meetings,
-    today_meetings: meetings.filter((m) => String(m.start_time || '').slice(0, 10) === today)
+    today_meetings: meetings.filter((m) => istanbulDateOfTimestamp(m.start_time) === today)
   };
 }
 
 /** Öğretmen paneli bağlamı — yalnızca öğretmenin kendi sınıfları ve dersleri (öğrenci adı yok). */
 export async function buildJuniorVipTeacherContext({ userId, institutionId = null, displayName = '' }) {
   const tid = String(userId || '').trim();
-  const today = isoDate(new Date());
-  const { from, to } = weekBoundsUtc();
+  const { today, from, to } = todayAndWeek();
 
   let classIds = [];
   try {
