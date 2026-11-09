@@ -2,7 +2,10 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { BellRing, Loader2, Save, Search, Send } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiFetch } from '../../lib/session';
-import { crmInstitutionScope } from '../../lib/crmInboxApi';
+
+function crmInstitutionScope(): string | null {
+  return null;
+}
 
 type Settings = {
   enabled: boolean;

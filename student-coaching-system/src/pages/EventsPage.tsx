@@ -11,6 +11,7 @@ import {
 } from '../lib/eventParticipantImport';
 import { normalizeImportedPhone } from '../lib/userBulkImport';
 import { buildEventPreviewVars, renderTemplatePreview } from '../lib/eventMessagePreview';
+import DenemeExamNotifyPanel from './crm/DenemeExamNotifyPanel';
 import {
   bindingsListFromTemplate,
   bindingsNeedMeetingLink,
@@ -789,6 +790,7 @@ export default function EventsPage() {
 
   return (
     <div className="mx-auto max-w-4xl space-y-8 p-4 md:p-6">
+      <DenemeExamNotifyPanel />
       <div>
         <h1 className="flex items-center gap-2 text-2xl font-bold text-slate-900">
           <CalendarDays className="h-7 w-7 text-indigo-600" />
