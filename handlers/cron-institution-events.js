@@ -8,6 +8,7 @@ import {
   templateBindingsNeedLink
 } from '../api/_lib/institution-event-send.js';
 import { syncSeminarRegistrationsToEvents } from '../api/_lib/sync-seminar-registrations.js';
+import { processDenemeExamNotify } from '../api/_lib/deneme-exam-notify.js';
 
 function parseHm(timeVal) {
   const s = String(timeVal || '').slice(0, 8);
@@ -142,6 +143,13 @@ export default async function handler(req, res) {
       if (nowMin < targetMin) continue;
 
       await processEvent(ev, now, todayIstanbul, log);
+    }
+
+    try {
+      const deneme = await processDenemeExamNotify({ now, log });
+      log.push({ deneme_exam_notify: deneme });
+    } catch (e) {
+      log.push({ deneme_exam_notify_error: String(e?.message || e) });
     }
 
     await recordCronRun({ jobKey: 'institution_events', ok: true, processed: log.length });
