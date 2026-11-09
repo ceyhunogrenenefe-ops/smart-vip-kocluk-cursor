@@ -35,6 +35,11 @@ export function useProgramInstitutionId(): string {
  */
 export function useProgramGroups(enabled = true) {
   const instId = useProgramInstitutionId();
+  const { effectiveUser } = useAuth();
+  const roleStr = String(effectiveUser?.role || '');
+  const roleTags = ((effectiveUser as { roles?: string[] } | null)?.roles || []).map(String);
+  /** Yeni şube/grup açma ve üyelik değiştirme: yalnız yönetici */
+  const canManage = ['admin', 'super_admin'].some((r) => roleStr === r || roleTags.includes(r));
   const [programs, setPrograms] = useState<EduProgram[]>([]);
   const [classes, setClasses] = useState<ProgramClass[]>([]);
   const [loading, setLoading] = useState(false);
@@ -70,6 +75,7 @@ export function useProgramGroups(enabled = true) {
 
   return {
     institutionId: instId,
+    canManage,
     programs,
     programsById,
     classes: sortedClasses,

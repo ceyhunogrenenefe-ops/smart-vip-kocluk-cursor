@@ -55,6 +55,7 @@ export default function ProgramEnrollmentDraft({ groups, value, onChange, prefer
         preferredLevel={preferredLevel}
         buttonLabel="Ekle"
         onPick={(id) => onChange([...new Set([...value, id])])}
+        createGroup={groups.canManage ? { institutionId: groups.institutionId || null, onCreated: groups.reload } : undefined}
       />
     </div>
   );
