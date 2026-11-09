@@ -196,6 +196,48 @@ describe('deneme exam notify', () => {
     assert.equal(saturday.sends.some((s) => s.step === 'karne'), false);
   });
 
+  it('sınıf yalnız karne seçtiyse hatırlatma gitmez', () => {
+    const onlyKarne = planNotifyActions({
+      exams: [exam],
+      students: [
+        {
+          id: 's9',
+          name: 'Dokuz',
+          phone: '+90555',
+          steps: { day_before: false, soon: false, karne: true }
+        }
+      ],
+      settings,
+      nowMs: new Date('2026-11-11T18:05:00+03:00').getTime(),
+      masterEnabled: true,
+      attendanceByExam: { e1: ['s9'] },
+      resultsByStudent: { s9: [{ id: 'r9', date: '2026-11-12', exam_name: 'Limit 4' }] }
+    });
+    assert.deepEqual(
+      onlyKarne.sends.map((s) => s.step),
+      []
+    );
+    const later = planNotifyActions({
+      exams: [exam],
+      students: [
+        {
+          id: 's9',
+          name: 'Dokuz',
+          phone: '+90555',
+          steps: { day_before: false, soon: false, karne: true }
+        }
+      ],
+      settings: { ...settings, day_before_enabled: true, soon_enabled: true, karne_enabled: false },
+      nowMs: new Date('2026-11-12T13:05:00+03:00').getTime(),
+      masterEnabled: true,
+      attendanceByExam: { e1: ['s9'] },
+      resultsByStudent: { s9: [{ id: 'r9', date: '2026-11-12', exam_name: 'Limit 4' }] },
+      linksByRoom: { lise: 'https://zoom.example/lise' },
+      karneUrlFor: () => 'https://panel.example/karne/e1-s9'
+    });
+    assert.deepEqual(later.sends.map((s) => s.step), ['karne']);
+  });
+
   it('otomasyon kapalıyken test alıcısı şablonu dolar ama toplu gönderim çıkmaz', () => {
     const msg = renderNotifyTemplate(DEFAULT_NOTIFY_SETTINGS.tpl_soon, {
       ogrenci: 'Test Öğrenci',

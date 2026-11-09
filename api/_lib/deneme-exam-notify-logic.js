@@ -253,8 +253,9 @@ export function planNotifyActions({
         const schedule = stepScheduleMs(exam, cfg, step);
         let status = 'pending';
         let error = null;
-        const classStepOff = student?.steps && student.steps[step] === false;
-        if (stopped || !stepEnabled(cfg, step) || classStepOff || student?.active === false) {
+        const classSteps = student?.steps;
+        const stepOn = classSteps ? classSteps[step] !== false : stepEnabled(cfg, step);
+        if (stopped || !stepOn || student?.active === false) {
           status = 'cancelled';
           error = stopped ? 'sinav_iptal' : student?.active === false ? 'sinif_kapali' : 'adim_kapali';
         } else if (step === 'karne' && schedule != null && nowMs >= schedule && !attended.has(student.id)) {

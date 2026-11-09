@@ -81,6 +81,22 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return j as T;
 }
 
+function classLevelKey(cls: ClassOpt): string {
+  const raw = String(cls.class_level || '').trim();
+  if (raw) return raw.toLocaleLowerCase('tr-TR');
+  const match = String(cls.name || '').match(/(?:^|[^\d])(\d{1,2})(?:\s|[.\-/]|$)/);
+  return match ? match[1] : '';
+}
+
+function reminderText(row: Target): string {
+  const parts = [
+    row.day_before_enabled !== false ? '1 gün önce' : '',
+    row.soon_enabled !== false ? '30 dk önce' : '',
+    row.karne_enabled !== false ? 'karne' : ''
+  ].filter(Boolean);
+  return parts.length ? parts.join(', ') : 'hiçbiri';
+}
+
 function fmt(iso?: string | null) {
   if (!iso) return '—';
   return new Date(iso).toLocaleString('tr-TR', {
@@ -106,6 +122,7 @@ export default function DenemeExamNotifyPanel() {
   const [open, setOpen] = useState(false);
   const [programId, setProgramId] = useState('');
   const [pickClassId, setPickClassId] = useState('');
+  const [levelKey, setLevelKey] = useState('');
   const [classes, setClasses] = useState<ClassOpt[]>([]);
   const [programs, setPrograms] = useState<ProgramOpt[]>([]);
   const [roster, setRoster] = useState<Record<string, StudentOpt[]>>({});
@@ -171,6 +188,10 @@ export default function DenemeExamNotifyPanel() {
     () => classes.filter((c) => !programId || String(c.program_id || '') === programId),
     [classes, programId]
   );
+  const levels = useMemo(() => {
+    const set = new Set(filteredClasses.map(classLevelKey).filter(Boolean));
+    return [...set].sort((a, b) => a.localeCompare(b, 'tr', { numeric: true }));
+  }, [filteredClasses]);
   const classById = useMemo(() => new Map(classes.map((c) => [c.id, c])), [classes]);
 
   function patch<K extends keyof Settings>(key: K, value: Settings[K]) {
@@ -199,9 +220,9 @@ export default function DenemeExamNotifyPanel() {
         class_id: classId,
         label: cls.name,
         enabled: true,
-        day_before_enabled: settings?.day_before_enabled !== false,
-        soon_enabled: settings?.soon_enabled !== false,
-        karne_enabled: settings?.karne_enabled !== false,
+        day_before_enabled: true,
+        soon_enabled: true,
+        karne_enabled: true,
         join_link: cls.join_link || ''
       };
       const studentRows: Target[] = people.map((s) => ({
@@ -213,6 +234,53 @@ export default function DenemeExamNotifyPanel() {
       return [...list, classRow, ...studentRows];
     });
     setPickClassId('');
+  }
+
+  async function loadPeople(classId: string): Promise<StudentOpt[]> {
+    if (roster[classId]) return roster[classId];
+    const j = await api<{ students: StudentOpt[] }>(
+      `/api/deneme-exam-notify?op=directory&class_id=${encodeURIComponent(classId)}`
+    );
+    const people = j.students || [];
+    setRoster((cur) => (cur[classId] ? cur : { ...cur, [classId]: people }));
+    return people;
+  }
+
+  async function applyLevel(preset: 'all' | 'karne' | 'reminders') {
+    const flags =
+      preset === 'karne'
+        ? { enabled: true, day_before_enabled: false, soon_enabled: false, karne_enabled: true }
+        : preset === 'reminders'
+          ? { enabled: true, day_before_enabled: true, soon_enabled: true, karne_enabled: false }
+          : { enabled: true, day_before_enabled: true, soon_enabled: true, karne_enabled: true };
+    const matches = filteredClasses.filter((c) => classLevelKey(c) === levelKey);
+    if (!matches.length) {
+      toast.error('Bu seviyede sınıf yok.');
+      return;
+    }
+    const peopleByClass: Record<string, StudentOpt[]> = {};
+    for (const cls of matches) peopleByClass[cls.id] = await loadPeople(cls.id);
+    setTargets((list) => {
+      const next = [...list];
+      for (const cls of matches) {
+        const idx = next.findIndex((t) => t.kind === 'class' && t.class_id === cls.id);
+        if (idx >= 0) next[idx] = { ...next[idx], ...flags };
+        else {
+          next.push({
+            kind: 'class',
+            class_id: cls.id,
+            label: cls.name,
+            join_link: cls.join_link || '',
+            ...flags
+          });
+          for (const student of peopleByClass[cls.id] || []) {
+            next.push({ kind: 'student', student_id: student.id, source_class_id: cls.id, label: student.name });
+          }
+        }
+      }
+      return next;
+    });
+    toast.success(`${matches.length} sınıfa hatırlatma ayarı yazıldı. Kaydetmeyi unutmayın.`);
   }
 
   function removeClass(classId: string) {
@@ -236,7 +304,7 @@ export default function DenemeExamNotifyPanel() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ settings })
       });
-      await api('/api/deneme-exam-notify?op=targets', {
+      const saved = await api<{ hint?: string }>('/api/deneme-exam-notify?op=targets', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -255,7 +323,8 @@ export default function DenemeExamNotifyPanel() {
         })
       });
       await api('/api/deneme-exam-notify?op=sync', { method: 'POST' });
-      toast.success(settings.enabled ? 'Otomasyon açık. Zamanı gelen mesajlar gönderilmeye başlar.' : 'Ayarlar kaydedildi. Gerçek gönderim kapalı.');
+      if (saved.hint) toast.error(saved.hint);
+      else toast.success(settings.enabled ? 'Sınıf ayarları kaydedildi. Zamanı gelen mesajlar gönderilmeye başlar.' : 'Sınıf ayarları kaydedildi. Gerçek gönderim kapalı.');
       await load();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Kaydedilemedi');
@@ -339,24 +408,12 @@ export default function DenemeExamNotifyPanel() {
       {open && (
       <>
       <p className="mt-3 max-w-3xl text-sm text-slate-600">
-        Mesaj veliye ve öğrenciye gider. Her sınıf kendi davet linkini kullanır ve otomasyonu ayrı açılır. Cumartesi ve pazar denemeleri 10:00’da başlar.
+        Hangi hatırlatmanın gideceğini her sınıfta ayrı seçin. Örneğin 9. sınıflara yalnız karne, 8. sınıflara üç hatırlatma gidebilir. Mesaj veliye ve öğrenciye gider.
       </p>
 
       {hint && <p className="mt-3 rounded-lg bg-amber-50 p-2 text-xs text-amber-900">{hint}</p>}
 
       <div className="mt-4 grid gap-3 md:grid-cols-3">
-        <label className="flex items-center gap-2 text-sm text-slate-700">
-          <input type="checkbox" checked={settings.day_before_enabled} onChange={(e) => patch('day_before_enabled', e.target.checked)} />
-          1 gün önce
-        </label>
-        <label className="flex items-center gap-2 text-sm text-slate-700">
-          <input type="checkbox" checked={settings.soon_enabled} onChange={(e) => patch('soon_enabled', e.target.checked)} />
-          30 dakika önce
-        </label>
-        <label className="flex items-center gap-2 text-sm text-slate-700">
-          <input type="checkbox" checked={settings.karne_enabled} onChange={(e) => patch('karne_enabled', e.target.checked)} />
-          Sonuç karnesi
-        </label>
         <label className="text-sm text-slate-700">
           Bir gün önceki saat
           <input
@@ -427,6 +484,26 @@ export default function DenemeExamNotifyPanel() {
             Sınıfı ekle
           </button>
         </div>
+        <div className="flex flex-col gap-2 rounded-xl bg-slate-50 p-3 sm:flex-row sm:items-end">
+          <label className="text-sm text-slate-700 sm:min-w-40">
+            Seviye
+            <select value={levelKey} onChange={(e) => setLevelKey(e.target.value)} className="mt-1 block w-full rounded-xl border border-slate-300 px-3 py-2">
+              <option value="">Seviye seçin</option>
+              {levels.map((level) => (
+                <option key={level} value={level}>{/^\d+$/.test(level) ? `${level}. sınıf` : level}</option>
+              ))}
+            </select>
+          </label>
+          <button type="button" disabled={!levelKey} onClick={() => void applyLevel('karne')} className="rounded-xl bg-emerald-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-40">
+            Bu seviyedekilere sadece karne
+          </button>
+          <button type="button" disabled={!levelKey} onClick={() => void applyLevel('all')} className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-800 disabled:opacity-40">
+            Üç hatırlatma
+          </button>
+          <button type="button" disabled={!levelKey} onClick={() => void applyLevel('reminders')} className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-800 disabled:opacity-40">
+            Karne hariç
+          </button>
+        </div>
 
         {classTargets.length === 0 && <p className="text-sm text-slate-500">Henüz sınıf eklenmedi.</p>}
         {classTargets.map((cls) => {
@@ -448,6 +525,11 @@ export default function DenemeExamNotifyPanel() {
                   </label>
                   <button type="button" className="text-xs font-semibold text-rose-600" onClick={() => removeClass(id)}>Sınıfı iptal et</button>
                 </div>
+              </div>
+              <p className="mt-2 text-sm font-medium text-emerald-800">Bu sınıfa gidecek: {reminderText(cls)}</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <button type="button" onClick={() => patchClass(id, { enabled: true, day_before_enabled: false, soon_enabled: false, karne_enabled: true })} className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-800">Sadece karne</button>
+                <button type="button" onClick={() => patchClass(id, { enabled: true, day_before_enabled: true, soon_enabled: true, karne_enabled: true })} className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">Üçü de</button>
               </div>
               <div className="mt-2 flex flex-wrap gap-3 text-sm text-slate-700">
                 <label className="flex items-center gap-1"><input type="checkbox" checked={cls.day_before_enabled !== false} onChange={(e) => patchClass(id, { day_before_enabled: e.target.checked })} /> 1 gün önce</label>
