@@ -200,6 +200,9 @@ export interface Database {
           birth_date: string | null;
           class_level: string;
           school: string | null;
+          tc_identity_no?: string | null;
+          address?: string | null;
+          enrolled_program?: string | null;
           parent_name: string | null;
           parent_phone: string | null;
           coach_id: string | null;
