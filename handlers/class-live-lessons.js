@@ -58,6 +58,7 @@ import {
 } from '../api/_lib/class-lesson-reminder-send.js';
 import { shouldSkipClassLessonReminder } from '../api/_lib/class-lesson-reminder-logic.js';
 import { normalizedUserRolesFromDb } from '../api/_lib/user-roles-fetch.js';
+import { checkMembershipTarget } from '../api/_lib/edu-programs.js';
 import {
   buildClassStudentSubjectMap,
   filterStudentIdsForClassSubject,
@@ -553,17 +554,47 @@ function mapClassesInsertError(error) {
   const msg = String(error?.message || '');
   if (
     code === '23505' ||
-    /duplicate key|unique constraint|uq_classes_institution_name/i.test(msg)
+    /duplicate key|unique constraint|uq_classes_institution_name|uq_classes_inst_program_level_name/i.test(msg)
   ) {
     return {
       status: 409,
       body: {
-        error: 'Bu kurumda aynı isimde bir sınıf zaten var. Farklı bir ad kullanın.',
+        error: 'Bu programda aynı seviyede aynı adlı bir şube/grup zaten var. Farklı bir ad kullanın.',
         code: 'duplicate_class_name'
       }
     };
   }
   return { status: 500, body: { error: msg || 'Sınıf oluşturulamadı.', code: code || undefined } };
+}
+
+/** Sınıf/grup → program bağlantısını doğrula (aynı kurum; yeni grupta program aktif olmalı). */
+async function validateClassProgram(programId, institutionId, { requireActive }) {
+  const { data, error } = await supabaseAdmin
+    .from('edu_programs')
+    .select('id, institution_id, is_active')
+    .eq('id', programId)
+    .maybeSingle();
+  if (error) {
+    if (error.code === '42P01' || /edu_programs/i.test(String(error.message || ''))) {
+      return { status: 400, error: 'Programlar tablosu kurulmamış (sql/2026-11-09-edu-programs.sql).' };
+    }
+    return { status: 500, error: error.message };
+  }
+  if (!data) return { status: 400, error: 'Program bulunamadı.' };
+  if (institutionId && String(data.institution_id) !== String(institutionId)) {
+    return { status: 400, error: 'Program bu kuruma ait değil.' };
+  }
+  if (requireActive && data.is_active === false) {
+    return { status: 400, error: 'Pasif programa yeni şube/grup açılamaz.' };
+  }
+  return null;
+}
+
+function hasClassInstitutionAccess(actor, role, roleTags, classInstitutionId) {
+  if (normalizeRole(role) === 'super_admin' || (Array.isArray(roleTags) && roleTags.includes('super_admin'))) {
+    return true;
+  }
+  return String(actor.institution_id || '') === String(classInstitutionId || '');
 }
 
 async function getManagedClassIds(actor) {
@@ -2373,6 +2404,7 @@ export default async function handler(req, res) {
       const studentIds = Array.isArray(body.student_ids) ? body.student_ids.map(String).filter(Boolean) : [];
       const classLevelRaw = String(body.class_level || '').trim() || null;
       const branchRaw = String(body.branch || '').trim() || null;
+      const programIdRaw = String(body.program_id || '').trim() || null;
 
       let writeInstitutionId = institutionId;
       if (role === 'super_admin') {
@@ -2393,7 +2425,13 @@ export default async function handler(req, res) {
         created_by: actor.sub
       };
 
+      if (programIdRaw) {
+        const progErr = await validateClassProgram(programIdRaw, writeInstitutionId, { requireActive: true });
+        if (progErr) return res.status(progErr.status).json({ error: progErr.error });
+      }
+
       let insertRow = { ...baseRow, class_level: classLevelRaw, branch: branchRaw };
+      if (programIdRaw) insertRow.program_id = programIdRaw;
       let usedMinimalClassesInsert = false;
       let { data: created, error: insErr } = await supabaseAdmin
         .from('classes')
@@ -2449,6 +2487,7 @@ export default async function handler(req, res) {
 
       let responseRow = created;
       if (usedMinimalClassesInsert && (classLevelRaw || branchRaw)) {
+        // program_id kolonu yoksa (SQL henüz çalışmadı) program sessizce atlanır
         const patch = {};
         if (classLevelRaw) patch.class_level = classLevelRaw;
         if (branchRaw) patch.branch = branchRaw;
@@ -2493,8 +2532,23 @@ export default async function handler(req, res) {
         });
         await supabaseAdmin.from('class_students').insert(rows);
       }
-      if (Object.prototype.hasOwnProperty.call(body, 'class_level') || Object.prototype.hasOwnProperty.call(body, 'branch') || Object.prototype.hasOwnProperty.call(body, 'name')) {
+      if (Object.prototype.hasOwnProperty.call(body, 'class_level') || Object.prototype.hasOwnProperty.call(body, 'branch') || Object.prototype.hasOwnProperty.call(body, 'name') || Object.prototype.hasOwnProperty.call(body, 'program_id')) {
         const clsPatch = {};
+        if (Object.prototype.hasOwnProperty.call(body, 'program_id')) {
+          const nextProgram = String(body.program_id || '').trim() || null;
+          if (nextProgram) {
+            const { data: clsInst } = await supabaseAdmin
+              .from('classes')
+              .select('institution_id')
+              .eq('id', classId)
+              .maybeSingle();
+            const progErr = await validateClassProgram(nextProgram, clsInst?.institution_id || null, {
+              requireActive: false
+            });
+            if (progErr) return res.status(progErr.status).json({ error: progErr.error });
+          }
+          clsPatch.program_id = nextProgram;
+        }
         if (Object.prototype.hasOwnProperty.call(body, 'class_level'))
           clsPatch.class_level = String(body.class_level || '').trim() || null;
         if (Object.prototype.hasOwnProperty.call(body, 'branch'))
@@ -2513,6 +2567,68 @@ export default async function handler(req, res) {
         }
       }
       return res.status(200).json({ ok: true });
+    }
+
+    /**
+     * Öğrenciyi tek bir şube/gruba ekle (Program → Seviye → Grup seçimi).
+     * Öğrencinin kaydı ve diğer sınıf üyelikleri değişmez; yalnız bu grup için class_students satırı eklenir.
+     */
+    if (op === 'add-student-to-class' || op === 'remove-student-from-class') {
+      if (!isAdminRole(role)) return res.status(403).json({ error: 'forbidden' });
+      const classId = String(body.class_id || '').trim();
+      const studentId = String(body.student_id || '').trim();
+      if (!classId || !studentId) return res.status(400).json({ error: 'class_id_and_student_id_required' });
+      const { data: cls, error: cErr } = await supabaseAdmin
+        .from('classes')
+        .select('*')
+        .eq('id', classId)
+        .maybeSingle();
+      if (cErr) return res.status(500).json({ error: cErr.message });
+      if (!cls) return res.status(404).json({ error: 'Grup bulunamadı.' });
+      if (cls.institution_id && !hasClassInstitutionAccess(actor, role, roleTags, cls.institution_id)) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+      if (op === 'remove-student-from-class') {
+        const { error: dErr } = await supabaseAdmin
+          .from('class_students')
+          .delete()
+          .eq('class_id', classId)
+          .eq('student_id', studentId);
+        if (dErr) return res.status(500).json({ error: dErr.message });
+        return res.status(200).json({ ok: true });
+      }
+      const { data: student, error: sErr } = await supabaseAdmin
+        .from('students')
+        .select('id, institution_id, deleted_at')
+        .eq('id', studentId)
+        .maybeSingle();
+      if (sErr) return res.status(500).json({ error: sErr.message });
+      let program = null;
+      if (cls.program_id) {
+        const { data: p } = await supabaseAdmin
+          .from('edu_programs')
+          .select('id, is_active')
+          .eq('id', cls.program_id)
+          .maybeSingle();
+        program = p || null;
+      }
+      const ruleErr = checkMembershipTarget({ cls, student, program });
+      if (ruleErr) return res.status(ruleErr.status).json({ error: ruleErr.error });
+      const { data: existing } = await supabaseAdmin
+        .from('class_students')
+        .select('id')
+        .eq('class_id', classId)
+        .eq('student_id', studentId)
+        .maybeSingle();
+      if (existing) return res.status(200).json({ ok: true, already: true });
+      const { error: iErr } = await supabaseAdmin
+        .from('class_students')
+        .insert({ class_id: classId, student_id: studentId });
+      if (iErr) {
+        if (String(iErr.code) === '23505') return res.status(200).json({ ok: true, already: true });
+        return res.status(500).json({ error: iErr.message });
+      }
+      return res.status(201).json({ ok: true });
     }
 
     if (op === 'create-session') {

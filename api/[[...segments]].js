@@ -29,7 +29,8 @@ const TOKEN_REQUIRED_ROUTES = new Set([
   'written-exams',
   'commerce-admin',
   'commerce-vendor',
-  'commerce-upload'
+  'commerce-upload',
+  'edu-programs'
 ]);
 
 function hasBearerToken(req) {

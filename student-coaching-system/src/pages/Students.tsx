@@ -18,6 +18,18 @@ import {
 import { resolveCoachRecordId } from '../lib/coachResolve';
 import { sortByFirstName } from '../lib/personNameSort';
 import { db } from '../lib/database';
+import { useProgramGroups } from '../hooks/useProgramGroups';
+import ProgramGroupFilters from '../components/programs/ProgramGroupFilters';
+import StudentProgramMemberships from '../components/programs/StudentProgramMemberships';
+import ProgramEnrollmentDraft from '../components/programs/ProgramEnrollmentDraft';
+import {
+  EMPTY_PROGRAM_FILTER,
+  addStudentToClass,
+  classesMatchingFilter,
+  groupLabel,
+  studentMatchesProgramFilter,
+  type ProgramGroupFilter
+} from '../lib/eduPrograms';
 import {
   AppModal,
   AppModalBody,
@@ -73,6 +85,15 @@ export default function Students() {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterClass, setFilterClass] = useState<ClassLevel | 'all'>('all');
   const [filterProgram, setFilterProgram] = useState<ProgramName | 'all'>('all');
+  const [programFilter, setProgramFilter] = useState<ProgramGroupFilter>(EMPTY_PROGRAM_FILTER);
+  const [draftProgramClassIds, setDraftProgramClassIds] = useState<string[]>([]);
+  const programGroupsEnabled =
+    !!effectiveUser && ['super_admin', 'admin', 'coach'].includes(String(effectiveUser.role || ''));
+  const programGroups = useProgramGroups(programGroupsEnabled);
+  const programMatchingClassIds = useMemo(
+    () => new Set(classesMatchingFilter(programGroups.classes, programFilter).map((c) => c.id)),
+    [programGroups.classes, programFilter]
+  );
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
@@ -97,10 +118,16 @@ export default function Students() {
       const matchesClass = filterClass === 'all' || student.classLevel === filterClass;
       const studentProgram = student.programName || inferProgramName(student.classLevel);
       const matchesProgram = filterProgram === 'all' || studentProgram === filterProgram;
-      return matchesSearch && matchesClass && matchesProgram;
+      const matchesEduProgram = studentMatchesProgramFilter(
+        student.id,
+        programFilter,
+        programMatchingClassIds,
+        programGroups.membershipIndex
+      );
+      return matchesSearch && matchesClass && matchesProgram && matchesEduProgram;
     });
     return sortByFirstName(filtered, (s) => s.name);
-  }, [students, searchTerm, filterClass, filterProgram]);
+  }, [students, searchTerm, filterClass, filterProgram, programFilter, programMatchingClassIds, programGroups.membershipIndex]);
 
   // Yeni öğrenci formu
   const [formData, setFormData] = useState({
@@ -254,6 +281,7 @@ export default function Students() {
   }, [students, location.state, location.pathname, location.search, navigate]);
 
   const resetForm = () => {
+    setDraftProgramClassIds([]);
     setFormData({
       name: '',
       email: '',
@@ -376,7 +404,7 @@ export default function Students() {
           return;
         }
         setSaving(true);
-        await addStudent({
+        const created = await addStudent({
           id: '',
           name: formData.name.trim(),
           email: normalizedEmail,
@@ -393,8 +421,27 @@ export default function Students() {
           whatsappAutomationEnabled: formData.whatsappAutomationEnabled,
           createdAt: new Date().toISOString()
         });
+        const enrollErrors: string[] = [];
+        const newId = created?.student?.id;
+        if (newId && draftProgramClassIds.length) {
+          for (const classId of draftProgramClassIds) {
+            try {
+              await addStudentToClass(classId, newId);
+            } catch (err) {
+              const c = programGroups.classes.find((x) => x.id === classId);
+              enrollErrors.push(
+                `${c ? groupLabel(c, programGroups.programsById) : classId}: ${err instanceof Error ? err.message : String(err)}`
+              );
+            }
+          }
+          await programGroups.reload();
+        }
         alert(
-          `Öğrenci eklendi.\n\nE-posta: ${normalizedEmail}\nŞifre: ${formData.password.trim()}`
+          `Öğrenci eklendi.\n\nE-posta: ${normalizedEmail}\nŞifre: ${formData.password.trim()}` +
+            (draftProgramClassIds.length && !enrollErrors.length
+              ? `\n\n${draftProgramClassIds.length} program grubuna eklendi.`
+              : '') +
+            (enrollErrors.length ? `\n\nProgram kaydı yapılamayanlar:\n${enrollErrors.join('\n')}` : '')
         );
       }
       setShowAddModal(false);
@@ -579,7 +626,7 @@ export default function Students() {
               onChange={(e) => setFilterProgram(e.target.value as ProgramName | 'all')}
               className="appearance-none px-4 py-2 pr-10 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent bg-white"
             >
-              <option value="all">Tüm Programlar</option>
+              <option value="all">Tüm sınav alanları</option>
               {PROGRAM_OPTIONS.map((program) => (
                 <option key={program.value} value={program.value}>
                   {program.label}
@@ -589,6 +636,27 @@ export default function Students() {
             <ChevronDown className="absolute right-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
           </div>
         </div>
+        {programGroupsEnabled && (programGroups.programs.length > 0 || programGroups.classes.length > 0) ? (
+          <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-gray-100 pt-3">
+            <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">Program</span>
+            <ProgramGroupFilters
+              value={programFilter}
+              onChange={setProgramFilter}
+              programs={programGroups.programs}
+              programsById={programGroups.programsById}
+              classes={programGroups.classes}
+            />
+            {programFilter.programId || programFilter.level || programFilter.classId ? (
+              <button
+                type="button"
+                onClick={() => setProgramFilter(EMPTY_PROGRAM_FILTER)}
+                className="text-xs font-medium text-indigo-600 hover:underline"
+              >
+                Temizle
+              </button>
+            ) : null}
+          </div>
+        ) : null}
       </div>
 
       {/* Öğrenci Listesi */}
@@ -611,6 +679,24 @@ export default function Students() {
                     <h3 className="font-semibold text-slate-800">{student.name}</h3>
                     <p className="text-sm text-gray-500">{formatClassLevelLabel(student.classLevel)}</p>
                     <p className="text-xs text-indigo-600 font-medium">{(student.programName || inferProgramName(student.classLevel)).toUpperCase()}</p>
+                    {(programGroups.membershipIndex.get(student.id) || []).length ? (
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        {(programGroups.membershipIndex.get(student.id) || []).slice(0, 3).map((c) => (
+                          <span
+                            key={c.id}
+                            title={groupLabel(c, programGroups.programsById)}
+                            className="max-w-[180px] truncate rounded bg-violet-50 px-1.5 py-0.5 text-[10px] font-semibold text-violet-800"
+                          >
+                            {groupLabel(c, programGroups.programsById)}
+                          </span>
+                        ))}
+                        {(programGroups.membershipIndex.get(student.id) || []).length > 3 ? (
+                          <span className="text-[10px] text-gray-500">
+                            +{(programGroups.membershipIndex.get(student.id) || []).length - 3}
+                          </span>
+                        ) : null}
+                      </div>
+                    ) : null}
                   </div>
                 </div>
                 <div className="flex items-center gap-1">
@@ -1054,6 +1140,16 @@ export default function Students() {
                   </label>
                 </div>
               </div>
+              {!editingStudent && programGroupsEnabled ? (
+                <div className="mt-4">
+                  <ProgramEnrollmentDraft
+                    groups={programGroups}
+                    value={draftProgramClassIds}
+                    onChange={setDraftProgramClassIds}
+                    preferredLevel={String(formData.classLevel ?? '')}
+                  />
+                </div>
+              ) : null}
           </AppModalBody>
 
           <AppModalFooter>
@@ -1155,6 +1251,16 @@ export default function Students() {
                   <span>{selectedStudent.groupName}</span>
                 </div>
               )}
+
+              {programGroupsEnabled ? (
+                <StudentProgramMemberships
+                  studentId={selectedStudent.id}
+                  studentName={selectedStudent.name}
+                  studentLevel={selectedStudent.classLevel as string | number | null}
+                  groups={programGroups}
+                  canEdit={canEditStudents}
+                />
+              ) : null}
 
               <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4 mt-2">
                 <h4 className="text-sm font-semibold text-slate-800 mb-1">Canlı özel ders paketi (öğretmen başına)</h4>
