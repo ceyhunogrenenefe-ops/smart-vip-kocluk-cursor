@@ -223,10 +223,12 @@ export function EtutTopluYoklama({
     return { total: gorunen.length, present, late, absent, excused };
   }, [gorunen]);
 
-  const kaydedilecek = useMemo(
-    () => satirlar.filter((s) => s.dilim === seciliDilim && s.dirty),
-    [satirlar, seciliDilim]
-  );
+  const kaydedilecek = useMemo(() => {
+    const dilimdekiler = satirlar.filter((s) => s.dilim === seciliDilim);
+    // Etütte varsayılan katıldı. Yalnız değişen satır giderse koça katılan adları yazılmaz.
+    if (!deneme) return dilimdekiler;
+    return dilimdekiler.filter((s) => s.dirty);
+  }, [satirlar, seciliDilim, deneme]);
 
   const durumSec = (sessionId: string, studentId: string, status: Durum) => {
     setSatirlar((prev) =>
@@ -333,7 +335,7 @@ export function EtutTopluYoklama({
               <p className="mt-0.5 text-xs text-slate-600">
                 {deneme
                   ? '1. deneme ve 2. deneme ayrı. Kayıtsız öğrenci katılmadı sayılır; katılanları işaretleyin. Yalnız değiştirdiğiniz satırlar kaydedilir.'
-                  : '1. etüt ve 2. etüt ayrı. Kayıt, açık etütteki her öğrencinin kendi sınıf dersine yazılır. Yalnız değiştirdiğiniz satırlar kaydedilir.'}
+                  : '1. etüt ve 2. etüt ayrı. Kaydet, bu etütteki katılan ve katılmayan her öğrenciyi koça yazar. Katılmayan öğrencinin velisine mesaj gider.'}
               </p>
             </div>
             <button type="button" className="shrink-0 text-sm text-slate-500 hover:text-slate-800" onClick={kapat}>
