@@ -85,7 +85,7 @@ function coachIntent(t, ctx) {
   }
   if (t.includes('bugun')) {
     const list = (ctx?.today_meetings || []).map(
-      (m) => `${timeOf(m.start_time)} ${m.student || m.title || 'görüşme'}`.trim()
+      (m) => `${timeOf(m.start_time)} ${m.student || 'görüşme'}`.trim()
     );
     return {
       reply: list.length

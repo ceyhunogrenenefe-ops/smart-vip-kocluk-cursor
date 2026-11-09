@@ -33,9 +33,9 @@ const DB = {
     { id: C2, name: 'Başka Koç', email: 'o@x.com', user_id: 'u-other', institution_id: INST }
   ],
   students: [
-    { id: S1, name: 'Ayşe Yılmaz', coach_id: C1, institution_id: INST, class_level: '7', group_name: 'A' },
-    { id: S2, name: 'Mehmet Kaya', coach_id: C1, institution_id: INST, class_level: '8', group_name: 'B' },
-    { id: S_OTHER, name: 'Gizli Öğrenci', coach_id: C2, institution_id: INST, class_level: '8', group_name: 'C' }
+    { id: S1, name: 'Ayşe Yılmaz', coach_id: C1, institution_id: INST, class_level: '7', branch: 'A' },
+    { id: S2, name: 'Mehmet Kaya', coach_id: C1, institution_id: INST, class_level: '8', branch: 'B' },
+    { id: S_OTHER, name: 'Gizli Öğrenci', coach_id: C2, institution_id: INST, class_level: '8', branch: 'C' }
   ],
   weekly_entries: [
     { id: 'e1', student_id: S1, date: today, subject: 'Matematik', topic: 'Kesirler', solved_questions: 30, correct: 25, wrong: 5, blank: 0 },
@@ -43,8 +43,8 @@ const DB = {
   ],
   weekly_planner_entries: [],
   meetings: [
-    { id: 'm1', coach_id: C1, student_id: S2, title: 'Veli görüşmesi', start_time: `${today}T14:30:00Z`, status: 'planned' },
-    { id: 'm2', coach_id: C2, student_id: S_OTHER, title: 'Gizli görüşme', start_time: `${today}T10:00:00Z`, status: 'planned' }
+    { id: 'm1', coach_id: C1, student_id: S2, start_time: `${today}T14:30:00Z`, status: 'planned' },
+    { id: 'm2', coach_id: C2, student_id: S_OTHER, start_time: `${today}T10:00:00Z`, status: 'planned' }
   ],
   classes: [
     { id: CLASS_A, name: '8-A LGS', institution_id: INST },
@@ -61,6 +61,7 @@ const DB = {
 /** Supabase sorgu zincirini taklit eden basit oluşturucu (bilinmeyen zincir metodları yok sayılır). */
 function from(table) {
   let rows = [...(DB[table] || [])];
+  let selectError = null;
   const b = new Proxy(
     {},
     {
@@ -91,16 +92,25 @@ function from(table) {
             rows = rows.filter((r) => String(r[col] || '').toLowerCase() === String(v).toLowerCase());
             return b;
           };
+        if (prop === 'select')
+          return (cols) => {
+            selectError = unknownSelectColumnError(table, cols);
+            return b;
+          };
+        const err = () => (selectError ? { message: selectError, code: '42703' } : null);
         if (prop === 'maybeSingle' || prop === 'single')
-          return () => Promise.resolve({ data: rows[0] || null, error: null });
+          return () => Promise.resolve(err() ? { data: null, error: err() } : { data: rows[0] || null, error: null });
         if (prop === 'then')
-          return (resolve, reject) => Promise.resolve({ data: rows, error: null }).then(resolve, reject);
+          return (resolve, reject) =>
+            Promise.resolve(err() ? { data: null, error: err() } : { data: rows, error: null }).then(resolve, reject);
         return () => b; // select, order, limit, range, not, or …
       }
     }
   );
   return b;
 }
+
+import { unknownSelectColumnError } from '../api/_lib/junior-vip-db-columns.js';
 
 mock.module('../api/_lib/supabase-admin.js', {
   namedExports: { supabaseAdmin: { from }, getSupabaseAdmin: () => ({ from }), hasSupabaseServiceRoleKey: () => true },

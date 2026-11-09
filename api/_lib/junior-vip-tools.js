@@ -49,12 +49,13 @@ function sameSubject(a, b) {
 export async function loadStudentProfile(studentId) {
   const { data, error } = await supabaseAdmin
     .from('students')
-    .select('id,name,class_level,group_name,institution_id')
+    .select('id,name,class_level,branch,institution_id')
     .eq('id', studentId)
     .maybeSingle();
   if (error) throw new JuniorVipToolError('student_read_failed', error.message);
   if (!data) throw new JuniorVipToolError('student_not_found');
-  return data;
+  // students tablosunda şube bilgisi `branch` kolonunda; eski alan adı geriye uyum için korunur.
+  return { ...data, group_name: data.branch ?? null };
 }
 
 async function readPlannerById(id) {
