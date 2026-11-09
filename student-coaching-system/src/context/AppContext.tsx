@@ -1046,6 +1046,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
           birth_date: student.birthDate ?? null,
           class_level: String(student.classLevel),
           school: student.school ?? null,
+          tc_identity_no: student.tcIdentityNo ?? null,
+          address: student.address ?? null,
+          enrolled_program: student.enrolledProgram ?? null,
           parent_name: student.parentName ?? null,
           parent_phone: student.parentPhone ?? null,
           coach_id: student.coachId || null,
@@ -1087,6 +1090,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (updatedStudent.classLevel !== undefined)
       patch.class_level = String(updatedStudent.classLevel);
     if (updatedStudent.school !== undefined) patch.school = updatedStudent.school;
+    if (updatedStudent.tcIdentityNo !== undefined) patch.tc_identity_no = updatedStudent.tcIdentityNo || null;
+    if (updatedStudent.address !== undefined) patch.address = updatedStudent.address || null;
+    if (updatedStudent.enrolledProgram !== undefined)
+      patch.enrolled_program = updatedStudent.enrolledProgram || null;
     if (updatedStudent.parentName !== undefined) patch.parent_name = updatedStudent.parentName;
     if (updatedStudent.parentPhone !== undefined) patch.parent_phone = updatedStudent.parentPhone;
     /** `coachId: undefined` ile çağrıda `'coachId' in obj` true olurdu → coach_id null yazılıyordu */

@@ -106,6 +106,12 @@ export interface Student {
   /** DB’de yoksa veya parse edilemezse undefined — asla yanlış varsayılan sınıf uydurma */
   classLevel?: ClassLevel;
   school?: string;
+  /** Koçluk kayıt formundan gelen program adı */
+  enrolledProgram?: string;
+  /** T.C. kimlik no */
+  tcIdentityNo?: string;
+  /** Kayıt formu adresi */
+  address?: string;
   parentName?: string;
   coachId?: string; // Koç ID'si
   programId?: string;
