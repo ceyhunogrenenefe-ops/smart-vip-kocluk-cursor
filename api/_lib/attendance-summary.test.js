@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildAttendanceSummary,
+  coachSummaryShouldRefresh,
   computeAttendanceNotifyPlan,
   formatCoachAttendanceSummaryMessage,
   formatLateArrivalUpdateMessage
@@ -155,6 +156,23 @@ describe('attendance-summary', () => {
     });
     expect(late).toContain('YOKLAMA GÜNCELLEMESİ');
     expect(late).toContain('5/5');
+  });
+
+  it('yeniden gönderir: önceki raporda olmayan katılan ismi varsa', () => {
+    const prior = new Map([['a1', { status: 'absent', camera_status: 'n_a' }]]);
+    expect(
+      coachSummaryShouldRefresh(prior, [
+        { student_id: 'a1', status: 'absent' },
+        { student_id: 'p1', status: 'present' }
+      ])
+    ).toBe(true);
+    expect(
+      coachSummaryShouldRefresh(prior, [{ student_id: 'a1', status: 'absent' }])
+    ).toBe(false);
+    const already = new Map([['p1', { status: 'present', camera_status: 'on' }]]);
+    expect(
+      coachSummaryShouldRefresh(already, [{ student_id: 'p1', status: 'present' }])
+    ).toBe(false);
   });
 });
 
