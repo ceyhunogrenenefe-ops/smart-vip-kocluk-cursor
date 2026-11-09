@@ -44,7 +44,7 @@ create unique index if not exists uq_classes_inst_program_level_name
 
 -- Varsayılan programlar: her kurum için (varsa atlanır)
 insert into public.edu_programs (institution_id, name, sort_order)
-select i.id, p.name, p.sort_order
+select i.id::uuid, p.name, p.sort_order
 from public.institutions i
 cross join (
   values
@@ -53,10 +53,12 @@ cross join (
     ('Yaz Okulu', 30),
     ('Kitap Okuma Atölyesi', 40)
 ) as p(name, sort_order)
-where not exists (
-  select 1 from public.edu_programs e
-  where e.institution_id = i.id and lower(e.name) = lower(p.name)
-);
+-- institutions.id metin tipinde: yalnız geçerli uuid olanlar dönüştürülür
+where i.id::text ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+  and not exists (
+    select 1 from public.edu_programs e
+    where e.institution_id::text = i.id::text and lower(e.name) = lower(p.name)
+  );
 
 -- Mevcut sınıfları programlara yerleştir (yalnız programı boş olanlar).
 -- Ada göre tahmin; eşleşmeyen her şey Dönem Programı. Sonradan sınıf düzenleme ekranından değiştirilebilir.
