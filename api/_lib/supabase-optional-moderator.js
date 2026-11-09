@@ -94,24 +94,30 @@ export async function selectWithOptionalColumns(table, baseSelect, optionalColum
   const optional = Array.isArray(optionalColumns) ? optionalColumns : OPTIONAL_INSERT_COLUMNS;
   const base = String(baseSelect || '*').trim();
   const baseCols = new Set(base.split(',').map((c) => c.trim()).filter(Boolean));
-  const extra = optional.filter((c) => !baseCols.has(c));
-  const select = extra.length ? `${base},${extra.join(',')}` : base;
-
-  let q = supabaseAdmin.from(table).select(select);
-  if (typeof applyQuery === 'function') q = applyQuery(q) || q;
-  let result = await q;
-  if (!result.error) return result;
-
-  const missingCol = columnFromSchemaError(result.error);
-  const canRetry =
-    Boolean(missingCol) ||
-    missingOptionalColumn(result.error) ||
-    /does not exist/i.test(errorText(result.error));
-  if (!canRetry) return result;
-
-  q = supabaseAdmin.from(table).select(base);
-  if (typeof applyQuery === 'function') q = applyQuery(q) || q;
-  return await q;
+  let extra = optional.filter((c) => !baseCols.has(c));
+  let lastError = null;
+  for (let attempt = 0; attempt < extra.length + 2; attempt++) {
+    const select = extra.length ? `${base},${extra.join(',')}` : base;
+    let q = supabaseAdmin.from(table).select(select);
+    if (typeof applyQuery === 'function') q = applyQuery(q) || q;
+    const result = await q;
+    if (!result.error) return result;
+    lastError = result.error;
+    const missingCol = columnFromSchemaError(result.error);
+    if (missingCol && extra.includes(missingCol)) {
+      extra = extra.filter((c) => c !== missingCol);
+      continue;
+    }
+    const canDropAll =
+      extra.length > 0 &&
+      (missingOptionalColumn(result.error) || /does not exist/i.test(errorText(result.error)));
+    if (canDropAll) {
+      extra = [];
+      continue;
+    }
+    return result;
+  }
+  return { data: null, error: lastError };
 }
 
 /** UPDATE: isteğe bağlı kolonlar şemada yoksa kademeli düşürülür. */
