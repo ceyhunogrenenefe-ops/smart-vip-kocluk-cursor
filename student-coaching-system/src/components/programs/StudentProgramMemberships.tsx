@@ -131,6 +131,7 @@ export default function StudentProgramMemberships({ studentId, studentName, stud
             preferredLevel={studentLevel != null ? String(studentLevel) : null}
             busy={busy}
             onPick={add}
+        createGroup={groups.canManage ? { institutionId: groups.institutionId || null, onCreated: groups.reload } : undefined}
           />
         </div>
       ) : null}

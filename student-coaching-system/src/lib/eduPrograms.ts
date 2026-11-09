@@ -94,6 +94,30 @@ async function membershipOp(op: string, classId: string, studentId: string): Pro
   if (!res.ok) throw new Error(String(j.error || 'İşlem yapılamadı'));
 }
 
+/** Program içinde yeni şube/grup açar (yalnız yönetici). Yeni sınıf id'sini döner. */
+export async function createProgramClass(
+  input: { name: string; class_level: string; program_id: string },
+  instId?: string | null
+): Promise<string> {
+  const res = await apiFetch('/api/class-live-lessons?op=create-class', {
+    method: 'POST',
+    body: JSON.stringify({
+      name: input.name.trim(),
+      class_level: input.class_level,
+      program_id: input.program_id,
+      teacher_ids: [],
+      student_ids: [],
+      ...(instId ? { institution_id: instId } : {})
+    })
+  });
+  const j = await readJson(res);
+  if (!res.ok) throw new Error(String(j.error || j.message || 'Şube/grup oluşturulamadı'));
+  const d = (j.data || j.class || j) as { id?: string };
+  const id = String(d?.id || '');
+  if (!id) throw new Error('Şube/grup oluşturuldu ama kimliği alınamadı; sayfayı yenileyin.');
+  return id;
+}
+
 export const addStudentToClass = (classId: string, studentId: string) =>
   membershipOp('add-student-to-class', classId, studentId);
 
@@ -103,6 +127,12 @@ export const removeStudentFromClass = (classId: string, studentId: string) =>
 /* ---------- Etiketler ---------- */
 
 const LEVEL_ORDER = ['2', '3', '4', '5', '6', '7', 'LGS', '8', '9', '10', '11', '12', 'TYT'];
+
+/** Programda henüz grup olmasa da seçilebilen standart sınıf seviyeleri */
+export const STANDARD_LEVELS = [
+  '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12',
+  'LGS', 'TYT', 'YKS EŞİTAĞIRLIK', 'YKS SAYISAL', 'AP', 'IB', 'YÖS'
+];
 
 export function levelLabel(level?: string | null): string {
   const v = String(level ?? '').trim();
