@@ -33,6 +33,9 @@ import EduPostLessonHomeworkModal, {
 } from '../components/eduPanel/EduPostLessonHomeworkModal';
 import ClassLiveClassManager from '../components/liveLessons/ClassLiveClassManager';
 import DeletedClassesPanel from '../components/liveLessons/DeletedClassesPanel';
+import ProgramManagerPanel from '../components/programs/ProgramManagerPanel';
+import { fetchEduPrograms, type EduProgram } from '../lib/eduPrograms';
+import { useProgramInstitutionId } from '../hooks/useProgramGroups';
 import ClassLivePresenceModal from '../components/liveLessons/ClassLivePresenceModal';
 import {
   CLASS_LIVE_PRESENCE_ENABLED,
@@ -82,6 +85,8 @@ type ClassRow = {
   class_level?: string | null;
   /** Öğrenci `school` alanıyla eşleşen şube (örn. A) */
   branch?: string | null;
+  /** Eğitim programı (edu_programs.id) — Program → Seviye → Şube/Grup */
+  program_id?: string | null;
   description?: string | null;
   teacher_ids: string[];
   student_ids: string[];
@@ -219,6 +224,22 @@ export default function ClassLiveLessons() {
   const canManageClasses = userHasAnyRole(effectiveUser, ['admin', 'super_admin', 'coach']);
   /** Grup sınıfı silme yalnız yönetici yetkisinde — koç silemez (11 B vakası) */
   const canDeleteClasses = userHasAnyRole(effectiveUser, ['admin', 'super_admin']);
+  const programInstId = useProgramInstitutionId();
+  const [eduPrograms, setEduPrograms] = useState<EduProgram[]>([]);
+  const [eduProgramsSetupRequired, setEduProgramsSetupRequired] = useState(false);
+  const loadEduPrograms = useCallback(async () => {
+    if (!canManageClasses) return;
+    try {
+      const r = await fetchEduPrograms(programInstId || null);
+      setEduPrograms(r.programs);
+      setEduProgramsSetupRequired(r.setupRequired);
+    } catch {
+      setEduPrograms([]);
+    }
+  }, [canManageClasses, programInstId]);
+  useEffect(() => {
+    void loadEduPrograms();
+  }, [loadEduPrograms]);
   const canOpenSchedulePlanner = role === 'admin' || role === 'super_admin';
   const canManageSlots = canManageClasses || role === 'teacher' || userHasAnyRole(effectiveUser, ['teacher']);
   const isTeacherView = userHasAnyRole(effectiveUser, ['teacher']);
@@ -1313,6 +1334,7 @@ export default function ClassLiveLessons() {
     name: string;
     class_level: string;
     branch?: string;
+    program_id?: string | null;
     teacher_ids: string[];
     student_ids: string[];
   }): Promise<boolean> => {
@@ -1328,6 +1350,7 @@ export default function ClassLiveLessons() {
         name: payload.name.trim(),
         class_level: payload.class_level,
         branch: payload.branch?.trim() || undefined,
+        ...(payload.program_id ? { program_id: payload.program_id } : {}),
         teacher_ids: payload.teacher_ids,
         student_ids: payload.student_ids,
         ...(instId ? { institution_id: instId } : {})
@@ -1349,6 +1372,7 @@ export default function ClassLiveLessons() {
       name: string;
       class_level: string;
       branch: string | null;
+      program_id?: string | null;
       teacher_ids: string[];
       student_ids: string[];
       student_subjects?: Record<string, string[]>;
@@ -1361,6 +1385,7 @@ export default function ClassLiveLessons() {
         name: payload.name.trim(),
         class_level: payload.class_level,
         branch: payload.branch,
+        ...(payload.program_id !== undefined ? { program_id: payload.program_id } : {}),
         teacher_ids: payload.teacher_ids,
         student_ids: payload.student_ids,
         student_subjects: payload.student_subjects || {}
@@ -2279,7 +2304,19 @@ export default function ClassLiveLessons() {
         className={showMobileCalendar && !isStudentView ? 'flex flex-col gap-4' : 'contents'}
       >
       <div className={showMobileCalendar && !isStudentView ? 'order-2' : undefined}>
+      {canDeleteClasses ? (
+        <div className="mb-3">
+          <ProgramManagerPanel
+            programs={eduPrograms}
+            classes={classes}
+            institutionId={programInstId}
+            setupRequired={eduProgramsSetupRequired}
+            onChanged={() => void loadEduPrograms()}
+          />
+        </div>
+      ) : null}
       <ClassLiveClassManager
+        programs={eduPrograms}
         classes={classes}
         selectedClassId={selectedClassId}
         onSelectClass={setSelectedClassId}

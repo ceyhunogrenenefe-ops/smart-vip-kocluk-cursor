@@ -93,6 +93,18 @@ import {
   normalizeAcademicYearLabel
 } from '../lib/academicYearTerms';
 import { compareByFirstName, sortByFirstName } from '../lib/personNameSort';
+import { useProgramGroups } from '../hooks/useProgramGroups';
+import ProgramGroupFilters from '../components/programs/ProgramGroupFilters';
+import StudentProgramMemberships from '../components/programs/StudentProgramMemberships';
+import ProgramEnrollmentDraft from '../components/programs/ProgramEnrollmentDraft';
+import {
+  EMPTY_PROGRAM_FILTER,
+  addStudentToClass,
+  classesMatchingFilter,
+  isFilterActive,
+  studentMatchesProgramFilter,
+  type ProgramGroupFilter
+} from '../lib/eduPrograms';
 import {
   buildUserExportFilterSummary,
   buildUserExportRows,
@@ -320,6 +332,14 @@ export default function UserManagement() {
   const [filterBranch, setFilterBranch] = useState<string>('all');
   const [filterAcademicYear, setFilterAcademicYear] = useState<string>('all');
   const [filterCoachId, setFilterCoachId] = useState<string>('all');
+  const [programFilter, setProgramFilter] = useState<ProgramGroupFilter>(EMPTY_PROGRAM_FILTER);
+  const [draftProgramClassIds, setDraftProgramClassIds] = useState<string[]>([]);
+  const programGroupsEnabled = userHasAnyRole(authUser, ['admin', 'super_admin', 'coach']);
+  const programGroups = useProgramGroups(programGroupsEnabled);
+  const programMatchingClassIds = useMemo(
+    () => new Set(classesMatchingFilter(programGroups.classes, programFilter).map((c) => c.id)),
+    [programGroups.classes, programFilter]
+  );
 
   useEffect(() => {
     const q = (searchParams.get('q') || '').trim();
@@ -948,6 +968,20 @@ export default function UserManagement() {
         }
       }
 
+      if (isFilterActive(programFilter)) {
+        if (!tags.includes('student') || !studentMatchForFilter?.id) return false;
+        if (
+          !studentMatchesProgramFilter(
+            String(studentMatchForFilter.id),
+            programFilter,
+            programMatchingClassIds,
+            programGroups.membershipIndex
+          )
+        ) {
+          return false;
+        }
+      }
+
       if (filterCoachId !== 'all') {
         const coachRow = coachesForFilter.find((c) => c.id === filterCoachId);
         const studentCoach = studentMatchForFilter?.coachId ? String(studentMatchForFilter.coachId) : '';
@@ -988,8 +1022,27 @@ export default function UserManagement() {
     filterCoachId,
     studentLinkIndex,
     linkedStudents,
-    coachesForFilter
+    coachesForFilter,
+    programFilter,
+    programMatchingClassIds,
+    programGroups.membershipIndex
   ]);
+
+  /** Düzenlenen kullanıcının öğrenci kartı (program üyelikleri için) */
+  const editingStudentRecord = useMemo(() => {
+    if (modalMode !== 'edit' || !selectedUser) return null;
+    return (
+      resolveStudentForUser(
+        { id: selectedUser.id, email: selectedUser.email, studentId: selectedUser.studentId },
+        studentLinkIndex
+      ) ??
+      findStudentForPlatformUser(
+        { platformUserId: selectedUser.id, email: selectedUser.email, studentId: selectedUser.studentId },
+        linkedStudents
+      ) ??
+      null
+    );
+  }, [modalMode, selectedUser, studentLinkIndex, linkedStudents]);
 
   useEffect(() => {
     setRenderLimit(USERS_RENDER_BATCH);
@@ -1620,6 +1673,7 @@ export default function UserManagement() {
     const adresNote = (searchParams.get('adres') || '').trim();
 
     setModalMode('add');
+    setDraftProgramClassIds([]);
     setSelectedUser(null);
     setMessage(null);
     setFormData({
@@ -1686,6 +1740,7 @@ export default function UserManagement() {
     endDate.setDate(endDate.getDate() + days);
 
     setModalMode('add');
+    setDraftProgramClassIds([]);
     setSelectedUser(null);
     setMessage(null);
     setFormData({
@@ -2232,12 +2287,28 @@ export default function UserManagement() {
                   { platformUserId: newUserId, email: createdEmail },
                   linkedStudents
                 );
+                let enrolledStudentId = '';
                 if (existingSt) {
                   await updateStudent(existingSt.id, studentPayload);
                   mergePageStudent({ ...existingSt, ...studentPayload, id: existingSt.id });
+                  enrolledStudentId = String(existingSt.id);
                 } else {
                   const created = await addStudent(studentPayload);
                   mergePageStudent(created.student);
+                  enrolledStudentId = String(created.student?.id || '');
+                }
+                if (enrolledStudentId && draftProgramClassIds.length) {
+                  const failed: string[] = [];
+                  for (const classId of draftProgramClassIds) {
+                    try {
+                      await addStudentToClass(classId, enrolledStudentId);
+                    } catch (pe) {
+                      failed.push(pe instanceof Error ? pe.message : String(pe));
+                    }
+                  }
+                  setDraftProgramClassIds([]);
+                  void programGroups.reload();
+                  if (failed.length) window.alert(`Öğrenci kaydedildi ancak program kaydı tamamlanamadı: ${failed.join(' · ')}`);
                 }
               } else if (formData.role === 'coach' || (staffRolesNew?.roles || []).includes('coach')) {
                 const coachPayload = {
@@ -3232,6 +3303,18 @@ export default function UserManagement() {
                   </option>
                 ))}
             </select>
+
+            {programGroupsEnabled && (programGroups.programs.length > 0 || programGroups.classes.length > 0) ? (
+              <ProgramGroupFilters
+                value={programFilter}
+                onChange={setProgramFilter}
+                programs={programGroups.programs}
+                programsById={programGroups.programsById}
+                classes={programGroups.classes}
+                className="contents"
+                selectClassName="w-full px-4 py-2.5 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 min-h-[44px] xl:min-w-[10rem] xl:w-auto bg-white"
+              />
+            ) : null}
 
             <select
               value={filterAcademicYear}
@@ -4290,6 +4373,23 @@ export default function UserManagement() {
 
               {(modalMode === 'add' || modalMode === 'edit') && formData.role === 'student' && (
                 <div className="space-y-3 rounded-lg border border-gray-200 bg-gray-50/90 p-4">
+                  {programGroupsEnabled && modalMode === 'edit' && editingStudentRecord?.id ? (
+                    <StudentProgramMemberships
+                      studentId={String(editingStudentRecord.id)}
+                      studentName={selectedUser?.name}
+                      studentLevel={formData.classLevel || null}
+                      groups={programGroups}
+                      canEdit
+                    />
+                  ) : null}
+                  {programGroupsEnabled && modalMode === 'add' ? (
+                    <ProgramEnrollmentDraft
+                      groups={programGroups}
+                      value={draftProgramClassIds}
+                      onChange={setDraftProgramClassIds}
+                      preferredLevel={String(formData.classLevel || '')}
+                    />
+                  ) : null}
                   {currentUser?.role === 'super_admin' && (
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Kurum</label>

@@ -12,6 +12,7 @@ import {
   studentMatchesClassLevelAndBranch
 } from '../../lib/classLiveBranchUtils';
 import { apiFetch } from '../../lib/session';
+import { levelLabel, NO_PROGRAM, type EduProgram } from '../../lib/eduPrograms';
 import {
   ChevronDown,
   GraduationCap,
@@ -53,6 +54,7 @@ export type ClassLiveClassRow = {
   name: string;
   class_level?: string | null;
   branch?: string | null;
+  program_id?: string | null;
   teacher_ids: string[];
   student_ids: string[];
   student_subjects?: Record<string, string[]>;
@@ -160,6 +162,7 @@ type Props = {
     name: string;
     class_level: string;
     branch?: string;
+    program_id?: string | null;
     teacher_ids: string[];
     student_ids: string[];
   }) => Promise<boolean>;
@@ -169,6 +172,7 @@ type Props = {
       name: string;
       class_level: string;
       branch: string | null;
+      program_id?: string | null;
       teacher_ids: string[];
       student_ids: string[];
       student_subjects?: Record<string, string[]>;
@@ -179,6 +183,8 @@ type Props = {
   livePresenceByClassId?: Record<string, ClassLivePresenceSnapshot | undefined>;
   livePresenceLoading?: boolean;
   onPresenceStatClick?: (classId: string, kind: ClassLivePresenceModalKind) => void;
+  /** Eğitim programları (Dönem Programı, Deneme Kulübü …). Boşsa program alanları gizlenir. */
+  programs?: EduProgram[];
 };
 
 export default function ClassLiveClassManager({
@@ -194,8 +200,15 @@ export default function ClassLiveClassManager({
   onDeleteClass,
   livePresenceByClassId,
   livePresenceLoading,
-  onPresenceStatClick
+  onPresenceStatClick,
+  programs = []
 }: Props) {
+  const programsById = useMemo(() => new Map(programs.map((p) => [p.id, p])), [programs]);
+  const activePrograms = useMemo(() => programs.filter((p) => p.is_active), [programs]);
+  const hasPrograms = programs.length > 0;
+  const [programFilter, setProgramFilter] = useState('');
+  const [newProgramId, setNewProgramId] = useState('');
+  const [editProgramId, setEditProgramId] = useState('');
   const [showNewForm, setShowNewForm] = useState(false);
   const [newName, setNewName] = useState('');
   const [newLevel, setNewLevel] = useState('9');
@@ -275,6 +288,7 @@ export default function ClassLiveClassManager({
     onSelectClass(c.id);
     setEditClass(c);
     setEditName(c.name);
+    setEditProgramId(String(c.program_id || ''));
     setEditLevel(String(c.class_level || '9'));
     setEditBranch(String(c.branch || ''));
     setEditTeacherIds([...(c.teacher_ids || [])]);
@@ -317,6 +331,7 @@ export default function ClassLiveClassManager({
     e.preventDefault();
     if (creatingRef.current) return;
     if (!newName.trim()) return;
+    if (hasPrograms && !newProgramId) return;
     creatingRef.current = true;
     setCreating(true);
     try {
@@ -324,6 +339,7 @@ export default function ClassLiveClassManager({
         name: newName.trim(),
         class_level: newLevel,
         branch: newBranch.trim() || undefined,
+        program_id: newProgramId || null,
         teacher_ids: newTeacherIds,
         student_ids: newStudentIds
       });
@@ -358,6 +374,7 @@ export default function ClassLiveClassManager({
         name: editName.trim(),
         class_level: editLevel,
         branch: editBranch.trim() ? editBranch.trim() : null,
+        ...(hasPrograms ? { program_id: editProgramId || null } : {}),
         teacher_ids: editTeacherIds,
         student_ids: editStudentIds,
         student_subjects
@@ -387,6 +404,14 @@ export default function ClassLiveClassManager({
       setDeletingId(null);
     }
   };
+
+  const visibleClasses = useMemo(
+    () =>
+      !programFilter
+        ? classes
+        : classes.filter((c) => (programFilter === NO_PROGRAM ? !c.program_id : c.program_id === programFilter)),
+    [classes, programFilter]
+  );
 
   const teacherItems = teacherOptions.map((t) => ({ id: t.id, label: t.name }));
   const newStudentItems = studentsForNew.map((s) => ({ id: s.id, label: formatStudentLabel(s) }));
@@ -420,20 +445,30 @@ export default function ClassLiveClassManager({
 
       {canManageClasses && showNewForm ? (
         <form onSubmit={(e) => void submitNew(e)} className="border-b border-slate-100 bg-slate-50/50 p-4 sm:p-5 space-y-4">
-          <p className="text-sm font-semibold text-slate-800">Yeni sınıf oluştur</p>
-          <div className="grid gap-3 sm:grid-cols-3">
+          <p className="text-sm font-semibold text-slate-800">Yeni şube / grup oluştur</p>
+          <div className={`grid gap-3 ${hasPrograms ? 'sm:grid-cols-4' : 'sm:grid-cols-3'}`}>
+            {hasPrograms ? (
+              <div>
+                <label className="mb-1 block text-xs font-medium text-slate-600">1 · Program</label>
+                <select
+                  value={newProgramId}
+                  onChange={(e) => setNewProgramId(e.target.value)}
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+                  required
+                >
+                  <option value="">Program seçin</option>
+                  {activePrograms.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : null}
             <div>
-              <label className="mb-1 block text-xs font-medium text-slate-600">Sınıf adı</label>
-              <input
-                value={newName}
-                onChange={(e) => setNewName(e.target.value)}
-                placeholder="Örn: 10-A Matematik"
-                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
-                required
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-xs font-medium text-slate-600">Program / seviye</label>
+              <label className="mb-1 block text-xs font-medium text-slate-600">
+                {hasPrograms ? '2 · Sınıf seviyesi' : 'Program / seviye'}
+              </label>
               <select
                 value={newLevel}
                 onChange={(e) => setNewLevel(e.target.value)}
@@ -447,7 +482,19 @@ export default function ClassLiveClassManager({
               </select>
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-slate-600">Şube (isteğe bağlı)</label>
+              <label className="mb-1 block text-xs font-medium text-slate-600">
+                {hasPrograms ? '3 · Şube / Grup adı' : 'Sınıf adı'}
+              </label>
+              <input
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                placeholder={hasPrograms ? 'Örn: 8A veya A Grubu' : 'Örn: 10-A Matematik'}
+                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+                required
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-slate-600">Öğrenci şube filtresi (isteğe bağlı)</label>
               <select
                 value={newBranch}
                 onChange={(e) => setNewBranch(e.target.value)}
@@ -484,11 +531,11 @@ export default function ClassLiveClassManager({
           </div>
           <button
             type="submit"
-            disabled={creating || !newName.trim()}
+            disabled={creating || !newName.trim() || (hasPrograms && !newProgramId)}
             className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
           >
             {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-            Sınıfı oluştur
+            {hasPrograms ? 'Şube/grubu oluştur' : 'Sınıfı oluştur'}
           </button>
         </form>
       ) : null}
@@ -510,8 +557,39 @@ export default function ClassLiveClassManager({
             ) : null}
           </div>
         ) : (
+          <>
+          {hasPrograms && !isStudentView ? (
+            <div className="mb-3 flex flex-wrap gap-1.5" role="tablist" aria-label="Programa göre filtrele">
+              {[
+                { id: '', name: 'Tümü' },
+                ...programs.filter((p) => classes.some((c) => c.program_id === p.id)),
+                ...(classes.some((c) => !c.program_id) ? [{ id: NO_PROGRAM, name: 'Programsız' }] : [])
+              ].map((p) => {
+                const count = !p.id
+                  ? classes.length
+                  : classes.filter((c) => (p.id === NO_PROGRAM ? !c.program_id : c.program_id === p.id)).length;
+                const on = programFilter === p.id;
+                return (
+                  <button
+                    key={p.id || 'all'}
+                    type="button"
+                    role="tab"
+                    aria-selected={on}
+                    onClick={() => setProgramFilter(p.id)}
+                    className={`rounded-full border px-3 py-1 text-xs font-semibold ${
+                      on
+                        ? 'border-violet-600 bg-violet-600 text-white'
+                        : 'border-slate-200 bg-white text-slate-700 hover:border-violet-300'
+                    }`}
+                  >
+                    {p.name} <span className={on ? 'text-violet-100' : 'text-slate-400'}>{count}</span>
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-            {classes.map((c) => {
+            {visibleClasses.map((c) => {
               const selected = selectedClassId === c.id;
               const teacherCount = (c.teacher_ids || []).length;
               const studentCount = (c.student_ids || []).length;
@@ -541,9 +619,14 @@ export default function ClassLiveClassManager({
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-base font-bold text-slate-900">{c.name}</p>
                       <div className="mt-1.5 flex flex-wrap gap-1.5">
+                        {hasPrograms ? (
+                          <span className="rounded-md bg-violet-100 px-2 py-0.5 text-[10px] font-semibold text-violet-800">
+                            {c.program_id ? programsById.get(c.program_id)?.name || 'Program' : 'Programsız'}
+                          </span>
+                        ) : null}
                         {c.class_level ? (
                           <span className="rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-600">
-                            {c.class_level}
+                            {hasPrograms ? levelLabel(c.class_level) : c.class_level}
                           </span>
                         ) : null}
                         {c.branch ? (
@@ -614,6 +697,7 @@ export default function ClassLiveClassManager({
               );
             })}
           </div>
+          </>
         )}
       </div>
 
@@ -642,9 +726,29 @@ export default function ClassLiveClassManager({
               </button>
             </div>
             <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-4 py-4 sm:px-5 [-webkit-overflow-scrolling:touch]">
+              {hasPrograms ? (
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-slate-600">Program</label>
+                  <select
+                    value={editProgramId}
+                    onChange={(e) => setEditProgramId(e.target.value)}
+                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+                  >
+                    <option value="">Programsız</option>
+                    {programs.map((p) => (
+                      <option key={p.id} value={p.id} disabled={!p.is_active && p.id !== editClass.program_id}>
+                        {p.name}
+                        {p.is_active ? '' : ' (pasif)'}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ) : null}
               <div className="grid gap-3 sm:grid-cols-3">
                 <div className="sm:col-span-1">
-                  <label className="mb-1 block text-xs font-medium text-slate-600">Sınıf adı</label>
+                  <label className="mb-1 block text-xs font-medium text-slate-600">
+                    {hasPrograms ? 'Şube / Grup adı' : 'Sınıf adı'}
+                  </label>
                   <input
                     value={editName}
                     onChange={(e) => setEditName(e.target.value)}
