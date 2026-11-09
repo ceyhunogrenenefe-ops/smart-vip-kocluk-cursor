@@ -2,7 +2,10 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   DEFAULT_NOTIFY_SETTINGS,
+  examClock,
+  examRoomForClass,
   examRoomForLevel,
+  isWeekendExam,
   planNotifyActions,
   renderNotifyTemplate,
   uniqueStudents
@@ -50,6 +53,10 @@ describe('deneme exam notify', () => {
     assert.equal(uniqueStudents(students).length, 2);
     assert.equal(examRoomForLevel('9'), 'lise');
     assert.equal(examRoomForLevel('lgs'), 'class78');
+    assert.equal(examRoomForClass('10', '10 A'), 'lise');
+    assert.equal(examRoomForClass('5', '5A'), 'class56');
+    assert.equal(isWeekendExam('2026-11-14'), true);
+    assert.equal(examClock({ exam_date: '2026-11-14' }, settings), '10:00');
   });
 
   it('sınavdan bir gün önce seçili herkese hatırlatır', () => {
@@ -161,6 +168,32 @@ describe('deneme exam notify', () => {
     });
     assert.equal(again.sends.filter((s) => s.step === 'karne').length, 1);
     assert.equal(again.sends[0].student_id, 's2');
+  });
+
+  it('hafta sonu denemesini 10:00 sayar ve sınıfın kendi linkini yazar', () => {
+    const saturday = planNotifyActions({
+      exams: [{ ...exam, exam_date: '2026-11-14', exam_time: '14:00' }],
+      students: [
+        {
+          id: 's1',
+          name: 'Ali',
+          phone: '+90555',
+          phones: ['+905551110011', '+905559990000'],
+          join_link: 'https://zoom.example/10a',
+          steps: { day_before: true, soon: true, karne: false }
+        }
+      ],
+      settings: { ...settings, default_exam_time: '14:00' },
+      nowMs: new Date('2026-11-14T09:40:00+03:00').getTime(),
+      linksByRoom: { lise: 'https://zoom.example/lise' },
+      masterEnabled: true
+    });
+    const soon = saturday.sends.filter((s) => s.step === 'soon');
+    assert.equal(soon.length, 1);
+    assert.match(soon[0].message, /10:00/);
+    assert.match(soon[0].message, /zoom\.example\/10a/);
+    assert.deepEqual(soon[0].phones, ['+905551110011', '+905559990000']);
+    assert.equal(saturday.sends.some((s) => s.step === 'karne'), false);
   });
 
   it('otomasyon kapalıyken test alıcısı şablonu dolar ama toplu gönderim çıkmaz', () => {

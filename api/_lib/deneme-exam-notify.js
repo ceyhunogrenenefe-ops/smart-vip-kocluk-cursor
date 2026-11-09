@@ -15,12 +15,14 @@ import {
 import { examCalendarLevelForClassLevel } from './exam-calendar.js';
 import {
   DEFAULT_NOTIFY_SETTINGS,
+  examRoomForClass,
   examRoomForLevel,
   examTitle,
   formatTrDate,
   normalizeNotifySettings,
   planNotifyActions,
   renderNotifyTemplate,
+  suggestClassJoinLink,
   uniqueStudents
 } from './deneme-exam-notify-logic.js';
 
@@ -115,7 +117,35 @@ async function loadExams(institutionId, today) {
   return data || [];
 }
 
-export async function resolveNotifyAudience(institutionId, targets) {
+function studentPhones(row) {
+  const list = [row?.parent_phone, row?.phone].map((p) => normalizePhoneToE164(p)).filter(Boolean);
+  return [...new Set(list)];
+}
+
+async function loadSlotLinks(classIds) {
+  const out = new Map();
+  if (!classIds.length) return out;
+  const { data, error } = await supabaseAdmin
+    .from('class_weekly_slots')
+    .select('class_id, meeting_link, subject, updated_at')
+    .in('class_id', classIds)
+    .limit(2000);
+  if (error) return out;
+  const ranked = [...(data || [])].sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')));
+  for (const row of ranked) {
+    const id = String(row.class_id);
+    const link = String(row.meeting_link || '').trim();
+    if (!/^https?:\/\//i.test(link)) continue;
+    const deneme = /deneme/i.test(String(row.subject || ''));
+    const prev = out.get(id);
+    if (!prev || (deneme && !prev.deneme)) out.set(id, { link, deneme });
+  }
+  const flat = new Map();
+  for (const [id, row] of out) flat.set(id, row.link);
+  return flat;
+}
+
+export async function resolveNotifyAudience(institutionId, targets, linksByRoom = {}) {
   const { data: allStudents, error } = await supabaseAdmin
     .from('students')
     .select('id, name, class_level, phone, parent_phone')
@@ -125,8 +155,10 @@ export async function resolveNotifyAudience(institutionId, targets) {
   const byId = new Map((allStudents || []).map((s) => [String(s.id), s]));
   const picked = [];
 
-  const classIds = [...new Set((targets || []).filter((t) => t.kind === 'class' && t.class_id).map((t) => t.class_id))];
+  const classTargets = (targets || []).filter((t) => t.kind === 'class' && t.class_id);
+  const classIds = [...new Set(classTargets.map((t) => String(t.class_id)))];
   const classMembers = new Map();
+  const classMeta = new Map();
   if (classIds.length) {
     const { data: links, error: cErr } = await supabaseAdmin
       .from('class_students')
@@ -134,34 +166,94 @@ export async function resolveNotifyAudience(institutionId, targets) {
       .in('class_id', classIds);
     if (cErr) throw cErr;
     for (const row of links || []) {
-      const list = classMembers.get(row.class_id) || [];
+      const list = classMembers.get(String(row.class_id)) || [];
       list.push(String(row.student_id));
-      classMembers.set(row.class_id, list);
+      classMembers.set(String(row.class_id), list);
+    }
+    const { data: classes } = await supabaseAdmin
+      .from('classes')
+      .select('id, name, class_level')
+      .in('id', classIds);
+    for (const row of classes || []) classMeta.set(String(row.id), row);
+  }
+  const slotLinks = await loadSlotLinks(classIds);
+  const explicitByClass = new Map();
+  const loose = [];
+  for (const target of targets || []) {
+    if (target.kind !== 'student' || !target.student_id) continue;
+    if (target.source_class_id) {
+      const list = explicitByClass.get(String(target.source_class_id)) || [];
+      list.push(String(target.student_id));
+      explicitByClass.set(String(target.source_class_id), list);
+    } else if (byId.has(String(target.student_id))) {
+      loose.push(byId.get(String(target.student_id)));
+    }
+  }
+
+  const orderedClasses = [...classTargets].sort((a, b) => Number(b.enabled !== false) - Number(a.enabled !== false));
+  for (const target of orderedClasses) {
+    const cid = String(target.class_id);
+    const meta = classMeta.get(cid);
+    const room = examRoomForClass(meta?.class_level, meta?.name);
+    const join = suggestClassJoinLink({
+      slotLink: String(target.join_link || '').trim() || slotLinks.get(cid),
+      room,
+      linksByRoom
+    });
+    const explicit = explicitByClass.get(cid) || [];
+    const memberIds = explicit.length ? explicit : classMembers.get(cid) || [];
+    const steps = {
+      day_before: target.day_before_enabled !== false,
+      soon: target.soon_enabled !== false,
+      karne: target.karne_enabled !== false
+    };
+    for (const sid of memberIds) {
+      const student = byId.get(sid);
+      if (!student) continue;
+      const phones = studentPhones(student);
+      picked.push({
+        id: String(student.id),
+        name: String(student.name || '').trim() || 'Öğrenci',
+        class_level: student.class_level || '',
+        phone: phones[0] || null,
+        phones,
+        join_link: join || null,
+        room,
+        steps,
+        active: target.enabled !== false
+      });
     }
   }
 
   for (const target of targets || []) {
-    if (target.kind === 'student' && target.student_id && byId.has(String(target.student_id))) {
-      picked.push(byId.get(String(target.student_id)));
-    } else if (target.kind === 'class') {
-      for (const sid of classMembers.get(target.class_id) || []) {
-        if (byId.has(sid)) picked.push(byId.get(sid));
-      }
-    } else if (target.kind === 'grade') {
-      for (const student of byId.values()) {
-        if (examCalendarLevelForClassLevel(student.class_level) === String(target.grade_level || '')) {
-          picked.push(student);
-        }
-      }
+    if (target.kind !== 'grade') continue;
+    for (const student of byId.values()) {
+      if (examCalendarLevelForClassLevel(student.class_level) !== String(target.grade_level || '')) continue;
+      const phones = studentPhones(student);
+      picked.push({
+        id: String(student.id),
+        name: String(student.name || '').trim() || 'Öğrenci',
+        class_level: student.class_level || '',
+        phone: phones[0] || null,
+        phones,
+        active: true
+      });
     }
   }
 
-  return uniqueStudents(picked).map((s) => ({
-    id: String(s.id),
-    name: String(s.name || '').trim() || 'Öğrenci',
-    class_level: s.class_level || '',
-    phone: normalizePhoneToE164(s.parent_phone || s.phone) || null
-  }));
+  for (const student of loose) {
+    const phones = studentPhones(student);
+    picked.push({
+      id: String(student.id),
+      name: String(student.name || '').trim() || 'Öğrenci',
+      class_level: student.class_level || '',
+      phone: phones[0] || null,
+      phones,
+      active: true
+    });
+  }
+
+  return uniqueStudents(picked);
 }
 
 async function loadAttendance(exams, studentIds) {
@@ -251,7 +343,8 @@ export async function processDenemeExamNotify({
       .select('*')
       .eq('institution_id', iid);
     if (tErr) throw tErr;
-    const students = await resolveNotifyAudience(iid, targets || []);
+    const links = await loadLinks(iid);
+    const students = await resolveNotifyAudience(iid, targets || [], links?.exams || {});
     const stuckBefore = new Date(now.getTime() - 15 * 60 * 1000).toISOString();
     await supabaseAdmin
       .from('deneme_exam_notify_sends')
@@ -262,12 +355,25 @@ export async function processDenemeExamNotify({
 
     const examIds = exams.map((e) => e.id);
     const existing = examIds.length ? await loadExistingSends(iid, examIds) : [];
+    const audience = new Set(students.filter((s) => s.active !== false).map((s) => String(s.id)));
+    const dropped = [...new Set(existing.filter((row) => row.status === 'pending' && !audience.has(String(row.student_id))).map((row) => row.student_id))];
+    if (dropped.length && examIds.length) {
+      await supabaseAdmin
+        .from('deneme_exam_notify_sends')
+        .update({ status: 'cancelled', error: 'secimden_cikti', updated_at: now.toISOString() })
+        .eq('institution_id', iid)
+        .eq('status', 'pending')
+        .in('exam_id', examIds)
+        .in('student_id', dropped);
+      for (const row of existing) {
+        if (row.status === 'pending' && dropped.includes(row.student_id)) row.status = 'cancelled';
+      }
+    }
 
     const tokens = new Map();
     for (const row of existing) {
       if (row.step === 'karne' && row.karne_token) tokens.set(`${row.exam_id}|${row.student_id}`, row.karne_token);
     }
-    const links = await loadLinks(iid);
     const attendanceByExam = await loadAttendance(exams, students.map((s) => s.id));
     const resultsByStudent = await loadResults(students.map((s) => s.id), exams);
     const plan = planNotifyActions({
@@ -353,14 +459,21 @@ export async function processDenemeExamNotify({
         .maybeSingle();
       if (claimErr || !claim) continue;
       budget -= 1;
-      let sent;
-      if (!job.phone) sent = { ok: false, error: 'telefon_yok' };
-      else {
-        try {
-          sent = await sendMessage(job.phone, job.message);
-        } catch (e) {
-          sent = { ok: false, error: String(e?.message || e) };
+      const phones = [...new Set((job.phones?.length ? job.phones : [job.phone]).map((p) => String(p || '').trim()).filter(Boolean))];
+      let sent = { ok: false, error: 'telefon_yok' };
+      if (phones.length) {
+        const errors = [];
+        let okAny = false;
+        for (const phone of phones) {
+          try {
+            const one = await sendMessage(phone, job.message);
+            if (one?.ok) okAny = true;
+            else errors.push(String(one?.error || 'send_failed'));
+          } catch (e) {
+            errors.push(String(e?.message || e));
+          }
         }
+        sent = okAny ? { ok: true } : { ok: false, error: errors[0] || 'send_failed' };
       }
       await supabaseAdmin
         .from('deneme_exam_notify_sends')

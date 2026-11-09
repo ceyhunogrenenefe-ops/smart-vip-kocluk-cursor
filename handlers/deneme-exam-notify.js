@@ -13,6 +13,10 @@ import { isMissingTableError } from '../api/_lib/supabase-schema.js';
 import { EXAM_CALENDAR_LEVELS, EXAM_CALENDAR_LEVEL_LABELS } from '../api/_lib/exam-calendar.js';
 import { getIstanbulDateString, addCalendarDaysYmd } from '../api/_lib/istanbul-time.js';
 import {
+  examRoomForClass,
+  suggestClassJoinLink
+} from '../api/_lib/deneme-exam-notify-logic.js';
+import {
   NOTIFY_GAPS,
   NOTIFY_SCHEMA_HINT,
   examLabel,
@@ -104,8 +108,27 @@ export default async function handler(req, res) {
   try {
     if (req.method === 'GET' && op === 'directory') {
       const q = String(req.query?.q || '').trim().slice(0, 60);
+      const classId = String(req.query?.class_id || '').trim();
       let students = [];
-      if (q.length >= 2) {
+      if (classId) {
+        const { data: members, error: mErr } = await supabaseAdmin
+          .from('class_students')
+          .select('student_id')
+          .eq('class_id', classId);
+        if (mErr) throw mErr;
+        const ids = [...new Set((members || []).map((r) => r.student_id).filter(Boolean))];
+        if (ids.length) {
+          const { data, error } = await supabaseAdmin
+            .from('students')
+            .select('id, name, class_level')
+            .eq('institution_id', institutionId)
+            .in('id', ids)
+            .order('name')
+            .limit(500);
+          if (error) throw error;
+          students = data || [];
+        }
+      } else if (q.length >= 2) {
         const { data, error } = await supabaseAdmin
           .from('students')
           .select('id, name, class_level')
@@ -116,12 +139,68 @@ export default async function handler(req, res) {
         if (error) throw error;
         students = data || [];
       }
-      let classQuery = supabaseAdmin.from('classes').select('id, name, class_level').order('name').limit(200);
+      let programs = [];
+      const prog = await supabaseAdmin
+        .from('edu_programs')
+        .select('id, name, sort_order, is_active')
+        .eq('institution_id', institutionId)
+        .order('sort_order');
+      if (!prog.error) programs = (prog.data || []).filter((p) => p.is_active !== false);
+      let classQuery = supabaseAdmin.from('classes').select('id, name, class_level, program_id').order('name').limit(400);
       classQuery = classQuery.eq('institution_id', institutionId);
-      const { data: classes, error: cErr } = await classQuery;
+      let { data: classes, error: cErr } = await classQuery;
+      if (cErr && String(cErr.message || '').includes('program_id')) {
+        const retry = await supabaseAdmin.from('classes').select('id, name, class_level').eq('institution_id', institutionId).order('name').limit(400);
+        classes = retry.data;
+        cErr = retry.error;
+      }
       if (cErr) throw cErr;
+      const classIds = (classes || []).map((c) => c.id);
+      const slotLink = new Map();
+      if (classIds.length) {
+        const slots = await supabaseAdmin
+          .from('class_weekly_slots')
+          .select('class_id, meeting_link, subject, updated_at')
+          .in('class_id', classIds)
+          .limit(2000);
+        if (!slots.error) {
+          const ranked = [...(slots.data || [])].sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')));
+          for (const row of ranked) {
+            const link = String(row.meeting_link || '').trim();
+            if (!/^https?:\/\//i.test(link)) continue;
+            const deneme = /deneme/i.test(String(row.subject || ''));
+            const prev = slotLink.get(String(row.class_id));
+            if (!prev || (deneme && !prev.deneme)) slotLink.set(String(row.class_id), { link, deneme });
+          }
+        }
+      }
+      let linksByRoom = {};
+      try {
+        const { data } = await supabaseAdmin.from('platform_academic_center_links').select('links, payload').eq('id', 1).maybeSingle();
+        const { linksForInstitution, normalizeAcademicLinksStore } = await import('../api/_lib/academic-center-links-store.js');
+        linksByRoom = linksForInstitution(normalizeAcademicLinksStore(data?.links ?? data?.payload), institutionId)?.exams || {};
+      } catch {
+        linksByRoom = {};
+      }
+      const programName = new Map(programs.map((p) => [String(p.id), p.name]));
       const grades = EXAM_CALENDAR_LEVELS.map((id) => ({ id, label: EXAM_CALENDAR_LEVEL_LABELS[id] || id }));
-      return res.status(200).json({ students, classes: classes || [], grades });
+      return res.status(200).json({
+        students,
+        programs,
+        classes: (classes || []).map((c) => {
+          const room = examRoomForClass(c.class_level, c.name);
+          return {
+            ...c,
+            program_name: programName.get(String(c.program_id || '')) || '',
+            join_link: suggestClassJoinLink({
+              slotLink: slotLink.get(String(c.id))?.link,
+              room,
+              linksByRoom
+            })
+          };
+        }),
+        grades
+      });
     }
 
     if (req.method === 'GET' && op === 'sends') {
@@ -154,10 +233,18 @@ export default async function handler(req, res) {
       let targets = [];
       try {
         settings = await loadNotifySettings(institutionId);
-        const { data, error } = await supabaseAdmin
+        let { data, error } = await supabaseAdmin
           .from('deneme_exam_notify_targets')
-          .select('id, kind, student_id, class_id, grade_level')
+          .select('id, kind, student_id, class_id, grade_level, enabled, day_before_enabled, soon_enabled, karne_enabled, join_link, source_class_id')
           .eq('institution_id', institutionId);
+        if (error && /column|schema cache|PGRST204/i.test(String(error.message || ''))) {
+          const retry = await supabaseAdmin
+            .from('deneme_exam_notify_targets')
+            .select('id, kind, student_id, class_id, grade_level')
+            .eq('institution_id', institutionId);
+          data = retry.data;
+          error = retry.error;
+        }
         if (error) throw error;
         targets = data || [];
         const studentIds = targets.filter((t) => t.kind === 'student' && t.student_id).map((t) => t.student_id);
@@ -229,15 +316,29 @@ export default async function handler(req, res) {
       for (const raw of incoming) {
         const kind = String(raw?.kind || '');
         if (kind === 'student' && raw.student_id) {
-          const key = `student:${raw.student_id}`;
+          const key = `student:${raw.source_class_id || ''}:${raw.student_id}`;
           if (seen.has(key)) continue;
           seen.add(key);
-          rows.push({ institution_id: institutionId, kind, student_id: String(raw.student_id) });
+          rows.push({
+            institution_id: institutionId,
+            kind,
+            student_id: String(raw.student_id),
+            source_class_id: raw.source_class_id ? String(raw.source_class_id) : null
+          });
         } else if (kind === 'class' && raw.class_id) {
           const key = `class:${raw.class_id}`;
           if (seen.has(key)) continue;
           seen.add(key);
-          rows.push({ institution_id: institutionId, kind, class_id: String(raw.class_id) });
+          rows.push({
+            institution_id: institutionId,
+            kind,
+            class_id: String(raw.class_id),
+            enabled: raw.enabled !== false,
+            day_before_enabled: raw.day_before_enabled !== false,
+            soon_enabled: raw.soon_enabled !== false,
+            karne_enabled: raw.karne_enabled !== false,
+            join_link: String(raw.join_link || '').trim() || null
+          });
         } else if (kind === 'grade' && EXAM_CALENDAR_LEVELS.includes(String(raw.grade_level))) {
           const key = `grade:${raw.grade_level}`;
           if (seen.has(key)) continue;
@@ -264,7 +365,25 @@ export default async function handler(req, res) {
         .eq('institution_id', institutionId);
       if (delErr) throw delErr;
       if (rows.length) {
-        const { error } = await supabaseAdmin.from('deneme_exam_notify_targets').insert(rows);
+        let { error } = await supabaseAdmin.from('deneme_exam_notify_targets').insert(rows);
+        if (error && /source_class_id|join_link|day_before_enabled|column/i.test(String(error.message || ''))) {
+          const slim = rows.map((row) => ({
+            institution_id: row.institution_id,
+            kind: row.kind,
+            student_id: row.student_id || null,
+            class_id: row.class_id || null,
+            grade_level: row.grade_level || null
+          }));
+          const retry = await supabaseAdmin.from('deneme_exam_notify_targets').insert(slim);
+          error = retry.error;
+          if (!error) {
+            return res.status(200).json({
+              ok: true,
+              count: slim.length,
+              hint: "Sınıf otomasyonu için Supabase SQL Editor'da sql/2026-11-09-deneme-exam-notify-class.sql dosyasını çalıştırın."
+            });
+          }
+        }
         if (error) throw error;
       }
       return res.status(200).json({ ok: true, count: rows.length });

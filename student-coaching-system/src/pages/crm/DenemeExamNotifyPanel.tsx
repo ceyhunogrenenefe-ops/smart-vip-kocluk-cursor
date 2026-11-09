@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { BellRing, Loader2, Save, Search, Send } from 'lucide-react';
+import { BellRing, ChevronDown, Loader2, Save, Send } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiFetch } from '../../lib/session';
 import { crmInstitutionScope } from '../../lib/crmInboxApi';
@@ -23,8 +23,25 @@ type Target = {
   student_id?: string | null;
   class_id?: string | null;
   grade_level?: string | null;
+  source_class_id?: string | null;
+  enabled?: boolean;
+  day_before_enabled?: boolean;
+  soon_enabled?: boolean;
+  karne_enabled?: boolean;
+  join_link?: string | null;
   label?: string;
 };
+
+type ClassOpt = {
+  id: string;
+  name: string;
+  class_level: string | null;
+  program_id?: string | null;
+  program_name?: string;
+  join_link?: string;
+};
+type ProgramOpt = { id: string; name: string };
+type StudentOpt = { id: string; name: string; class_level: string | null };
 
 type ExamOpt = { id: string; title: string; exam_date: string; exam_time: string | null; status: string | null };
 type SendRow = {
@@ -86,10 +103,12 @@ export default function DenemeExamNotifyPanel() {
   const [saving, setSaving] = useState(false);
   const [examId, setExamId] = useState('');
   const [sends, setSends] = useState<SendRow[]>([]);
-  const [q, setQ] = useState('');
-  const [students, setStudents] = useState<{ id: string; name: string; class_level: string | null }[]>([]);
-  const [classes, setClasses] = useState<{ id: string; name: string; class_level: string | null }[]>([]);
-  const [grades, setGrades] = useState<{ id: string; label: string }[]>([]);
+  const [open, setOpen] = useState(false);
+  const [programId, setProgramId] = useState('');
+  const [pickClassId, setPickClassId] = useState('');
+  const [classes, setClasses] = useState<ClassOpt[]>([]);
+  const [programs, setPrograms] = useState<ProgramOpt[]>([]);
+  const [roster, setRoster] = useState<Record<string, StudentOpt[]>>({});
   const [testStep, setTestStep] = useState('day_before');
 
   const load = useCallback(async () => {
@@ -123,6 +142,16 @@ export default function DenemeExamNotifyPanel() {
   }, [load]);
 
   useEffect(() => {
+    const ids = [...new Set(targets.filter((t) => t.kind === 'class' && t.class_id).map((t) => String(t.class_id)))];
+    for (const id of ids) {
+      if (roster[id]) continue;
+      void api<{ students: StudentOpt[] }>(`/api/deneme-exam-notify?op=directory&class_id=${encodeURIComponent(id)}`)
+        .then((j) => setRoster((cur) => (cur[id] ? cur : { ...cur, [id]: j.students || [] })))
+        .catch(() => {});
+    }
+  }, [targets, roster]);
+
+  useEffect(() => {
     if (!examId) return;
     void api<{ data: SendRow[] }>(`/api/deneme-exam-notify?op=sends&exam_id=${encodeURIComponent(examId)}`)
       .then((j) => setSends(j.data || []))
@@ -130,33 +159,71 @@ export default function DenemeExamNotifyPanel() {
   }, [examId, counts]);
 
   useEffect(() => {
-    const t = window.setTimeout(() => {
-      const query = q.trim();
-      void api<{ students: typeof students; classes: typeof classes; grades: typeof grades }>(
-        `/api/deneme-exam-notify?op=directory&q=${encodeURIComponent(query)}`
-      )
-        .then((j) => {
-          setStudents(j.students || []);
-          setClasses(j.classes || []);
-          setGrades(j.grades || []);
-        })
-        .catch(() => {});
-    }, 250);
-    return () => window.clearTimeout(t);
-  }, [q]);
+    void api<{ classes: ClassOpt[]; programs: ProgramOpt[] }>('/api/deneme-exam-notify?op=directory')
+      .then((j) => {
+        setClasses(j.classes || []);
+        setPrograms(j.programs || []);
+      })
+      .catch(() => {});
+  }, []);
 
-  const className = useMemo(() => new Map(classes.map((c) => [c.id, c.name])), [classes]);
-  const gradeName = useMemo(() => new Map(grades.map((g) => [g.id, g.label])), [grades]);
+  const filteredClasses = useMemo(
+    () => classes.filter((c) => !programId || String(c.program_id || '') === programId),
+    [classes, programId]
+  );
+  const classById = useMemo(() => new Map(classes.map((c) => [c.id, c])), [classes]);
 
   function patch<K extends keyof Settings>(key: K, value: Settings[K]) {
     setSettings((s) => (s ? { ...s, [key]: value } : s));
   }
 
-  function addTarget(next: Target) {
+  function patchClass(classId: string, patchRow: Partial<Target>) {
+    setTargets((list) => list.map((t) => (t.kind === 'class' && t.class_id === classId ? { ...t, ...patchRow } : t)));
+  }
+
+  async function addClass(classId: string) {
+    const cls = classById.get(classId);
+    if (!cls) return;
+    let people = roster[classId];
+    if (!people) {
+      const j = await api<{ students: StudentOpt[] }>(
+        `/api/deneme-exam-notify?op=directory&class_id=${encodeURIComponent(classId)}`
+      );
+      people = j.students || [];
+      setRoster((cur) => ({ ...cur, [classId]: people }));
+    }
     setTargets((list) => {
-      const key = `${next.kind}:${next.student_id || next.class_id || next.grade_level}`;
-      if (list.some((t) => `${t.kind}:${t.student_id || t.class_id || t.grade_level}` === key)) return list;
-      return [...list, next];
+      if (list.some((t) => t.kind === 'class' && t.class_id === classId)) return list;
+      const classRow: Target = {
+        kind: 'class',
+        class_id: classId,
+        label: cls.name,
+        enabled: true,
+        day_before_enabled: settings?.day_before_enabled !== false,
+        soon_enabled: settings?.soon_enabled !== false,
+        karne_enabled: settings?.karne_enabled !== false,
+        join_link: cls.join_link || ''
+      };
+      const studentRows: Target[] = people.map((s) => ({
+        kind: 'student',
+        student_id: s.id,
+        source_class_id: classId,
+        label: s.name
+      }));
+      return [...list, classRow, ...studentRows];
+    });
+    setPickClassId('');
+  }
+
+  function removeClass(classId: string) {
+    setTargets((list) => list.filter((t) => t.class_id !== classId && t.source_class_id !== classId));
+  }
+
+  function toggleStudent(classId: string, student: StudentOpt) {
+    setTargets((list) => {
+      const has = list.some((t) => t.kind === 'student' && t.source_class_id === classId && t.student_id === student.id);
+      if (has) return list.filter((t) => !(t.kind === 'student' && t.source_class_id === classId && t.student_id === student.id));
+      return [...list, { kind: 'student', student_id: student.id, source_class_id: classId, label: student.name }];
     });
   }
 
@@ -177,7 +244,13 @@ export default function DenemeExamNotifyPanel() {
             kind: t.kind,
             student_id: t.student_id,
             class_id: t.class_id,
-            grade_level: t.grade_level
+            grade_level: t.grade_level,
+            source_class_id: t.source_class_id,
+            enabled: t.enabled,
+            day_before_enabled: t.day_before_enabled,
+            soon_enabled: t.soon_enabled,
+            karne_enabled: t.karne_enabled,
+            join_link: t.join_link
           }))
         })
       });
@@ -242,24 +315,32 @@ export default function DenemeExamNotifyPanel() {
   }
   if (!settings) return null;
 
+  const classTargets = targets.filter((t) => t.kind === 'class');
+
   return (
     <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h2 className="flex items-center gap-2 text-base font-semibold text-slate-900">
-            <BellRing className="h-5 w-5 text-emerald-600" />
-            Deneme Kulübü sınav bildirimleri
-          </h2>
-          <p className="mt-1 max-w-3xl text-sm text-slate-600">
-            Seçili öğrencilere sınavdan bir gün önce ve 30 dakika önce mesaj gider. Sonuç karnesi yalnız o sınava katılan öğrenciye gider.
-            Gerçek gönderimler anahtar açılınca başlar. Saatler Türkiye saatidir.
-          </p>
-        </div>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <button type="button" onClick={() => setOpen((v) => !v)} className="flex items-center gap-2 text-left">
+          <ChevronDown className={`h-5 w-5 text-slate-500 transition ${open ? 'rotate-180' : ''}`} />
+          <BellRing className="h-5 w-5 text-emerald-600" />
+          <span>
+            <span className="block text-base font-semibold text-slate-900">Deneme Kulübü sınav bildirimleri</span>
+            <span className="block text-xs text-slate-500">
+              {classTargets.length} sınıf · {settings.enabled ? 'otomasyon açık' : 'otomasyon kapalı'} · hafta sonu sınavları 10:00
+            </span>
+          </span>
+        </button>
         <label className="flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-800">
           <input type="checkbox" checked={settings.enabled} onChange={(e) => patch('enabled', e.target.checked)} />
           Otomasyon açık
         </label>
       </div>
+
+      {open && (
+      <>
+      <p className="mt-3 max-w-3xl text-sm text-slate-600">
+        Mesaj veliye ve öğrenciye gider. Her sınıf kendi davet linkini kullanır ve otomasyonu ayrı açılır. Cumartesi ve pazar denemeleri 10:00’da başlar.
+      </p>
 
       {hint && <p className="mt-3 rounded-lg bg-amber-50 p-2 text-xs text-amber-900">{hint}</p>}
 
@@ -285,14 +366,15 @@ export default function DenemeExamNotifyPanel() {
             className="mt-1 block w-full rounded-xl border border-slate-300 px-3 py-2"
           />
         </label>
-        <label className="text-sm text-slate-700">
-          Varsayılan sınav saati
+        <label className="text-sm text-slate-700 md:col-span-2">
+          Hafta içi sınav saati
           <input
             type="time"
             value={settings.default_exam_time}
             onChange={(e) => patch('default_exam_time', e.target.value)}
             className="mt-1 block w-full rounded-xl border border-slate-300 px-3 py-2"
           />
+          <span className="mt-1 block text-xs text-slate-500">Cumartesi ve pazar sabit 10:00.</span>
         </label>
         <label className="text-sm text-slate-700">
           Test telefonu
@@ -314,78 +396,93 @@ export default function DenemeExamNotifyPanel() {
         Değişkenler: {'{{ogrenci}} {{sinav_adi}} {{tarih}} {{saat}} {{bolum}} {{link}} {{karne_link}}'}
       </p>
 
-      <div className="mt-4 grid gap-4 lg:grid-cols-[1fr_1fr]">
-        <div>
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-            <input
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="Öğrenci ara (en az 2 harf)"
-              className="w-full rounded-xl border border-slate-300 py-2 pl-9 pr-3 text-sm"
-            />
-          </div>
-          <div className="mt-2 max-h-40 space-y-1 overflow-y-auto">
-            {students.map((s) => (
-              <button
-                key={s.id}
-                type="button"
-                onClick={() => addTarget({ kind: 'student', student_id: s.id, label: s.name })}
-                className="block w-full rounded-lg px-2 py-1.5 text-left text-sm hover:bg-slate-50"
-              >
-                {s.name}
-                <span className="ml-2 text-xs text-slate-400">{s.class_level || ''}</span>
-              </button>
-            ))}
-          </div>
-          <div className="mt-3 flex flex-wrap gap-2">
-            {classes.map((c) => (
-              <button
-                key={c.id}
-                type="button"
-                onClick={() => addTarget({ kind: 'class', class_id: c.id, label: c.name })}
-                className="rounded-full border border-slate-200 px-3 py-1 text-xs font-medium text-slate-700 hover:border-emerald-400"
-              >
-                Sınıf: {c.name}
-              </button>
-            ))}
-          </div>
-          <div className="mt-2 flex flex-wrap gap-2">
-            {grades.map((g) => (
-              <button
-                key={g.id}
-                type="button"
-                onClick={() => addTarget({ kind: 'grade', grade_level: g.id, label: g.label })}
-                className="rounded-full border border-slate-200 px-3 py-1 text-xs font-medium text-slate-700 hover:border-emerald-400"
-              >
-                Kademe: {g.label}
-              </button>
-            ))}
-          </div>
+      <div className="mt-4 space-y-3">
+        <div className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
+          <label className="text-sm text-slate-700">
+            Program
+            <select value={programId} onChange={(e) => { setProgramId(e.target.value); setPickClassId(''); }} className="mt-1 block w-full rounded-xl border border-slate-300 px-3 py-2">
+              <option value="">Tüm programlar</option>
+              {programs.map((p) => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </select>
+          </label>
+          <label className="text-sm text-slate-700">
+            Sınıf
+            <select value={pickClassId} onChange={(e) => setPickClassId(e.target.value)} className="mt-1 block w-full rounded-xl border border-slate-300 px-3 py-2">
+              <option value="">Sınıf seçin</option>
+              {filteredClasses.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.program_name ? `${c.program_name} · ` : ''}{c.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            type="button"
+            onClick={() => void addClass(pickClassId)}
+            disabled={!pickClassId}
+            className="self-end rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"
+          >
+            Sınıfı ekle
+          </button>
         </div>
-        <div>
-          <p className="text-sm font-medium text-slate-800">Seçilenler</p>
-          <ul className="mt-2 space-y-1">
-            {targets.length === 0 && <li className="text-sm text-slate-500">Henüz öğrenci, sınıf veya kademe seçilmedi.</li>}
-            {targets.map((t, i) => {
-              const label =
-                t.label ||
-                (t.kind === 'class' ? className.get(String(t.class_id)) : t.kind === 'grade' ? gradeName.get(String(t.grade_level)) : t.student_id) ||
-                'Seçim';
-              return (
-                <li key={`${t.kind}-${i}`} className="flex items-center justify-between rounded-lg bg-slate-50 px-2 py-1.5 text-sm">
-                  <span>
-                    {t.kind === 'student' ? 'Öğrenci' : t.kind === 'class' ? 'Sınıf' : 'Kademe'}: {label}
-                  </span>
-                  <button type="button" className="text-xs text-rose-600" onClick={() => setTargets((list) => list.filter((_, idx) => idx !== i))}>
-                    Çıkar
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-          <p className="mt-2 text-xs text-slate-500">Aynı öğrenci birden fazla seçimde olsa da bir kez mesaj alır.</p>
-        </div>
+
+        {classTargets.length === 0 && <p className="text-sm text-slate-500">Henüz sınıf eklenmedi.</p>}
+        {classTargets.map((cls) => {
+          const id = String(cls.class_id);
+          const info = classById.get(id);
+          const people = roster[id] || [];
+          const picked = new Set(targets.filter((t) => t.kind === 'student' && t.source_class_id === id).map((t) => String(t.student_id)));
+          return (
+            <article key={id} className="rounded-xl border border-slate-200 p-3">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-sm font-semibold text-slate-900">{cls.label || info?.name || 'Sınıf'}</p>
+                  <p className="text-xs text-slate-500">{info?.program_name || 'Program'} · {picked.size} öğrenci</p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <label className="flex items-center gap-2 text-sm">
+                    <input type="checkbox" checked={cls.enabled !== false} onChange={(e) => patchClass(id, { enabled: e.target.checked })} />
+                    Bu sınıf açık
+                  </label>
+                  <button type="button" className="text-xs font-semibold text-rose-600" onClick={() => removeClass(id)}>Sınıfı iptal et</button>
+                </div>
+              </div>
+              <div className="mt-2 flex flex-wrap gap-3 text-sm text-slate-700">
+                <label className="flex items-center gap-1"><input type="checkbox" checked={cls.day_before_enabled !== false} onChange={(e) => patchClass(id, { day_before_enabled: e.target.checked })} /> 1 gün önce</label>
+                <label className="flex items-center gap-1"><input type="checkbox" checked={cls.soon_enabled !== false} onChange={(e) => patchClass(id, { soon_enabled: e.target.checked })} /> 30 dk önce</label>
+                <label className="flex items-center gap-1"><input type="checkbox" checked={cls.karne_enabled !== false} onChange={(e) => patchClass(id, { karne_enabled: e.target.checked })} /> Karne</label>
+              </div>
+              <label className="mt-2 block text-sm text-slate-700">
+                Bu sınıfın davet linki
+                <input
+                  value={cls.join_link || ''}
+                  onChange={(e) => patchClass(id, { join_link: e.target.value })}
+                  placeholder={info?.join_link || 'https://'}
+                  className="mt-1 block w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
+                />
+              </label>
+              <div className="mt-2 flex gap-2 text-xs">
+                <button type="button" className="font-semibold text-emerald-700" onClick={() => setTargets((list) => {
+                  const rest = list.filter((t) => !(t.kind === 'student' && t.source_class_id === id));
+                  return [...rest, ...people.map((s) => ({ kind: 'student' as const, student_id: s.id, source_class_id: id, label: s.name }))];
+                })}>Tümünü seç</button>
+                <button type="button" className="font-semibold text-slate-500" onClick={() => setTargets((list) => list.filter((t) => !(t.kind === 'student' && t.source_class_id === id)))}>Seçimi temizle</button>
+              </div>
+              <div className="mt-2 max-h-40 space-y-1 overflow-y-auto">
+                {people.map((s) => (
+                  <label key={s.id} className="flex items-center gap-2 rounded-lg px-1 py-1 text-sm hover:bg-slate-50">
+                    <input type="checkbox" checked={picked.has(s.id)} onChange={() => toggleStudent(id, s)} />
+                    {s.name}
+                  </label>
+                ))}
+                {people.length === 0 && <p className="text-xs text-slate-500">Bu sınıfta öğrenci kaydı yok.</p>}
+              </div>
+            </article>
+          );
+        })}
+        <p className="text-xs text-slate-500">Mesaj öğrencinin kendi telefonuna ve veli telefonuna gider. Aynı numara bir kez kullanılır. Aynı öğrenci bir kez yazılır.</p>
       </div>
 
       <div className="mt-4 flex flex-col gap-2 sm:flex-row">
@@ -479,6 +576,8 @@ export default function DenemeExamNotifyPanel() {
             <li key={gap}>{gap}</li>
           ))}
         </ul>
+      )}
+      </>
       )}
     </section>
   );

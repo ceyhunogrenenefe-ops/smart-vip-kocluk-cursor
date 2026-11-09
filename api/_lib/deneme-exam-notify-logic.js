@@ -88,9 +88,53 @@ export function istanbulStampMs(ymd, hm) {
   return Number.isFinite(ms) ? ms : null;
 }
 
+export function isWeekendExam(ymd) {
+  const date = String(ymd || '').trim().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return false;
+  const day = new Date(`${date}T12:00:00+03:00`).getUTCDay();
+  return day === 0 || day === 6;
+}
+
+/** Cumartesi ve pazar denemeleri 10:00'da başlar. */
+export function examClock(exam, settings) {
+  if (isWeekendExam(exam?.exam_date)) return '10:00';
+  return hmOr(exam?.exam_time, settings.default_exam_time);
+}
+
 export function examStartMs(exam, settings) {
-  const time = hmOr(exam?.exam_time, settings.default_exam_time);
-  return istanbulStampMs(exam?.exam_date, time);
+  return istanbulStampMs(exam?.exam_date, examClock(exam, settings));
+}
+
+function gradeBlob(level, name) {
+  return `${String(level ?? '')} ${String(name ?? '')}`
+    .toLocaleLowerCase('tr-TR')
+    .replace(/ı/g, 'i')
+    .replace(/ş/g, 's')
+    .replace(/ğ/g, 'g')
+    .replace(/ü/g, 'u')
+    .replace(/ö/g, 'o')
+    .replace(/ç/g, 'c');
+}
+
+/** Sınıfın kendi kademesine denk deneme odası. */
+export function examRoomForClass(level, name) {
+  const blob = gradeBlob(level, name);
+  if (/\byos\b/.test(blob)) return 'yos';
+  if (/\b(tyt|ayt|yks|lise|mezun)\b/.test(blob) || /(?:^|[^\d])(9|10|11|12)(?:\.|\s|$)/.test(blob)) return 'lise';
+  if (/\blgs\b/.test(blob) || /(?:^|[^\d])8(?:[a-z]|\.|\s|$)/.test(blob)) return 'class78';
+  if (/(?:^|[^\d])7(?:[a-z]|\.|\s|$)/.test(blob)) return 'class78';
+  if (/(?:^|[^\d])([56])(?:[a-z]|\.|\s|$)/.test(blob) && !/(?:^|[^\d])([47])(?:[a-z]|\.|\s|$)/.test(blob)) {
+    return 'class56';
+  }
+  if (/(?:^|[^\d])4(?:[a-z]|\.|\s|$)/.test(blob)) return 'class47';
+  if (/(?:^|[^\d])3(?:[a-z]|\.|\s|$)/.test(blob)) return 'class34';
+  return examRoomForLevel(level);
+}
+
+export function suggestClassJoinLink({ slotLink, room, linksByRoom }) {
+  const slot = String(slotLink || '').trim();
+  if (/^https?:\/\//i.test(slot)) return slot;
+  return String(linksByRoom?.[room] || '').trim();
 }
 
 export function stepScheduleMs(exam, settings, step) {
@@ -195,7 +239,7 @@ export function planNotifyActions({
     const room = examRoomForLevel(exam.level);
     const attended = new Set(attendanceByExam[exam.id] || []);
     const title = examTitle(exam);
-    const clock = hmOr(exam.exam_time, cfg.default_exam_time);
+    const clock = examClock(exam, cfg);
     const section = ACADEMIC_EXAM_ROOM_LABELS[room] || 'Deneme sınavı';
     const link = String(linksByRoom[room] || '').trim();
 
@@ -209,9 +253,10 @@ export function planNotifyActions({
         const schedule = stepScheduleMs(exam, cfg, step);
         let status = 'pending';
         let error = null;
-        if (stopped || !stepEnabled(cfg, step)) {
+        const classStepOff = student?.steps && student.steps[step] === false;
+        if (stopped || !stepEnabled(cfg, step) || classStepOff || student?.active === false) {
           status = 'cancelled';
-          error = stopped ? 'sinav_iptal' : 'adim_kapali';
+          error = stopped ? 'sinav_iptal' : student?.active === false ? 'sinif_kapali' : 'adim_kapali';
         } else if (step === 'karne' && schedule != null && nowMs >= schedule && !attended.has(student.id)) {
           status = 'skipped';
           error = 'katilmadi';
@@ -253,20 +298,25 @@ export function planNotifyActions({
         }
 
         const karneLink = step === 'karne' && karneUrlFor ? karneUrlFor(exam.id, student.id) : '';
+        const studentRoom = student.room || room;
+        const studentSection = ACADEMIC_EXAM_ROOM_LABELS[studentRoom] || section;
+        const studentLink = String(student.join_link || linksByRoom[studentRoom] || link || '').trim();
+        const phones = [...new Set((student.phones || [student.phone]).map((p) => String(p || '').trim()).filter(Boolean))];
         const vars = {
           ogrenci: student.name || 'Öğrenci',
           sinav_adi: title,
           tarih: formatTrDate(exam.exam_date),
           saat: clock,
-          bolum: section,
-          link: link || 'Akademik Merkez',
+          bolum: studentSection,
+          link: studentLink || 'Akademik Merkez',
           karne_link: karneLink
         };
         sends.push({
           exam_id: exam.id,
           student_id: student.id,
           step,
-          phone: student.phone || null,
+          phone: phones[0] || student.phone || null,
+          phones,
           message: renderNotifyTemplate(templateFor(cfg, step), vars),
           scheduled_for,
           result_id: result?.id || null
