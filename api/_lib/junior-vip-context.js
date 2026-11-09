@@ -23,7 +23,7 @@ export async function buildJuniorVipStudentContext(studentId) {
   const [stuRes, entriesRes, plannerRes] = await Promise.all([
     supabaseAdmin
       .from('students')
-      .select('id,name,class_level,group_name,institution_id')
+      .select('id,name,class_level,branch,institution_id')
       .eq('id', sid)
       .maybeSingle(),
     supabaseAdmin
@@ -56,7 +56,7 @@ export async function buildJuniorVipStudentContext(studentId) {
           id: student.id,
           name: student.name,
           class_level: student.class_level,
-          group_name: student.group_name
+          group_name: student.branch ?? null
         }
       : { id: sid },
     today,
@@ -77,13 +77,13 @@ export async function buildJuniorVipCoachContext({ coachId, displayName = '' }) 
     supabaseAdmin.from('coaches').select('id,name').eq('id', cid).maybeSingle(),
     supabaseAdmin
       .from('students')
-      .select('id,name,class_level,group_name')
+      .select('id,name,class_level,branch')
       .eq('coach_id', cid)
       .order('name', { ascending: true })
       .limit(200),
     supabaseAdmin
       .from('meetings')
-      .select('id,student_id,title,start_time,status')
+      .select('id,student_id,start_time,end_time,status')
       .eq('coach_id', cid)
       .gte('start_time', `${from}T00:00:00+03:00`)
       .lte('start_time', `${to}T23:59:59+03:00`)
@@ -91,6 +91,9 @@ export async function buildJuniorVipCoachContext({ coachId, displayName = '' }) 
       .limit(40)
   ]);
 
+  for (const [name, r] of [['coaches', coachRes], ['students', studentsRes], ['meetings', meetingsRes]]) {
+    if (r.error) console.error('[junior-vip] coach context', name, r.error.message);
+  }
   const students = studentsRes.error ? [] : studentsRes.data || [];
   const ids = students.map((s) => s.id);
   const nameById = new Map(students.map((s) => [String(s.id), s.name]));
@@ -104,7 +107,8 @@ export async function buildJuniorVipCoachContext({ coachId, displayName = '' }) 
       .gte('date', from)
       .lte('date', to)
       .limit(5000);
-    if (!error) {
+    if (error) console.error('[junior-vip] coach context weekly_entries', error.message);
+    else {
       for (const e of entries || []) {
         const k = String(e.student_id);
         solvedByStudent.set(k, (solvedByStudent.get(k) || 0) + (Number(e.solved_questions) || 0));
@@ -116,13 +120,12 @@ export async function buildJuniorVipCoachContext({ coachId, displayName = '' }) 
     id: s.id,
     name: s.name,
     class_level: s.class_level,
-    group_name: s.group_name,
+    group_name: s.branch ?? null,
     week_solved_questions: solvedByStudent.get(String(s.id)) || 0
   }));
 
   const meetings = (meetingsRes.error ? [] : meetingsRes.data || []).map((m) => ({
     student: nameById.get(String(m.student_id)) || null,
-    title: m.title || null,
     start_time: m.start_time,
     status: m.status
   }));
@@ -172,6 +175,9 @@ export async function buildJuniorVipTeacherContext({ userId, institutionId = nul
     supabaseAdmin.from('users').select('name').eq('id', tid).maybeSingle()
   ]);
 
+  for (const [name, r] of [['classes', classesRes], ['class_sessions', sessionsRes], ['users', userRes]]) {
+    if (r?.error) console.error('[junior-vip] teacher context', name, r.error.message);
+  }
   const classes = classesRes.error ? [] : classesRes.data || [];
   const classNameById = new Map(classes.map((c) => [String(c.id), c.name]));
   const sessions = (sessionsRes.error ? [] : sessionsRes.data || []).map((s) => ({

@@ -35,8 +35,8 @@ function seed() {
     ],
     coaches: [],
     students: [
-      { id: S1, user_id: 'u-stu', email: 's@x.com', name: 'Ayşe Yılmaz', coach_id: null, institution_id: INST, class_level: 'LGS', group_name: 'A' },
-      { id: S2, user_id: 'u-stu2', email: 's2@x.com', name: 'Ali Demir', coach_id: null, institution_id: INST, class_level: 'LGS', group_name: 'B' }
+      { id: S1, user_id: 'u-stu', email: 's@x.com', name: 'Ayşe Yılmaz', coach_id: null, institution_id: INST, class_level: 'LGS', branch: 'A' },
+      { id: S2, user_id: 'u-stu2', email: 's2@x.com', name: 'Ali Demir', coach_id: null, institution_id: INST, class_level: 'LGS', branch: 'B' }
     ],
     weekly_entries: [],
     weekly_planner_entries: [],
@@ -67,8 +67,10 @@ function query(table) {
   let payload = null;
   let single = null;
   let orderBy = null;
+  let selectError = null;
   const apply = () => (DB[table] || []).filter((r) => filters.every((f) => f(r)));
   const exec = () => {
+    if (selectError) return { data: null, error: { message: selectError, code: '42703' } };
     if (FAIL.has(table) || FAIL.has(`${table}:${mode}`)) {
       return { data: null, error: { message: `simulated ${table} failure`, code: 'XX000' } };
     }
@@ -99,7 +101,8 @@ function query(table) {
     return { data: rows, error: null };
   };
   const b = {
-    select() {
+    select(cols) {
+      selectError = unknownSelectColumnError(table, cols);
       return b;
     },
     insert(p) {
@@ -218,6 +221,8 @@ async function rpc(name, args) {
 }
 
 const supabaseAdmin = { from: query, rpc };
+import { unknownSelectColumnError } from '../api/_lib/junior-vip-db-columns.js';
+
 mock.module('../api/_lib/supabase-admin.js', {
   namedExports: { supabaseAdmin, getSupabaseAdmin: () => supabaseAdmin, hasSupabaseServiceRoleKey: () => true }
 });
