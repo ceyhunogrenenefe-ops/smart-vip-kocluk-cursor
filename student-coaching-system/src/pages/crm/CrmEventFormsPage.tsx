@@ -19,6 +19,7 @@ import { toast } from 'sonner';
 import { apiFetch } from '../../lib/session';
 import { crmInstitutionScope } from '../../lib/crmInboxApi';
 import { buildEventPreviewVars, renderTemplatePreview } from '../../lib/eventMessagePreview';
+import DenemeExamNotifyPanel from './DenemeExamNotifyPanel';
 
 /* ---------- tipler ---------- */
 
@@ -556,7 +557,9 @@ export default function CrmEventFormsPage() {
   };
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[320px_1fr]">
+    <div className="space-y-4">
+      <DenemeExamNotifyPanel />
+      <div className="grid gap-4 lg:grid-cols-[320px_1fr]">
       {/* Sol: etkinlik listesi */}
       <aside className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm lg:sticky lg:top-4 lg:max-h-[calc(100vh-110px)] lg:overflow-y-auto">
         <div className="mb-2 flex items-center justify-between px-1">
@@ -1210,6 +1213,7 @@ export default function CrmEventFormsPage() {
             )}
           </>
         )}
+      </div>
       </div>
     </div>
   );

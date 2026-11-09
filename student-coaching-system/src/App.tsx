@@ -109,6 +109,7 @@ import CrmEventFormsPage from './pages/crm/CrmEventFormsPage';
 import CrmWebsiteOrdersPage from './pages/crm/CrmWebsiteOrdersPage';
 import EventFormPublicPage from './pages/eventForm/EventFormPublicPage';
 import EventSurveyPublicPage from './pages/eventForm/EventSurveyPublicPage';
+import DenemeKarnePublicPage from './pages/DenemeKarnePublicPage';
 import HomeworkSharePage from './pages/HomeworkSharePage';
 import CrmInboxPage from './pages/crm/CrmInboxPage';
 import CrmAgentsPage from './pages/crm/CrmAgentsPage';
@@ -228,6 +229,7 @@ function App() {
               {/* Etkinlik kayıt formu — oturum yok */}
               <Route path="/f/:slug" element={<EventFormPublicPage />} />
               <Route path="/anket/:token" element={<EventSurveyPublicPage />} />
+              <Route path="/karne/:token" element={<DenemeKarnePublicPage />} />
 
             {/* Ana sayfa yönlendirmesi */}
             <Route path="/" element={<HomeRedirect />} />
