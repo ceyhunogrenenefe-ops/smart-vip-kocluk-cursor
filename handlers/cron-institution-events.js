@@ -9,6 +9,7 @@ import {
 } from '../api/_lib/institution-event-send.js';
 import { syncSeminarRegistrationsToEvents } from '../api/_lib/sync-seminar-registrations.js';
 import { processEventReminders } from '../api/_lib/event-reminders.js';
+import { processDenemeExamNotify } from '../api/_lib/deneme-exam-notify.js';
 
 function parseHm(timeVal) {
   const s = String(timeVal || '').slice(0, 8);
@@ -150,6 +151,13 @@ export default async function handler(req, res) {
       await processEventReminders({ now, log });
     } catch (e) {
       log.push({ reminders_error: String(e?.message || e) });
+    }
+
+    try {
+      const deneme = await processDenemeExamNotify({ now, log });
+      log.push({ deneme_exam_notify: deneme });
+    } catch (e) {
+      log.push({ deneme_exam_notify_error: String(e?.message || e) });
     }
 
     await recordCronRun({ jobKey: 'institution_events', ok: true, processed: log.length });
