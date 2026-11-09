@@ -33,6 +33,7 @@ import {
 } from '../api/_lib/class-attendance-notify.js';
 import {
   buildAttendanceSummary,
+  coachSummaryShouldRefresh,
   computeAttendanceNotifyPlan
 } from '../api/_lib/attendance-summary.js';
 import { isUuid } from '../api/_lib/uuid.js';
@@ -2928,7 +2929,8 @@ export default async function handler(req, res) {
             className,
             rows: prepared,
             studentIds: studentIdsForCoach,
-            institutionId: instKey
+            institutionId: instKey,
+            forceResend: coachSummaryShouldRefresh(priorByStudent, prepared)
           });
           if (coach_whatsapp?.warning) warnings.push(coach_whatsapp.warning);
         } catch (e) {

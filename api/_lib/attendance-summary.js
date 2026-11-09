@@ -251,3 +251,30 @@ export function computeAttendanceNotifyPlan(prior, prepared) {
     sendCoachLateDelta: lateFromAbsent.length > 0
   };
 }
+
+/**
+ * Koç özeti daha önce gittiyse, bu kayıtta yeni katılan veya geç isimler varsa raporu yenile.
+ * Etüt yoklaması yalnız devamsızları yazınca katılan adları ilk mesajda yoktu.
+ */
+export function coachSummaryShouldRefresh(prior, prepared) {
+  const priorMap =
+    prior instanceof Map
+      ? prior
+      : new Map(
+          (prior || []).map((r) => [
+            String(r.student_id),
+            { status: String(r.status || ''), camera_status: r.camera_status ?? null }
+          ])
+        );
+
+  for (const row of prepared || []) {
+    const status = normalizeAttendanceStatus(row.status);
+    if (status !== 'present' && status !== 'late') continue;
+    const sid = String(row.student_id || '').trim();
+    if (!sid) continue;
+    const prev = priorMap.get(sid);
+    const prevStatus = prev ? normalizeAttendanceStatus(prev.status) : null;
+    if (prevStatus !== 'present' && prevStatus !== 'late') return true;
+  }
+  return false;
+}
