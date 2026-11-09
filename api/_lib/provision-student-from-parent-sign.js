@@ -26,6 +26,32 @@ function randomStudentPassword(length = 10) {
   return `${s}A1`;
 }
 
+function missingColumnName(err) {
+  const m = `${err?.message || ''} ${err?.details || ''} ${err?.hint || ''}`;
+  const quoted = m.match(/Could not find the '([^']+)' column/i);
+  if (quoted) return quoted[1];
+  const plain = m.match(/column\s+"?(\w+)"?\s+.*does not exist/i);
+  return plain ? plain[1] : null;
+}
+
+async function writeRow(table, payload, { id, mode }) {
+  let current = { ...payload };
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const result =
+      mode === 'insert'
+        ? await supabaseAdmin.from(table).insert(current)
+        : await supabaseAdmin.from(table).update(current).eq('id', id);
+    if (!result.error) return result;
+    const missing = missingColumnName(result.error);
+    if (missing && Object.prototype.hasOwnProperty.call(current, missing)) {
+      delete current[missing];
+      continue;
+    }
+    return result;
+  }
+  return { error: new Error('write_failed') };
+}
+
 async function provisionSupabaseAuthUser(userRow, passwordPlain) {
   if (!hasSupabaseServiceRoleKey()) return;
   const sb = getSupabaseAdmin();
@@ -102,13 +128,9 @@ export async function provisionStudentFromParentSignContract(rowOrId, opts = {})
   if (!row?.id) return { ok: false, skipped: true, reason: 'not_found' };
 
   const link = alreadyLinked(row);
-  if (link.linked && !opts.force) {
-    return { ok: true, skipped: true, reason: 'already_linked', userId: link.userId, studentId: link.studentId };
-  }
-
   const signed =
     String(row.status || '').toLowerCase() === 'signed' || Boolean(row.signed_at);
-  if (!signed && !opts.force) {
+  if (!link.linked && !signed && !opts.force) {
     return { ok: false, skipped: true, reason: 'not_signed' };
   }
 
@@ -159,12 +181,14 @@ export async function provisionStudentFromParentSignContract(rowOrId, opts = {})
       created_at: now,
       updated_at: now
     };
-    const { data: createdUserRow, error: uErr } = await supabaseAdmin
+    const insertedUser = await writeRow('users', insertUserPayload, { mode: 'insert' });
+    if (insertedUser.error) throw insertedUser.error;
+    const { data: createdUserRow, error: uReadErr } = await supabaseAdmin
       .from('users')
-      .insert(insertUserPayload)
       .select('*')
+      .eq('id', userId)
       .single();
-    if (uErr) throw uErr;
+    if (uReadErr) throw uReadErr;
     createdUser = true;
     try {
       await provisionSupabaseAuthUser(createdUserRow, passwordPlain);
@@ -187,6 +211,8 @@ export async function provisionStudentFromParentSignContract(rowOrId, opts = {})
     institution_id: profile.institutionId,
     user_id: userId,
     platform_user_id: userId,
+    address: profile.adres,
+    enrolled_program: profile.programAdi,
     updated_at: now
   };
 
@@ -212,21 +238,22 @@ export async function provisionStudentFromParentSignContract(rowOrId, opts = {})
       console.warn('[provision-student-from-parent-sign] quota', errorMessage(quotaErr));
     }
     studentId = normalizeUuidOrGenerate(null);
-    const { error: stInsErr } = await supabaseAdmin.from('students').insert({
-      id: studentId,
-      ...studentPayload,
-      coach_id: null,
-      program_id: null,
-      created_at: now
-    });
-    if (stInsErr) throw stInsErr;
+    const stIns = await writeRow(
+      'students',
+      {
+        id: studentId,
+        ...studentPayload,
+        coach_id: null,
+        program_id: null,
+        created_at: now
+      },
+      { mode: 'insert' }
+    );
+    if (stIns.error) throw stIns.error;
     createdStudent = true;
   } else {
-    const { error: stUpdErr } = await supabaseAdmin
-      .from('students')
-      .update(studentPayload)
-      .eq('id', studentId);
-    if (stUpdErr) throw stUpdErr;
+    const stUpd = await writeRow('students', studentPayload, { id: studentId, mode: 'update' });
+    if (stUpd.error) throw stUpd.error;
   }
 
   const jPrev = kayitJson(row);

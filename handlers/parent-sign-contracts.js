@@ -707,6 +707,14 @@ export default async function handler(req, res) {
         }).catch((e) => {
           console.warn('[parent-sign-contracts public_register notify]', errorMessage(e));
         });
+        try {
+          await provisionStudentFromParentSignContract(created, {
+            force: true,
+            source: 'public_kayit_formu'
+          });
+        } catch (provErr) {
+          console.warn('[parent-sign-contracts public_register provision]', errorMessage(provErr));
+        }
         return res.status(200).json({
           ok: true,
           sign_url: signUrl,
@@ -836,6 +844,14 @@ export default async function handler(req, res) {
         }).catch((e) => {
           console.warn('[parent-sign-contracts registration notify]', errorMessage(e));
         });
+        try {
+          await provisionStudentFromParentSignContract(updatedRow, {
+            force: true,
+            source: 'veli_kayit_formu'
+          });
+        } catch (provErr) {
+          console.warn('[parent-sign-contracts registration provision]', errorMessage(provErr));
+        }
         return res.status(200).json({ ok: true });
       } catch (e) {
         console.error('[parent-sign-contracts registration]', errorMessage(e), e);

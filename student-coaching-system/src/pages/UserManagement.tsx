@@ -98,6 +98,21 @@ import {
   exportUsersToPdf
 } from '../lib/usersExport';
 
+function kayitProfilSatiri(student: {
+  enrolledProgram?: string;
+  tcIdentityNo?: string;
+  address?: string;
+} | null | undefined): string {
+  if (!student) return '';
+  return [
+    student.enrolledProgram ? `Program: ${student.enrolledProgram}` : '',
+    student.tcIdentityNo ? `TC: ${student.tcIdentityNo}` : '',
+    student.address ? `Adres: ${student.address}` : ''
+  ]
+    .filter(Boolean)
+    .join(' · ');
+}
+
 function studentBranchSelectValue(school: string | undefined | null): string {
   const key = normalizeStudentBranchKey(school);
   if ((STANDARD_BRANCH_LETTERS as readonly string[]).includes(key)) return key;
@@ -792,6 +807,9 @@ export default function UserManagement() {
     birthDate: '',
     classLevel: '9',
     branch: '',
+    enrolledProgram: '',
+    tcIdentityNo: '',
+    address: '',
     parentName: '',
     parentPhone: '',
     password: '',
@@ -1441,6 +1459,9 @@ export default function UserManagement() {
         birthDate: studentMatch?.birthDate || '',
         classLevel: studentMatch?.classLevel != null ? String(studentMatch.classLevel) : '9',
         branch: studentMatch?.school || '',
+        enrolledProgram: studentMatch?.enrolledProgram || '',
+        tcIdentityNo: studentMatch?.tcIdentityNo || '',
+        address: studentMatch?.address || '',
         parentName: studentMatch?.parentName || '',
         parentPhone: studentMatch?.parentPhone || '',
         password: '',
@@ -1495,6 +1516,9 @@ export default function UserManagement() {
                 classLevel:
                   profile.classLevel != null ? String(profile.classLevel) : prev.classLevel,
                 branch: profile.school || prev.branch,
+                enrolledProgram: profile.enrolledProgram || prev.enrolledProgram,
+                tcIdentityNo: profile.tcIdentityNo || prev.tcIdentityNo,
+                address: profile.address || prev.address,
                 parentName: profile.parentName || '',
                 parentPhone: profile.parentPhone || '',
                 assignCoachId: profile.coachId ? String(profile.coachId) : prev.assignCoachId,
@@ -1529,6 +1553,9 @@ export default function UserManagement() {
         birthDate: '',
         classLevel: '9',
         branch: '',
+        enrolledProgram: '',
+        tcIdentityNo: '',
+        address: '',
         parentName: '',
         parentPhone: '',
         password: '',
@@ -1606,7 +1633,12 @@ export default function UserManagement() {
       phone: (searchParams.get('tel') || '').trim(),
       birthDate: (searchParams.get('dogum') || '').trim().slice(0, 10),
       classLevel: String(toClassLevel(sinifRaw)),
-      branch: [searchParams.get('okul') || '', programNote].map((x) => String(x || '').trim()).filter(Boolean).join(' · ') || (searchParams.get('okul') || '').trim(),
+      branch: /^[A-Za-zÇĞİÖŞÜçğıöşü]$/.test((searchParams.get('okul') || '').trim())
+        ? (searchParams.get('okul') || '').trim().toLocaleUpperCase('tr-TR')
+        : '',
+      enrolledProgram: programNote,
+      tcIdentityNo: tcFromQuery,
+      address: adresNote,
       parentName: (searchParams.get('veli_adsoyad') || '').trim(),
       parentPhone: (searchParams.get('veli_tel') || '').trim(),
       password: '',
@@ -1671,12 +1703,15 @@ export default function UserManagement() {
       email: '',
       phone: '',
       birthDate: '',
-      classLevel: '9',
-      branch: '',
-      parentName: '',
-      parentPhone: '',
-      password: '',
-      role: 'teacher',
+        classLevel: '9',
+        branch: '',
+        enrolledProgram: '',
+        tcIdentityNo: '',
+        address: '',
+        parentName: '',
+        parentPhone: '',
+        password: '',
+        role: 'teacher',
       alsoCoach: false,
       alsoTeacher: false,
       assignCoachId: '',
@@ -1930,6 +1965,9 @@ export default function UserManagement() {
               birthDate: formData.birthDate || undefined,
               classLevel: toClassLevel(formData.classLevel),
               school: formData.branch.trim() || undefined,
+              enrolledProgram: formData.enrolledProgram.trim() || undefined,
+              tcIdentityNo: formData.tcIdentityNo.replace(/\D/g, '').slice(0, 11) || undefined,
+              address: formData.address.trim() || undefined,
               parentName: formData.parentName.trim() || undefined,
               parentPhone: formData.parentPhone.trim() || undefined,
               coachId: formData.assignCoachId.trim() || undefined,
@@ -2199,6 +2237,9 @@ export default function UserManagement() {
                   parentPhone: formData.parentPhone.trim() || '',
                   classLevel: toClassLevel(formData.classLevel),
                   school: formData.branch.trim() || undefined,
+                  enrolledProgram: formData.enrolledProgram.trim() || undefined,
+                  tcIdentityNo: formData.tcIdentityNo.replace(/\D/g, '').slice(0, 11) || undefined,
+                  address: formData.address.trim() || undefined,
                   coachId: formData.assignCoachId || undefined,
                   institutionId: institutionForStudentProfile || undefined,
                   whatsappAutomationEnabled: formData.whatsappAutomationEnabled,
@@ -3517,6 +3558,9 @@ export default function UserManagement() {
                           {studentMatch.parentPhone?.trim() ? ` · ${studentMatch.parentPhone}` : ''}
                         </p>
                       ) : null}
+                      {kayitProfilSatiri(studentMatch) ? (
+                        <p className="text-xs text-slate-700 sm:col-span-2">{kayitProfilSatiri(studentMatch)}</p>
+                      ) : null}
                     </div>
                   ) : null}
                 </article>
@@ -3567,6 +3611,7 @@ export default function UserManagement() {
                 <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 w-[5%]">Şubesi</th>
                 <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 w-[13%]">Koçu</th>
                 <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 w-[9%]">Rolü</th>
+                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 w-[14%]">Program / TC / Adres</th>
                 <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 w-[8%]">Veli adı</th>
                 <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 w-[10%]">Veli telefon numarası</th>
                 <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 w-[8%]">Dönem</th>
@@ -3576,7 +3621,7 @@ export default function UserManagement() {
             <tbody className="divide-y divide-gray-100">
               {listLoading || authLoading ? (
                 <tr>
-                  <td colSpan={13} className="px-4 py-12 text-center text-sm text-slate-500">
+                  <td colSpan={14} className="px-4 py-12 text-center text-sm text-slate-500">
                     <span className="inline-flex items-center justify-center gap-2">
                       <Loader2 className="h-5 w-5 animate-spin text-red-500" />
                       Kullanıcılar yükleniyor…
@@ -3740,6 +3785,9 @@ export default function UserManagement() {
                       >
                         <span className="truncate">{roleBadge.label}</span>
                       </span>
+                    </td>
+                    <td className="px-3 py-3 text-xs text-slate-700 whitespace-normal" title={kayitProfilSatiri(studentMatch)}>
+                      {kayitProfilSatiri(studentMatch) || '—'}
                     </td>
                     <td className="px-3 py-3 text-sm text-gray-600 truncate" title={studentMatch?.parentName || ''}>
                       {studentMatch?.parentName?.trim() ? studentMatch.parentName : '—'}
@@ -3984,6 +4032,45 @@ export default function UserManagement() {
                           <option value={formData.branch}>{formData.branch} (mevcut)</option>
                         ) : null}
                       </select>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Kayıt programı</label>
+                    <input
+                      type="text"
+                      value={formData.enrolledProgram}
+                      onChange={(e) => setFormData({ ...formData, enrolledProgram: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
+                      placeholder="Deneme Kulübü, Yazılıya Hazırlık…"
+                    />
+                  </div>
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">T.C. kimlik no</label>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        value={formData.tcIdentityNo}
+                        onChange={(e) =>
+                          setFormData({
+                            ...formData,
+                            tcIdentityNo: e.target.value.replace(/\D/g, '').slice(0, 11)
+                          })
+                        }
+                        className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
+                        placeholder="11 hane"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Adres</label>
+                      <input
+                        type="text"
+                        value={formData.address}
+                        onChange={(e) => setFormData({ ...formData, address: e.target.value })}
+                        className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
+                        placeholder="İl, ilçe, açık adres"
+                      />
                     </div>
                   </div>
 

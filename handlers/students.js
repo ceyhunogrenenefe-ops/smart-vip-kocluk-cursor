@@ -8,6 +8,7 @@ import { enforceCoachLicenseForStudentInsert, LicenseError } from '../api/_lib/c
 import { getTeacherPanelStudentScope } from '../api/_lib/teacher-class-scope.js';
 import { normalizedUserRolesFromDb } from '../api/_lib/user-roles-fetch.js';
 import { STUDENT_LIST_COLUMNS, STUDENT_LIST_OPTIONAL_COLUMNS } from '../api/_lib/list-query-columns.js';
+import { mergeKayitOntoStudents } from '../api/_lib/student-kayit-profile.js';
 import { selectWithOptionalColumns, updateOneOptionalModerator, insertOneOptionalModerator } from '../api/_lib/supabase-optional-moderator.js';
 import { resolveViewAsActorIfAllowed } from '../api/_lib/view-as-actor.js';
 import { autoEnrollStudentRow } from '../api/_lib/edesis-auto-enroll.js';
@@ -50,13 +51,49 @@ function filterEnrollmentRows(rows, opts = {}) {
   return out;
 }
 
+async function attachKayitProfiles(rows) {
+  const list = Array.isArray(rows) ? rows : [];
+  if (!list.length) return list;
+  const ids = [...new Set(list.map((r) => String(r?.id || '').trim()).filter(Boolean))];
+  const userIds = [
+    ...new Set(
+      list
+        .flatMap((r) => [r?.platform_user_id, r?.user_id])
+        .map((id) => String(id || '').trim())
+        .filter(Boolean)
+    )
+  ];
+  const contracts = [];
+  const pull = async (column, values) => {
+    for (let i = 0; i < values.length; i += 150) {
+      const chunk = values.slice(i, i + 150);
+      const { data, error } = await supabaseAdmin
+        .from('parent_sign_contracts')
+        .select('student_id,ogrenci_user_id,program_adi,adres,kayit_formu_json,updated_at,created_at')
+        .in(column, chunk);
+      if (error) throw error;
+      if (data?.length) contracts.push(...data);
+    }
+  };
+  if (ids.length) await pull('student_id', ids);
+  if (userIds.length) await pull('ogrenci_user_id', userIds);
+  return mergeKayitOntoStudents(list, contracts);
+}
+
 async function queryStudentsList(applyQuery) {
-  return selectWithOptionalColumns(
+  const result = await selectWithOptionalColumns(
     'students',
     STUDENT_LIST_COLUMNS,
-    STUDENT_LIST_OPTIONAL_COLUMNS,
+    [...STUDENT_LIST_OPTIONAL_COLUMNS, 'tc_identity_no', 'address', 'enrolled_program'],
     applyQuery
   );
+  if (result.error || !result.data) return result;
+  try {
+    result.data = await attachKayitProfiles(result.data);
+  } catch (e) {
+    console.warn('[students] kayit profili', e?.message || e);
+  }
+  return result;
 }
 
 const normActorRole = (r) => String(r || '').trim().toLowerCase();
@@ -575,15 +612,20 @@ export default async function handler(req, res) {
           parent_phone: body.parent_phone !== undefined ? body.parent_phone : existing.parent_phone,
           coach_id: resolvedCoachId !== undefined ? resolvedCoachId : existing.coach_id,
           program_id: body.program_id !== undefined ? body.program_id : existing.program_id,
+          tc_identity_no: body.tc_identity_no !== undefined ? body.tc_identity_no : existing.tc_identity_no,
+          address: body.address !== undefined ? body.address : existing.address,
+          enrolled_program:
+            body.enrolled_program !== undefined ? body.enrolled_program : existing.enrolled_program,
           institution_id: institutionId || existing.institution_id,
           updated_at: new Date().toISOString()
         };
 
+        const mergedUpd = await updateOneOptionalModerator('students', patch, 'id', existing.id);
+        if (mergedUpd.error) throw mergedUpd.error;
         const { data: merged, error: mergeErr } = await supabaseAdmin
           .from('students')
-          .update(patch)
+          .select('*')
           .eq('id', existing.id)
-          .select()
           .single();
         if (mergeErr) throw mergeErr;
 
@@ -648,6 +690,9 @@ export default async function handler(req, res) {
         parent_phone: body.parent_phone ?? null,
         coach_id: resolvedCoachId,
         program_id: body.program_id ?? null,
+        tc_identity_no: body.tc_identity_no ?? null,
+        address: body.address ?? null,
+        enrolled_program: body.enrolled_program ?? null,
         institution_id: institutionId,
         enrollment_status: normalizeEnrollmentStatus(body.enrollment_status, 'confirmed'),
         deleted_at: null,
@@ -690,6 +735,9 @@ export default async function handler(req, res) {
         'parent_phone',
         'coach_id',
         'program_id',
+        'tc_identity_no',
+        'address',
+        'enrolled_program',
         'whatsapp_automation_enabled',
         'institution_id',
         'enrollment_status',
