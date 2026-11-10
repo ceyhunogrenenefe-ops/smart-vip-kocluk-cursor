@@ -71,6 +71,16 @@ function useDebouncedValue<T>(value: T, ms = 350) {
 
 export default function RegistrationTrackingPanel({ isManager, institutionId }: Props) {
   const [params, setParams] = useSearchParams();
+  const paramsRef = useRef(params);
+  paramsRef.current = params;
+  const setParamsRef = useRef(setParams);
+  setParamsRef.current = setParams;
+  const patchQuery = (mutate: (n: URLSearchParams) => void, mode: 'push' | 'replace' = 'replace') => {
+    const n = new URLSearchParams(paramsRef.current);
+    mutate(n);
+    paramsRef.current = n;
+    setParamsRef.current(n, { replace: mode === 'replace' });
+  };
   const rawView = params.get('rt_view');
   const viewMode: ViewMode = rawView === 'list' ? 'list' : 'kanban'; // excel kaldırıldı
   const quickFilter = params.get('rt_quick') || '';
@@ -79,7 +89,7 @@ export default function RegistrationTrackingPanel({ isManager, institutionId }: 
   const [leads, setLeads] = useState<RegLead[]>([]);
   const [dash, setDash] = useState<RegDashboard | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [drawerId, setDrawerId] = useState<string | null>(params.get('rt_lead'));
+  const drawerId = params.get('rt_lead');
   const [showCreate, setShowCreate] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [search, setSearch] = useState(params.get('rt_search') || '');
@@ -98,20 +108,16 @@ export default function RegistrationTrackingPanel({ isManager, institutionId }: 
 
 
   const setViewMode = (v: ViewMode) => {
-    setParams((p) => {
-      const n = new URLSearchParams(p);
+    patchQuery((n) => {
       if (v === 'kanban') n.delete('rt_view');
       else n.set('rt_view', v);
-      return n;
     });
   };
 
   const setQuickFilter = (q: string) => {
-    setParams((p) => {
-      const n = new URLSearchParams(p);
+    patchQuery((n) => {
       if (!q) n.delete('rt_quick');
       else n.set('rt_quick', q);
-      return n;
     });
   };
 
@@ -259,14 +265,15 @@ export default function RegistrationTrackingPanel({ isManager, institutionId }: 
     }
   };
 
+  const urlSearch = params.get('rt_search') || '';
   useEffect(() => {
-    setParams((p) => {
-      const n = new URLSearchParams(p);
-      if (debouncedSearch) n.set('rt_search', debouncedSearch);
-      else n.delete('rt_search');
-      return n;
-    });
-  }, [debouncedSearch, setParams]);
+    if (urlSearch === debouncedSearch) return;
+    const n = new URLSearchParams(paramsRef.current);
+    if (debouncedSearch) n.set('rt_search', debouncedSearch);
+    else n.delete('rt_search');
+    paramsRef.current = n;
+    setParamsRef.current(n, { replace: true });
+  }, [debouncedSearch, urlSearch]);
 
   const confirmedByGrade = useMemo(() => {
     const map = new Map<string, RegLead[]>();
@@ -293,21 +300,15 @@ export default function RegistrationTrackingPanel({ isManager, institutionId }: 
   }, [leads]);
 
   const openDrawer = (id: string) => {
-    setDrawerId(id);
-    setParams((p) => {
-      const n = new URLSearchParams(p);
+    patchQuery((n) => {
       n.set('rt_lead', id);
-      return n;
-    });
+    }, 'push');
   };
 
   const closeDrawer = () => {
-    setDrawerId(null);
-    setParams((p) => {
-      const n = new URLSearchParams(p);
+    patchQuery((n) => {
       n.delete('rt_lead');
-      return n;
-    });
+    }, 'replace');
   };
 
   const handleExport = async () => {
@@ -440,11 +441,9 @@ export default function RegistrationTrackingPanel({ isManager, institutionId }: 
           className="rounded-lg border border-slate-200 px-2 py-1.5 text-xs dark:border-slate-600 dark:bg-slate-800"
           value={coachId}
           onChange={(e) =>
-            setParams((p) => {
-              const n = new URLSearchParams(p);
+            patchQuery((n) => {
               if (e.target.value) n.set('rt_coach', e.target.value);
               else n.delete('rt_coach');
-              return n;
             })
           }
         >
@@ -463,11 +462,9 @@ export default function RegistrationTrackingPanel({ isManager, institutionId }: 
             className="rounded-lg border border-slate-200 px-2 py-1.5 text-xs dark:border-slate-600 dark:bg-slate-800"
             value={dateFrom}
             onChange={(e) =>
-              setParams((p) => {
-                const n = new URLSearchParams(p);
+              patchQuery((n) => {
                 if (e.target.value) n.set('rt_from', e.target.value);
                 else n.delete('rt_from');
-                return n;
               })
             }
           />
@@ -477,11 +474,9 @@ export default function RegistrationTrackingPanel({ isManager, institutionId }: 
             className="rounded-lg border border-slate-200 px-2 py-1.5 text-xs dark:border-slate-600 dark:bg-slate-800"
             value={dateTo}
             onChange={(e) =>
-              setParams((p) => {
-                const n = new URLSearchParams(p);
+              patchQuery((n) => {
                 if (e.target.value) n.set('rt_to', e.target.value);
                 else n.delete('rt_to');
-                return n;
               })
             }
           />
