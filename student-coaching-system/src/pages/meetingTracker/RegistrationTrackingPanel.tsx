@@ -78,6 +78,17 @@ function useDebouncedValue<T>(value: T, ms = 350) {
 
 export default function RegistrationTrackingPanel({ isManager, canAssign, institutionId }: Props) {
   const [params, setParams] = useSearchParams();
+  // Süzgeç yazımları react-router'ın eski anlık görüntüsüne düşmesin diye son sorguyu ref'te tut.
+  const paramsRef = useRef(params);
+  paramsRef.current = params;
+  const setParamsRef = useRef(setParams);
+  setParamsRef.current = setParams;
+  const patchQuery = (mutate: (n: URLSearchParams) => void, mode: 'push' | 'replace' = 'replace') => {
+    const n = new URLSearchParams(paramsRef.current);
+    mutate(n);
+    paramsRef.current = n;
+    setParamsRef.current(n, { replace: mode === 'replace' });
+  };
   const { effectiveUser } = useAuth();
   const myUserId = effectiveUser?.id ? String(effectiveUser.id) : '';
   const rawView = params.get('rt_view');
@@ -88,7 +99,7 @@ export default function RegistrationTrackingPanel({ isManager, canAssign, instit
   const [leads, setLeads] = useState<RegLead[]>([]);
   const [dash, setDash] = useState<RegDashboard | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [drawerId, setDrawerId] = useState<string | null>(params.get('rt_lead'));
+  const drawerId = params.get('rt_lead');
   const [showCreate, setShowCreate] = useState(false);
   const [showInboundCall, setShowInboundCall] = useState(false);
   const [showImport, setShowImport] = useState(false);
@@ -113,31 +124,26 @@ export default function RegistrationTrackingPanel({ isManager, canAssign, instit
 
 
   const setViewMode = (v: ViewMode) => {
-    setParams((p) => {
-      const n = new URLSearchParams(p);
+    patchQuery((n) => {
       if (v === 'kanban') n.delete('rt_view');
       else n.set('rt_view', v);
-      return n;
     });
   };
 
   const setQuickFilter = (q: string) => {
-    setParams((p) => {
-      const n = new URLSearchParams(p);
+    patchQuery((n) => {
       if (!q) n.delete('rt_quick');
       else n.set('rt_quick', q);
-      return n;
     });
   };
 
   const setDateRange = (preset: CrmTimePreset, from = '', to = '') => {
-    setParams((p) => {
-      const n = new URLSearchParams(p);
+    patchQuery((n) => {
       if (preset === 'all') {
         n.delete('rt_range');
         n.delete('rt_from');
         n.delete('rt_to');
-        return n;
+        return;
       }
       n.set('rt_range', preset);
       if (preset === 'custom') {
@@ -147,11 +153,10 @@ export default function RegistrationTrackingPanel({ isManager, canAssign, instit
         const ordered = start <= end ? { from: start, to: end } : { from: end, to: start };
         n.set('rt_from', ordered.from);
         n.set('rt_to', ordered.to);
-        return n;
+        return;
       }
       n.delete('rt_from');
       n.delete('rt_to');
-      return n;
     });
   };
 
@@ -301,14 +306,15 @@ export default function RegistrationTrackingPanel({ isManager, canAssign, instit
     }
   };
 
+  const urlSearch = params.get('rt_search') || '';
   useEffect(() => {
-    setParams((p) => {
-      const n = new URLSearchParams(p);
-      if (debouncedSearch) n.set('rt_search', debouncedSearch);
-      else n.delete('rt_search');
-      return n;
-    });
-  }, [debouncedSearch, setParams]);
+    if (urlSearch === debouncedSearch) return;
+    const n = new URLSearchParams(paramsRef.current);
+    if (debouncedSearch) n.set('rt_search', debouncedSearch);
+    else n.delete('rt_search');
+    paramsRef.current = n;
+    setParamsRef.current(n, { replace: true });
+  }, [debouncedSearch, urlSearch]);
 
   const confirmedByGrade = useMemo(() => {
     const map = new Map<string, RegLead[]>();
@@ -335,21 +341,15 @@ export default function RegistrationTrackingPanel({ isManager, canAssign, instit
   }, [leads]);
 
   const openDrawer = (id: string) => {
-    setDrawerId(id);
-    setParams((p) => {
-      const n = new URLSearchParams(p);
+    patchQuery((n) => {
       n.set('rt_lead', id);
-      return n;
-    });
+    }, 'push');
   };
 
   const closeDrawer = () => {
-    setDrawerId(null);
-    setParams((p) => {
-      const n = new URLSearchParams(p);
+    patchQuery((n) => {
       n.delete('rt_lead');
-      return n;
-    });
+    }, 'replace');
   };
 
   const handleExport = async () => {
@@ -497,11 +497,9 @@ export default function RegistrationTrackingPanel({ isManager, canAssign, instit
           className="rounded-lg border border-slate-200 px-2 py-1.5 text-xs dark:border-slate-600 dark:bg-slate-800"
           value={coachId}
           onChange={(e) =>
-            setParams((p) => {
-              const n = new URLSearchParams(p);
+            patchQuery((n) => {
               if (e.target.value) n.set('rt_coach', e.target.value);
               else n.delete('rt_coach');
-              return n;
             })
           }
         >
