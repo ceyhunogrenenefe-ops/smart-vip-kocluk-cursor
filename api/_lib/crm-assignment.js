@@ -22,7 +22,8 @@ export async function updateCrmSettings(institutionId, patch, actorId = null) {
   return data;
 }
 
-/** Dağıtım havuzu: aktif atama + dağıtıma dahil + aktif kullanıcı (ad sırasına göre sabit sıra) */
+/** Dağıtım havuzu: aktif atama + dağıtıma dahil + aktif kullanıcı (ad sırasına göre sabit sıra).
+ * Widget kadrosu açıldıysa yalnız o kişilere dağıtılır. */
 export async function listRoundRobinAgents(institutionId) {
   const { data: assigns } = await supabaseAdmin
     .from('crm_user_assignments')
@@ -32,10 +33,20 @@ export async function listRoundRobinAgents(institutionId) {
   const ids = (assigns || []).filter((a) => a.in_round_robin !== false).map((a) => String(a.user_id));
   if (!ids.length) return [];
   const { data: users } = await supabaseAdmin.from('users').select('id, name, is_active').in('id', ids);
-  return (users || [])
+  let agents = (users || [])
     .filter((u) => u.is_active !== false)
-    .map((u) => ({ id: String(u.id), name: u.name || 'Temsilci' }))
-    .sort((a, b) => a.name.localeCompare(b.name, 'tr') || a.id.localeCompare(b.id));
+    .map((u) => ({ id: String(u.id), name: u.name || 'Temsilci' }));
+  try {
+    const settings = await getCrmSettings(institutionId);
+    if (settings.widget_agents_seeded) {
+      const { listWidgetAgentIds } = await import('./crm-widget-agents.js');
+      const allow = new Set(await listWidgetAgentIds(institutionId));
+      agents = agents.filter((a) => allow.has(a.id));
+    }
+  } catch (e) {
+    console.warn('[crm-assignment] widget kadrosu:', e?.message || e);
+  }
+  return agents.sort((a, b) => a.name.localeCompare(b.name, 'tr') || a.id.localeCompare(b.id));
 }
 
 /** CRM canlı kullanım başlangıcı (İstanbul gün başı, ISO). Tanımsızsa null → tüm kayıtlar. */

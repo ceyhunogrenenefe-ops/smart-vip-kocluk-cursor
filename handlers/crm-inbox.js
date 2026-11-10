@@ -1580,8 +1580,23 @@ export default async function handler(req, res) {
         }
       }
 
+      let widgetAgents = [];
+      try {
+        const { listWidgetAgents } = await import('../api/_lib/crm-widget-agents.js');
+        widgetAgents = await listWidgetAgents(
+          institutionId || PLATFORM_FALLBACK_INSTITUTION_ID,
+          actor.sub
+        );
+      } catch (e) {
+        console.warn('[crm-inbox] widget agents:', e?.message || e);
+      }
+
       return res.status(200).json({
-        data: { assignments: agents, role_users: [...roleUsersMap.values()] }
+        data: {
+          assignments: agents,
+          role_users: [...roleUsersMap.values()],
+          widget_agents: widgetAgents
+        }
       });
     }
 
