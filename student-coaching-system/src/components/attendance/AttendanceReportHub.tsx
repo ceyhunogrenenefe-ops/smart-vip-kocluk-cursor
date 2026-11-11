@@ -1,8 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiFetch, getAuthToken } from '../../lib/session';
 import { useAuth } from '../../context/AuthContext';
+import { useApp } from '../../context/AppContext';
 import { userHasAnyRole } from '../../config/rolePermissions';
 import { useMobileAppShell } from '../../hooks/useMobileAppShell';
+import { sortByFirstName } from '../../lib/personNameSort';
 import { cn } from '../../lib/utils';
 
 function institutionScopeId(value: unknown): string {
@@ -67,6 +69,121 @@ type StatsPayload = {
 
 type InstitutionLite = { id: string; name: string };
 
+type ClassFilterOpt = {
+  id: string;
+  name: string;
+  student_ids: string[];
+  teacher_ids: string[];
+};
+
+type NameOption = { id: string; name: string };
+
+function foldTr(value: string): string {
+  return value.trim().toLocaleLowerCase('tr-TR');
+}
+
+function isReportTeacher(u: { role?: string; roles?: string[] }): boolean {
+  const role = String(u.role || '').toLowerCase();
+  const roles = Array.isArray(u.roles) ? u.roles.map((x) => String(x || '').toLowerCase()) : [];
+  return role === 'teacher' || role === 'coach' || roles.includes('teacher') || roles.includes('coach');
+}
+
+/** İsimle aranan tek seçim. Seçilen değer hâlâ kişi id'sidir; ekranda ad görünür. */
+function PersonNameFilter({
+  label,
+  value,
+  onChange,
+  options,
+  placeholder
+}: {
+  label: string;
+  value: string;
+  onChange: (id: string) => void;
+  options: NameOption[];
+  placeholder: string;
+}) {
+  const [query, setQuery] = useState('');
+  const [open, setOpen] = useState(false);
+  const [pickedName, setPickedName] = useState('');
+  const selected = options.find((o) => o.id === value) || null;
+  const shownName = selected?.name || (value ? pickedName : '');
+  const matched = useMemo(() => {
+    const q = foldTr(query);
+    return q ? options.filter((o) => foldTr(o.name).includes(q)) : options;
+  }, [options, query]);
+  const shown = matched.slice(0, 80);
+  const hiddenCount = matched.length - shown.length;
+
+  return (
+    <div className="relative w-full text-xs sm:min-w-[180px] sm:flex-1">
+      <span className="font-medium text-slate-500">{label}</span>
+      <input
+        value={open ? query : shownName}
+        onChange={(e) => {
+          setQuery(e.target.value);
+          setOpen(true);
+          if (!e.target.value.trim()) onChange('');
+        }}
+        onFocus={() => {
+          setOpen(true);
+          setQuery('');
+        }}
+        onBlur={() => {
+          window.setTimeout(() => setOpen(false), 120);
+        }}
+        placeholder={placeholder}
+        autoComplete="off"
+        className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-2 py-2 text-sm"
+      />
+      {open ? (
+        <ul className="absolute z-30 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
+          <li>
+            <button
+              type="button"
+              className="w-full px-3 py-1.5 text-left text-sm text-slate-500 hover:bg-slate-50"
+              onMouseDown={(e) => {
+                e.preventDefault();
+                onChange('');
+                setQuery('');
+                setOpen(false);
+              }}
+            >
+              Tümü
+            </button>
+          </li>
+          {shown.length === 0 ? (
+            <li className="px-3 py-2 text-sm text-slate-400">Eşleşen isim yok</li>
+          ) : (
+            shown.map((o) => (
+              <li key={o.id}>
+                <button
+                  type="button"
+                  className={cn(
+                    'w-full px-3 py-1.5 text-left text-sm hover:bg-indigo-50',
+                    o.id === value ? 'bg-indigo-50 font-medium text-indigo-900' : 'text-slate-800'
+                  )}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    onChange(o.id);
+                    setPickedName(o.name);
+                    setQuery('');
+                    setOpen(false);
+                  }}
+                >
+                  {o.name}
+                </button>
+              </li>
+            ))
+          )}
+          {hiddenCount > 0 ? (
+            <li className="px-3 py-1.5 text-[11px] text-slate-400">İsim yazarak daraltın</li>
+          ) : null}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
 type Props = {
   institutions: InstitutionLite[];
   activeInstitutionId: string | null;
@@ -112,7 +229,11 @@ export function AttendanceReportHub({ institutions, activeInstitutionId }: Props
   const [absentToday, setAbsentToday] = useState(false);
   const [includeStats, setIncludeStats] = useState(true);
 
-  const [classes, setClasses] = useState<{ id: string; name: string }[]>([]);
+  const [classes, setClasses] = useState<ClassFilterOpt[]>([]);
+  const [teachers, setTeachers] = useState<{ id: string; name: string; institutionId: string }[]>([]);
+  const [seenStudents, setSeenStudents] = useState<{ id: string; name: string; classIds: string[] }[]>([]);
+  const [seenTeachers, setSeenTeachers] = useState<{ id: string; name: string; classIds: string[] }[]>([]);
+  const { institutionStudents } = useApp();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [rows, setRows] = useState<AttendanceHubRow[]>([]);
@@ -149,7 +270,16 @@ export function AttendanceReportHub({ institutions, activeInstitutionId }: Props
       const res = await apiFetch(`/api/class-live-lessons?${qs.toString()}`);
       const j = await res.json().catch(() => ({}));
       if (res.ok && Array.isArray(j.data)) {
-        setClasses(j.data.map((c: { id: string; name: string }) => ({ id: c.id, name: c.name || c.id })));
+        setClasses(
+          j.data.map(
+            (c: { id: string; name?: string; student_ids?: string[]; teacher_ids?: string[] }) => ({
+              id: c.id,
+              name: c.name || c.id,
+              student_ids: Array.isArray(c.student_ids) ? c.student_ids.map(String) : [],
+              teacher_ids: Array.isArray(c.teacher_ids) ? c.teacher_ids.map(String) : []
+            })
+          )
+        );
       }
     } catch {
       setClasses([]);
@@ -159,6 +289,43 @@ export function AttendanceReportHub({ institutions, activeInstitutionId }: Props
   useEffect(() => {
     void loadMeta();
   }, [loadMeta]);
+
+  const loadTeachers = useCallback(async () => {
+    if (!getAuthToken() || !tags) return;
+    try {
+      const q = new URLSearchParams();
+      const instId = institutionScopeId(instFilter);
+      if (instId) q.set('institution_id', instId);
+      const res = await apiFetch(`/api/users${q.toString() ? `?${q}` : ''}`);
+      const j = (await res.json().catch(() => ({}))) as {
+        data?: Array<{
+          id: string;
+          name?: string;
+          email?: string;
+          role?: string;
+          roles?: string[];
+          institution_id?: string | null;
+        }>;
+      };
+      const data = Array.isArray(j.data) ? j.data : [];
+      setTeachers(
+        sortByFirstName(
+          data.filter(isReportTeacher).map((u) => ({
+            id: String(u.id),
+            name: String(u.name || u.email || '').trim() || String(u.id),
+            institutionId: institutionScopeId(u.institution_id)
+          })),
+          (t) => t.name
+        )
+      );
+    } catch {
+      setTeachers([]);
+    }
+  }, [tags, instFilter]);
+
+  useEffect(() => {
+    void loadTeachers();
+  }, [loadTeachers]);
 
   useEffect(() => {
     const scoped = institutionScopeId(activeInstitutionId);
@@ -287,6 +454,103 @@ export function AttendanceReportHub({ institutions, activeInstitutionId }: Props
   useEffect(() => {
     void loadReport();
   }, [loadReport]);
+
+  useEffect(() => {
+    setSeenStudents([]);
+    setSeenTeachers([]);
+  }, [instFilter]);
+
+  useEffect(() => {
+    if (!rows.length) return;
+    const merge = (
+      prev: { id: string; name: string; classIds: string[] }[],
+      pick: (row: AttendanceHubRow) => { id: string; name: string }
+    ) => {
+      const map = new Map(prev.map((p) => [p.id, { name: p.name, classIds: new Set(p.classIds) }]));
+      let changed = false;
+      for (const row of rows) {
+        const { id, name } = pick(row);
+        if (!id || !name || name === id) continue;
+        const cur = map.get(id) || { name, classIds: new Set<string>() };
+        if (!map.has(id) || cur.name !== name) changed = true;
+        if (cur.name !== name) cur.name = name;
+        const cid = String(row.class_id || '').trim();
+        if (cid && !cur.classIds.has(cid)) {
+          cur.classIds.add(cid);
+          changed = true;
+        }
+        map.set(id, cur);
+      }
+      if (!changed) return prev;
+      return [...map.entries()].map(([id, v]) => ({ id, name: v.name, classIds: [...v.classIds] }));
+    };
+    setSeenStudents((prev) =>
+      merge(prev, (row) => ({ id: String(row.student_id || '').trim(), name: String(row.student_name || '').trim() }))
+    );
+    setSeenTeachers((prev) =>
+      merge(prev, (row) => ({ id: String(row.teacher_id || '').trim(), name: String(row.teacher_name || '').trim() }))
+    );
+  }, [rows]);
+
+  const teacherOptions = useMemo(() => {
+    const iid = institutionScopeId(instFilter);
+    let list = teachers.filter((t) => !iid || !t.institutionId || t.institutionId === iid);
+    if (classId) {
+      const cls = classes.find((c) => c.id === classId);
+      if (cls && cls.teacher_ids.length) {
+        const allow = new Set(cls.teacher_ids);
+        const narrowed = list.filter((t) => allow.has(t.id));
+        if (narrowed.length) list = narrowed;
+      }
+    }
+    const byId = new Map(list.map((t) => [t.id, t.name]));
+    for (const t of seenTeachers) {
+      if (classId && t.classIds.length && !t.classIds.includes(classId)) continue;
+      if (!byId.has(t.id)) byId.set(t.id, t.name);
+    }
+    return sortByFirstName(
+      [...byId.entries()].map(([id, name]) => ({ id, name })),
+      (t) => t.name
+    );
+  }, [teachers, instFilter, classId, classes, seenTeachers]);
+
+  const studentOptions = useMemo(() => {
+    const iid = institutionScopeId(instFilter);
+    const pool = institutionStudents.filter((s) => !iid || !s.institutionId || s.institutionId === iid);
+    const cls = classId ? classes.find((c) => c.id === classId) : undefined;
+    const memberIds = cls && cls.student_ids.length ? new Set(cls.student_ids) : null;
+    const members = memberIds ? pool.filter((s) => memberIds.has(s.id)) : pool;
+    const base = members.length || !classId ? members : [];
+    const byId = new Map<string, { name: string; classLevel: string }>();
+    for (const s of base) {
+      const name = String(s.name || '').trim();
+      if (!name) continue;
+      byId.set(s.id, { name, classLevel: s.classLevel != null ? String(s.classLevel).trim() : '' });
+    }
+    for (const s of seenStudents) {
+      if (classId && s.classIds.length && !s.classIds.includes(classId)) continue;
+      if (!byId.has(s.id)) byId.set(s.id, { name: s.name, classLevel: '' });
+    }
+    if (!byId.size) {
+      for (const s of pool) {
+        const name = String(s.name || '').trim();
+        if (name) byId.set(s.id, { name, classLevel: s.classLevel != null ? String(s.classLevel).trim() : '' });
+      }
+    }
+    const counts = new Map<string, number>();
+    for (const row of byId.values()) {
+      const key = foldTr(row.name);
+      if (!key) continue;
+      counts.set(key, (counts.get(key) || 0) + 1);
+    }
+    return sortByFirstName(
+      [...byId.entries()].map(([id, row]) => {
+        const extra = (counts.get(foldTr(row.name)) || 0) > 1 && row.classLevel ? ` · ${row.classLevel}` : '';
+        return { id, name: `${row.name}${extra}` };
+      }),
+      (s) => s.name
+    );
+  }, [institutionStudents, instFilter, classId, classes, seenStudents]);
 
   const absentRows = useMemo(() => rows.filter((r) => r.status === 'absent'), [rows]);
   const cameraOffRows = useMemo(
@@ -521,24 +785,20 @@ export function AttendanceReportHub({ institutions, activeInstitutionId }: Props
             ))}
           </select>
         </label>
-        <label className="w-full text-xs sm:min-w-[160px] sm:flex-1">
-          <span className="font-medium text-slate-500">Öğretmen (kullanıcı id)</span>
-          <input
-            value={teacherId}
-            onChange={(e) => setTeacherId(e.target.value)}
-            placeholder="İsteğe bağlı"
-            className="mt-1 block w-full rounded-lg border border-slate-200 px-2 py-2 font-mono text-xs"
-          />
-        </label>
-        <label className="w-full text-xs sm:min-w-[140px] sm:flex-1">
-          <span className="font-medium text-slate-500">Öğrenci ID</span>
-          <input
-            value={studentId}
-            onChange={(e) => setStudentId(e.target.value)}
-            placeholder="İsteğe bağlı"
-            className="mt-1 block w-full rounded-lg border border-slate-200 px-2 py-2 text-sm"
-          />
-        </label>
+        <PersonNameFilter
+          label="Öğretmen"
+          value={teacherId}
+          onChange={setTeacherId}
+          options={teacherOptions}
+          placeholder="Öğretmen ara"
+        />
+        <PersonNameFilter
+          label="Öğrenci"
+          value={studentId}
+          onChange={setStudentId}
+          options={studentOptions}
+          placeholder="Öğrenci ara"
+        />
         {!mobileAppShell ? (
           <label className="w-full text-xs sm:min-w-[200px] sm:flex-1">
             <span className="font-medium text-slate-500">Oturum ID</span>
