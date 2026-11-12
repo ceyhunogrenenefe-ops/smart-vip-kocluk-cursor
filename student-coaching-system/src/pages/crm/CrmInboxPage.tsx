@@ -506,6 +506,11 @@ export default function CrmInboxPage() {
     if (!isAdmin) return;
     void crmListAgents()
       .then((res) => {
+        const widget = res.data?.widget_agents || [];
+        if (widget.length) {
+          setAgents(widget.map((u) => ({ id: u.id, name: u.name, email: u.email })));
+          return;
+        }
         const fromRoles = (res.data?.role_users || []).map((u) => ({
           id: u.id,
           name: u.name,

@@ -409,7 +409,49 @@ export default async function handler(req, res) {
         .update({ is_active: false, updated_at: new Date().toISOString() })
         .eq('user_id', userId);
 
+      try {
+        const { removeUserFromWidgetRoster } = await import('../api/_lib/crm-widget-agents.js');
+        await removeUserFromWidgetRoster(userId);
+      } catch (e) {
+        console.warn('[crm-admin] widget roster remove:', e?.message || e);
+      }
+
       return res.status(200).json({ data: updated });
+    }
+
+    if (op === 'widget_agents' || op === 'widget_agent_add' || op === 'widget_agent_remove') {
+      const { addWidgetAgent, getWidgetAgentDirectory, removeWidgetAgent } = await import(
+        '../api/_lib/crm-widget-agents.js'
+      );
+      const institutionId =
+        String(body.institution_id || req.query?.institution_id || actor.institution_id || '').trim() ||
+        PLATFORM_PRIMARY_INSTITUTION_ID;
+      try {
+        const data =
+          op === 'widget_agent_add' && req.method === 'POST'
+            ? await addWidgetAgent({
+                institutionId,
+                widgetId: body.widget_id,
+                userId: body.user_id,
+                actorId: actor.sub
+              })
+            : op === 'widget_agent_remove' && req.method === 'POST'
+              ? await removeWidgetAgent({
+                  institutionId,
+                  widgetId: body.widget_id,
+                  userId: body.user_id,
+                  actorId: actor.sub
+                })
+              : await getWidgetAgentDirectory(institutionId, actor.sub);
+        return res.status(200).json({ data });
+      } catch (e) {
+        const code = e?.code || e?.message;
+        if (code === 'user_not_found') return res.status(404).json({ error: 'user_not_found' });
+        if (code === 'user_id_required' || code === 'widget_id_invalid') {
+          return res.status(400).json({ error: code });
+        }
+        throw e;
+      }
     }
 
     if (op === 'list_agents' || op === 'list') {
@@ -475,11 +517,23 @@ export default async function handler(req, res) {
         return true;
       });
 
+      let widgetAgents = [];
+      let widgetAgentsError = null;
+      try {
+        const { listWidgetAgents } = await import('../api/_lib/crm-widget-agents.js');
+        widgetAgents = await listWidgetAgents(institutionId || PLATFORM_PRIMARY_INSTITUTION_ID, actor.sub);
+      } catch (e) {
+        widgetAgentsError = e instanceof Error ? e.message : 'widget_agents_failed';
+        console.warn('[crm-admin] widget agents:', widgetAgentsError);
+      }
+
       return res.status(200).json({
         data: {
           assignments,
           role_users: roleUsers,
-          coach_candidates: coaches
+          coach_candidates: coaches,
+          widget_agents: widgetAgents,
+          widget_agents_error: widgetAgentsError
         }
       });
     }
