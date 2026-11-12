@@ -445,10 +445,26 @@ export default function DenemeExamNotifyPanel() {
       </div>
 
       <div className="mt-3 grid gap-3 lg:grid-cols-3">
-        <textarea value={settings.tpl_day_before} onChange={(e) => patch('tpl_day_before', e.target.value)} rows={5} className="rounded-xl border border-slate-300 p-3 text-sm" />
-        <textarea value={settings.tpl_soon} onChange={(e) => patch('tpl_soon', e.target.value)} rows={5} className="rounded-xl border border-slate-300 p-3 text-sm" />
-        <textarea value={settings.tpl_karne} onChange={(e) => patch('tpl_karne', e.target.value)} rows={5} className="rounded-xl border border-slate-300 p-3 text-sm" />
+        {(
+          [
+            ['tpl_day_before', 'Merhaba {{ogrenci}}, yarın {{sinav_adi}} deneme sınavın var. Tarih: {{tarih}} Saat: {{saat}}.'],
+            ['tpl_soon', '{{ogrenci}}, {{sinav_adi}} 30 dakika sonra başlıyor. Saat: {{saat}}. Katılacağın yer: Akademik Merkez → {{bolum}}. Bağlantı: {{link}}'],
+            ['tpl_karne', '{{ogrenci}}, {{sinav_adi}} sonuç karnen hazır. Bu bağlantı yalnız senin karnendir: {{karne_link}}']
+          ] as const
+        ).map(([key, hazir]) => (
+          <textarea
+            key={key}
+            value={settings[key] || hazir}
+            onChange={(e) => patch(key, e.target.value)}
+            rows={5}
+            style={{ color: (settings[key] || hazir) === hazir ? '#94a3b8' : undefined }}
+            className="rounded-xl border border-slate-300 p-3 text-sm text-slate-900"
+          />
+        ))}
       </div>
+      <p className="mt-1 text-[11px] text-slate-500">
+        Silik yazı hazır metindir. Değiştirmek istediğiniz yeri silip kendi cümlenizi yazın.
+      </p>
       <p className="mt-1 text-xs text-slate-500">
         Değişkenler: {'{{ogrenci}} {{sinav_adi}} {{tarih}} {{saat}} {{bolum}} {{link}} {{karne_link}}'}
       </p>
@@ -542,7 +558,8 @@ export default function DenemeExamNotifyPanel() {
                   value={cls.join_link || ''}
                   onChange={(e) => patchClass(id, { join_link: e.target.value })}
                   placeholder={info?.join_link || 'https://'}
-                  className="mt-1 block w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
+                  style={{ color: cls.join_link && cls.join_link === info?.join_link ? '#94a3b8' : undefined }}
+                  className="mt-1 block w-full rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-900"
                 />
               </label>
               <div className="mt-2 flex gap-2 text-xs">

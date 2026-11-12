@@ -573,12 +573,32 @@ export default async function handler(req, res) {
     /** Otomatik Karşılama — kurum ayarları */
     if (op === 'auto_greeting_settings' && req.method !== 'POST') {
       const { getAutoGreetingSettings } = await import('../api/_lib/crm-auto-greeting.js');
-      const { GRADE_OPTIONS, DEFAULT_CALL_SLOTS } = await import('../api/_lib/crm-auto-greeting-core.js');
+      const {
+        GRADE_OPTIONS,
+        DEFAULT_CALL_SLOTS,
+        DEFAULT_GREETING_TEXT,
+        DEFAULT_GRADE_TEXT,
+        DEFAULT_CONSULTANT_TEXT,
+        DEFAULT_CALL_TIME_TEXT,
+        DEFAULT_CLOSING_TEXT
+      } = await import('../api/_lib/crm-auto-greeting-core.js');
+      const { DEFAULT_TEACHER_MESSAGE } = await import('../api/_lib/crm-teacher-application.js');
       const instId = institutionId || PLATFORM_FALLBACK_INSTITUTION_ID;
       const data = await getAutoGreetingSettings(instId);
       return res.status(200).json({
         data,
-        defaults: { grade_options: GRADE_OPTIONS, call_slots: DEFAULT_CALL_SLOTS },
+        defaults: {
+          grade_options: GRADE_OPTIONS,
+          call_slots: DEFAULT_CALL_SLOTS,
+          messages: {
+            greeting_text: DEFAULT_GREETING_TEXT,
+            grade_text: DEFAULT_GRADE_TEXT,
+            consultant_text: DEFAULT_CONSULTANT_TEXT,
+            call_time_text: DEFAULT_CALL_TIME_TEXT,
+            closing_text: DEFAULT_CLOSING_TEXT,
+            teacher_message: DEFAULT_TEACHER_MESSAGE
+          }
+        },
         institution_id: instId
       });
     }

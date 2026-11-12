@@ -12,6 +12,42 @@ import {
 const input =
   'mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-emerald-600 focus:outline-none';
 
+/** Sunucudaki hazır metinlerle aynı. Ayar boşken kutuda silik görünür. */
+const VARSAYILAN_MESAJLAR = {
+  greeting_text: `Merhabalar 👋
+Online VIP Dershane ile iletişime geçtiğiniz için teşekkür ederiz.
+Size en doğru bilgiyi verebilmemiz için öğrencimizin kademesini seçer misiniz?`,
+  grade_text: `Teşekkürler. Öğrencimizin sınıfını seçebilir misiniz? 👇`,
+  consultant_text: `Teşekkür ederiz 🙏
+Eğitim danışmanımız en kısa sürede sizinle iletişime geçecek.
+Bu arada merak ettiğiniz bir konu varsa buraya yazabilirsiniz.`,
+  call_time_text: `Teşekkür ederiz. 🌟
+Eğitim danışmanımız {program} programımız hakkında size detaylı bilgi verebilir.
+Sizi hangi saat aralığında aramamız daha uygun olur?`,
+  closing_text: `Teşekkür ederiz. 🙏
+Bilgilerinizi eğitim danışmanımıza ilettik. Belirttiğiniz saat aralığında sizinle iletişime geçeceğiz.
+Bu arada özellikle merak ettiğiniz bir konu varsa buraya yazabilirsiniz. Eğitim danışmanımız görüşme öncesinde mesajınızı da inceleyecektir.`,
+  teacher_message: `Merhaba Hocam, Online VIP Dershane'ye göstermiş olduğunuz ilgi için teşekkür ederiz. 🌟
+
+Öğretmen başvurunuzu değerlendirmeye alabilmemiz için aşağıdaki bağlantı üzerinden öğretmen profilinizi oluşturmanızı rica ederiz.
+
+🔗 [ÖĞRETMEN_BASVURU_LINKI]
+
+Profilinizi tamamladıktan sonra başvurunuz ilgili birimimiz tarafından incelenecek ve uygun görülmesi hâlinde sizinle iletişime geçilecektir.
+
+Online VIP Dershane`
+};
+
+function mesajDegeri(kayitli: string | null | undefined, hazir: string): string {
+  const v = String(kayitli ?? '');
+  return v.trim() ? v : hazir;
+}
+
+function mesajSilik(kayitli: string | null | undefined, hazir: string): boolean {
+  const v = String(kayitli ?? '');
+  return !v.trim() || v === hazir;
+}
+
 const EVENT_LABELS: Record<string, string> = {
   greeting_sent: 'Otomatik karşılama gönderildi',
   teacher_intent_detected: 'Öğretmen başvuru niyeti tespit edildi',
@@ -62,6 +98,7 @@ function Toggle({
  */
 export default function CrmAutoGreetingPanel() {
   const [form, setForm] = useState<CrmAutoGreetingSettings | null>(null);
+  const [varsayilan, setVarsayilan] = useState(VARSAYILAN_MESAJLAR);
   const [slotsText, setSlotsText] = useState('');
   const [logs, setLogs] = useState<CrmAutoGreetingLog[]>([]);
   const [showLogs, setShowLogs] = useState(false);
@@ -104,6 +141,7 @@ export default function CrmAutoGreetingPanel() {
           call_slots: r.defaults.call_slots
         };
         setForm(base);
+        setVarsayilan({ ...VARSAYILAN_MESAJLAR, ...(r.defaults.messages || {}) });
         setSlotsText((base.call_slots || r.defaults.call_slots).join('\n'));
       })
       .catch((e) => toast.error(e instanceof Error ? e.message : 'Ayarlar alınamadı'))
@@ -332,11 +370,19 @@ export default function CrmAutoGreetingPanel() {
           Öğretmen mesajı — {'[ÖĞRETMEN_BASVURU_LINKI]'} yukarıdaki adresle değişir
           <textarea
             rows={7}
-            value={form.teacher_message ?? ''}
-            onChange={(e) => patch({ teacher_message: e.target.value })}
-            placeholder="Boş bırakılırsa varsayılan metin kullanılır"
+            value={mesajDegeri(form.teacher_message, varsayilan.teacher_message)}
+            onChange={(e) => {
+              const next = e.target.value;
+              patch({
+                teacher_message: next.trim() && next !== varsayilan.teacher_message ? next : null
+              });
+            }}
+            style={{ color: mesajSilik(form.teacher_message, varsayilan.teacher_message) ? '#94a3b8' : undefined }}
             className={input}
           />
+          <span className="mt-1 block text-[11px] text-slate-500">
+            Silik yazı hazır metindir. Değiştirmek istediğiniz yeri silip kendi cümlenizi yazın.
+          </span>
         </label>
       </div>
 
@@ -394,13 +440,20 @@ export default function CrmAutoGreetingPanel() {
 
       <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-3">
         <p className="text-sm font-semibold text-slate-900">Öğrenci / veli mesajları</p>
+        <p className="text-[11px] text-slate-500">
+          Silik yazılar hazır metindir. Değiştirmek istediğiniz yeri silip kendi cümlenizi yazın.
+          Dokunmazsanız bu metin gider.
+        </p>
         <label className="block text-xs font-medium text-slate-600">
           Karşılama mesajı (altına kademe seçenekleri eklenir)
           <textarea
             rows={4}
-            value={form.greeting_text ?? ''}
-            onChange={(e) => patch({ greeting_text: e.target.value })}
-            placeholder="Boş bırakılırsa varsayılan metin kullanılır"
+            value={mesajDegeri(form.greeting_text, varsayilan.greeting_text)}
+            onChange={(e) => {
+              const next = e.target.value;
+              patch({ greeting_text: next.trim() && next !== varsayilan.greeting_text ? next : null });
+            }}
+            style={{ color: mesajSilik(form.greeting_text, varsayilan.greeting_text) ? '#94a3b8' : undefined }}
             className={input}
           />
         </label>
@@ -408,9 +461,12 @@ export default function CrmAutoGreetingPanel() {
           Sınıf sorusu (kademe seçildikten sonra)
           <textarea
             rows={2}
-            value={form.grade_text ?? ''}
-            onChange={(e) => patch({ grade_text: e.target.value })}
-            placeholder="Boş bırakılırsa varsayılan metin kullanılır"
+            value={mesajDegeri(form.grade_text, varsayilan.grade_text)}
+            onChange={(e) => {
+              const next = e.target.value;
+              patch({ grade_text: next.trim() && next !== varsayilan.grade_text ? next : null });
+            }}
+            style={{ color: mesajSilik(form.grade_text, varsayilan.grade_text) ? '#94a3b8' : undefined }}
             className={input}
           />
         </label>
@@ -418,9 +474,14 @@ export default function CrmAutoGreetingPanel() {
           Danışman mesajı — sınıf seçilince ve seçim yapılmazsa gönderilir
           <textarea
             rows={3}
-            value={form.consultant_text ?? ''}
-            onChange={(e) => patch({ consultant_text: e.target.value })}
-            placeholder="Boş bırakılırsa varsayılan metin kullanılır"
+            value={mesajDegeri(form.consultant_text, varsayilan.consultant_text)}
+            onChange={(e) => {
+              const next = e.target.value;
+              patch({
+                consultant_text: next.trim() && next !== varsayilan.consultant_text ? next : null
+              });
+            }}
+            style={{ color: mesajSilik(form.consultant_text, varsayilan.consultant_text) ? '#94a3b8' : undefined }}
             className={input}
           />
         </label>
@@ -428,9 +489,14 @@ export default function CrmAutoGreetingPanel() {
           Arama saati sorusu — {'{program}'} seçilen sınıfla değişir (yalnız eski akışta)
           <textarea
             rows={3}
-            value={form.call_time_text ?? ''}
-            onChange={(e) => patch({ call_time_text: e.target.value })}
-            placeholder="Boş bırakılırsa varsayılan metin kullanılır"
+            value={mesajDegeri(form.call_time_text, varsayilan.call_time_text)}
+            onChange={(e) => {
+              const next = e.target.value;
+              patch({
+                call_time_text: next.trim() && next !== varsayilan.call_time_text ? next : null
+              });
+            }}
+            style={{ color: mesajSilik(form.call_time_text, varsayilan.call_time_text) ? '#94a3b8' : undefined }}
             className={input}
           />
         </label>
@@ -438,9 +504,12 @@ export default function CrmAutoGreetingPanel() {
           Kapanış mesajı
           <textarea
             rows={3}
-            value={form.closing_text ?? ''}
-            onChange={(e) => patch({ closing_text: e.target.value })}
-            placeholder="Boş bırakılırsa varsayılan metin kullanılır"
+            value={mesajDegeri(form.closing_text, varsayilan.closing_text)}
+            onChange={(e) => {
+              const next = e.target.value;
+              patch({ closing_text: next.trim() && next !== varsayilan.closing_text ? next : null });
+            }}
+            style={{ color: mesajSilik(form.closing_text, varsayilan.closing_text) ? '#94a3b8' : undefined }}
             className={input}
           />
         </label>
