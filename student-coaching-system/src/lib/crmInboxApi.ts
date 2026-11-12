@@ -798,7 +798,18 @@ export type CrmAutoGreetingLog = {
 export function crmGetAutoGreetingSettings() {
   return inboxGet<{
     data: CrmAutoGreetingSettings | null;
-    defaults: { grade_options: { key: string; label: string }[]; call_slots: string[] };
+    defaults: {
+      grade_options: { key: string; label: string }[];
+      call_slots: string[];
+      messages?: {
+        greeting_text: string;
+        grade_text: string;
+        consultant_text: string;
+        call_time_text: string;
+        closing_text: string;
+        teacher_message: string;
+      };
+    };
     institution_id: string;
   }>('auto_greeting_settings');
 }

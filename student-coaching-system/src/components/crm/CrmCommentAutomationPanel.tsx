@@ -71,6 +71,35 @@ const BOS: Automation = {
   ig_user_id: null
 };
 
+/**
+ * Yeni otomasyonda hazır gelen metinler. Takip cümleleri sunucudaki
+ * VARSAYILAN_METINLER ile aynıdır; boş bırakılırsa sunucu da bunları kullanır.
+ * Silik görünür, kullanıcı üzerine yazarak değiştirir.
+ */
+const HAZIR = {
+  dm_text: 'Merhaba {{username}} 👋\nLGS deneme kampı rehberimiz: https://…/rehber.pdf',
+  reply_comment_text: "DM'den gönderdik 💌",
+  follow_invite_text:
+    'Merhaba! 👋 İstediğiniz PDF\'yi sizinle paylaşmaktan mutluluk duyarız.\n' +
+    'PDF bağlantınıza ulaşabilmeniz için öncelikle hesabımızı takip etmeniz gerekiyor. ❤️\n' +
+    'Takip ettikten sonra aşağıdaki "Takip Ettim" butonuna dokunabilirsiniz.',
+  follow_button_text: '✅ Takip Ettim',
+  follow_retry_text:
+    'Henüz takip ettiğinizi doğrulayamadık. 😊\n' +
+    'PDF\'nize ulaşmak için hesabımızı takip edip tekrar kontrol edebilirsiniz.',
+  follow_retry_button_text: '🔄 Tekrar Kontrol Et'
+};
+
+function metinSinifi(value: string | null | undefined, hazir: string): string {
+  const v = String(value || '').trim();
+  return !v || v === hazir.trim() ? ' text-slate-400' : ' text-slate-900';
+}
+
+function doluYoksa(value: string | null | undefined, hazir: string): string {
+  const v = String(value || '').trim();
+  return v ? String(value) : hazir;
+}
+
 /** Takip dogrulamasi bu kurulumda calisiyor mu */
 type Yetenek = {
   baglanti_var?: boolean;
@@ -487,14 +516,33 @@ export default function CrmCommentAutomationPanel() {
   }, [load, loadAccounts]);
 
   const yeni = () => {
-    setDraft({ ...BOS });
+    setDraft({
+      ...BOS,
+      dm_text: HAZIR.dm_text,
+      reply_comment_text: HAZIR.reply_comment_text,
+      follow_invite_text: HAZIR.follow_invite_text,
+      follow_button_text: HAZIR.follow_button_text,
+      follow_retry_text: HAZIR.follow_retry_text,
+      follow_retry_button_text: HAZIR.follow_retry_button_text
+    });
     setKeywordText('');
     setTestText('');
     void loadMedia();
   };
 
   const duzenle = (a: Automation) => {
-    setDraft({ ...a });
+    setDraft({
+      ...a,
+      dm_text: doluYoksa(a.dm_text, HAZIR.dm_text),
+      ...(a.follow_gate_enabled
+        ? {
+            follow_invite_text: doluYoksa(a.follow_invite_text, HAZIR.follow_invite_text),
+            follow_button_text: doluYoksa(a.follow_button_text, HAZIR.follow_button_text),
+            follow_retry_text: doluYoksa(a.follow_retry_text, HAZIR.follow_retry_text),
+            follow_retry_button_text: doluYoksa(a.follow_retry_button_text, HAZIR.follow_retry_button_text)
+          }
+        : {})
+    });
     setKeywordText((a.keywords || []).join(', '));
     setTestText('');
     void loadMedia(a.ig_user_id || null);
@@ -526,6 +574,10 @@ export default function CrmCommentAutomationPanel() {
     }
     if (!draft.dm_text.trim()) {
       toast.error('Gönderilecek mesajı yazın');
+      return;
+    }
+    if (/https:\/\/…|https:\/\/\.\.\./.test(draft.dm_text)) {
+      toast.error('Mesajdaki örnek linki kendi PDF adresinizle değiştirin');
       return;
     }
     setBusy(true);
@@ -667,6 +719,10 @@ export default function CrmCommentAutomationPanel() {
 
       {draft ? (
         <div className="space-y-3 rounded-xl border border-indigo-100 bg-indigo-50/40 p-3">
+          <p className="text-[11px] leading-relaxed text-slate-500">
+            Silik yazılar hazır metindir. Değiştirmek istediğiniz yeri silip kendi cümlenizi yazın.
+            Dokunmazsanız bu metin kaydedilir.
+          </p>
           <label className="block text-xs font-medium text-slate-600">
             Otomasyon adı
             <input
@@ -769,8 +825,7 @@ export default function CrmCommentAutomationPanel() {
               rows={4}
               value={draft.dm_text}
               onChange={(e) => setDraft({ ...draft, dm_text: e.target.value })}
-              placeholder={'Merhaba {{username}} 👋\nLGS deneme kampı rehberimiz: https://…/rehber.pdf'}
-              className={input}
+              className={input + metinSinifi(draft.dm_text, HAZIR.dm_text)}
             />
             <span className="mt-1 block text-[11px] text-slate-500">
               {'{{username}}'} kullanıcı adıyla, {'{{keyword}}'} yazdığı kelimeyle değişir.
@@ -784,8 +839,23 @@ export default function CrmCommentAutomationPanel() {
                 type="checkbox"
                 checked={draft.follow_gate_enabled === true}
                 onChange={(e) => {
-                  setDraft({ ...draft, follow_gate_enabled: e.target.checked });
-                  if (e.target.checked && !yetenek) void yetenegiSor();
+                  const acik = e.target.checked;
+                  setDraft({
+                    ...draft,
+                    follow_gate_enabled: acik,
+                    ...(acik
+                      ? {
+                          follow_invite_text: doluYoksa(draft.follow_invite_text, HAZIR.follow_invite_text),
+                          follow_button_text: doluYoksa(draft.follow_button_text, HAZIR.follow_button_text),
+                          follow_retry_text: doluYoksa(draft.follow_retry_text, HAZIR.follow_retry_text),
+                          follow_retry_button_text: doluYoksa(
+                            draft.follow_retry_button_text,
+                            HAZIR.follow_retry_button_text
+                          )
+                        }
+                      : {})
+                  });
+                  if (acik && !yetenek) void yetenegiSor();
                 }}
                 className="mt-0.5"
                 data-test="takip-kapisi-ac"
@@ -844,8 +914,7 @@ export default function CrmCommentAutomationPanel() {
                     rows={3}
                     value={draft.follow_invite_text || ''}
                     onChange={(e) => setDraft({ ...draft, follow_invite_text: e.target.value })}
-                    placeholder={'Merhaba! 👋 PDF için önce hesabımızı takip etmeniz gerekiyor ❤️'}
-                    className={input}
+                    className={input + metinSinifi(draft.follow_invite_text, HAZIR.follow_invite_text)}
                   />
                 </label>
 
@@ -856,8 +925,7 @@ export default function CrmCommentAutomationPanel() {
                       maxLength={20}
                       value={draft.follow_button_text || ''}
                       onChange={(e) => setDraft({ ...draft, follow_button_text: e.target.value })}
-                      placeholder="✅ Takip Ettim"
-                      className={input}
+                      className={input + metinSinifi(draft.follow_button_text, HAZIR.follow_button_text)}
                     />
                   </label>
                   <label className="block text-xs font-medium text-slate-600">
@@ -868,8 +936,7 @@ export default function CrmCommentAutomationPanel() {
                       onChange={(e) =>
                         setDraft({ ...draft, follow_retry_button_text: e.target.value })
                       }
-                      placeholder="🔄 Tekrar Kontrol Et"
-                      className={input}
+                      className={input + metinSinifi(draft.follow_retry_button_text, HAZIR.follow_retry_button_text)}
                     />
                   </label>
                 </div>
@@ -880,8 +947,7 @@ export default function CrmCommentAutomationPanel() {
                     rows={2}
                     value={draft.follow_retry_text || ''}
                     onChange={(e) => setDraft({ ...draft, follow_retry_text: e.target.value })}
-                    placeholder="Henüz takip ettiğinizi doğrulayamadık 😊"
-                    className={input}
+                    className={input + metinSinifi(draft.follow_retry_text, HAZIR.follow_retry_text)}
                   />
                 </label>
 
@@ -899,8 +965,7 @@ export default function CrmCommentAutomationPanel() {
             <input
               value={draft.reply_comment_text || ''}
               onChange={(e) => setDraft({ ...draft, reply_comment_text: e.target.value })}
-              placeholder="DM'den gönderdik 💌"
-              className={input}
+              className={input + metinSinifi(draft.reply_comment_text, HAZIR.reply_comment_text)}
             />
           </label>
 
