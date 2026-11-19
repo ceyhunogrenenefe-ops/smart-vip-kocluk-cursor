@@ -21,6 +21,7 @@ import { toast } from 'sonner';
 import { useAuth } from '../../context/AuthContext';
 import { userRoleTags } from '../../config/rolePermissions';
 import CrmTeacherApplicationBar from '../../components/crm/CrmTeacherApplicationBar';
+import CrmAiConversationBar from '../../components/crm/CrmAiConversationBar';
 import {
   crmAddNote,
   crmAssignConversation,
@@ -1589,6 +1590,10 @@ export default function CrmInboxPage() {
                   Ekle
                 </button>
               </div>
+            </div>
+
+            <div className="mb-3">
+              <CrmAiConversationBar conversationId={selected.id} refreshKey={selected.last_message_at} />
             </div>
 
             {selected.metadata?.teacher_application ? (
