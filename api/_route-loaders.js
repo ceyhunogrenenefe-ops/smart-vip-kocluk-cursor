@@ -57,6 +57,7 @@ export const routeLoaders = {
   'coach-whatsapp-gateway-schedules': () => import('../handlers/coach-whatsapp-gateway-schedules.js'),
   'teacher-reminder-settings': () => import('../handlers/teacher-reminder-settings.js'),
   'crm-comment-automations': () => import('../handlers/crm-comment-automations.js'),
+  'crm-ai-assistant': () => import('../handlers/crm-ai-assistant.js'),
   'parent-satisfaction': () => import('../handlers/parent-satisfaction.js'),
   'whatsapp-templates': () => import('../handlers/whatsapp-templates.js'),
   'teacher-declarations': () => import('../handlers/teacher-declarations.js'),
@@ -142,6 +143,7 @@ export const routeLoaders = {
   'cron/crm-reply-sla': () => import('../handlers/cron-crm-reply-sla.js'),
   'cron/crm-auto-greeting-followup': () =>
     import('../handlers/cron-crm-auto-greeting-followup.js'),
+  'cron/crm-ai-assistant': () => import('../handlers/cron-crm-ai-assistant.js'),
   'cron/crm-daily-report': () => import('../handlers/cron-crm-daily-report.js'),
   'cron/crm-staff-alerts': () => import('../handlers/cron-crm-staff-alerts.js'),
   'cron/crm-instagram-sync': () => import('../handlers/cron-crm-instagram-sync.js'),

@@ -458,7 +458,22 @@ export async function upsertCrmMessage({
    * Otomatik Karşılama: kurum ayarı açıksa yeni adayı karşılar, sınıf ve
    * arama saatini sorar. Modül varsayılan kapalı; kapalıyken hiçbir şey yapmaz.
    */
+  /**
+   * AI Satış Asistanı: açık ve çalışma saatindeyse yanıtı arka planda üretir.
+   * Konuşma asistanın sorumluluğundaysa Otomatik Karşılama çalışmaz (tek bot konuşur).
+   */
+  let aiOwnsConversation = false;
   if (direction === 'inbound' && !conversation.is_internal && body) {
+    try {
+      const { onInboundMessage } = await import('./crm-ai-assistant.js');
+      const ai = await onInboundMessage({ conversation, body });
+      aiOwnsConversation = ai.owns === true;
+    } catch (e) {
+      console.warn('[crm-inbox] ai asistan:', e instanceof Error ? e.message : e);
+    }
+  }
+
+  if (direction === 'inbound' && !conversation.is_internal && body && !aiOwnsConversation) {
     try {
       const { runAutoGreetingFlow } = await import('./crm-auto-greeting.js');
       await runAutoGreetingFlow({ conversation, body });
@@ -474,6 +489,12 @@ export async function upsertCrmMessage({
       if (senderType === 'agent') await markHumanTakeover(conversation.id);
     } catch (e) {
       console.warn('[crm-inbox] temsilci devri:', e instanceof Error ? e.message : e);
+    }
+    try {
+      const { markAgentReplied } = await import('./crm-ai-assistant.js');
+      if (senderType === 'agent') await markAgentReplied(conversation.id, senderId || null);
+    } catch (e) {
+      console.warn('[crm-inbox] ai temsilci devri:', e instanceof Error ? e.message : e);
     }
   }
 

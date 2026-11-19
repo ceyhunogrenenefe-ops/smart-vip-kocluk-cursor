@@ -7,7 +7,9 @@
     "deploy:prod": "vercel deploy --prod --yes"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^1.11.0",
     "@supabase/supabase-js": "^2.57.4",
+    "@vercel/functions": "^3.11.3",
     "googleapis": "^146.0.0",
     "pdf-parse": "^1.1.1",
     "postgres": "^3.4.7",
