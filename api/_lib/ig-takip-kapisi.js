@@ -22,6 +22,7 @@
  *   4. Yorum altına "PDF gönderdik" yanıtı yalnız PDF gerçekten
  *      gönderildikten sonra verilir.
  */
+import { renderAutomationText } from './crm-comment-automation-core.js';
 
 /** Spec 6'daki izlenebilir aşamalar */
 export const DURUMLAR = [
@@ -169,4 +170,20 @@ export function ayarlariDogrula(automation) {
     eksik.push('PDF mesajı (doğrulamadan sonra gönderilecek) boş olamaz.');
   }
   return { gecerli: eksik.length === 0, eksik };
+}
+
+/**
+ * Takip kapısı sonrası gönderilen metinlerdeki {{username}} / {{keyword}}
+ * yer tutucularını yorum kaydındaki bilgilerle doldurur.
+ *
+ * Neden: buton yanıtından sonra giden PDF, hatırlatma ve yorum yanıtı
+ * metinleri ham gönderiliyordu; kullanıcıya "Merhaba {{username}}" gidiyordu.
+ * İlk yorum adımındaki davranışla aynı: kullanıcı adı "@ad" olarak yazılır,
+ * bilinmiyorsa yer tutucu sessizce kaldırılır.
+ */
+export function takipMetniniDoldur(metin, log) {
+  return renderAutomationText(metin, {
+    username: log?.username || '',
+    keyword: log?.matched_keyword || ''
+  });
 }

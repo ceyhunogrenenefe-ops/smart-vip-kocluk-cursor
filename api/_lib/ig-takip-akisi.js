@@ -10,7 +10,12 @@
  */
 import { supabaseAdmin } from './supabase-admin.js';
 import { errorMessage } from './error-msg.js';
-import { butonYukunuCoz, dogrulamaSonrasiPlan, tekrarEngeli } from './ig-takip-kapisi.js';
+import {
+  butonYukunuCoz,
+  dogrulamaSonrasiPlan,
+  takipMetniniDoldur,
+  tekrarEngeli
+} from './ig-takip-kapisi.js';
 import { takipDurumunuOku } from './ig-takip-dogrula.js';
 import {
   ADIMLAR,
@@ -86,6 +91,8 @@ export async function takipButonunuIsle({ payload, igUserId, institutionId, even
     });
 
     const plan = dogrulamaSonrasiPlan(sonuc, automation);
+    // {{username}} vb. yer tutucular kullaniciya ham gitmesin
+    plan.text = takipMetniniDoldur(plan.text, log);
     const yama = {
       follow_state: plan.durum,
       follow_checked_at: new Date().toISOString(),
@@ -127,7 +134,7 @@ export async function takipButonunuIsle({ payload, igUserId, institutionId, even
          * Yorum yanıtı ancak PDF GERÇEKTEN gittikten sonra verilir
          * (spec 3: yanıltıcı "PDF gönderdik" yanıtı yasak).
          */
-        const replyText = String(automation.reply_comment_text || '').trim();
+        const replyText = takipMetniniDoldur(automation.reply_comment_text, log);
         if (replyText && log.comment_id) {
           try {
             await inbox.replyToInstagramComment({ commentId: log.comment_id, text: replyText, override });
