@@ -99,7 +99,7 @@ export default async function handler(req, res) {
       return res.status(result.status || 400).json({ error: result.error || 'invalid' });
     }
     if (result.lead_id) {
-      queueCrmWebsiteOrderSync(() => syncRegistrationLeadById(result.lead_id));
+      await queueCrmWebsiteOrderSync(() => syncRegistrationLeadById(result.lead_id));
     }
     return res.status(200).json({
       ok: true,

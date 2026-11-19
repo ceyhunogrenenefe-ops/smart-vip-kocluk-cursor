@@ -3,6 +3,7 @@ import {
   computeAddressFields,
   formatAddressDisplay,
   inferProductCategory,
+  queueCrmWebsiteOrderSync,
 } from './crm-website-orders.js';
 
 describe('computeAddressFields', () => {
@@ -52,5 +53,24 @@ describe('inferProductCategory', () => {
 
   it('detects eğitim programs', () => {
     expect(inferProductCategory('YKS Canlı Eğitim Paketi')).toBe('egitim');
+  });
+});
+
+describe('queueCrmWebsiteOrderSync', () => {
+  it('eşitleme bitmeden dönmez (Vercel dondurmadan önce tamamlanır)', async () => {
+    let done = false;
+    const ok = await queueCrmWebsiteOrderSync(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+      done = true;
+    });
+    expect(done).toBe(true);
+    expect(ok).toBe(true);
+  });
+
+  it('hata fırlatmaz, false döner (ödeme akışı bozulmaz)', async () => {
+    const ok = await queueCrmWebsiteOrderSync(async () => {
+      throw new Error('db kapalı');
+    });
+    expect(ok).toBe(false);
   });
 });

@@ -414,7 +414,7 @@ async function handleCallback(req, res) {
     console.error('[garanti-pos] mark linked payment failed', errorMessage(e));
   }
 
-  queueCrmWebsiteOrderSync(() => syncGarantiPaymentOrderById(order.id));
+  await queueCrmWebsiteOrderSync(() => syncGarantiPaymentOrderById(order.id));
 
   return okRedirect(orderId);
 }

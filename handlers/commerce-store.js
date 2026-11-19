@@ -1162,7 +1162,7 @@ async function fulfillPaidOrder(order, { provider = 'paytr', ref = null, raw = n
     vendor_whatsapp = { ok: false, error: e?.message || 'whatsapp_failed' };
   }
 
-  queueCrmWebsiteOrderSync(() => syncCommerceOrderById(order.id));
+  await queueCrmWebsiteOrderSync(() => syncCommerceOrderById(order.id));
 
   return { ok: true, order_id: order.id, order_number: order.order_number, vendor_whatsapp };
 }
@@ -1310,7 +1310,7 @@ async function applyCheckoutCustomer(body, orderId) {
     if (!existing) throw new Error('Teslimat adresi gerekli');
   }
 
-  queueCrmWebsiteOrderSync(() => syncCommerceOrderById(orderId));
+  await queueCrmWebsiteOrderSync(() => syncCommerceOrderById(orderId));
 
   return { name, email, phone, notes: newNotes };
 }

@@ -166,6 +166,10 @@
       "schedule": "* * * * *"
     },
     {
+      "path": "/api/cron/crm-website-orders-reconcile",
+      "schedule": "*/10 * * * *"
+    },
+    {
       "path": "/api/cron/crm-reply-sla",
       "schedule": "* * * * *"
     },
