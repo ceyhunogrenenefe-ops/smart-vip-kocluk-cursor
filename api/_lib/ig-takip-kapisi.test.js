@@ -5,6 +5,7 @@ import {
   butonYuku,
   butonYukunuCoz,
   dogrulamaSonrasiPlan,
+  takipMetniniDoldur,
   tekrarEngeli,
   yorumIcinPlan,
   yorumYanitiVerilebilirMi
@@ -113,4 +114,21 @@ test('takip kapisi acikken PDF metni bos birakilamaz', () => {
   assert.equal(r.gecerli, false);
   assert.equal(ayarlariDogrula(ACIK).gecerli, true);
   assert.equal(ayarlariDogrula(KAPALI).gecerli, true, 'kapaliyken denetim yapilmaz');
+});
+
+test('takip sonrası metinlerde {{username}} kullanıcı adıyla doldurulur', () => {
+  const log = { username: 'ayse_lgs', matched_keyword: 'LGS' };
+  assert.equal(
+    takipMetniniDoldur('Merhaba {{username}} 👋 {{ keyword }} PDF: https://ornek.com/a', log),
+    'Merhaba @ayse_lgs 👋 LGS PDF: https://ornek.com/a'
+  );
+  // Zaten @ ile kaydedilmişse çift @ olmaz
+  assert.equal(takipMetniniDoldur('Merhaba {{username}}', { username: '@ayse' }), 'Merhaba @ayse');
+});
+
+test('kullanıcı adı yoksa yer tutucu ham gönderilmez', () => {
+  const sonuc = takipMetniniDoldur('Merhaba {{username}}! PDF hazır', { username: null });
+  assert.ok(!sonuc.includes('{{'));
+  assert.ok(!/username/i.test(sonuc));
+  assert.equal(takipMetniniDoldur(null, null), '');
 });
