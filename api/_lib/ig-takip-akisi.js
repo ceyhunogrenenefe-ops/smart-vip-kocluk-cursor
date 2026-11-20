@@ -29,6 +29,27 @@ const LOG_TABLE = 'crm_comment_automation_logs';
 const AUTO_TABLE = 'crm_comment_automations';
 
 /**
+ * Gönderilen otomatik mesajı gelen kutusuna da yaz (temsilci ve AI asistan
+ * PDF'in gittiğini görsün). Hata verirse gönderim akışını etkilemez.
+ */
+async function gelenKutusunaYaz(inbox, { igUserId, username, text, institutionId }) {
+  if (!igUserId || !String(text || '').trim() || typeof inbox?.upsertCrmMessage !== 'function') return;
+  try {
+    await inbox.upsertCrmMessage({
+      channel: 'instagram',
+      contactIdentifier: igUserId,
+      contactName: username || null,
+      body: text,
+      direction: 'outbound',
+      senderType: 'bot',
+      institutionId: institutionId || null
+    });
+  } catch (e) {
+    console.warn('[ig-takip] gelen kutusu kaydı:', errorMessage(e));
+  }
+}
+
+/**
  * @returns {{handled: boolean, state?: string, reason?: string}}
  */
 export async function takipButonunuIsle({ payload, igUserId, institutionId, eventId }) {
@@ -127,6 +148,12 @@ export async function takipButonunuIsle({ payload, igUserId, institutionId, even
       try {
         await inbox.sendCrmInstagramDm({ igScopedId: kullanici, text: plan.text, override });
         await gonderimSonucu({ dedupKey: pdfKey, status: 'sent' });
+        await gelenKutusunaYaz(inbox, {
+          igUserId: kullanici,
+          username: log.username,
+          text: plan.text,
+          institutionId: institutionId || automation.institution_id || log.institution_id
+        });
         yama.follow_state = 'pdf_sent';
         yama.dm_status = 'sent';
 
@@ -181,6 +208,12 @@ export async function takipButonunuIsle({ payload, igUserId, institutionId, even
           override
         });
         await gonderimSonucu({ dedupKey: retryKey, status: 'sent' });
+        await gelenKutusunaYaz(inbox, {
+          igUserId: kullanici,
+          username: log.username,
+          text: plan.text,
+          institutionId: institutionId || automation.institution_id || log.institution_id
+        });
       } catch (e) {
         await gonderimIncelemeyeAl({ dedupKey: retryKey, error: errorMessage(e) });
         yama.follow_check_error = errorMessage(e).slice(0, 500);

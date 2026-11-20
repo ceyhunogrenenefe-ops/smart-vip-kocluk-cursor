@@ -14,6 +14,7 @@ import {
   isWithinSchedule,
   maskPii,
   mergeCollected,
+  nonChatInboundReason,
   normalizeTrPhone,
   parseChatExport,
   parseInstagramExport,
@@ -217,8 +218,29 @@ test('konuşma geçmişi Claude mesajlarına çevrilir', () => {
   assert.deepEqual(historyToMessages(rows), [
     { role: 'user', content: 'Merhaba\nLGS fiyat?' },
     { role: 'assistant', content: 'Merhaba!' },
-    { role: 'user', content: 'Teşekkürler' }
+    { role: 'user', content: '[Gönderi yorumu]\nTeşekkürler' }
   ]);
+});
+
+test('yorum otomasyonu: yorum + PDF DM bağlam olarak kalır', () => {
+  const rows = [
+    { sender_type: 'lead', body: 'LGS', message_type: 'comment' },
+    { sender_type: 'bot', body: 'Merhaba, PDF: https://drive.google.com/x' },
+    { sender_type: 'lead', body: 'Teşekkürler, 8. sınıfım' }
+  ];
+  assert.deepEqual(historyToMessages(rows), [
+    { role: 'user', content: '[Gönderi yorumu] LGS' },
+    { role: 'assistant', content: 'Merhaba, PDF: https://drive.google.com/x' },
+    { role: 'user', content: 'Teşekkürler, 8. sınıfım' }
+  ]);
+});
+
+test('yorum ve takip butonu asistanı tetiklemez', () => {
+  assert.equal(nonChatInboundReason({ messageType: 'comment' }), 'comment');
+  assert.equal(nonChatInboundReason({ messageType: 'text', quickReplyPayload: 'ig_follow_gate:abc:claim' }), 'follow_gate_button');
+  assert.equal(nonChatInboundReason({ messageType: 'text', quickReplyPayload: 'baska_buton' }), null);
+  assert.equal(nonChatInboundReason({ messageType: 'text' }), null);
+  assert.match(buildStaticSystemPrompt({}), /YORUM OTOMASYONUNDAN GELENLER/);
 });
 
 test('sistem talimatı: bilgi tabanı, KVKK ve uydurmama kuralı', () => {
