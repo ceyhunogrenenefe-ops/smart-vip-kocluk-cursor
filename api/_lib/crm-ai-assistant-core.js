@@ -57,6 +57,25 @@ export const HANDOVER_REPLY =
   'Bu konuda size en doğru bilgiyi eğitim danışmanımız verecek. Danışmanımız sizi en kısa sürede arayacak 🙏';
 
 export const DAY_NAMES = ['Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi', 'Pazar'];
+
+/**
+ * Claude servisi kaynaklı (müşteriyle ilgisi olmayan) hata mı?
+ * Bu hatalarda konuşma insana devredilmez; asistan geçici olarak
+ * devre dışı sayılır ve kredi / anahtar düzelince kaldığı yerden devam eder.
+ * @returns {null | 'billing' | 'auth' | 'rate_limit' | 'overloaded' | 'server' | 'network'}
+ */
+export function classifyAiServiceError(e) {
+  if (!e) return null;
+  const status = Number(e.status ?? e.statusCode ?? 0);
+  const msg = String(e.message || e || '').toLowerCase();
+  if (/credit balance|billing|purchase credits|insufficient.?(funds|credit)/.test(msg)) return 'billing';
+  if (/anthropic_api_key|api key|x-api-key|authentication/.test(msg) || status === 401 || status === 403) return 'auth';
+  if (status === 429 || /rate.?limit/.test(msg)) return 'rate_limit';
+  if (status === 529 || /overloaded/.test(msg)) return 'overloaded';
+  if (status >= 500 && status < 600) return 'server';
+  if (/timed? ?out|timeout|econnreset|enotfound|etimedout|socket hang up|fetch failed|connection error/.test(msg)) return 'network';
+  return null;
+}
 const MONTH_NAMES = [
   'Ocak',
   'Şubat',
@@ -554,7 +573,7 @@ GÖREVİN
 3. Bilgiler tamamlanınca get_available_slots ile danışmanların boş saatlerini al, 2-4 seçenek sun, kişi seçince book_callback ile randevuyu oluştur ve saati teyit et.
 
 KESİN KURALLAR
-- Bilgi tabanında açıkça yazmayan hiçbir fiyat, indirim, tarih, öğretmen, garanti, taksit veya kampanya bilgisini UYDURMA. Emin değilsen ya da bilgi yoksa "Bu konuda en doğru bilgiyi eğitim danışmanımız verecek, sizi arayacak" de ve randevu bilgilerini toplamaya geç.
+- Bilgi tabanında açıkça yazmayan hiçbir fiyat, indirim, tarih, öğretmen, garanti, taksit veya kampanya bilgisini UYDURMA. Yalnız bilgi tabanında karşılığı OLMAYAN kısım için "bunu eğitim danışmanımız netleştirecek" de; bilgi tabanında ilgili bilgi varsa önce onu ver. Tek başına "danışmanımız sizi arayacak" diye cevap verme.
 - Fiyat sorulursa bilgi tabanındaki fiyatı aynen ve hangi program için olduğunu belirterek ver; kişiye özel indirim sözü verme, "danışmanımız size uygun ödeme seçeneklerini anlatacak" de.
 - İnsan olduğunu asla iddia etme. "Bot musun?" diye sorulursa yapay zekâ destekli asistan olduğunu söyle.
 - Öğrenci 18 yaşından küçükse (2-12. sınıf öğrencilerinin neredeyse hepsi) randevu için veli adı ve veli telefonu iste; öğrenciyle doğrudan satış kapatmaya çalışma, velinin de görüşmede olmasını öner.
@@ -572,7 +591,8 @@ YORUM OTOMASYONUNDAN GELENLER
 
 ÜSLUP
 - Profesyonel, sıcak ve güven veren bir satış temsilcisi gibi yaz. Velilere "siz" diye hitap et.
-- WhatsApp/Instagram mesajı kısalığında yaz: çoğunlukla 1-4 cümle, gerekirse kısa madde işaretleri. Uzun paragraf yazma. En fazla 1-2 emoji.
+- Bilgi soran mesaja (program, sınıf, ders içeriği, ders saatleri, grup yapısı, koçluk, deneme, fiyat) bilgi tabanındaki ilgili bilgiyi geniş ve somut ver: neler olduğunu kısa maddelerle (4-8 madde ya da satır) anlat, sonra tek bir soruyla devam et. Kişi genel "bilgi alabilir miyim?" diye yazdıysa önce kurumu ve ilgili programları kısaca tanıt, ardından öğrencinin sınıfını sor; sınıf öğrenilince o sınıfın programını ayrıntılı anlat.
+- Sohbeti ilerleten mesajlarda (bilgi toplama, teyit, randevu) 1-3 cümle yeterli. Uzun paragraf yerine kısa satırlar kullan. En fazla 1-2 emoji.
 - Her mesajda tek soru sor; bilgileri adım adım topla.
 - İtirazlarda (fiyat pahalı, online verim, zaman yok, eşimle konuşayım) önce anla ve onayla, sonra bilgi tabanındaki somut bir değerle (küçük grup, canlı ders, koçluk, başarılar) cevap ver, sonra danışman görüşmesine davet et.
 - Cevabın yalnızca müşteriye gidecek mesaj metni olsun; iç notlar, başlıklar veya araç adları yazma.

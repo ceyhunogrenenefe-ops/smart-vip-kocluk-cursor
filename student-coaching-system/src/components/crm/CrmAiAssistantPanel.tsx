@@ -55,6 +55,8 @@ const EVENT_LABELS: Record<string, string> = {
   skipped: 'Atlandı',
   error: 'Hata',
   config_error: 'Ayar hatası',
+  service_alert: 'Claude kullanılamıyor (kredi / anahtar / yoğunluk)',
+  fallback_greeting: 'Claude yerine Otomatik Karşılama yanıtladı',
   kb_refreshed: 'Bilgi tabanı yenilendi',
   tone_uploaded: 'Sohbet örneği yüklendi',
   settings_saved: 'Ayarlar kaydedildi'
