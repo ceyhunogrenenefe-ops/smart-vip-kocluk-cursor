@@ -33,6 +33,7 @@ import {
   buildStaticSystemPrompt,
   buildToneExcerpt,
   computeFreeSlots,
+  classifyAiServiceError,
   decideRun,
   nonChatInboundReason,
   displayTrPhone,
@@ -467,14 +468,15 @@ export async function processConversation(conversationId, { expectedPendingAt = 
       booked: null
     };
 
+    // Önce yanıt üretilir: Claude çalışmazsa müşteriye yarım (yalnız KVKK) mesaj gitmesin
+    const result = await generateReply({ ctx, messages, execute: (name, input) => executeTool(ctx, name, input) });
+
     // İlk yanıt: bot olduğunu ve KVKK aydınlatmasını bildir (sabit metin, modele bırakılmaz)
     if (!session.kvkk_notice_sent_at) {
       await sendText(conversation, buildKvkkNotice(settings.kvkk_url));
       session = await patchSession(conversationId, { kvkk_notice_sent_at: new Date().toISOString() });
       ctx.session = session;
     }
-
-    const result = await generateReply({ ctx, messages, execute: (name, input) => executeTool(ctx, name, input) });
 
     let text = result.text;
     if (!text || result.stopReason === 'refusal') {
@@ -511,6 +513,16 @@ export async function processConversation(conversationId, { expectedPendingAt = 
     await release();
     await logEvent({ institutionId: session?.institution_id, conversationId, leadId: session?.lead_id, event: 'error', detail: { error: errorMessage(e) } });
     console.warn('[ai-assistant] işleme:', errorMessage(e));
+    /**
+     * Claude servisi hatası (kredi bitti, anahtar, yoğunluk): müşteriye "danışman
+     * arayacak" yazıp konuşmayı kalıcı devretmek yerine eski Otomatik Karşılama
+     * cevap verir, yöneticiler uyarılır; servis düzelince asistan kaldığı yerden sürer.
+     */
+    const serviceError = classifyAiServiceError(e);
+    if (ctx && !ctx.handedOver && serviceError) {
+      await handleServiceOutage(ctx, serviceError, e).catch((e2) => console.warn('[ai-assistant] servis kesintisi:', errorMessage(e2)));
+      return { ran: false, reason: 'service_unavailable', error: errorMessage(e) };
+    }
     // Müşteri cevapsız kalmasın: kibar devir mesajı + ekibe bildirim (bir kez)
     if (ctx && !ctx.handedOver) {
       try {
@@ -777,6 +789,53 @@ async function doHandover(ctx, reason) {
     institutionId: settings.institution_id
   });
   await logEvent({ institutionId: settings.institution_id, conversationId: conversation.id, leadId: conversation.lead_id, event: 'handover', detail: { reason, by: 'ai' } });
+}
+
+const SERVICE_ERROR_TEXT = {
+  billing: 'Anthropic hesabında kredi bitti — console.anthropic.com → Plans & Billing’den kredi yükleyin.',
+  auth: 'ANTHROPIC_API_KEY geçersiz ya da yetkisiz — Vercel’deki anahtarı kontrol edin.',
+  rate_limit: 'Anthropic istek sınırına takıldı.',
+  overloaded: 'Claude servisi şu an yoğun.',
+  server: 'Claude servisinde geçici hata.',
+  network: 'Claude servisine bağlanılamadı.'
+};
+
+/**
+ * Claude geçici olarak kullanılamıyor: bu mesaja Otomatik Karşılama cevap verir
+ * (açıksa), konuşma devredilmez; yöneticilere en fazla saatte bir uyarı gider.
+ */
+async function handleServiceOutage(ctx, kind, err) {
+  const { conversation, settings } = ctx;
+  const inst = settings.institution_id;
+  try {
+    const messages = await loadMessages(conversation.id);
+    const lastLead = [...messages].reverse().find((m) => m.sender_type === 'lead');
+    if (lastLead?.body) {
+      const { runAutoGreetingFlow } = await import('./crm-auto-greeting.js');
+      const r = await runAutoGreetingFlow({ conversation, body: lastLead.body });
+      await logEvent({ institutionId: inst, conversationId: conversation.id, leadId: conversation.lead_id, event: 'fallback_greeting', detail: { kind, ran: r?.ran === true, reason: r?.reason || null } });
+    }
+  } catch (e) {
+    console.warn('[ai-assistant] yedek karşılama:', errorMessage(e));
+  }
+
+  // Aynı sorun için saatte en fazla bir uyarı
+  const since = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+  const { data: recent } = await supabaseAdmin
+    .from(LOG_TABLE)
+    .select('id')
+    .eq('institution_id', inst)
+    .eq('event', 'service_alert')
+    .gte('created_at', since)
+    .limit(1);
+  if (recent?.length) return;
+  await logEvent({ institutionId: inst, conversationId: conversation.id, event: 'service_alert', detail: { kind, error: errorMessage(err).slice(0, 300) } });
+  await notifyUsers(await adminUserIds(conversation.institution_id), {
+    title: '⚠️ AI asistan yanıt veremiyor',
+    body: `${SERVICE_ERROR_TEXT[kind] || 'Claude servisine ulaşılamıyor.'} Bu sürede gelen mesajlara Otomatik Karşılama cevap veriyor.`,
+    conversation,
+    institutionId: inst
+  });
 }
 
 async function adminUserIds(institutionId) {

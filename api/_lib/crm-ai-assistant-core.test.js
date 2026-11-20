@@ -5,6 +5,7 @@ import {
   buildKvkkNotice,
   buildStaticSystemPrompt,
   buildToneExcerpt,
+  classifyAiServiceError,
   computeFreeSlots,
   decideRun,
   gradeProgramCode,
@@ -233,6 +234,26 @@ test('yorum otomasyonu: yorum + PDF DM bağlam olarak kalır', () => {
     { role: 'assistant', content: 'Merhaba, PDF: https://drive.google.com/x' },
     { role: 'user', content: 'Teşekkürler, 8. sınıfım' }
   ]);
+});
+
+test('Claude servis hataları sınıflanır (devir yapılmaz)', () => {
+  const credit = Object.assign(new Error('400 {"error":{"message":"Your credit balance is too low to access the Anthropic API."}}'), { status: 400 });
+  assert.equal(classifyAiServiceError(credit), 'billing');
+  assert.equal(classifyAiServiceError(new Error('ANTHROPIC_API_KEY tanımlı değil')), 'auth');
+  assert.equal(classifyAiServiceError(Object.assign(new Error('x'), { status: 401 })), 'auth');
+  assert.equal(classifyAiServiceError(Object.assign(new Error('x'), { status: 429 })), 'rate_limit');
+  assert.equal(classifyAiServiceError(Object.assign(new Error('Overloaded'), { status: 529 })), 'overloaded');
+  assert.equal(classifyAiServiceError(Object.assign(new Error('x'), { status: 500 })), 'server');
+  assert.equal(classifyAiServiceError(new Error('Request timed out.')), 'network');
+  // Meta gönderim hataları servis hatası değildir
+  assert.equal(classifyAiServiceError(new Error('(#10) Bu mesaj izin verilen zaman aralığının dışında gönderilir.')), null);
+  assert.equal(classifyAiServiceError(null), null);
+});
+
+test('bilgi sorularına geniş cevap talimatı', () => {
+  const p = buildStaticSystemPrompt({});
+  assert.match(p, /geniş ve somut/);
+  assert.match(p, /Tek başına "danışmanımız sizi arayacak" diye cevap verme/);
 });
 
 test('yorum ve takip butonu asistanı tetiklemez', () => {
