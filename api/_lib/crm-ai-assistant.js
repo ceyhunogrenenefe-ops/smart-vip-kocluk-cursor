@@ -34,6 +34,7 @@ import {
   buildToneExcerpt,
   computeFreeSlots,
   decideRun,
+  nonChatInboundReason,
   displayTrPhone,
   gradeProgramCode,
   historyToMessages,
@@ -259,7 +260,7 @@ async function runInBackground(task) {
  * @returns {Promise<{queued:boolean, owns:boolean, reason:string}>}
  *   owns: bu konuşma AI asistanın sorumluluğunda — Otomatik Karşılama çalışmasın.
  */
-export async function onInboundMessage({ conversation, body }) {
+export async function onInboundMessage({ conversation, body, messageType = null, quickReplyPayload = null }) {
   try {
     if (!conversation?.id || !String(body || '').trim()) return { queued: false, owns: false, reason: 'empty' };
     const settings = await getSettings(conversation.institution_id);
@@ -267,6 +268,12 @@ export async function onInboundMessage({ conversation, body }) {
     const session = await getSession(conversation.id);
     const now = Date.now();
     const decision = decideRun({ settings, conversation, session, now, lastInboundAt: new Date(now).toISOString() });
+    /**
+     * Yorum / takip butonu: cevabı yorum otomasyonu verir. Asistan yazmaz;
+     * ama asistan bu sohbetin sahibiyse Otomatik Karşılama da araya girmesin.
+     */
+    const nonChat = nonChatInboundReason({ messageType, quickReplyPayload });
+    if (nonChat) return { queued: false, owns: decision.run || Boolean(session), reason: nonChat };
     if (!decision.run) {
       if (session && decision.reason !== 'outside_schedule') {
         await logEvent({ institutionId: settings.institution_id, conversationId: conversation.id, leadId: conversation.lead_id, event: 'skipped', detail: { reason: decision.reason } });

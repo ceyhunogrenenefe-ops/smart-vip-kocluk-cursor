@@ -466,7 +466,12 @@ export async function upsertCrmMessage({
   if (direction === 'inbound' && !conversation.is_internal && body) {
     try {
       const { onInboundMessage } = await import('./crm-ai-assistant.js');
-      const ai = await onInboundMessage({ conversation, body });
+      const ai = await onInboundMessage({
+        conversation,
+        body,
+        messageType,
+        quickReplyPayload: payload?.message?.quick_reply?.payload ?? null
+      });
       aiOwnsConversation = ai.owns === true;
     } catch (e) {
       console.warn('[crm-inbox] ai asistan:', e instanceof Error ? e.message : e);
