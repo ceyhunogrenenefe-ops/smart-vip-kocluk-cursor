@@ -63,7 +63,7 @@ export function seriEsleri(durum: Durum, o: Oturum, bitis: string): Map<number, 
 type YeniDers = { class_id: string; teacher_id: string | null; subject: string; start_time: string; end_time: string };
 
 /** Ardışık haftaları tek istekte oluşturur (sunucu öğretmen çakışan haftaları atlar). */
-async function haftalikOlustur(p: YeniDers, tarihler: string[]): Promise<{ eklenen: number; atlanan: Atlanan[] }> {
+export async function haftalikOlustur(p: YeniDers, tarihler: string[]): Promise<{ eklenen: number; atlanan: Atlanan[] }> {
   const sirali = [...new Set(tarihler)].sort();
   const parcalar: string[][] = [];
   for (const t of sirali) {

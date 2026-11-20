@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { AlertTriangle, Download, Loader2, Move, Plus, Trash2, X } from 'lucide-react';
+import { AlertTriangle, Download, Loader2, Move, Pencil, Plus, Trash2, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiFetch } from '../../lib/session';
 import { subjectTheme } from '../../lib/classScheduleBrandedPng';
@@ -65,6 +65,7 @@ export default function ProgramCizelgesi({
   ogretmenAd,
   kurumQs,
   onDuzenle,
+  onTaslakDuzenle,
   onEkle,
   yenile
 }: {
@@ -75,6 +76,7 @@ export default function ProgramCizelgesi({
   ogretmenAd: Map<string, string>;
   kurumQs: string;
   onDuzenle: (o: Oturum) => void;
+  onTaslakDuzenle?: (d: Ders) => void;
   onEkle: (tarih: string, bas?: string, bit?: string) => void;
   yenile: () => Promise<void>;
 }) {
@@ -355,7 +357,7 @@ export default function ProgramCizelgesi({
         <span className="flex items-center gap-1 text-slate-600">
           <Move className="h-4 w-4 text-indigo-700" />
           Dersi sürükleyip bırakın ya da derse tıklayıp hedef hücreye tıklayın. Dolu hücreye bırakırsanız iki ders yer değiştirir.
-          Kaldırmak için dersin üzerindeki çöp kutusuna basın. Ders seçiliyken öğretmenin başka sınıfta dersi olan saatler kırmızı görünür.
+          Kalemle düzenleyin (her haftaya uygulama dahil); kaldırmak için çöp kutusuna basın. Ders seçiliyken öğretmenin başka sınıfta dersi olan saatler kırmızı görünür.
         </span>
         <div className="ml-auto flex flex-wrap items-center gap-2">
           <label className="flex items-center gap-1.5 text-slate-700">
@@ -537,21 +539,37 @@ export default function ProgramCizelgesi({
                                 sec ? 'ring-2 ring-[#173b70] ring-offset-1' : cak ? 'ring-2 ring-red-500' : ''
                               } ${k.tur === 'taslak' ? 'border-dashed opacity-80' : ''}`}
                             >
-                              <button
-                                type="button"
-                                draggable={false}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  void kaldir(k);
-                                }}
-                                className={`absolute right-1 top-1 rounded p-0.5 text-red-700 hover:bg-white/80 ${
-                                  sec ? 'block' : 'hidden group-hover/chip:block'
-                                }`}
-                                aria-label={`${k.subject.replace(HAZIRLIK_RE, '')} dersini kaldır`}
-                                title="Dersi kaldır"
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </button>
+                              <span className="absolute right-0.5 top-0.5 flex flex-col gap-0.5">
+                                {k.oturum || (k.tur === 'taslak' && k.ders && onTaslakDuzenle) ? (
+                                  <button
+                                    type="button"
+                                    draggable={false}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (k.oturum) onDuzenle(k.oturum);
+                                      else if (k.ders && onTaslakDuzenle) onTaslakDuzenle(k.ders);
+                                    }}
+                                    className="rounded bg-white/70 p-0.5 text-slate-700 hover:bg-white"
+                                    aria-label={`${k.subject.replace(HAZIRLIK_RE, '')} dersini düzenle`}
+                                    title="Düzenle · her haftaya uygula"
+                                  >
+                                    <Pencil className="h-3.5 w-3.5" />
+                                  </button>
+                                ) : null}
+                                <button
+                                  type="button"
+                                  draggable={false}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    void kaldir(k);
+                                  }}
+                                  className={`rounded p-0.5 text-red-700 hover:bg-white/80 ${sec ? 'block' : 'hidden group-hover/chip:block'}`}
+                                  aria-label={`${k.subject.replace(HAZIRLIK_RE, '')} dersini kaldır`}
+                                  title="Dersi kaldır"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              </span>
                               <span className="block text-[13px] font-bold leading-tight">{k.subject.replace(HAZIRLIK_RE, '')}</span>
                               <span className="block text-[11px] leading-tight text-slate-600">
                                 {k.teacher_id ? ogretmenAd.get(k.teacher_id) || 'Öğretmen' : 'Öğretmen yok'}

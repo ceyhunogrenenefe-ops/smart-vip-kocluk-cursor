@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { AlertTriangle, Ban, Loader2, Pencil, Plus, Repeat, Sparkles, Trash2, X } from 'lucide-react';
+import { AlertTriangle, Ban, Link2, Loader2, Pencil, Plus, Repeat, Sparkles, Trash2, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiFetch } from '../../lib/session';
 import type { Ders, Durum, Mesgul, Satir } from './YaziliProgramPage';
@@ -8,6 +8,7 @@ import { etutMu } from './oturumIslem';
 import { cakismalar } from './cakisma';
 import { atlananYaz, haftalaraEkle, seriEsleri, seriyeUygula, seriyiIptalEt, sonrakiHaftalar, type SeriKapsam, type TekrarSonuc } from './tekrar';
 import ProgramCizelgesi from './ProgramCizelgesi';
+import SinifBirlestir from './SinifBirlestir';
 
 const GUN_ADI = ['Pazar', 'Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi'];
 const HAZIRLIK_EKI = ' (Yazılıya Hazırlık)';
@@ -91,6 +92,7 @@ export default function SinifProgrami({
     }
   };
   const [iptalEdilen, setIptalEdilen] = useState<string | null>(null);
+  const [birlestirAcik, setBirlestirAcik] = useState(false);
   const tumSiniflar = sinifId === 'all';
 
   const oturumlar = useMemo(
@@ -119,10 +121,20 @@ export default function SinifProgrami({
     <section className="space-y-3">
       <div className="flex flex-wrap items-end gap-2">
         <h2 className="text-lg font-bold text-[#173b70]">Sınıfın ders programı</h2>
+        {!tumSiniflar ? (
+          <button
+            type="button"
+            onClick={() => setBirlestirAcik(true)}
+            className="ml-auto inline-flex items-center gap-1 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-sm font-semibold text-emerald-800 hover:bg-emerald-100"
+            title="Başka bir sınıfı bu sınıfın programıyla birleştir (ortak ders)"
+          >
+            <Link2 className="h-4 w-4" /> Sınıfları birleştir
+          </button>
+        ) : null}
         <select
           value={sinifId}
           onChange={(e) => setSinifId(e.target.value)}
-          className="ml-auto rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-semibold"
+          className={`${tumSiniflar ? 'ml-auto ' : ''}rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-semibold`}
           aria-label="Programı gösterilecek sınıf"
         >
           <option value="all">Sınıf seçin (tüm hazırlık dersleri)</option>
@@ -182,6 +194,7 @@ export default function SinifProgrami({
           ogretmenAd={ogretmenAd}
           kurumQs={kurumQs}
           onDuzenle={(o) => setPencere({ tur: 'duzenle', oturum: o as Oturum })}
+          onTaslakDuzenle={taslakDuzenle}
           onEkle={(tarih, bas, bit) => setPencere({ tur: 'ekle', tarih, bas, bit })}
           yenile={yenile}
         />
@@ -327,6 +340,21 @@ export default function SinifProgrami({
       })}
         </>
       )}
+
+      {birlestirAcik && !tumSiniflar ? (
+        <SinifBirlestir
+          durum={durum}
+          sinifId={sinifId}
+          sinifAd={sinifAd}
+          ogretmenAd={ogretmenAd}
+          kurumQs={kurumQs}
+          kapat={() => setBirlestirAcik(false)}
+          bitti={async () => {
+            setBirlestirAcik(false);
+            await yenile();
+          }}
+        />
+      ) : null}
 
       {pencere && !tumSiniflar ? (
         <OturumPenceresi
