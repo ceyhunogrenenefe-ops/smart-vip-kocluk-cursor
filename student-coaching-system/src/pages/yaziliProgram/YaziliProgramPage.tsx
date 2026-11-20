@@ -95,7 +95,7 @@ const gunEtiketi = (iso: string, kisa = false) => {
 const gunListesi = (bas: string, bit: string) => {
   const out: string[] = [];
   const t = tarihNesne(bas);
-  for (let i = 0; i < 62; i += 1) {
+  for (let i = 0; i < 130; i += 1) {
     const iso = t.toISOString().slice(0, 10);
     if (iso > bit) break;
     out.push(iso);
@@ -137,6 +137,22 @@ export default function YaziliProgramPage() {
   /** Takvimde olup kurumun programında olmayan dersler (Tarih, Felsefe…) varsayılan gizli */
   const [programDisi, setProgramDisi] = useState(false);
   const [kapaliSiniflar, setKapaliSiniflar] = useState<Set<string>>(new Set());
+  /** Yazılı takvimi bölümü (yazılıya hazırlık araçları) — standart kullanımda kapalı */
+  const [yaziliAcik, setYaziliAcik] = useState(() => {
+    try {
+      return localStorage.getItem('planlayici-yazili-acik') === '1';
+    } catch {
+      return false;
+    }
+  });
+  const yaziliAc = (v: boolean) => {
+    setYaziliAcik(v);
+    try {
+      localStorage.setItem('planlayici-yazili-acik', v ? '1' : '0');
+    } catch {
+      /* yok say */
+    }
+  };
   const [pencere, setPencere] = useState<Pencere | null>(null);
   const [yerlesmeyen, setYerlesmeyen] = useState<{ class_id: string; class_name: string; subject: string; subject_key: string; sebep: string }[]>([]);
   const [yayinSonucu, setYayinSonucu] = useState<{ basarili: number; hatalar: string[] } | null>(null);
@@ -376,10 +392,11 @@ export default function YaziliProgramPage() {
       <PlannerSekmeleri />
 
       <div className="rounded-2xl bg-gradient-to-r from-[#173b70] to-indigo-700 p-5 text-white">
-        <h1 className="text-xl font-bold">Yazılıya Hazırlık Programı</h1>
+        <h1 className="text-xl font-bold">Ders Programı · Takvim</h1>
         <p className="mt-1 max-w-3xl text-sm text-indigo-100">
-          Sınıflar ve dersleri otomatik gelir; {durum?.takvim_adi} ortak takvimi yüklüdür. Her ders yazılısından önceki bir
-          saate konur. Taslaklar siz <b>Yayınla</b> diyene kadar öğrencilere görünmez.
+          Tarih aralığını ve sınıfı seçin; sınıfın canlı ders programı çizelge olarak açılır. Yaptığınız değişiklik öğrencinin
+          ders programına hemen yansır. Bir dersi eklerken ya da düzenlerken <b>Her hafta aynı dersi uygula</b> derseniz
+          seçili aralıktaki bütün haftalara uygulanır. Yazılıya hazırlık araçları aşağıdaki <b>Yazılı takvimi</b> bölümünde.
         </p>
       </div>
 
@@ -468,7 +485,7 @@ export default function YaziliProgramPage() {
           ) : null}
 
           {/* Özet */}
-          <div className="grid gap-3 sm:grid-cols-4">
+          <div className={yaziliAcik ? 'grid gap-3 sm:grid-cols-4' : 'hidden'}>
             <OzetKart ad="Yazılısı olan sınıf-ders" deger={ozet.tarihli} />
             <OzetKart ad="Hazırlık dersi planlanan" deger={`${ozet.planli} / ${ozet.tarihli}`} vurgu />
             <OzetKart ad="Taslak ders" deger={ozet.taslak} />
@@ -515,17 +532,27 @@ export default function YaziliProgramPage() {
           ) : null}
 
           {/* Sınıf seçiliyken çizelge tam genişlikte üstte, yazılı takvimi altta */}
-          <div
-            className={
-              sinifSuzgec === 'all'
-                ? 'grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]'
-                : 'flex flex-col-reverse gap-6'
-            }
-          >
-            {/* Sınav takvimi */}
+          <div className="flex flex-col-reverse gap-6">
+            {/* Sınav takvimi (yazılıya hazırlık) — katlanır */}
+            {!yaziliAcik ? (
+              <button
+                type="button"
+                onClick={() => yaziliAc(true)}
+                className="flex w-full items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-left text-sm"
+              >
+                <ChevronRight className="h-4 w-4 text-slate-400" />
+                <span className="font-bold text-[#173b70]">Yazılı takvimi ve yazılıya hazırlık</span>
+                <span className="text-xs text-slate-500">
+                  {ozet.tarihli} yazılı · {ozet.taslak} taslak · {ozet.yayinda} yayındaki hazırlık dersi
+                </span>
+              </button>
+            ) : (
             <section className="space-y-3">
               <div className="flex flex-wrap items-end gap-3">
-                <h2 className="text-lg font-bold text-[#173b70]">Yazılı takvimi</h2>
+                <button type="button" onClick={() => yaziliAc(false)} className="flex items-center gap-1" aria-label="Yazılı takvimini kapat">
+                  <ChevronDown className="h-4 w-4 text-slate-400" />
+                  <h2 className="text-lg font-bold text-[#173b70]">Yazılı takvimi</h2>
+                </button>
                 <select
                   value={sinifSuzgec}
                   onChange={(e) => setSinifSuzgec(e.target.value)}
@@ -599,6 +626,7 @@ export default function YaziliProgramPage() {
                 );
               })}
             </section>
+            )}
 
             {/* Seçili sınıfın gerçek ders programı + hazırlık taslakları */}
             <SinifProgrami

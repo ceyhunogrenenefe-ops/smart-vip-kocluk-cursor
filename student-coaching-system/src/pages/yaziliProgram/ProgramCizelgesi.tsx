@@ -318,7 +318,7 @@ export default function ProgramCizelgesi({
           .trim() || ad;
       const yil = (iso: string) => tarihNesne(iso).getUTCFullYear();
       await downloadDatedSchedulePng({
-        title: `${kisaAd} | Yazılıya Hazırlık Ders Programı`,
+        title: `${kisaAd} | ${pngKalem.some((k) => k.hazirlik) ? 'Yazılıya Hazırlık Ders Programı' : 'Ders Programı'}`,
         termLabel: `${ogretimYili(gunler[0])} DÖNEMİ`,
         rangeLabel: `${tarihKisa(gunler[0])} - ${tarihKisa(gunler[gunler.length - 1])} ${yil(gunler[gunler.length - 1])}`,
         days: gunler.map((g) => ({ iso: g, title: gunAdi(g), subtitle: tarihKisa(g) })),
@@ -330,7 +330,7 @@ export default function ProgramCizelgesi({
           teacher: k.teacher_id ? ogretmenAd.get(k.teacher_id) || '' : ''
         })),
         showTeacher: pngOgretmen,
-        filename: `${ad.replace(/[\\/:*?"<>|]+/g, ' ').trim()} - yazililara hazirlik programi.png`
+        filename: `${ad.replace(/[\\/:*?"<>|]+/g, ' ').trim()} - ${pngKalem.some((k) => k.hazirlik) ? 'yazililara hazirlik programi' : 'ders programi'} ${gunler[0]}.png`
       });
       toast.success('PNG indirildi.');
     } catch (e) {

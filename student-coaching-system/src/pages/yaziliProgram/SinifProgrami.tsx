@@ -1,11 +1,12 @@
 import React, { useMemo, useState } from 'react';
-import { AlertTriangle, Ban, Loader2, Pencil, Plus, Sparkles, Trash2, X } from 'lucide-react';
+import { AlertTriangle, Ban, Loader2, Pencil, Plus, Repeat, Sparkles, Trash2, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiFetch } from '../../lib/session';
 import type { Ders, Durum, Mesgul, Satir } from './YaziliProgramPage';
 import { ortakIptal, ortakNotu, ortakOlustur, ortakTasi, siniftakiBaglar } from './ortak';
 import { etutMu } from './oturumIslem';
 import { cakismalar } from './cakisma';
+import { atlananYaz, haftalaraEkle, seriEsleri, seriyeUygula, seriyiIptalEt, sonrakiHaftalar, type SeriKapsam, type TekrarSonuc } from './tekrar';
 import ProgramCizelgesi from './ProgramCizelgesi';
 
 const GUN_ADI = ['Pazar', 'Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi'];
@@ -369,7 +370,16 @@ function OturumPenceresi({
   const [ders, setDers] = useState(o?.subject || '');
   const [ogretmen, setOgretmen] = useState(o?.teacher_id || '');
   const [kaydediliyor, setKaydediliyor] = useState(false);
+  const [ilerleme, setIlerleme] = useState<string | null>(null);
   const [hata, setHata] = useState<string | null>(null);
+  /** Düzenle: sadece bu hafta / bu ve sonraki haftalar / her hafta. Ekle: her hafta aynı dersi uygula. */
+  const [kapsam, setKapsam] = useState<SeriKapsam>('tek');
+  const bitis = durum.ayar.bitis;
+  const esler = useMemo(() => (o ? seriEsleri(durum, o, bitis) : new Map()), [durum, o, bitis]);
+  const sonrakiler = useMemo(
+    () => (/^\d{4}-\d{2}-\d{2}$/.test(tarih) ? sonrakiHaftalar(tarih, bitis) : []),
+    [tarih, bitis]
+  );
 
   // Yazılısı olan dersler: tek tıkla hazırlık dersine çevirme
   const yaziliDersleri = useMemo(
@@ -406,6 +416,38 @@ function OturumPenceresi({
       ad
     );
   }, [gecerli, durum, o, sinifId, ogretmen, ders, tarih, bas, bit, sinifAd]);
+  /** Tekrarda çakışma yüzünden atlanacak haftalar (önizleme) */
+  const tekrarCakisan = useMemo(() => {
+    if (!gecerli || kapsam !== 'herHafta' || o) return [] as string[];
+    const ad = new Map(durum.teachers.map((t) => [t.id, t.name]));
+    const out: string[] = [];
+    for (const t of sonrakiler) {
+      const c = cakismalar(
+        durum,
+        { class_id: sinifId, teacher_id: ogretmen || null, subject: ders.trim(), lesson_date: t, start_time: bas, end_time: bit },
+        sinifAd,
+        ad
+      );
+      if (c.length) out.push(`${kisaTarih(t)}: ${c[0]}`);
+    }
+    return out;
+  }, [gecerli, kapsam, o, durum, sonrakiler, sinifId, ogretmen, ders, bas, bit, sinifAd]);
+
+  const sonucBildir = (baslik: string, r: TekrarSonuc) => {
+    const parca = [baslik];
+    if (r.islenen) parca.push(`${r.islenen} hafta güncellendi`);
+    if (r.eklenen) parca.push(`${r.eklenen} haftaya eklendi`);
+    const not = ortakNotu(r.ortak, sinifAd);
+    if (r.atlanan.length) {
+      toast.warning(`${parca.join(', ')}. ${r.atlanan.length} hafta atlandı.${not}`, {
+        description: r.atlanan.map(atlananYaz).join('\n'),
+        duration: 20000
+      });
+    } else {
+      toast.success(`${parca.join(', ')}.${not}`);
+    }
+  };
+
   const hazirlikSatiri = [...satirMap.values()].find(
     (r) => r.class_id === sinifId && hazirlikMi(ders) && ders.toLocaleLowerCase('tr').startsWith(r.subject.toLocaleLowerCase('tr'))
   );
@@ -414,29 +456,57 @@ function OturumPenceresi({
       ? `Bu dersin yazılısı ${kisaTarih(hazirlikSatiri.exam_date)}; hazırlık dersi yazılıdan sonraya düşüyor.`
       : null;
 
+  const ilerlet = (y: number, t: number) => setIlerleme(`${y}/${t} hafta`);
+
   const kaydet = async () => {
     setKaydediliyor(true);
     setHata(null);
     try {
       if (o) {
+        const yeni = {
+          lesson_date: tarih,
+          start_time: bas,
+          end_time: bit,
+          subject: ders.trim(),
+          teacher_id: (ogretmen || o.teacher_id || null) as string | null
+        };
         const degisti =
           tarih !== o.lesson_date ||
           bas !== o.start_time ||
           bit !== o.end_time ||
           ders.trim() !== o.subject ||
-          (ogretmen && ogretmen !== (o.teacher_id || ''));
-        if (!degisti) {
+          Boolean(ogretmen && ogretmen !== (o.teacher_id || ''));
+        if (!degisti && kapsam !== 'herHafta') {
           kapat();
           return;
         }
-        const s = await ortakTasi(durum, o, {
-          lesson_date: tarih,
-          start_time: bas,
-          end_time: bit,
-          subject: ders.trim(),
-          teacher_id: ogretmen || o.teacher_id
-        });
-        toast.success(`${tarih !== o.lesson_date ? 'Ders yeni güne taşındı.' : 'Ders güncellendi.'}${ortakNotu(s, sinifAd)}`);
+        let ilk = '';
+        let ortakIlk = { uygulanan: 0, eslesmeyen: [] as string[] };
+        if (degisti) {
+          ortakIlk = await ortakTasi(durum, o, yeni);
+          ilk = tarih !== o.lesson_date ? 'Ders yeni güne taşındı' : 'Ders güncellendi';
+        } else {
+          ilk = 'Ders aynı kaldı';
+        }
+        if (kapsam === 'tek') {
+          toast.success(`${ilk}.${ortakNotu(ortakIlk, sinifAd)}`);
+        } else {
+          const r = await seriyeUygula(durum, o, yeni, kapsam, sinifAd, ilerlet);
+          r.ortak.uygulanan += ortakIlk.uygulanan;
+          r.ortak.eslesmeyen = [...new Set([...r.ortak.eslesmeyen, ...ortakIlk.eslesmeyen])];
+          sonucBildir(ilk, r);
+        }
+      } else if (kapsam === 'herHafta') {
+        const r = await haftalaraEkle(
+          durum,
+          { class_id: sinifId, teacher_id: ogretmen || null, subject: ders.trim(), start_time: bas, end_time: bit },
+          [tarih, ...sonrakiler],
+          sinifAd
+        );
+        if (!r.eklenen) {
+          throw new Error(`Hiçbir haftaya eklenemedi.\n${r.atlanan.map(atlananYaz).join('\n')}`);
+        }
+        sonucBildir(`Ders ${r.eklenen} haftaya eklendi`, { ...r, eklenen: 0 });
       } else {
         const s = await ortakOlustur(durum, {
           class_id: sinifId,
@@ -451,6 +521,39 @@ function OturumPenceresi({
       await kaydedildi();
     } catch (e) {
       setHata(e instanceof Error ? e.message : 'Kaydedilemedi');
+    } finally {
+      setKaydediliyor(false);
+      setIlerleme(null);
+    }
+  };
+
+  const iptalEt = async () => {
+    if (!o) return;
+    const seri = kapsam !== 'tek' && esler.size > 0;
+    const mesaj = seri
+      ? `${o.subject} dersi bu hafta ve sonraki ${esler.size} haftada iptal edilsin mi?\nÖğrenciler bu dersleri artık görmez.`
+      : `${o.lesson_date} ${o.start_time} ${o.subject} dersi iptal edilsin mi?\nÖğrenciler bu dersi artık görmez.`;
+    if (!window.confirm(mesaj)) return;
+    setKaydediliyor(true);
+    setHata(null);
+    try {
+      if (seri) {
+        const r = await seriyiIptalEt(durum, o);
+        if (r.atlanan.length) {
+          toast.warning(`${r.islenen} ders iptal edildi, ${r.atlanan.length} ders iptal edilemedi.${ortakNotu(r.ortak, sinifAd)}`, {
+            description: r.atlanan.map(atlananYaz).join('\n'),
+            duration: 20000
+          });
+        } else {
+          toast.success(`${r.islenen} ders iptal edildi.${ortakNotu(r.ortak, sinifAd)}`);
+        }
+      } else {
+        const s = await ortakIptal(durum, o);
+        toast.success(`Ders iptal edildi.${ortakNotu(s, sinifAd)}`);
+      }
+      await kaydedildi();
+    } catch (e) {
+      setHata(e instanceof Error ? e.message : 'İptal edilemedi');
     } finally {
       setKaydediliyor(false);
     }
@@ -529,6 +632,67 @@ function OturumPenceresi({
           </select>
         </label>
 
+        {o ? (
+          esler.size > 0 || sonrakiler.length > 0 ? (
+            <fieldset className="mt-3 rounded-xl border border-indigo-200 bg-indigo-50/60 p-3 text-sm text-slate-800">
+              <legend className="flex items-center gap-1 px-1 text-sm font-semibold text-indigo-900">
+                <Repeat className="h-4 w-4" /> Hangi haftalara uygulansın?
+              </legend>
+              <label className="flex items-start gap-2 py-0.5">
+                <input type="radio" name="kapsam" checked={kapsam === 'tek'} onChange={() => setKapsam('tek')} className="mt-1" />
+                <span>Sadece bu hafta</span>
+              </label>
+              {esler.size > 0 ? (
+                <label className="flex items-start gap-2 py-0.5">
+                  <input type="radio" name="kapsam" checked={kapsam === 'sonraki'} onChange={() => setKapsam('sonraki')} className="mt-1" />
+                  <span>
+                    Bu ve sonraki haftalar
+                    <span className="block text-xs text-slate-500">
+                      Sonraki haftalardaki aynı {esler.size} ders de aynı şekilde değişir ({kisaTarih(bitis)} tarihine kadar).
+                    </span>
+                  </span>
+                </label>
+              ) : null}
+              <label className="flex items-start gap-2 py-0.5">
+                <input type="radio" name="kapsam" checked={kapsam === 'herHafta'} onChange={() => setKapsam('herHafta')} className="mt-1" />
+                <span>
+                  Her hafta aynı dersi uygula
+                  <span className="block text-xs text-slate-500">
+                    {kisaTarih(bitis)} tarihine kadar her hafta: ders varsa güncellenir, yoksa eklenir. Çakışan haftalar atlanır.
+                  </span>
+                </span>
+              </label>
+            </fieldset>
+          ) : null
+        ) : sonrakiler.length > 0 ? (
+          <div className="mt-3 rounded-xl border border-indigo-200 bg-indigo-50/60 p-3 text-sm text-slate-800">
+            <label className="flex items-start gap-2">
+              <input
+                type="checkbox"
+                checked={kapsam === 'herHafta'}
+                onChange={(e) => setKapsam(e.target.checked ? 'herHafta' : 'tek')}
+                className="mt-1"
+              />
+              <span>
+                <span className="flex items-center gap-1 font-semibold text-indigo-900">
+                  <Repeat className="h-4 w-4" /> Her hafta aynı dersi uygula
+                </span>
+                <span className="block text-xs text-slate-600">
+                  Aynı gün ve saatte, {kisaTarih(bitis)} tarihine kadar {sonrakiler.length + 1} haftaya eklenir.
+                </span>
+              </span>
+            </label>
+            {tekrarCakisan.length ? (
+              <div className="mt-2 rounded-lg bg-amber-50 p-2 text-xs text-amber-900">
+                <p className="font-semibold">Bu haftalar çakışma yüzünden atlanacak:</p>
+                {tekrarCakisan.map((c) => (
+                  <p key={c}>{c}</p>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
         {canliCakisma.length ? (
           <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-2 text-xs text-red-900">
             {canliCakisma.map((c) => (
@@ -543,12 +707,22 @@ function OturumPenceresi({
             <AlertTriangle className="h-3.5 w-3.5 shrink-0" /> {uyari}
           </p>
         ) : null}
-        {hata ? <p className="mt-3 rounded-lg bg-red-50 p-2 text-sm text-red-800">{hata}</p> : null}
+        {hata ? <p className="mt-3 whitespace-pre-line rounded-lg bg-red-50 p-2 text-sm text-red-800">{hata}</p> : null}
         <p className="mt-3 text-xs text-slate-500">
-          Değişiklik hemen canlı ders programına yansır. Öğretmen çakışması varsa kaydedilmez ve nedeni burada yazar.
+          Değişiklik hemen canlı ders programına ve öğrencilerin programına yansır. Öğretmen çakışması varsa kaydedilmez ve nedeni burada yazar.
         </p>
 
-        <div className="mt-4 flex justify-end gap-2">
+        <div className="mt-4 flex flex-wrap justify-end gap-2">
+          {o ? (
+            <button
+              type="button"
+              onClick={() => void iptalEt()}
+              disabled={kaydediliyor}
+              className="mr-auto inline-flex items-center gap-1 rounded-lg border border-red-200 px-3 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50"
+            >
+              <Ban className="h-4 w-4" /> {kapsam !== 'tek' && esler.size > 0 ? `İptal et (${esler.size + 1} hafta)` : 'İptal et'}
+            </button>
+          ) : null}
           <button type="button" onClick={kapat} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700">
             Vazgeç
           </button>
@@ -559,7 +733,7 @@ function OturumPenceresi({
             className="inline-flex items-center gap-1 rounded-lg bg-[#173b70] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
           >
             {kaydediliyor ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-            Kaydet
+            {kaydediliyor && ilerleme ? `Uygulanıyor ${ilerleme}` : kapsam === 'herHafta' ? 'Her haftaya uygula' : 'Kaydet'}
           </button>
         </div>
       </div>
