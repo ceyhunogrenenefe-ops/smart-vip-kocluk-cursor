@@ -8,6 +8,7 @@ import {
   classifyAiServiceError,
   computeFreeSlots,
   decideRun,
+  formatForChannel,
   gradeProgramCode,
   historyToMessages,
   htmlToText,
@@ -248,6 +249,22 @@ test('Claude servis hataları sınıflanır (devir yapılmaz)', () => {
   // Meta gönderim hataları servis hatası değildir
   assert.equal(classifyAiServiceError(new Error('(#10) Bu mesaj izin verilen zaman aralığının dışında gönderilir.')), null);
   assert.equal(classifyAiServiceError(null), null);
+});
+
+test('Markdown kanala göre düz metne çevrilir', () => {
+  const md = '## Programlar\n**Deneme Kulübü** ile:\n- 10 kademe\n* Kargo\n[Kayıt](https://onlinevipdershane.com/x)\n\n\n\nSon';
+  assert.equal(
+    formatForChannel(md, 'whatsapp'),
+    'Programlar\n*Deneme Kulübü* ile:\n• 10 kademe\n• Kargo\nKayıt: https://onlinevipdershane.com/x\n\nSon'
+  );
+  assert.equal(
+    formatForChannel(md, 'instagram'),
+    'Programlar\nDeneme Kulübü ile:\n• 10 kademe\n• Kargo\nKayıt: https://onlinevipdershane.com/x\n\nSon'
+  );
+  // Düz metin ve çarpma/fiyat ifadeleri bozulmaz
+  assert.equal(formatForChannel('Haftada 2*3 saat, 1.500₺', 'instagram'), 'Haftada 2*3 saat, 1.500₺');
+  assert.equal(formatForChannel('https://x.com/a', 'whatsapp'), 'https://x.com/a');
+  assert.match(buildStaticSystemPrompt({}), /Markdown kullanma/);
 });
 
 test('bilgi sorularına geniş cevap talimatı', () => {
