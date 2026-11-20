@@ -1112,7 +1112,9 @@ export async function processPendingSessions({ limit = 10 } = {}) {
   }
   const out = [];
   for (const row of data || []) {
-    out.push({ conversation_id: row.conversation_id, ...(await processConversation(row.conversation_id, { expectedPendingAt: row.pending_at })) });
+    // Veritabanından okunan zaman damgası (+00:00, mikrosaniye) birebir eşleşmeye
+    // güvenilmez; kilit zaten atomik: "bekleyen var ve işlenmiyor" yeterli.
+    out.push({ conversation_id: row.conversation_id, ...(await processConversation(row.conversation_id, {})) });
   }
   return { processed: out.length, results: out };
 }
