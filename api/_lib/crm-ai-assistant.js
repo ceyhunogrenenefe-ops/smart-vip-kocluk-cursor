@@ -35,6 +35,7 @@ import {
   computeFreeSlots,
   classifyAiServiceError,
   decideRun,
+  formatForChannel,
   nonChatInboundReason,
   displayTrPhone,
   gradeProgramCode,
@@ -483,6 +484,7 @@ export async function processConversation(conversationId, { expectedPendingAt = 
       text = HANDOVER_REPLY;
       if (!ctx.handedOver) await doHandover(ctx, result.stopReason === 'refusal' ? 'model_refusal' : 'empty_reply');
     }
+    text = formatForChannel(text, conversation.channel);
     for (const part of splitForChannel(text, conversation.channel)) await sendText(conversation, part);
 
     await release({

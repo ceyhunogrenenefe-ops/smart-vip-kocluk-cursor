@@ -596,6 +596,7 @@ YORUM OTOMASYONUNDAN GELENLER
 - Her mesajda tek soru sor; bilgileri adım adım topla.
 - İtirazlarda (fiyat pahalı, online verim, zaman yok, eşimle konuşayım) önce anla ve onayla, sonra bilgi tabanındaki somut bir değerle (küçük grup, canlı ders, koçluk, başarılar) cevap ver, sonra danışman görüşmesine davet et.
 - Cevabın yalnızca müşteriye gidecek mesaj metni olsun; iç notlar, başlıklar veya araç adları yazma.
+- Markdown kullanma (**kalın**, # başlık, [metin](bağlantı) yok): mesaj WhatsApp/Instagram'da düz metin görünür. Madde için "•" kullan, bağlantıyı olduğu gibi yaz.
 
 ${toneGuide ? `<ton_rehberi>\n${String(toneGuide).trim()}\n</ton_rehberi>\n\n` : ''}${examples ? `<ornek_gorusmeler>\nKurumun gerçek temsilcilerinin geçmiş yazışmalarından anonim örnekler. Üslup, itiraz karşılama ve kapanış için örnek al; içerikteki fiyat/tarih bilgilerini KULLANMA (güncel olmayabilir), bilgi için yalnız bilgi tabanına bak.\n${examples}\n</ornek_gorusmeler>\n\n` : ''}${extraInstructions ? `<yonetici_notlari>\n${String(extraInstructions).trim()}\n</yonetici_notlari>\n\n` : ''}<bilgi_tabani>
 ${kb}
@@ -821,6 +822,29 @@ export async function runAssistantLoop({ create, params, executeTool, maxIterati
 /* ------------------------------------------------------------------ */
 /* Çalışma kararı                                                      */
 /* ------------------------------------------------------------------ */
+
+/**
+ * Model yanıtındaki Markdown'u kanala uygun düz metne çevirir.
+ * WhatsApp: **kalın** → *kalın* (WhatsApp biçimi). Instagram: biçim işaretleri kaldırılır.
+ * Her iki kanalda: # başlıklar düz satır, [metin](url) → "metin: url", "- " / "* " madde → "• ".
+ */
+export function formatForChannel(text, channel) {
+  const ch = String(channel || '').toLowerCase();
+  let s = String(text || '');
+  // [metin](url) → metin: url  (metin url'nin kendisiyse yalnız url)
+  s = s.replace(/\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\)/g, (_, label, url) => (label.trim() === url ? url : `${label.trim()}: ${url}`));
+  // Başlıklar
+  s = s.replace(/^\s{0,3}#{1,6}\s+/gm, '');
+  // Madde işaretleri (satır başı "- " veya "* ")
+  s = s.replace(/^(\s*)[-*]\s+/gm, '$1• ');
+  if (ch === 'whatsapp') {
+    s = s.replace(/\*\*(?=\S)([^*\n]+?)\*\*/g, '*$1*').replace(/__(?=\S)([^_\n]+?)__/g, '_$1_');
+  } else {
+    s = s.replace(/\*\*(?=\S)([^*\n]+?)\*\*/g, '$1').replace(/__(?=\S)([^_\n]+?)__/g, '$1');
+    s = s.replace(/(^|[\s(])\*(?=\S)([^*\n]+?)\*(?=[\s.,!?;:)]|$)/g, '$1$2');
+  }
+  return s.replace(/\n{3,}/g, '\n\n').trim();
+}
 
 /**
  * Bu gelen olay sohbet mesajı mı? Gönderi yorumu (DM atılamaz; yorum
