@@ -279,6 +279,8 @@ test('program sorularında önce cevap, sonra bağlantı; ilk mesajda fiyat yok'
   assert.match(p, /Etüt ve Soru Odası uygulaması/);
   assert.match(p, /Türkiye'de benzeri olmayan bir uygulama/);
   assert.match(p, /Programın içinde Deneme Kulübü de vardır/);
+  assert.match(p, /sınırsız Z kitap/);
+  assert.match(p, /sınırsız PDF/);
   assert.match(p, /Tek başına "danışmanımız sizi arayacak" diye cevap verme/);
   assert.doesNotMatch(p, /Fiyat sorulursa bilgi tabanındaki fiyatı aynen/);
 });
