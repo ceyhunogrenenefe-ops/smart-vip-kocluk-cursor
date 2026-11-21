@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   useSearchParams, Link } from 'react-router-dom';
 import {
+  ChevronLeft,
   Facebook,
   FileText,
   Image as ImageIcon,
@@ -228,12 +229,19 @@ export default function CrmInboxPage() {
 
   const [conversations, setConversations] = useState<CrmConversation[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  /** Telefonda kayıt kartı tam ekran açılır. Masaüstünde sağ panel hep durur. */
+  const [cardOpen, setCardOpen] = useState(false);
   // FAZ 4: bildirimden gelen /crm/inbox?c=<id> ilgili sohbeti açar
   const [searchParams] = useSearchParams();
   const deepLinkId = searchParams.get('c');
   useEffect(() => {
-    if (deepLinkId) setSelectedId(deepLinkId);
+    if (!deepLinkId) return;
+    setSelectedId(deepLinkId);
+    if (window.matchMedia('(max-width: 1023px)').matches) setCardOpen(true);
   }, [deepLinkId]);
+  useEffect(() => {
+    if (!selectedId) setCardOpen(false);
+  }, [selectedId]);
   const [messages, setMessages] = useState<CrmMessage[]>([]);
   const [selected, setSelected] = useState<CrmConversation | null>(null);
   const [q, setQ] = useState('');
@@ -820,8 +828,10 @@ export default function CrmInboxPage() {
           </div>
         )}
       </div>
-      <div className="flex min-h-0 flex-1 overflow-hidden">
-      <aside className="flex w-full max-w-sm flex-col border-r border-slate-200 bg-slate-50/80 sm:w-80">
+      <div className="relative flex min-h-0 flex-1 overflow-hidden">
+      <aside
+        className={`${selectedId ? 'hidden lg:flex' : 'flex'} w-full max-w-none flex-col border-r border-slate-200 bg-slate-50/80 lg:w-80 lg:max-w-sm`}
+      >
         <div className="space-y-2 border-b border-slate-200 p-3">
           <div className="grid grid-cols-3 gap-1 rounded-lg bg-slate-200/70 p-1 text-xs font-semibold">
             {(
@@ -912,7 +922,10 @@ export default function CrmInboxPage() {
                 <button
                   key={c.id}
                   type="button"
-                  onClick={() => setSelectedId(c.id)}
+                  onClick={() => {
+                    setSelectedId(c.id);
+                    if (window.matchMedia('(max-width: 1023px)').matches) setCardOpen(true);
+                  }}
                   className={`flex w-full flex-col gap-1 border-b border-slate-100 px-3 py-3 text-left transition ${
                     active ? 'bg-emerald-50' : 'hover:bg-white'
                   }`}
@@ -1006,18 +1019,30 @@ export default function CrmInboxPage() {
         </div>
       </aside>
 
-      <section className="flex min-w-0 flex-1 flex-col">
+      <section className={`${selectedId ? 'flex' : 'hidden lg:flex'} min-w-0 flex-1 flex-col`}>
         {!selectedId ? (
           <div className="flex flex-1 items-center justify-center text-sm text-slate-400">
             Bir konuşma seçin
           </div>
         ) : (
           <>
-            <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
-              <div>
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 px-2 py-3 sm:px-4">
+              <div className="flex min-w-0 items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCardOpen(false);
+                    setSelectedId(null);
+                  }}
+                  className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-600 hover:bg-slate-100 lg:hidden"
+                  aria-label="Gelen kutusuna dön"
+                >
+                  <ChevronLeft className="h-5 w-5" />
+                </button>
+              <div className="min-w-0">
                 <div className="flex items-center gap-2">
                   {selected ? <ContactAvatar c={selected} size="md" /> : null}
-                  <h2 className="font-semibold text-slate-900">
+                  <h2 className="min-w-0 truncate font-semibold text-slate-900">
                     {selected ? contactTitle(selected) : '…'}
                   </h2>
                   {selected && <ChannelBadge channel={selected.channel} contactIdentifier={selected.contact_identifier} adSourceData={selected.ad_source_data as Record<string, unknown> | null} />}
@@ -1030,11 +1055,12 @@ export default function CrmInboxPage() {
                     </span>
                   ) : null}
                 </div>
-                <p className="text-xs text-slate-500" title={selected?.contact_identifier || ''}>
+                <p className="truncate text-xs text-slate-500" title={selected?.contact_identifier || ''}>
                   {selected ? contactSubtitle(selected) : ''}
                 </p>
               </div>
-              <div className="flex items-center gap-2">
+              </div>
+              <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
               {selected ? (
                 <button
                   type="button"
@@ -1101,6 +1127,26 @@ export default function CrmInboxPage() {
               </select>
               </div>
             </div>
+
+            <button
+              type="button"
+              onClick={() => setCardOpen(true)}
+              className="flex w-full items-center justify-between gap-2 border-b border-emerald-100 bg-emerald-50/80 px-3 py-2 text-left lg:hidden"
+            >
+              <span className="min-w-0">
+                <span className="block text-[10px] font-semibold uppercase tracking-wide text-emerald-800">
+                  Kayıt kartı
+                </span>
+                <span className="block truncate text-xs font-medium text-slate-800">
+                  {leadOzet
+                    ? `${STAGE_LABELS[String(leadOzet.stage || '')] || leadOzet.stage || 'Aşama yok'} · ${String(leadOzet.primary_status || 'durum yok')}`
+                    : 'İletişim, not ve aşama'}
+                </span>
+              </span>
+              <span className="shrink-0 rounded-lg bg-white px-2 py-1 text-xs font-semibold text-emerald-800 ring-1 ring-emerald-200">
+                Aç
+              </span>
+            </button>
 
             <div className="flex-1 space-y-2 overflow-y-auto bg-gradient-to-b from-white to-slate-50 px-4 py-3">
               {loadingMsgs ? (
@@ -1342,8 +1388,23 @@ export default function CrmInboxPage() {
 
       {/* Sağ panel genişletildi: not alma ve pipeline işlemleri daralmasın — mesaj
           sütunu flex-1 olduğu için kendiliğinden küçülür */}
-      <aside className="hidden w-80 shrink-0 flex-col border-l border-slate-200 bg-slate-50/60 lg:flex xl:w-96">
-        <div className="border-b border-slate-200 p-4">
+      <aside
+        className={`${
+          cardOpen ? 'absolute inset-0 z-30 flex w-full max-lg:overflow-y-auto' : 'hidden'
+        } shrink-0 flex-col border-l border-slate-200 bg-slate-50/60 lg:static lg:z-auto lg:flex lg:min-h-0 lg:w-80 xl:w-96`}
+      >
+        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-200 bg-white px-3 py-2 lg:hidden">
+          <p className="text-sm font-semibold text-slate-900">Kayıt kartı</p>
+          <button
+            type="button"
+            onClick={() => setCardOpen(false)}
+            className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-100"
+          >
+            <X className="h-4 w-4" />
+            Kapat
+          </button>
+        </div>
+        <div className="border-b border-slate-200 p-4 max-lg:order-2">
           <div className="mb-1 flex items-center justify-between gap-2">
             <h3 className="flex items-center gap-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
               <FileText className="h-3.5 w-3.5" />
@@ -1417,7 +1478,7 @@ export default function CrmInboxPage() {
           ) : null}
         </div>
         {selected ? (
-          <div className="space-y-4 overflow-y-auto p-4 text-sm">
+          <div className="max-lg:order-1 space-y-4 overflow-y-auto p-4 text-sm lg:min-h-0 lg:flex-1">
             <div>
               <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">İletişim</h3>
               <p className="mt-1 font-medium text-slate-900">{selected.contact_name || '—'}</p>
