@@ -269,11 +269,14 @@ test('Markdown kanala göre düz metne çevrilir', () => {
   assert.match(buildStaticSystemPrompt({}), /Markdown kullanma/);
 });
 
-test('program sorularında önce cevap, sonra bağlantı talimatı', () => {
+test('program sorularında önce cevap, sonra bağlantı; ilk mesajda fiyat yok', () => {
   const p = buildStaticSystemPrompt({});
-  assert.match(p, /önce soruyu yanıtla/);
-  assert.match(p, /https:\/\/www\.onlinevipdershane\.com bağlantısını ver/);
+  assert.match(p, /Önce sorduğu konuyu kısaca anlat/);
+  assert.match(p, /https:\/\/www\.onlinevipdershane\.com\/ozel-ders\.html/);
+  assert.match(p, /https:\/\/www\.onlinevipdershane\.com\/deneme-kulubu/);
+  assert.match(p, /İlk yazışmalarda ücret/);
   assert.match(p, /Tek başına "danışmanımız sizi arayacak" diye cevap verme/);
+  assert.doesNotMatch(p, /Fiyat sorulursa bilgi tabanındaki fiyatı aynen/);
 });
 
 test('yorum ve takip butonu asistanı tetiklemez', () => {
@@ -292,7 +295,8 @@ test('sistem talimatı: bilgi tabanı, KVKK ve uydurmama kuralı', () => {
   assert.match(p, /18 yaşından küçükse/);
   assert.match(buildStaticSystemPrompt({}), /Bilgi tabanı boş/);
   assert.match(p, /dijital asistan/);
-  assert.match(p, /Ücret ve kayıt bilgileri için aşağıdaki bağlantıyı inceleyebilirsiniz\./);
+  assert.match(p, /ozel-ders\.html/);
+  assert.match(p, /deneme-kulubu/);
   assert.match(p, /WhatsApp'ta telefon numarası İSTEME/);
 });
 
