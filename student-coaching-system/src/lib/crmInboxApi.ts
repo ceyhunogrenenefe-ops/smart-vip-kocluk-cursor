@@ -460,11 +460,27 @@ export function crmSaveMetaConfigurationId(configurationId: string) {
   });
 }
 
+export type CrmWidgetAgent = {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  roles?: string[];
+  widget_ids: string[];
+};
+
+export type CrmWidgetAgentDirectory = {
+  items: CrmWidgetAgent[];
+  by_widget: Record<string, Array<{ id: string; name: string; email: string }>>;
+  candidates: Array<{ id: string; name: string; email: string; role?: string }>;
+};
+
 export function crmListAgents(institutionId?: string) {
   return inboxGet<{
     data: {
       assignments: Array<Record<string, unknown>>;
       role_users: Array<{ id: string; name: string; email: string; role: string }>;
+      widget_agents?: CrmWidgetAgent[];
     };
   }>('list_agents', { institution_id: institutionId });
 }
@@ -504,8 +520,28 @@ export function crmAdminListAgents(institutionId?: string) {
       assignments: Array<Record<string, unknown>>;
       role_users: Array<{ id: string; name: string; email: string; role: string; roles?: string[] }>;
       coach_candidates: Array<{ id: string; name: string; email: string; role: string }>;
+      widget_agents?: CrmWidgetAgent[];
+      widget_agents_error?: string | null;
     };
   }>('list_agents', { institution_id: institutionId });
+}
+
+export function crmAdminWidgetAgents() {
+  return adminGet<{ data: CrmWidgetAgentDirectory }>('widget_agents');
+}
+
+export function crmAdminAddWidgetAgent(widgetId: string, userId: string) {
+  return adminPost<{ data: CrmWidgetAgentDirectory }>('widget_agent_add', {
+    widget_id: widgetId,
+    user_id: userId
+  });
+}
+
+export function crmAdminRemoveWidgetAgent(widgetId: string, userId: string) {
+  return adminPost<{ data: CrmWidgetAgentDirectory }>('widget_agent_remove', {
+    widget_id: widgetId,
+    user_id: userId
+  });
 }
 
 export function crmAdminCreateUser(payload: {
