@@ -633,7 +633,10 @@ async function executeTool(ctx, name, input) {
   if (name === 'book_callback') {
     if (ctx.session?.appointment_task_id) return `Bu kişi için randevu zaten var: ${slotLabel(ctx.session.appointment_at)}. Yeni randevu açılmadı.`;
     if (!ctx.allowedSlots.length) ctx.allowedSlots = (await freeSlotsFor(ctx.settings)).slots;
-    const v = validateBooking(input, { allowedStarts: ctx.allowedSlots.map((s) => s.start_iso) });
+    const v = validateBooking(input, {
+      allowedStarts: ctx.allowedSlots.map((s) => s.start_iso),
+      fallbackPhone: String(ctx.conversation.channel) === 'whatsapp' ? ctx.conversation.contact_identifier : ''
+    });
     if (!v.ok) return `Randevu oluşturulmadı: ${v.errors.join('; ')}. Eksik bilgiyi müşteriden iste ya da get_available_slots ile güncel saatleri al.`;
     return bookCallback(ctx, v.value);
   }
@@ -1082,7 +1085,7 @@ export async function testChat(institutionId, turns = []) {
       return slots.length ? JSON.stringify(slots.map((s) => ({ start_iso: s.start_iso, label: s.label }))) : 'Boş saat yok.';
     }
     if (name === 'book_callback') {
-      const v = validateBooking(input, { allowedStarts: ctx.allowedSlots.map((s) => s.start_iso) });
+      const v = validateBooking(input, { allowedStarts: ctx.allowedSlots.map((s) => s.start_iso), fallbackPhone: '905321112233' });
       return v.ok ? `(DENEME) Randevu oluşturuldu: ${slotLabel(v.value.start_iso)}. Müşteriye teyit et.` : `Randevu oluşturulmadı: ${v.errors.join('; ')}`;
     }
     if (name === 'handover_to_human') return '(DENEME) Konuşma devredildi. Müşteriye danışmanın döneceğini söyle.';
