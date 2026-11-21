@@ -10,11 +10,12 @@
  *        https://www.dersonlinevipkocluk.com/api/netgsm-call-webhook?secret=<anahtar>
  *   3. Supabase'de sql/2026-11-21-crm-phone-calls.sql çalıştırılır (çift kayıt koruması).
  *
- * Ne yapar (yalnız `cdr` olayı, gelen çağrı, takip edilen hat):
- *   - Numara CRM'de varsa adayın kaydına "Gelen arama / Cevapsız arama" etkileşimi düşer.
+ * Ne yapar (gelen çağrı, takip edilen hat):
+ *   - InboundtoPBX / Inbound_call gelir gelmez aday kartı açılır (cdr'i beklemez).
+ *   - Numara CRM'de varsa kayda "Gelen arama / Cevapsız arama" etkileşimi düşer.
  *   - Yoksa kaynak "telefon_arayan" ile yeni aday açılır ve sorumlu ataması yapılır.
- *   - Cevapsız çağrıda adaya "call_back" sonraki aksiyonu yazılır.
- * Diğer olaylar (Inbound_call, DTMF, Queue…) 200 ile kabul edilip yok sayılır.
+ *   - Cevapsız çağrıda (cdr) adaya "call_back" sonraki aksiyonu yazılır.
+ * Giden, iç çağrı, DTMF ve Queue 200 ile kabul edilip yok sayılır.
  */
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import {
@@ -22,7 +23,6 @@ import {
   findLeadByPhone,
   resolveDefaultInstitutionId
 } from '../api/_lib/registration-channel-ingest.js';
-import { autoMarkLeadInternal } from '../api/_lib/crm-internal-contacts.js';
 import { normalizeTrPhone } from '../api/_lib/registration-tracking-utils.js';
 import {
   formatDuration,
@@ -75,7 +75,15 @@ async function claimCall(event, institutionId, raw) {
     .select('id')
     .maybeSingle();
   if (error) {
-    if (/duplicate|unique/i.test(error.message || '')) return { fresh: false, rowId: null };
+    if (/duplicate|unique/i.test(error.message || '')) {
+      const { data: existing } = await supabaseAdmin
+        .from('crm_phone_calls')
+        .select('id, lead_id')
+        .eq('provider', 'netgsm')
+        .eq('provider_call_id', event.callId)
+        .maybeSingle();
+      return { fresh: false, rowId: existing?.id || null, leadId: existing?.lead_id || null };
+    }
     if (isMissingTable(error)) {
       console.warn('[netgsm-webhook] crm_phone_calls tablosu yok — sql/2026-11-21-crm-phone-calls.sql çalıştırın');
       return { fresh: true, rowId: null };
@@ -85,15 +93,21 @@ async function claimCall(event, institutionId, raw) {
   return { fresh: true, rowId: data?.id || null };
 }
 
-async function recordCallOnLead(lead, event, institutionId) {
+async function recordCallOnLead(lead, event, institutionId, { note = true } = {}) {
   const answered = event.answered === true;
-  const title = answered ? 'Gelen arama' : 'Cevapsız arama';
+  const missed = event.answered === false;
+  const title = missed ? 'Cevapsız arama' : 'Gelen arama';
   const parts = [
-    answered ? `Görüşme süresi: ${formatDuration(event.durationSec)}` : 'Çağrı cevaplanmadı — geri aranmalı',
+    answered && event.durationSec != null
+      ? `Görüşme süresi: ${formatDuration(event.durationSec)}`
+      : missed
+        ? 'Çağrı cevaplanmadı — geri aranmalı'
+        : 'Çağrı santrale düştü',
     event.called ? `Aranan hat: ${event.called}` : null,
     event.recordingUrl ? `Ses kaydı: ${event.recordingUrl}` : null
   ].filter(Boolean);
 
+  if (note) {
   try {
     await supabaseAdmin.from('registration_interactions').insert({
       lead_id: lead.id,
@@ -108,6 +122,7 @@ async function recordCallOnLead(lead, event, institutionId) {
   } catch (e) {
     console.warn('[netgsm-webhook] interaction insert:', e instanceof Error ? e.message : e);
   }
+  }
 
   const patch = {
     last_inbound_channel: 'phone',
@@ -115,7 +130,7 @@ async function recordCallOnLead(lead, event, institutionId) {
     last_inbound_at: event.startedAt,
     updated_at: new Date().toISOString()
   };
-  if (!answered) {
+  if (event.answered === false) {
     patch.next_action_type = 'call_back';
     patch.next_action_at = new Date().toISOString();
   }
@@ -126,26 +141,65 @@ async function recordCallOnLead(lead, event, institutionId) {
   }
 }
 
+function logDecision(event, result) {
+  console.info('[netgsm-webhook]', {
+    scenario: event.scenario || 'none',
+    kind: event.kind,
+    direction: event.direction,
+    answered: event.answered,
+    result: result.ignored ? result.reason : result.ok ? 'saved' : result.reason || 'fail',
+    caller_tail: String(event.caller || '').slice(-4)
+  });
+}
+
 export async function processNetgsmEvent(rawBody) {
   const event = normalizeNetgsmEvent(rawBody);
+  const tracked = parseTrackedNumbers(process.env.NETGSM_TRACKED_NUMBERS);
+  const inboundCdr = event.kind === 'cdr' && event.direction !== 'outbound' && event.direction !== 'internal';
+  const recordable = event.kind === 'inbound' || inboundCdr;
 
-  if (event.kind !== 'cdr') return { ignored: true, reason: `scenario:${event.scenario || 'unknown'}` };
-  if (event.direction !== 'inbound') return { ignored: true, reason: 'not_inbound' };
-  if (!isTrackedCall(event, parseTrackedNumbers(process.env.NETGSM_TRACKED_NUMBERS))) {
-    return { ignored: true, reason: 'untracked_line' };
+  if (!recordable) {
+    const result = { ignored: true, reason: `scenario:${event.scenario || 'unknown'}` };
+    logDecision(event, result);
+    return result;
+  }
+  if (!isTrackedCall(event, tracked)) {
+    const result = { ignored: true, reason: 'untracked_line' };
+    logDecision(event, result);
+    return result;
   }
 
   const normalizedPhone = normalizeTrPhone(event.caller);
-  if (!normalizedPhone) return { ignored: true, reason: 'no_caller_number' };
+  if (!normalizedPhone) {
+    const result = { ignored: true, reason: 'no_caller_number' };
+    logDecision(event, result);
+    return result;
+  }
 
   const institutionId = await resolveDefaultInstitutionId();
-  if (!institutionId) return { ignored: true, reason: 'no_institution' };
+  if (!institutionId) {
+    const result = { ignored: true, reason: 'no_institution' };
+    logDecision(event, result);
+    return result;
+  }
 
   const claim = await claimCall(event, institutionId, rawBody);
-  if (!claim.fresh) return { ignored: true, reason: 'duplicate' };
+  if (!claim.fresh && claim.leadId) {
+    await recordCallOnLead(
+      { id: claim.leadId },
+      event,
+      institutionId,
+      { note: Boolean(event.durationSec || event.recordingUrl || event.answered === false) }
+    );
+    const result = { ok: true, duplicate: true, lead_id: claim.leadId, answered: event.answered };
+    logDecision(event, result);
+    return result;
+  }
 
   try {
-    return await attachCallToLead(event, normalizedPhone, institutionId, claim.rowId);
+    const result = await attachCallToLead(event, normalizedPhone, institutionId, claim.rowId);
+    logDecision(event, result);
+    return result;
   } catch (e) {
     // Netgsm tekrar gönderirse yeniden işlenebilsin diye çift kayıt satırını geri al
     if (claim.rowId) {
@@ -166,16 +220,20 @@ async function attachCallToLead(event, normalizedPhone, institutionId, claimRowI
       normalizedPhone,
       contactName: 'Telefon Arayan',
       source: LEAD_SOURCE,
-      notes: `İlk temas: ${event.called || 'santral'} hattına ${
-        event.answered ? 'gelen arama' : 'cevapsız arama'
-      }`
+      notes: `İlk temas: ${event.called || event.pbx || 'santral'} hattına gelen arama`
     });
     created = Boolean(lead?.id);
   }
   if (!lead?.id) return { ok: false, reason: 'lead_not_created' };
 
   const leadInstitution = lead.institution_id || institutionId;
-  await autoMarkLeadInternal(lead.id, normalizedPhone);
+  // 0850 satış hattı. Kayıtlı veli numarası da panoda görünsün; kurum içi işaret
+  // bu kartı Kayıt Takibi listesinden siliyordu.
+  await supabaseAdmin
+    .from('registration_leads')
+    .update({ is_internal: false, internal_reason: 'manual_unmarked' })
+    .eq('id', lead.id)
+    .eq('is_internal', true);
   await recordCallOnLead(lead, event, leadInstitution);
 
   if (claimRowId) {

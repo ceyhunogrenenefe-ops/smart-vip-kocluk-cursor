@@ -56,11 +56,12 @@ function numberFromClid(clid) {
 
 export function parseNetgsmBody(raw) {
   if (raw == null) return {};
-  if (typeof raw === 'object') return raw;
+  if (typeof Buffer !== 'undefined' && Buffer.isBuffer(raw)) raw = raw.toString('utf8');
+  if (typeof raw === 'object') return unwrapNetgsmBody(raw);
   const text = String(raw);
   try {
     const parsed = JSON.parse(text);
-    return parsed && typeof parsed === 'object' ? parsed : {};
+    return parsed && typeof parsed === 'object' ? unwrapNetgsmBody(parsed) : {};
   } catch {
     // form-urlencoded olarak gelirse
     try {
@@ -71,9 +72,18 @@ export function parseNetgsmBody(raw) {
   }
 }
 
+function unwrapNetgsmBody(body) {
+  if (Array.isArray(body)) {
+    const first = body.find((item) => item && typeof item === 'object');
+    return first || {};
+  }
+  if (body.data && typeof body.data === 'object' && !body.scenario) return unwrapNetgsmBody(body.data);
+  return body;
+}
+
 /**
  * @returns {{
- *   kind: 'cdr'|'inbound_call'|'other',
+ *   kind: 'cdr'|'inbound'|'other',
  *   scenario: string,
  *   callId: string|null,
  *   caller: string|null,
@@ -86,6 +96,17 @@ export function parseNetgsmBody(raw) {
  *   recordingUrl: string|null
  * }}
  */
+/** Çağrı santrale düştüğü anda gelen olaylar. Kart bununla açılır; cdr 30–60 sn sonra zenginleştirir. */
+const INBOUND_SCENARIOS = new Set(['inboundtopbx', 'inbound_call', 'answer']);
+
+function dispositionAnswered(body) {
+  const raw = body?.channel_variables?.disposition ?? body?.disposition;
+  const value = str(raw).toUpperCase().replace(/\s+/g, ' ');
+  if (value === 'ANSWERED') return true;
+  if (value === 'NO ANSWER' || value === 'BUSY' || value === 'FAILED' || value === 'CANCEL') return false;
+  return null;
+}
+
 export function normalizeNetgsmEvent(body) {
   const b = body && typeof body === 'object' ? body : {};
   const scenario = str(b.scenario);
@@ -95,31 +116,32 @@ export function normalizeNetgsmEvent(body) {
     const yon = YON[Number(b.yon)] || null;
     const durationRaw = Number(b.sure);
     const caller = digits(b.arayan) || numberFromClid(b.clid);
+    const fromDisposition = dispositionAnswered(b);
     return {
       kind: 'cdr',
       scenario,
       callId: str(b.asteriskId) || str(b.kimlik) || str(b.unique_id) || null,
       caller: caller || null,
-      called: digits(b.aranan) || null,
-      pbx: digits(b.santral) || null,
+      called: digits(b.aranan) || digits(b.trunk) || digits(b.incoming_number) || null,
+      pbx: digits(b.santral) || digits(b.pbx_num) || null,
       direction: yon ? yon.direction : null,
-      answered: yon ? yon.answered : null,
+      answered: fromDisposition != null ? fromDisposition : yon ? yon.answered : null,
       durationSec: Number.isFinite(durationRaw) ? durationRaw : null,
       startedAt: istanbulDateToIso(b.bas) || msToIso(b.timestamp) || new Date().toISOString(),
       recordingUrl: str(b.seskaydi) || null
     };
   }
 
-  if (lower === 'inbound_call') {
+  if (INBOUND_SCENARIOS.has(lower)) {
     return {
-      kind: 'inbound_call',
+      kind: 'inbound',
       scenario,
-      callId: str(b.unique_id) || null,
-      caller: digits(b.customer_num) || null,
-      called: null,
-      pbx: digits(b.pbx_num) || null,
+      callId: str(b.unique_id) || str(b.asteriskId) || null,
+      caller: digits(b.customer_num) || digits(b.arayan) || numberFromClid(b.clid) || null,
+      called: digits(b.incoming_number) || digits(b.aranan) || null,
+      pbx: digits(b.pbx_num) || digits(b.santral) || null,
       direction: 'inbound',
-      answered: null,
+      answered: lower === 'answer' ? true : null,
       durationSec: null,
       startedAt: msToIso(b.timestamp) || new Date().toISOString(),
       recordingUrl: null
@@ -157,7 +179,11 @@ export function parseTrackedNumbers(value) {
  */
 export function isTrackedCall(event, trackedNumbers) {
   if (!trackedNumbers || trackedNumbers.length === 0) return true;
-  const haystack = [event.called, event.pbx].filter(Boolean).join(' ');
+  const parts = [event.called, event.pbx].filter(Boolean);
+  // Eski Inbound_call örneğinde pbx_num yalnız dahili ("101"). Hat numarası yoksa gelen çağrıyı eleme.
+  const lines = parts.filter((p) => p.length >= 10);
+  if (!lines.length && event.direction === 'inbound') return true;
+  const haystack = parts.join(' ');
   return trackedNumbers.some((n) => haystack.includes(n));
 }
 
