@@ -51,7 +51,7 @@ test('giden ve ic aramalar inbound sayilmaz', () => {
   assert.equal(normalizeNetgsmEvent({ ...cdr, yon: 9 }).direction, null);
 });
 
-test('Inbound_call ve diger olaylar', () => {
+test('Inbound_call ve InboundtoPBX kart acar, DTMF acmaz', () => {
   const e = normalizeNetgsmEvent({
     pbx_num: '101',
     unique_id: '1428481992.3556',
@@ -59,9 +59,30 @@ test('Inbound_call ve diger olaylar', () => {
     customer_num: '903129110000',
     timestamp: '1652080580926'
   });
-  assert.equal(e.kind, 'inbound_call');
+  assert.equal(e.kind, 'inbound');
+  assert.equal(e.direction, 'inbound');
   assert.equal(e.caller, '903129110000');
+  const ring = normalizeNetgsmEvent({
+    scenario: 'InboundtoPBX',
+    pbx_num: '8503034014',
+    incoming_number: '08503034014',
+    customer_num: '05551112233',
+    unique_id: 'sip1-1'
+  });
+  assert.equal(ring.kind, 'inbound');
+  assert.equal(ring.caller, '05551112233');
+  assert.equal(ring.called, '08503034014');
   assert.equal(normalizeNetgsmEvent({ scenario: 'DTMF' }).kind, 'other');
+});
+
+test('cdr cevaplandi bilgisi disposition alanindan okunur', () => {
+  const e = normalizeNetgsmEvent({
+    ...cdr,
+    yon: 2,
+    channel_variables: { disposition: 'ANSWERED' }
+  });
+  assert.equal(e.direction, 'inbound');
+  assert.equal(e.answered, true);
 });
 
 test('takip edilen hat filtresi', () => {
@@ -71,6 +92,13 @@ test('takip edilen hat filtresi', () => {
   const other = normalizeNetgsmEvent({ ...cdr, aranan: '2129998877', santral: '2129998877' });
   assert.equal(isTrackedCall(other, tracked), false);
   assert.equal(isTrackedCall(other, []), true);
+  const extensionOnly = normalizeNetgsmEvent({
+    scenario: 'Inbound_call',
+    pbx_num: '101',
+    customer_num: '05551112233',
+    unique_id: 'sip1-2'
+  });
+  assert.equal(isTrackedCall(extensionOnly, tracked), true);
 });
 
 test('govde ayristirma ve sure bicimi', () => {
