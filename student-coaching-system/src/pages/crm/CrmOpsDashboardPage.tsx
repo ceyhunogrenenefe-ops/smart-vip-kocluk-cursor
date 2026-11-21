@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { Clock, Globe, GraduationCap, Instagram, Loader2, MessageCircle, Trophy, Users } from 'lucide-react';
 import { toast } from 'sonner';
@@ -112,11 +113,47 @@ function SourceMixPanel({
   );
 }
 
+const DASH_PRESETS: CrmTimePreset[] = ['today', 'yesterday', 'last_7_days', 'this_week', 'this_month', 'custom'];
+
+function readDashPreset(raw: string | null): CrmTimePreset {
+  return DASH_PRESETS.includes(raw as CrmTimePreset) ? (raw as CrmTimePreset) : 'this_week';
+}
+
 export default function CrmOpsDashboardPage() {
-  const [preset, setPreset] = useState<CrmTimePreset>('this_week');
-  const [from, setFrom] = useState(todayYmd());
-  const [to, setTo] = useState(todayYmd());
-  const [agentId, setAgentId] = useState('');
+  const [params, setParams] = useSearchParams();
+  const preset = readDashPreset(params.get('preset'));
+  const from = params.get('from') || todayYmd();
+  const to = params.get('to') || todayYmd();
+  const agentId = params.get('agent') || '';
+  const writeFilters = (
+    next: Partial<{ preset: CrmTimePreset; from: string; to: string; agentId: string }>
+  ) => {
+    const presetNext = next.preset ?? preset;
+    const fromNext = next.from ?? from;
+    const toNext = next.to ?? to;
+    const agentNext = next.agentId !== undefined ? next.agentId : agentId;
+    setParams(
+      (p) => {
+        const n = new URLSearchParams(p);
+        n.set('preset', presetNext);
+        if (presetNext === 'custom') {
+          n.set('from', fromNext.slice(0, 10));
+          n.set('to', toNext.slice(0, 10));
+        } else {
+          n.delete('from');
+          n.delete('to');
+        }
+        if (agentNext) n.set('agent', agentNext);
+        else n.delete('agent');
+        return n;
+      },
+      { replace: true }
+    );
+  };
+  const setPreset = (value: CrmTimePreset) => writeFilters({ preset: value });
+  const setFrom = (value: string) => writeFilters({ preset: 'custom', from: value });
+  const setTo = (value: string) => writeFilters({ preset: 'custom', to: value });
+  const setAgentId = (value: string) => writeFilters({ agentId: value });
   const [coaches, setCoaches] = useState<RegCoach[]>(CRM_OPS_DEMO_COACHES);
   const [data, setData] = useState<CrmOpsDashboard | null>(null);
   const [demo, setDemo] = useState(false);
