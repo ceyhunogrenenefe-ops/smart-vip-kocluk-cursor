@@ -36,7 +36,7 @@ function isoFromWebhookTs(ts) {
 /** Panelde kullanılan ana kurum (Online Vip Dershane Ders ve Koçluk) */
 const PRIMARY_REGISTRATION_INSTITUTION_ID = '73323d75-eea1-4552-8bba-d50555423589';
 
-async function resolveDefaultInstitutionId() {
+export async function resolveDefaultInstitutionId() {
   const envId = String(
     process.env.REGISTRATION_INBOUND_INSTITUTION_ID ||
       process.env.META_WHATSAPP_DEFAULT_INSTITUTION_ID ||
@@ -91,7 +91,7 @@ async function resolveDefaultInstitutionId() {
   return null;
 }
 
-async function findLeadByPhone(normalizedPhone, institutionId, { includeAlternate = true } = {}) {
+export async function findLeadByPhone(normalizedPhone, institutionId, { includeAlternate = true } = {}) {
   if (!normalizedPhone) return null;
   const variants = phoneLookupVariants(normalizedPhone);
   if (!variants.length) return null;
@@ -282,7 +282,7 @@ export async function mergeDuplicateInboundLead({
   }
 }
 
-async function createLeadFromInbound({
+export async function createLeadFromInbound({
   institutionId,
   channel,
   phone,
@@ -399,7 +399,8 @@ async function createLeadFromInbound({
   // FAZ 2: yeni aday otomatik dağıtım (kayıtlı öğrenci/veli numarası dağıtılmaz)
   try {
     const { isInternalPhone } = await import('./crm-internal-contacts.js');
-    const internal = channel === 'whatsapp' && (await isInternalPhone(normalizedPhone || phone));
+    const internal =
+      (channel === 'whatsapp' || channel === 'phone') && (await isInternalPhone(normalizedPhone || phone));
     if (data?.id && !internal) {
       const { assignLeadIfUnassigned } = await import('./crm-assignment.js');
       await assignLeadIfUnassigned(data.id, institutionId);

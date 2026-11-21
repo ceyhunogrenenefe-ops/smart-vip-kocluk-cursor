@@ -48,6 +48,7 @@ export const routeLoaders = {
   'crm-website-orders': () => import('../handlers/crm-website-orders.js'),
   'setup-crm-website-orders-schema': () => import('../handlers/setup-crm-website-orders-schema.js'),
   'registration-inbound-gateway': () => import('../handlers/registration-inbound-gateway.js'),
+  'netgsm-call-webhook': () => import('../handlers/netgsm-call-webhook.js'),
   'whatsapp/send': () => import('../handlers/whatsapp-send.js'),
   'whatsapp/template-test': () => import('../handlers/whatsapp-template-test.js'),
   'message-templates': () => import('../handlers/message-templates.js'),
