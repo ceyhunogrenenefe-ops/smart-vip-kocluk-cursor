@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  ASSISTANT_TOOLS,
   DEFAULT_SCHEDULE,
+  buildDynamicContext,
   buildKvkkNotice,
   buildStaticSystemPrompt,
   buildToneExcerpt,
@@ -267,9 +269,10 @@ test('Markdown kanala göre düz metne çevrilir', () => {
   assert.match(buildStaticSystemPrompt({}), /Markdown kullanma/);
 });
 
-test('bilgi sorularına geniş cevap talimatı', () => {
+test('program sorularında önce cevap, sonra bağlantı talimatı', () => {
   const p = buildStaticSystemPrompt({});
-  assert.match(p, /geniş ve somut/);
+  assert.match(p, /önce soruyu yanıtla/);
+  assert.match(p, /https:\/\/www\.onlinevipdershane\.com bağlantısını ver/);
   assert.match(p, /Tek başına "danışmanımız sizi arayacak" diye cevap verme/);
 });
 
@@ -288,7 +291,44 @@ test('sistem talimatı: bilgi tabanı, KVKK ve uydurmama kuralı', () => {
   assert.match(p, /<ton_rehberi>\nSıcak ol/);
   assert.match(p, /18 yaşından küçükse/);
   assert.match(buildStaticSystemPrompt({}), /Bilgi tabanı boş/);
-  assert.match(buildKvkkNotice('https://k/x'), /bot.*https:\/\/k\/x/s);
+  assert.match(p, /dijital asistan/);
+  assert.match(p, /Ücret ve kayıt bilgileri için aşağıdaki bağlantıyı inceleyebilirsiniz\./);
+  assert.match(p, /WhatsApp'ta telefon numarası İSTEME/);
+});
+
+test('karşılama metni: Eğitim Destek Asistanı, KVKK bağlantısı, bot/satış/yapay zekâ yok', () => {
+  assert.equal(
+    buildKvkkNotice(),
+    'Merhaba 👋 Ben Online VIP Dershane’nin Eğitim Destek Asistanıyım. Ders programlarımız hakkında bilgi verebilir, dilerseniz sizi ilgili sınıfın eğitim danışmanına yönlendirebilirim. Size nasıl yardımcı olabilirim?\n\nKVKK Aydınlatma Metni\nhttps://www.onlinevipdershane.com/gizlilik.html'
+  );
+  const n = buildKvkkNotice('https://k/x');
+  assert.match(n, /\nhttps:\/\/k\/x$/);
+  assert.doesNotMatch(n, /bot|satış|yapay/i);
+});
+
+test('telefon: WhatsApp numara istemez, Instagram bir kez ister', () => {
+  const wa = buildDynamicContext({ channel: 'whatsapp', contactPhone: '0532 111 22 33' });
+  assert.match(wa, /telefon numarası isteme/);
+  const ig = buildDynamicContext({ channel: 'instagram' });
+  assert.match(ig, /yalnız bir kez iste/);
+  const book = ASSISTANT_TOOLS.find((t) => t.name === 'book_callback');
+  assert.ok(!book.input_schema.required.includes('phone'));
+});
+
+test('randevu: WhatsApp sohbet numarası telefon ve veli telefonu olarak kullanılır', () => {
+  const allowedStarts = ['2026-11-20T10:00:00+03:00'];
+  const v = validateBooking(
+    { start_iso: allowedStarts[0], student_name: 'Ali', grade: '5', target: 'okul başarısı', is_minor: true, parent_name: 'Ayşe' },
+    { allowedStarts, fallbackPhone: '905321112233' }
+  );
+  assert.equal(v.ok, true);
+  assert.equal(v.value.phone, '905321112233');
+  assert.equal(v.value.parent_phone, '905321112233');
+  const noPhone = validateBooking(
+    { start_iso: allowedStarts[0], student_name: 'Ali', grade: '5', target: 'LGS', is_minor: false },
+    { allowedStarts }
+  );
+  assert.equal(noPhone.ok, false);
 });
 
 const activeSettings = { is_active: true, schedule: DEFAULT_SCHEDULE, max_bot_replies: 15 };

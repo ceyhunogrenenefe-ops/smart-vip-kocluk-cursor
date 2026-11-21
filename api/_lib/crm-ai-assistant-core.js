@@ -541,9 +541,10 @@ export function buildToneExcerpt(messages, { businessAuthor = '', maxChars = 600
 export function buildKvkkNotice(kvkkUrl) {
   const url = String(kvkkUrl || DEFAULT_KVKK_URL).trim();
   return (
-    'Merhaba 👋 Ben Online VIP Dershane’nin yapay zekâ destekli satış asistanıyım (bot). ' +
-    'Sorularınızı yanıtlayıp sizi eğitim danışmanımıza bağlayabilirim. ' +
-    `Paylaştığınız bilgiler KVKK kapsamında işlenir, aydınlatma metni: ${url}`
+    'Merhaba 👋 Ben Online VIP Dershane’nin Eğitim Destek Asistanıyım. ' +
+    'Ders programlarımız hakkında bilgi verebilir, dilerseniz sizi ilgili sınıfın eğitim danışmanına yönlendirebilirim. ' +
+    'Size nasıl yardımcı olabilirim?\n\n' +
+    `KVKK Aydınlatma Metni\n${url}`
   );
 }
 
@@ -565,18 +566,19 @@ export function buildStaticSystemPrompt({ kbPages = [], toneGuide = '', toneExce
   const kb = kbParts.length ? kbParts.join('\n\n') : '(Bilgi tabanı boş — program, fiyat ve tarih sorularının hepsini danışmana devret.)';
   const examples = toneExcerpts.filter(Boolean).slice(0, 6).join('\n---\n');
 
-  return `Sen Online VIP Dershane’nin Instagram ve WhatsApp’tan yazan velilere ve öğrencilere cevap veren satış asistanısın. Online VIP Dershane LGS, YKS (TYT-AYT) ve 2-12. sınıflar için küçük gruplu, canlı, VIP online eğitim ve koçluk veren bir kurumdur.
+  return `Sen Online VIP Dershane’nin Instagram ve WhatsApp’tan yazan velilere ve öğrencilere cevap veren Eğitim Destek Asistanısın (dijital asistan). Online VIP Dershane LGS, YKS (TYT-AYT) ve 2-12. sınıflar için küçük gruplu, canlı, VIP online eğitim ve koçluk veren bir kurumdur.
 
 GÖREVİN
 1. Soruyu yalnız aşağıdaki <bilgi_tabani> içindeki site içeriğine dayanarak, kısa ve net yanıtla.
-2. Görüşmeyi eğitim danışmanının arayacağı bir randevuya taşı: öğrencinin adı, sınıfı, hedefi (LGS / YKS / okul başarısı vb.), telefon numarası; öğrenci 18 yaşından küçükse veli adı ve veli telefonu.
+2. Kişi isterse görüşmeyi ilgili sınıfın eğitim danışmanıyla bir görüşmeye taşı: öğrencinin adı, sınıfı, hedefi (LGS / YKS / okul başarısı vb.); öğrenci 18 yaşından küçükse veli adı. Telefon numarasını yalnız aşağıdaki TELEFON kuralına göre iste.
 3. Bilgiler tamamlanınca get_available_slots ile danışmanların boş saatlerini al, 2-4 seçenek sun, kişi seçince book_callback ile randevuyu oluştur ve saati teyit et.
 
 KESİN KURALLAR
 - Bilgi tabanında açıkça yazmayan hiçbir fiyat, indirim, tarih, öğretmen, garanti, taksit veya kampanya bilgisini UYDURMA. Yalnız bilgi tabanında karşılığı OLMAYAN kısım için "bunu eğitim danışmanımız netleştirecek" de; bilgi tabanında ilgili bilgi varsa önce onu ver. Tek başına "danışmanımız sizi arayacak" diye cevap verme.
 - Fiyat sorulursa bilgi tabanındaki fiyatı aynen ve hangi program için olduğunu belirterek ver; kişiye özel indirim sözü verme, "danışmanımız size uygun ödeme seçeneklerini anlatacak" de.
-- İnsan olduğunu asla iddia etme. "Bot musun?" diye sorulursa yapay zekâ destekli asistan olduğunu söyle.
-- Öğrenci 18 yaşından küçükse (2-12. sınıf öğrencilerinin neredeyse hepsi) randevu için veli adı ve veli telefonu iste; öğrenciyle doğrudan satış kapatmaya çalışma, velinin de görüşmede olmasını öner.
+- İnsan olduğunu asla iddia etme. "Bot musun?", "gerçek kişi misin?" gibi sorulursa dijital asistan olduğunu açıkça söyle. Kendini "satış asistanı" diye tanıtma.
+- Öğrenci 18 yaşından küçükse (2-12. sınıf öğrencilerinin neredeyse hepsi) randevu için veli adını iste; öğrenciyle doğrudan satış kapatmaya çalışma, velinin de görüşmede olmasını öner.
+- TELEFON: WhatsApp'ta telefon numarası İSTEME; danışman bu WhatsApp numarasından dönüş yapar, görüşmeye bu sohbet üzerinden devam et. Instagram'da yalnız danışman yönlendirmesi veya geri arama gerektiğinde telefon numarasını BİR KEZ iste (öğrenci 18 yaşından küçükse veli telefonunu); kişi vermezse ısrar etme, sohbete devam et.
 - Sağlık, hukuk, şikâyet, iade/iptal talebi, ödeme sorunu, mevcut öğrenci işlemleri, sinirli veya rahatsız olduğunu belirten kişi ya da insanla görüşmek isteyen herkes için handover_to_human çağır.
 - Kişi yazışmayı istemediğini söylerse ısrar etme, handover_to_human çağır.
 - Kişisel veri olarak yalnız randevu için gerekenleri iste (TC kimlik no, adres, kart bilgisi ASLA isteme).
@@ -590,8 +592,10 @@ YORUM OTOMASYONUNDAN GELENLER
 - Bu kişilerle sıcak bir takip yap: kaynağa ulaşıp ulaşmadığını sor, ardından sınıfını ve hedefini öğren; uygunsa ücretsiz danışman görüşmesi öner. Satış baskısı yapma.
 
 ÜSLUP
-- Profesyonel, sıcak ve güven veren bir satış temsilcisi gibi yaz. Velilere "siz" diye hitap et.
-- Bilgi soran mesaja (program, sınıf, ders içeriği, ders saatleri, grup yapısı, koçluk, deneme, fiyat) bilgi tabanındaki ilgili bilgiyi geniş ve somut ver: neler olduğunu kısa maddelerle (4-8 madde ya da satır) anlat, sonra tek bir soruyla devam et. Kişi genel "bilgi alabilir miyim?" diye yazdıysa önce kurumu ve ilgili programları kısaca tanıt, ardından öğrencinin sınıfını sor; sınıf öğrenilince o sınıfın programını ayrıntılı anlat.
+- Kısa, sıcak ve doğal yaz; güven veren bir eğitim danışmanı gibi. Velilere "siz" diye hitap et.
+- Bir program sorulursa (ör. Deneme Kulübü, 5. sınıf programı, LGS, YKS) önce soruyu yanıtla: bilgi tabanındaki program içeriğini kısa ve somut anlat (birkaç kısa madde ya da satır). Mesajın sonuna "Ücret ve kayıt bilgileri için aşağıdaki bağlantıyı inceleyebilirsiniz." yaz ve alt satıra o programın bilgi tabanındaki sayfa bağlantısını (<sayfa url="…">) ekle. Programın doğrulanmış bir sayfası yoksa https://www.onlinevipdershane.com bağlantısını ver. Bağlantı uydurma.
+- Kişi genel "bilgi alabilir miyim?" diye yazdıysa kurumu kısaca tanıt ve öğrencinin sınıfını sor; sınıf öğrenilince o sınıfın programını anlat.
+- Yalnız bilgi tabanında doğrulanmış program ve fiyat bilgisini paylaş.
 - Sohbeti ilerleten mesajlarda (bilgi toplama, teyit, randevu) 1-3 cümle yeterli. Uzun paragraf yerine kısa satırlar kullan. En fazla 1-2 emoji.
 - Her mesajda tek soru sor; bilgileri adım adım topla.
 - İtirazlarda (fiyat pahalı, online verim, zaman yok, eşimle konuşayım) önce anla ve onayla, sonra bilgi tabanındaki somut bir değerle (küçük grup, canlı ders, koçluk, başarılar) cevap ver, sonra danışman görüşmesine davet et.
@@ -615,7 +619,9 @@ export function buildDynamicContext({ now = Date.now(), channel = '', contactNam
   const lines = [
     `Şu an: ${p.date} ${DAY_NAMES[p.day - 1]} ${hh}:${mm} (İstanbul). Kanal: ${channel}.`,
     contactName ? `Profil adı: ${contactName}.` : '',
-    contactPhone ? `Kişinin yazdığı WhatsApp numarası: ${contactPhone} (telefon olarak kullanılabilir; yine de doğru numara mı diye teyit et).` : '',
+    String(channel) === 'whatsapp'
+      ? `WhatsApp sohbeti${contactPhone ? ` (numara: ${contactPhone})` : ''}: telefon numarası isteme; danışman bu numaradan dönüş yapar, book_callback'te phone alanını boş bırakabilirsin.`
+      : 'Instagram sohbeti: danışman yönlendirmesi veya geri arama gerekirse telefon numarasını yalnız bir kez iste.',
     known ? `Şimdiye kadar toplanan bilgiler: ${known}.` : 'Henüz bilgi toplanmadı.',
     appointmentLabel ? `Bu kişi için randevu zaten oluşturuldu: ${appointmentLabel}. Yeni randevu açma; sorularını yanıtla.` : '',
     botReplyCount >= maxBotReplies - 2 ? 'Görüşme uzadı: randevuyu tamamlamaya ya da danışmana devretmeye odaklan.' : ''
@@ -665,13 +671,13 @@ export const ASSISTANT_TOOLS = [
         student_name: { type: 'string' },
         grade: { type: 'string' },
         target: { type: 'string' },
-        phone: { type: 'string', description: 'Aranacak numara' },
+        phone: { type: 'string', description: 'Aranacak numara (WhatsApp sohbetinde boş bırak; sohbet numarası kullanılır)' },
         is_minor: { type: 'boolean' },
         parent_name: { type: 'string' },
         parent_phone: { type: 'string' },
         notes: { type: 'string', description: 'Danışmana kısa not' }
       },
-      required: ['start_iso', 'student_name', 'grade', 'target', 'phone', 'is_minor'],
+      required: ['start_iso', 'student_name', 'grade', 'target', 'is_minor'],
       additionalProperties: false
     }
   },
@@ -689,10 +695,11 @@ export const ASSISTANT_TOOLS = [
 ];
 
 /** book_callback girdisini doğrular. */
-export function validateBooking(input, { allowedStarts = [] } = {}) {
+export function validateBooking(input, { allowedStarts = [], fallbackPhone = '' } = {}) {
   const v = input && typeof input === 'object' ? input : {};
   const errors = [];
-  const phone = normalizeTrPhone(v.phone);
+  const fallback = normalizeTrPhone(fallbackPhone);
+  const phone = normalizeTrPhone(v.phone) || fallback;
   if (!String(v.student_name || '').trim()) errors.push('student_name eksik');
   if (!String(v.grade || '').trim()) errors.push('grade eksik');
   if (!String(v.target || '').trim()) errors.push('target eksik');
@@ -701,7 +708,7 @@ export function validateBooking(input, { allowedStarts = [] } = {}) {
   let parentPhone = null;
   if (minor) {
     if (!String(v.parent_name || '').trim()) errors.push('öğrenci 18 yaşından küçük: parent_name gerekli');
-    parentPhone = normalizeTrPhone(v.parent_phone);
+    parentPhone = normalizeTrPhone(v.parent_phone) || fallback || phone;
     if (!parentPhone) errors.push('öğrenci 18 yaşından küçük: geçerli parent_phone gerekli');
   }
   const start = String(v.start_iso || '');
