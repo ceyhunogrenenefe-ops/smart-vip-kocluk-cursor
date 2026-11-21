@@ -488,15 +488,57 @@ export async function syncRegistrationLeadById(leadId) {
   });
 }
 
-/** Ödeme akışını bozmamak için arka planda çağırın. */
-export function queueCrmWebsiteOrderSync(fn) {
-  Promise.resolve()
-    .then(fn)
-    .catch((e) => {
-      if (!isSchemaMissing(e)) {
-        console.warn('[crm-website-orders] sync failed', e?.message || e);
-      }
-    });
+/**
+ * CRM "Web Sitesinden Gelen Siparişler" eşitlemesi. Hata fırlatmaz (ödeme
+ * akışını bozmaz) ama MUTLAKA `await` edilmelidir: Vercel cevap döndüğü an
+ * fonksiyonu dondurur, beklenmeyen eşitleme çoğu zaman hiç çalışmaz ve sipariş
+ * CRM'e düşmez. Kaçan olursa cron/crm-website-orders-reconcile toparlar.
+ */
+export async function queueCrmWebsiteOrderSync(fn) {
+  try {
+    await fn();
+    return true;
+  } catch (e) {
+    if (!isSchemaMissing(e)) {
+      console.warn('[crm-website-orders] sync failed', e?.message || e);
+    }
+    return false;
+  }
+}
+
+/**
+ * Son `hours` saatte oluşan/güncellenen sipariş kaynaklarını CRM'e yeniden
+ * eşitler. Eşitleme upsert olduğu için tekrar çalışması zararsızdır.
+ */
+export async function reconcileRecentCrmWebsiteOrders({ hours = 48 } = {}) {
+  const since = new Date(Date.now() - hours * 3600 * 1000).toISOString();
+  const sources = [
+    ['commerce_orders', syncCommerceOrderById],
+    ['kitap_siparisleri', syncKitapSiparisById],
+    ['garanti_payment_orders', syncGarantiPaymentOrderById],
+    ['ozel_ders_talepleri', syncOzelDersTalepById],
+  ];
+  const summary = {};
+  for (const [table, syncFn] of sources) {
+    const { data, error } = await supabaseAdmin
+      .from(table)
+      .select('id')
+      .gte('updated_at', since)
+      .order('updated_at', { ascending: false })
+      .limit(500);
+    if (error) {
+      summary[table] = { error: error.message };
+      continue;
+    }
+    let synced = 0;
+    let failed = 0;
+    for (const row of data || []) {
+      if (await queueCrmWebsiteOrderSync(() => syncFn(row.id))) synced += 1;
+      else failed += 1;
+    }
+    summary[table] = { synced, failed };
+  }
+  return { since, summary };
 }
 
 const BACKFILL_BATCH = 150;

@@ -130,10 +130,10 @@ async function handleWebhook(req, res) {
           .select()
           .single();
         if (insErr) throw insErr;
-        queueCrmWebsiteOrderSync(() => syncOzelDersTalepById(data.id));
+        await queueCrmWebsiteOrderSync(() => syncOzelDersTalepById(data.id));
         return res.status(200).json({ ok: true, created: true, data });
       }
-      queueCrmWebsiteOrderSync(() => syncOzelDersTalepById(updated[0].id));
+      await queueCrmWebsiteOrderSync(() => syncOzelDersTalepById(updated[0].id));
       return res.status(200).json({ ok: true, updated: true, data: updated[0] });
     }
 
@@ -167,7 +167,7 @@ async function handleWebhook(req, res) {
       result = await supabaseAdmin.from(TABLE).insert(row).select().single();
     }
     if (result.error) throw result.error;
-    queueCrmWebsiteOrderSync(() => syncOzelDersTalepById(result.data.id));
+    await queueCrmWebsiteOrderSync(() => syncOzelDersTalepById(result.data.id));
     return res.status(200).json({ ok: true, data: result.data });
   } catch (e) {
     if (isSchemaMissing(e)) return schemaHint(res);
