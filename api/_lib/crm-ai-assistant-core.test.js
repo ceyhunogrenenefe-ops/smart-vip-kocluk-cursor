@@ -275,6 +275,10 @@ test('program sorularında önce cevap, sonra bağlantı; ilk mesajda fiyat yok'
   assert.match(p, /https:\/\/www\.onlinevipdershane\.com\/ozel-ders\.html/);
   assert.match(p, /https:\/\/www\.onlinevipdershane\.com\/deneme-kulubu/);
   assert.match(p, /İlk yazışmalarda ücret/);
+  assert.match(p, /Haftalık birebir eğitim koçluğu/);
+  assert.match(p, /Etüt ve Soru Odası uygulaması/);
+  assert.match(p, /Türkiye'de benzeri olmayan bir uygulama/);
+  assert.match(p, /Programın içinde Deneme Kulübü de vardır/);
   assert.match(p, /Tek başına "danışmanımız sizi arayacak" diye cevap verme/);
   assert.doesNotMatch(p, /Fiyat sorulursa bilgi tabanındaki fiyatı aynen/);
 });
