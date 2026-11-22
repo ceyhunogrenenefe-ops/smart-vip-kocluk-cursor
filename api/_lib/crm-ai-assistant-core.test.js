@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  applyReplyBudget,
   ASSISTANT_TOOLS,
+  DEFAULT_MODEL,
   DEFAULT_SCHEDULE,
   buildDynamicContext,
   buildKvkkNotice,
@@ -25,6 +27,7 @@ import {
   parseWhatsAppExport,
   pickConsultant,
   runAssistantLoop,
+  selectKbPages,
   sanitizeSiteUrls,
   slotLabel,
   validateBooking
@@ -414,4 +417,44 @@ test('araç döngüsü: araç hatası is_error ile döner, ret metin vermez', as
   assert.equal(r.stopReason, 'refusal');
   assert.equal(r.text, '');
   assert.equal(seen[1].messages[2].content[0].is_error, true);
+});
+
+test('eski Opus + orta düşünme ucuz varsayılana iner', () => {
+  const cheap = applyReplyBudget({ model: 'claude-opus-5-5', effort: 'medium', is_active: true });
+  assert.equal(cheap.model, DEFAULT_MODEL);
+  assert.equal(cheap.effort, 'low');
+  assert.equal(cheap.is_active, true);
+  const kept = applyReplyBudget({ model: 'claude-opus-5-5', effort: 'high' });
+  assert.equal(kept.model, 'claude-opus-5-5');
+  assert.equal(kept.effort, 'high');
+});
+
+test('bilgi tabanı yalnız soruyla ilgili sayfaları ve kısa kesiti alır', () => {
+  const pages = [
+    { url: 'https://www.onlinevipdershane.com/programlar/lgs.html', title: 'LGS', content: `LGS ${'x'.repeat(8000)}` },
+    { url: 'https://www.onlinevipdershane.com/iade.html', title: 'İade', content: 'iade koşulları' },
+    { url: 'https://www.onlinevipdershane.com/', title: 'Ana sayfa', content: 'kurum tanıtımı' },
+    { url: 'https://www.onlinevipdershane.com/ozel-ders.html', title: 'Özel ders', content: 'birebir ders' }
+  ];
+  const lgs = selectKbPages(pages, '8. sınıf LGS için yazıyorum');
+  assert.ok(lgs.some((p) => p.url.includes('lgs')));
+  assert.equal(lgs.some((p) => p.url.includes('iade')), false);
+  assert.ok(lgs.find((p) => p.url.includes('lgs')).content.length <= 4500);
+  const ders = selectKbPages(pages, 'matematik özel ders');
+  assert.ok(ders.some((p) => p.url.includes('ozel-ders')));
+  const vague = selectKbPages(pages, 'merhaba');
+  assert.equal(vague.length, 1);
+  assert.equal(vague[0].title, 'Ana sayfa');
+});
+
+test('geçmiş son 12 mesajı taşır', () => {
+  const rows = [];
+  for (let i = 0; i < 14; i += 1) {
+    rows.push({ sender_type: 'lead', body: `m${i}` });
+    rows.push({ sender_type: 'bot', body: `b${i}` });
+  }
+  const msgs = historyToMessages(rows);
+  assert.equal(msgs.length, 12);
+  assert.equal(msgs[0].content, 'm8');
+  assert.equal(msgs[msgs.length - 1].content, 'b13');
 });
