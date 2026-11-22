@@ -63,10 +63,10 @@ const EVENT_LABELS: Record<string, string> = {
 };
 
 const MODEL_LABELS: Record<string, string> = {
-  'claude-opus-5-5': 'Claude Opus 5.5 (en yetenekli)',
-  'claude-sonnet-5-5': 'Claude Sonnet 5.5 (daha hızlı / ekonomik)'
+  'claude-opus-5-5': 'Claude Opus 5.5 (pahalı — gerekmedikçe kapalı)',
+  'claude-sonnet-5-5': 'Claude Sonnet 5.5 (önerilen)'
 };
-const EFFORT_LABELS: Record<string, string> = { low: 'Düşük (hızlı)', medium: 'Orta (önerilen)', high: 'Yüksek' };
+const EFFORT_LABELS: Record<string, string> = { low: 'Düşük (önerilen)', medium: 'Orta', high: 'Yüksek (kredi yer)' };
 
 function Toggle({ checked, onChange, label, hint }: { checked: boolean; onChange: (v: boolean) => void; label: string; hint?: string }) {
   return (

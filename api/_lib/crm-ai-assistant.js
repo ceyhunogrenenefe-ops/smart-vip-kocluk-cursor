@@ -21,12 +21,20 @@ import { PLATFORM_PRIMARY_INSTITUTION_ID } from './quota-enforce.js';
 import {
   ALLOWED_EFFORTS,
   ALLOWED_MODELS,
+  applyReplyBudget,
+  ASSISTANT_MAX_ITERATIONS,
   ASSISTANT_TOOLS,
   BOT_AUTHOR_ID,
   DEFAULT_KVKK_URL,
   DEFAULT_MODEL,
   DEFAULT_SCHEDULE,
   DEFAULT_SITE_URLS,
+  HISTORY_MAX_MESSAGES,
+  kbQueryFromMessages,
+  REPLY_MAX_TOKENS,
+  selectKbPages,
+  SIDE_TASK_MAX_TOKENS,
+  TONE_SOURCE_MAX_CHARS,
   HANDOVER_REPLY,
   buildDynamicContext,
   buildKvkkNotice,
@@ -78,7 +86,7 @@ let clientPromise = null;
 async function claudeClient() {
   if (!isClaudeConfigured()) throw new Error('anthropic_api_key_missing — Vercel ortamına ANTHROPIC_API_KEY ekleyin');
   if (!clientPromise) {
-    clientPromise = import('@anthropic-ai/sdk').then(({ default: Anthropic }) => new Anthropic({ maxRetries: 2, timeout: 90_000 }));
+    clientPromise = import('@anthropic-ai/sdk').then(({ default: Anthropic }) => new Anthropic({ maxRetries: 0, timeout: 90_000 }));
   }
   return clientPromise;
 }
@@ -102,7 +110,7 @@ export function defaultSettings(institutionId) {
     primary_ig_only: true,
     schedule: normalizeSchedule(DEFAULT_SCHEDULE),
     model: DEFAULT_MODEL,
-    effort: 'medium',
+    effort: 'low',
     kvkk_url: DEFAULT_KVKK_URL,
     site_urls: DEFAULT_SITE_URLS,
     consultant_user_ids: [],
@@ -130,7 +138,7 @@ export async function getSettings(institutionId) {
   merged.schedule = normalizeSchedule(data.schedule);
   merged.site_urls = Array.isArray(data.site_urls) && data.site_urls.length ? data.site_urls : DEFAULT_SITE_URLS;
   merged.kvkk_url = data.kvkk_url || DEFAULT_KVKK_URL;
-  return merged;
+  return applyReplyBudget(merged);
 }
 
 function clampInt(v, min, max, dflt) {
@@ -444,7 +452,7 @@ export async function processConversation(conversationId, { expectedPendingAt = 
     }
     const settings = await getSettings(conversation.institution_id);
     const inst = settings.institution_id;
-    const messages = await loadMessages(conversationId);
+    const messages = await loadMessages(conversationId, HISTORY_MAX_MESSAGES + 4);
     const last = messages[messages.length - 1];
     if (!last || last.sender_type !== 'lead') {
       await release();
@@ -543,12 +551,12 @@ export async function generateReply({ ctx, messages, execute, create = claudeCre
   const { settings, conversation, session, lead } = ctx;
   const { kbPages, toneExcerpts } = await loadKnowledge(settings.institution_id);
   const system = buildStaticSystemPrompt({
-    kbPages,
+    kbPages: selectKbPages(kbPages, kbQueryFromMessages(messages, ctx.collected)),
     toneGuide: settings.tone_guide,
     toneExcerpts,
     extraInstructions: settings.extra_instructions
   });
-  const history = historyToMessages(messages);
+  const history = historyToMessages(messages, { maxMessages: HISTORY_MAX_MESSAGES });
   if (!history.length) return { text: '', stopReason: 'empty_history', usage: {}, toolCalls: [] };
   const contactPhone = String(conversation.channel) === 'whatsapp' ? displayTrPhone(conversation.contact_identifier) : '';
   const dynamic = buildDynamicContext({
@@ -563,10 +571,11 @@ export async function generateReply({ ctx, messages, execute, create = claudeCre
   return runAssistantLoop({
     create,
     executeTool: execute,
+    maxIterations: ASSISTANT_MAX_ITERATIONS,
     params: {
       model: settings.model || DEFAULT_MODEL,
-      max_tokens: 8000,
-      output_config: { effort: settings.effort || 'medium' },
+      max_tokens: REPLY_MAX_TOKENS,
+      output_config: { effort: settings.effort || 'low' },
       system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral', ttl: '1h' } }],
       tools: ASSISTANT_TOOLS,
       messages: [...history, { role: 'system', content: dynamic }]
@@ -881,12 +890,12 @@ async function notifyUsers(userIds, { title, body, conversation, institutionId }
 export async function summarizeMessages(messages, settings, create = claudeCreate) {
   const transcript = messages
     .filter((m) => String(m.body || '').trim())
-    .slice(-60)
-    .map((m) => `${m.sender_type === 'lead' ? 'Müşteri' : m.sender_type === 'bot' ? 'Asistan' : 'Temsilci'}: ${String(m.body).slice(0, 800)}`)
+    .slice(-24)
+    .map((m) => `${m.sender_type === 'lead' ? 'Müşteri' : m.sender_type === 'bot' ? 'Asistan' : 'Temsilci'}: ${String(m.body).slice(0, 400)}`)
     .join('\n');
   const res = await create({
-    model: settings.model || DEFAULT_MODEL,
-    max_tokens: 3000,
+    model: DEFAULT_MODEL,
+    max_tokens: SIDE_TASK_MAX_TOKENS,
     output_config: { effort: 'low' },
     system:
       'CRM için satış görüşmesi özeti yaz. Türkçe, en fazla 6 kısa madde: kim (öğrenci/veli, sınıf, hedef), ne istedi, itirazlar/soru işaretleri, verilen bilgiler, sonuç (randevu saati veya devir nedeni), danışmana öneri. Uydurma bilgi ekleme.',
@@ -1038,12 +1047,12 @@ export async function rebuildToneGuide(institutionId, actorId = null, create = c
   if (error) throw error;
   if (!tones?.length) throw new Error('Önce geçmiş sohbet yükleyin');
   const res = await create({
-    model: settings.model || DEFAULT_MODEL,
-    max_tokens: 6000,
-    output_config: { effort: 'medium' },
+    model: DEFAULT_MODEL,
+    max_tokens: SIDE_TASK_MAX_TOKENS,
+    output_config: { effort: 'low' },
     system:
       'Bir eğitim kurumunun satış temsilcilerinin geçmiş WhatsApp/Instagram yazışmalarından, yeni satış asistanı için kısa bir üslup rehberi çıkar. Türkçe yaz, en fazla 25 madde, şu başlıklarla: Hitap ve ton, Mesaj uzunluğu ve biçim, Sık sorulara yaklaşım, İtiraz karşılama kalıpları (itiraz → cevap örneği), Randevuya/kapanışa geçiş cümleleri, Kaçınılacaklar. Fiyat, tarih, kişi adı gibi somut bilgileri rehbere YAZMA; yalnız üslup ve kalıpları yaz.',
-    messages: [{ role: 'user', content: tones.map((t) => t.excerpt).join('\n\n---\n\n').slice(0, 120000) }]
+    messages: [{ role: 'user', content: tones.map((t) => t.excerpt).join('\n\n---\n\n').slice(0, TONE_SOURCE_MAX_CHARS) }]
   });
   const guide = (res.content || [])
     .filter((b) => b.type === 'text')
@@ -1062,7 +1071,7 @@ export async function rebuildToneGuide(institutionId, actorId = null, create = c
 export async function testChat(institutionId, turns = []) {
   const settings = await getSettings(institutionId);
   const messages = (Array.isArray(turns) ? turns : [])
-    .slice(-30)
+    .slice(-HISTORY_MAX_MESSAGES)
     .map((t) => ({ sender_type: t.role === 'user' ? 'lead' : 'bot', body: String(t.text || '').slice(0, 2000) }));
   const ctx = {
     conversation: { id: 'test', channel: 'whatsapp', contact_identifier: '', contact_name: 'Deneme' },

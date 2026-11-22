@@ -6,9 +6,19 @@
  * Yan etkiler (gönderim, kayıt, Claude çağrısı) crm-ai-assistant.js içindedir.
  */
 
-export const DEFAULT_MODEL = 'claude-opus-5-5';
+export const DEFAULT_MODEL = 'claude-sonnet-5-5';
 export const ALLOWED_MODELS = ['claude-opus-5-5', 'claude-sonnet-5-5'];
 export const ALLOWED_EFFORTS = ['low', 'medium', 'high'];
+/** Müşteri yanıtı: kısa WhatsApp/Instagram metni. Düşünme token’ı da bu tavana girer. */
+export const REPLY_MAX_TOKENS = 700;
+export const HISTORY_MAX_MESSAGES = 12;
+export const ASSISTANT_MAX_ITERATIONS = 3;
+export const KB_MAX_PAGES = 4;
+export const KB_MAX_CHARS = 15000;
+export const KB_MAX_PAGE_CHARS = 4500;
+/** Özet ve ton rehberi müşteriye gitmez; ucuz model + kısa çıktı. */
+export const SIDE_TASK_MAX_TOKENS = 800;
+export const TONE_SOURCE_MAX_CHARS = 20000;
 export const DEFAULT_KVKK_URL = 'https://www.onlinevipdershane.com/gizlilik.html';
 export const BOT_AUTHOR_ID = 'ai-assistant';
 
@@ -57,6 +67,19 @@ export const HANDOVER_REPLY =
   'Bu konuda size en doğru bilgiyi eğitim danışmanımız verecek. Danışmanımız sizi en kısa sürede arayacak 🙏';
 
 export const DAY_NAMES = ['Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi', 'Pazar'];
+
+/**
+ * Panelde kayıtlı eski varsayılan (Opus + orta düşünme) her mesajda kredi yakıyordu.
+ * O çift hâlâ duruyorsa ucuz varsayılana çekilir. Opus + düşük/yüksek bilinçli seçimdir, kalır.
+ */
+export function applyReplyBudget(settings = {}) {
+  const model = ALLOWED_MODELS.includes(settings.model) ? settings.model : DEFAULT_MODEL;
+  const effort = ALLOWED_EFFORTS.includes(settings.effort) ? settings.effort : 'low';
+  if (model === 'claude-opus-5-5' && effort === 'medium') {
+    return { ...settings, model: DEFAULT_MODEL, effort: 'low' };
+  }
+  return { ...settings, model, effort };
+}
 
 /**
  * Claude servisi kaynaklı (müşteriyle ilgisi olmayan) hata mı?
@@ -552,14 +575,121 @@ export function buildKvkkNotice(kvkkUrl) {
  * Sabit (önbelleğe alınan) sistem talimatı. Saat / kişi bilgisi buraya
  * KONMAZ — o bilgi her istekte değişir, önbelleği bozar.
  */
-export function buildStaticSystemPrompt({ kbPages = [], toneGuide = '', toneExcerpts = [], extraInstructions = '', maxKbChars = 200000 } = {}) {
+function foldTr(value) {
+  return String(value || '')
+    .toLocaleLowerCase('tr-TR')
+    .replace(/ı/g, 'i')
+    .replace(/ğ/g, 'g')
+    .replace(/ü/g, 'u')
+    .replace(/ş/g, 's')
+    .replace(/ö/g, 'o')
+    .replace(/ç/g, 'c')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function isHomeUrl(url) {
+  try {
+    const path = new URL(url).pathname.replace(/\/+$/, '');
+    return path === '';
+  } catch {
+    return /onlinevipdershane\.com\/?$/.test(String(url || ''));
+  }
+}
+
+/** URL → soru metninde aranacak ifadeler. Kısa ve genel kelimeler yok (her sayfayı seçmesin). */
+const KB_URL_TERMS = [
+  { re: /ozel-ders/i, terms: ['ozel ders', 'birebir', 'bire bir'] },
+  { re: /deneme/i, terms: ['deneme kulubu', 'deneme sinav', 'deneme'] },
+  { re: /yks-matematik|matematik-geometri/i, terms: ['geometri', 'yks matematik', 'tyt matematik', 'ayt matematik'] },
+  { re: /\/yks/i, terms: ['yks', 'tyt', 'ayt', 'mezun'] },
+  { re: /lgs/i, terms: ['lgs'] },
+  { re: /brans/i, terms: ['brans', 'fizik', 'kimya', 'biyoloji', 'edebiyat'] },
+  { re: /ortaokul/i, terms: ['ortaokul', '5 sinif', '6 sinif', '7 sinif'] },
+  { re: /\/lise/i, terms: ['lise', '9 sinif', '10 sinif', '11 sinif'] },
+  { re: /ilkokul|sinif-2/i, terms: ['ilkokul', '2 sinif', '3 sinif', '4 sinif'] },
+  { re: /kamp/i, terms: ['kamp', 'ara tatil'] },
+  { re: /yazili/i, terms: ['yazili'] },
+  { re: /kocluk/i, terms: ['kocluk'] },
+  { re: /kitap/i, terms: ['kitap atolyesi', 'kitap'] },
+  { re: /kadromuz|kadro/i, terms: ['ogretmen', 'kadro', 'hoca'] },
+  { re: /basari/i, terms: ['basari'] },
+  { re: /iletisim/i, terms: ['iletisim', 'adres'] },
+  { re: /iade/i, terms: ['iade', 'iptal'] },
+  { re: /\/start/i, terms: ['vip start', 'start paket'] }
+];
+
+function scoreKbPage(url, title, query) {
+  const q = foldTr(query);
+  if (!q) return 0;
+  let score = 0;
+  for (const rule of KB_URL_TERMS) {
+    if (!rule.re.test(url)) continue;
+    for (const term of rule.terms) {
+      if (q.includes(term)) score += term.includes(' ') ? 8 : 6;
+    }
+  }
+  const titleFold = foldTr(title);
+  if (titleFold && titleFold.length >= 3 && q.includes(titleFold)) score += 4;
+  if ((/\b8\b/.test(q) || q.includes('8 sinif')) && /lgs/i.test(url)) score += 6;
+  if ((/\b12\b/.test(q) || q.includes('mezun')) && /\/yks/i.test(url)) score += 4;
+  if (/\b(9|10|11)\b/.test(q) && /\/lise/i.test(url)) score += 5;
+  if (/\b(5|6|7)\b/.test(q) && /ortaokul/i.test(url)) score += 5;
+  if (/\b(2|3|4)\b/.test(q) && /ilkokul|sinif-2/i.test(url)) score += 5;
+  return score;
+}
+
+/**
+ * Son müşteri mesajına göre en fazla 4 sayfa. Tüm site her turda gönderilmez.
+ * Eşleşme yoksa yalnız ana sayfa (kısa) kalır; fiyat/program uydurulmaz, kural devreder.
+ */
+export function selectKbPages(pages, query, { maxPages = KB_MAX_PAGES, maxChars = KB_MAX_CHARS, maxPageChars = KB_MAX_PAGE_CHARS } = {}) {
+  const ranked = [];
+  for (const page of pages || []) {
+    const score = scoreKbPage(page?.url, page?.title, query);
+    if (score > 0) ranked.push({ page, score });
+  }
+  ranked.sort((a, b) => b.score - a.score || String(a.page?.url || '').localeCompare(String(b.page?.url || '')));
+  let chosen = ranked.slice(0, maxPages).map((r) => r.page);
+  if (!chosen.length) {
+    const home = (pages || []).find((p) => isHomeUrl(p?.url));
+    chosen = home ? [home] : (pages || []).slice(0, 1);
+  }
+  let left = maxChars;
+  const out = [];
+  for (const page of chosen) {
+    if (left < 80) break;
+    const content = String(page?.content || '').trim().slice(0, Math.min(maxPageChars, left));
+    if (!content) continue;
+    out.push({ ...page, content });
+    left -= content.length;
+  }
+  return out;
+}
+
+/** Son müşteri cümleleri + toplanan sınıf/hedef. Bilgi tabanı seçimi buna bakar. */
+export function kbQueryFromMessages(messages, collected = {}) {
+  const leads = (messages || []).filter((m) => m?.sender_type === 'lead' || m?.role === 'user');
+  const recent = leads
+    .slice(-3)
+    .map((m) => m.body || m.text || '')
+    .join('\n');
+  const extra = Object.values(collected || {})
+    .filter((v) => v != null && String(v).trim())
+    .join(' ');
+  return `${recent}\n${extra}`.trim().slice(0, 2000);
+}
+
+export function buildStaticSystemPrompt({ kbPages = [], toneGuide = '', toneExcerpts = [], extraInstructions = '', maxKbChars = KB_MAX_CHARS } = {}) {
   const kbParts = [];
   let used = 0;
   for (const p of kbPages) {
-    const content = String(p?.content || '').trim();
+    const room = maxKbChars - used;
+    if (room < 80) break;
+    const content = String(p?.content || '').trim().slice(0, room);
     if (!content) continue;
     const block = `<sayfa url="${p.url}" baslik="${String(p.title || '').replace(/"/g, "'")}">\n${content}\n</sayfa>`;
-    if (used + block.length > maxKbChars) break;
     kbParts.push(block);
     used += block.length;
   }
@@ -781,7 +911,7 @@ export function mergeCollected(prev, input) {
  * crm_messages satırları → Claude mesajları.
  * lead → user; bot / agent → assistant. İlk mesaj user olmalı.
  */
-export function historyToMessages(rows, { maxMessages = 30 } = {}) {
+export function historyToMessages(rows, { maxMessages = HISTORY_MAX_MESSAGES } = {}) {
   const list = (rows || [])
     .filter((r) => r && String(r.body || '').trim())
     .slice(-maxMessages);
@@ -812,7 +942,7 @@ export function extractText(content) {
  * Araç döngüsü. client.create(params) → Claude yanıtı; executeTool(name, input) → string sonuç.
  * Döner: { text, stopReason, usage, toolCalls, handedOver }
  */
-export async function runAssistantLoop({ create, params, executeTool, maxIterations = 6 }) {
+export async function runAssistantLoop({ create, params, executeTool, maxIterations = ASSISTANT_MAX_ITERATIONS }) {
   const messages = [...params.messages];
   const usage = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0 };
   const toolCalls = [];
