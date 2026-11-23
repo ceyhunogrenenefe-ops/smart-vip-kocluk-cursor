@@ -550,8 +550,10 @@ export async function listSyncedEdesisExams({ institutionId, limit = 200 } = {})
     )
     .order('exam_date', { ascending: false, nullsFirst: false })
     .order('synced_at', { ascending: false })
-    .limit(Math.min(500, Math.max(1, Number(limit) || 200)));
-  if (institutionId) q = q.eq('institution_id', institutionId);
+    .limit(Math.min(1000, Math.max(1, (Number(limit) || 200) * 2)));
+  // Süper admin senkronu katalogu institution_id NULL yazar; kurum satırları ise en son o kurumdan
+  // biri senkronladığında güncellenir. Yalnız kurum satırına bakılınca koç eski kataloğu görüyordu.
+  if (institutionId) q = q.or(`institution_id.eq.${institutionId},institution_id.is.null`);
   let { data, error } = await q;
   if (error && isSchemaMissingError(error)) {
     try {
@@ -571,7 +573,28 @@ export async function listSyncedEdesisExams({ institutionId, limit = 200 } = {})
     }
     throw error;
   }
-  return { items: data || [], schemaMissing: false, schemaHint: null, backend: 'sql' };
+  const items = dedupeSyncedExamsById(data || []).slice(0, Math.min(500, Math.max(1, Number(limit) || 200)));
+  return { items, schemaMissing: false, schemaHint: null, backend: 'sql' };
+}
+
+/** Aynı Edesis sınavının kurum + kurumsuz kopyalarından en son senkronlananı tut (sıra korunur). */
+export function dedupeSyncedExamsById(rows) {
+  const best = new Map();
+  for (const r of rows || []) {
+    const id = String(r?.edesis_exam_id || '');
+    if (!id) continue;
+    const prev = best.get(id);
+    if (!prev || String(r.synced_at || '') > String(prev.synced_at || '')) best.set(id, r);
+  }
+  const out = [];
+  const seen = new Set();
+  for (const r of rows || []) {
+    const id = String(r?.edesis_exam_id || '');
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    out.push(best.get(id));
+  }
+  return out;
 }
 
 
@@ -600,7 +623,9 @@ export async function listEdesisExamAssignments({
     )
     .order('created_at', { ascending: false })
     .limit(Math.min(1000, Math.max(1, Number(limit) || 300)));
-  if (institutionId) q = q.eq('institution_id', institutionId);
+  // Kurumsuz (süper admin) yapılan atamalar institution_id NULL kaydolur; öğrenci kapısı bunları
+  // zaten sayıyor. Liste de saymazsa koç / kurum admini bu atamaları hiç görmüyordu.
+  if (institutionId) q = q.or(`institution_id.eq.${institutionId},institution_id.is.null`);
   if (edesisExamId) q = q.eq('edesis_exam_id', String(edesisExamId));
   let { data, error } = await q;
   if (error && isSchemaMissingError(error)) {
