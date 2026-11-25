@@ -680,7 +680,7 @@ export async function syncWhatsAppEchoesToCrm(value, { institutionId } = {}) {
 
 export async function syncInstagramMessagingToCrm(
   events,
-  { institutionId, channel = 'instagram', accountIgUserId = null } = {}
+  { institutionId, channel = 'instagram', accountIgUserId = null, profileToken = null } = {}
 ) {
   const ch = normalizeCrmChannel(channel) === 'whatsapp' ? 'instagram' : normalizeCrmChannel(channel);
   const list = Array.isArray(events) ? events : [];
@@ -688,6 +688,18 @@ export async function syncInstagramMessagingToCrm(
   let skipped = 0;
   const issues = [];
   const baseInstitutionId = institutionId;
+  // Webhook kurumun Instagram'ından geldiyse profil sorgusu kurumun kendi anahtarıyla yapılır
+  if (!profileToken && baseInstitutionId) {
+    try {
+      const { isPlatformInstitutionId, resolveMetaConnection } = await import('./crm-meta-connection.js');
+      if (!isPlatformInstitutionId(baseInstitutionId)) {
+        const conn = await resolveMetaConnection(baseInstitutionId);
+        profileToken = String(conn?.instagram?.token || '').trim() || null;
+      }
+    } catch (e) {
+      console.warn('[crm-inbox] kurum ig anahtarı:', e?.message || e);
+    }
+  }
   for (const ev of list) {
     const norm = normalizeInstagramMessagingEvent(ev);
     if (norm.isEcho) continue;
@@ -700,7 +712,8 @@ export async function syncInstagramMessagingToCrm(
      * Ana hesapta davranış aynen korunur.
      */
     let accountMeta = {};
-    let accountToken;
+    // Kurumun kendi Instagram'ı: profil sorgusu kurumun sayfa anahtarıyla yapılır
+    let accountToken = profileToken ? String(profileToken).trim() || undefined : undefined;
     institutionId = baseInstitutionId;
     const recipientIg = String(accountIgUserId || ev?.recipient?.id || '').trim();
     if (recipientIg) {

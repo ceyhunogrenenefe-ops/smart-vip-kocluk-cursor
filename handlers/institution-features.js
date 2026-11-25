@@ -8,6 +8,7 @@ import { requireAuthenticatedActor } from '../api/_lib/auth.js';
 import { actorRoleSet } from '../api/_lib/actor-roles.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { describeHomeworkModule, setHomeworkModule } from '../api/_lib/homework-module.js';
+import { describeCrmModule, setCrmModule } from '../api/_lib/crm-module.js';
 
 function parseBody(req) {
   const b = req.body;
@@ -54,12 +55,25 @@ export default async function handler(req, res) {
     );
 
     if (req.method === 'GET') {
-      return res.status(200).json({ data: await describeHomeworkModule(institutionId) });
+      const data = await describeHomeworkModule(institutionId);
+      return res.status(200).json({ data: { ...data, crm: await describeCrmModule(institutionId) } });
     }
 
     if (req.method === 'POST' || req.method === 'PATCH') {
       if (!roleSet.has('super_admin')) {
         return res.status(403).json({ error: 'forbidden', hint: 'Modülü yalnız süper admin açar.' });
+      }
+      if (body.crm_module !== undefined) {
+        try {
+          const crm = await setCrmModule(institutionId, body.crm_module === true, actor.sub);
+          return res.status(200).json({ ok: true, data: { crm } });
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          if (msg === 'crm_always_on_for_platform') {
+            return res.status(400).json({ error: msg, message: 'Online VIP Dershane’de CRM her zaman açıktır.' });
+          }
+          return res.status(400).json({ error: 'save_failed', message: msg });
+        }
       }
       if (body.homework_module === undefined) {
         return res.status(400).json({ error: 'homework_module_required' });

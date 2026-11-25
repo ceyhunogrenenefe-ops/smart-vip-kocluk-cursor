@@ -143,6 +143,10 @@ export default async function handler(req, res) {
     roleSet,
     req.query?.institution_id || body.institution_id
   );
+  {
+    const { assertCrmModule } = await import('../api/_lib/crm-module.js');
+    if (!(await assertCrmModule(res, { institutionId, isSuperAdmin: roleSet.has('super_admin') }))) return;
+  }
 
   try {
     if (op === 'list_conversations') {
@@ -1500,8 +1504,9 @@ export default async function handler(req, res) {
     }
     if (op === 'push_test' && req.method === 'POST') {
       const { sendPushToUser } = await import('../api/_lib/crm-notify.js');
+      const { crmSenderName } = await import('../api/_lib/crm-brand.js');
       const r = await sendPushToUser(actor.sub, {
-        title: 'Online VIP CRM',
+        title: await crmSenderName(actor.institution_id).catch(() => 'CRM'),
         body: 'Bildirimler açık — yeni müşteri mesajları bu cihaza gelecek.',
         url: '/crm/inbox',
         tag: 'crm-push-test'

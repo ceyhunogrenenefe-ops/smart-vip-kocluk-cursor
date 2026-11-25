@@ -71,6 +71,11 @@ export default async function handler(req, res) {
   if (!actorIsAdminLike(actor, roleSet) && !agentMayRead) {
     return res.status(403).json({ error: 'admin_only' });
   }
+  {
+    const { assertCrmModule } = await import('../api/_lib/crm-module.js');
+    const scopeInst = String(body.institution_id || req.query?.institution_id || actor.institution_id || '').trim();
+    if (!(await assertCrmModule(res, { institutionId: scopeInst, isSuperAdmin: roleSet.has('super_admin') }))) return;
+  }
 
   try {
     if (op === 'create_crm_user' && req.method === 'POST') {

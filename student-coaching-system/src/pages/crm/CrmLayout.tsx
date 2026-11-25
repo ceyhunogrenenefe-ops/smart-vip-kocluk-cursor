@@ -9,6 +9,7 @@ import { setCrmInstitutionScope } from '../../lib/crmInboxApi';
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
 import { userRoleTags } from '../../config/rolePermissions';
+import CrmModuleGate from '../../features/crmModule/CrmModuleGate';
 
 /** İzole CRM kabuğu — yalnız temsilci (crm_agent) ana sidebar / faturalama görmez */
 export default function CrmLayout() {
@@ -210,7 +211,13 @@ export default function CrmLayout() {
         </div>
       </header>
       <main className="mx-auto max-w-[1600px] px-2 py-2 sm:px-4 sm:py-4">
-        <Outlet />
+        <CrmModuleGate
+          institutionId={institution?.id}
+          institutionName={institution?.name}
+          isSuperAdmin={tags.includes('super_admin')}
+        >
+          <Outlet />
+        </CrmModuleGate>
       </main>
       <CrmAlarmHost />
       <CrmLiveOpsHost />

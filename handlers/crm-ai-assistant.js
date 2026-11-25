@@ -77,6 +77,10 @@ export default async function handler(req, res) {
   const institutionId = await resolveInstitutionId(actor, roleSet, req.query?.institution_id || body.institution_id);
   const ai = await import('../api/_lib/crm-ai-assistant.js');
   const inst = ai.instKey(institutionId);
+  {
+    const { assertCrmModule } = await import('../api/_lib/crm-module.js');
+    if (!(await assertCrmModule(res, { institutionId: inst, isSuperAdmin: roleSet.has('super_admin') }))) return;
+  }
   const isPost = req.method === 'POST';
 
   try {

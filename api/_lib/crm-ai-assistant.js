@@ -78,6 +78,35 @@ export function instKey(institutionId) {
   return String(institutionId || '').trim() || PLATFORM_PRIMARY_INSTITUTION_ID;
 }
 
+export function isPlatformInst(institutionId) {
+  return instKey(institutionId) === PLATFORM_PRIMARY_INSTITUTION_ID;
+}
+
+/**
+ * Asistanın konuştuğu kurum kimliği. Platform kurumu (Online VIP) için
+ * eski metinler aynen kullanılır; diğer kurumlarda ad institutions tablosundan,
+ * site ise asistan ayarındaki ilk adresten gelir.
+ */
+export async function loadAssistantBrand(institutionId, settings = null) {
+  const inst = instKey(institutionId);
+  if (inst === PLATFORM_PRIMARY_INSTITUTION_ID) return { isPlatform: true };
+  let name = '';
+  try {
+    const { data } = await supabaseAdmin.from('institutions').select('name').eq('id', inst).maybeSingle();
+    name = String(data?.name || '').trim();
+  } catch (e) {
+    console.warn('[ai-assistant] kurum adı:', errorMessage(e));
+  }
+  let siteUrl = '';
+  try {
+    const first = (settings?.site_urls || [])[0];
+    if (first) siteUrl = new URL(first).origin;
+  } catch {
+    /* geçersiz adres */
+  }
+  return { isPlatform: false, name, siteUrl };
+}
+
 export function isClaudeConfigured() {
   return Boolean(String(process.env.ANTHROPIC_API_KEY || '').trim());
 }
@@ -102,6 +131,8 @@ async function claudeCreate(params) {
 /* ------------------------------------------------------------------ */
 
 export function defaultSettings(institutionId) {
+  // Online VIP'in sitesi / KVKK bağlantısı yalnız platform kurumuna varsayılır
+  const platform = isPlatformInst(institutionId);
   return {
     institution_id: instKey(institutionId),
     is_active: false,
@@ -111,8 +142,8 @@ export function defaultSettings(institutionId) {
     schedule: normalizeSchedule(DEFAULT_SCHEDULE),
     model: DEFAULT_MODEL,
     effort: 'low',
-    kvkk_url: DEFAULT_KVKK_URL,
-    site_urls: DEFAULT_SITE_URLS,
+    kvkk_url: platform ? DEFAULT_KVKK_URL : '',
+    site_urls: platform ? DEFAULT_SITE_URLS : [],
     consultant_user_ids: [],
     slot_minutes: 30,
     days_ahead: 3,
@@ -136,8 +167,8 @@ export async function getSettings(institutionId) {
   if (!data) return base;
   const merged = { ...base, ...Object.fromEntries(Object.entries(data).filter(([, v]) => v != null)) };
   merged.schedule = normalizeSchedule(data.schedule);
-  merged.site_urls = Array.isArray(data.site_urls) && data.site_urls.length ? data.site_urls : DEFAULT_SITE_URLS;
-  merged.kvkk_url = data.kvkk_url || DEFAULT_KVKK_URL;
+  merged.site_urls = Array.isArray(data.site_urls) && data.site_urls.length ? data.site_urls : base.site_urls;
+  merged.kvkk_url = data.kvkk_url || base.kvkk_url;
   return applyReplyBudget(merged);
 }
 
@@ -148,7 +179,7 @@ function clampInt(v, min, max, dflt) {
 }
 
 /** Panelden gelen ayarları doğrular. Hatalıysa Error fırlatır. */
-export function sanitizeSettingsPatch(patch = {}) {
+export function sanitizeSettingsPatch(patch = {}, { platform = true } = {}) {
   const row = {};
   for (const k of ['is_active', 'channel_whatsapp', 'channel_instagram', 'primary_ig_only']) {
     if (k in patch) row[k] = patch[k] === true;
@@ -171,7 +202,8 @@ export function sanitizeSettingsPatch(patch = {}) {
     const list = Array.isArray(patch.site_urls)
       ? patch.site_urls
       : String(patch.site_urls || '').split(/\s+/);
-    row.site_urls = sanitizeSiteUrls(list);
+    // Platform: yalnız onlinevipdershane.com; diğer kurumlar: kendi sitesi (ilk adresin alan adı)
+    row.site_urls = sanitizeSiteUrls(list, platform ? undefined : null);
   }
   if ('consultant_user_ids' in patch) {
     row.consultant_user_ids = (Array.isArray(patch.consultant_user_ids) ? patch.consultant_user_ids : [])
@@ -194,7 +226,16 @@ export function sanitizeSettingsPatch(patch = {}) {
 
 export async function saveSettings(institutionId, patch = {}, actorId = null) {
   const inst = instKey(institutionId);
-  const row = { ...sanitizeSettingsPatch(patch), institution_id: inst, updated_by: actorId, updated_at: new Date().toISOString() };
+  const platform = inst === PLATFORM_PRIMARY_INSTITUTION_ID;
+  const row = { ...sanitizeSettingsPatch(patch, { platform }), institution_id: inst, updated_by: actorId, updated_at: new Date().toISOString() };
+  if (!platform && row.is_active === true) {
+    // Diğer kurumlarda asistan, kurumun kendi sitesi ve KVKK metni olmadan açılmaz
+    const current = await getSettings(inst);
+    const kvkk = 'kvkk_url' in row ? row.kvkk_url : current.kvkk_url;
+    const sites = 'site_urls' in row ? row.site_urls : current.site_urls;
+    if (!kvkk) throw new Error('Asistanı açmak için kurumunuzun KVKK aydınlatma metni bağlantısını girin');
+    if (!sites?.length) throw new Error('Asistanı açmak için kurumunuzun site adreslerini girin (bilgi tabanı bunlardan oluşur)');
+  }
   const { error } = await supabaseAdmin.from(SETTINGS_TABLE).upsert(row, { onConflict: 'institution_id' });
   if (error) {
     if (tableMissing(error)) throw new Error('Tablolar yok — sql/2026-11-19-crm-ai-sales-assistant.sql dosyasını çalıştırın');
@@ -482,7 +523,7 @@ export async function processConversation(conversationId, { expectedPendingAt = 
 
     // İlk yanıt: bot olduğunu ve KVKK aydınlatmasını bildir (sabit metin, modele bırakılmaz)
     if (!session.kvkk_notice_sent_at) {
-      await sendText(conversation, buildKvkkNotice(settings.kvkk_url));
+      await sendText(conversation, buildKvkkNotice(settings.kvkk_url, await loadAssistantBrand(settings.institution_id, settings)));
       session = await patchSession(conversationId, { kvkk_notice_sent_at: new Date().toISOString() });
       ctx.session = session;
     }
@@ -550,7 +591,9 @@ export async function processConversation(conversationId, { expectedPendingAt = 
 export async function generateReply({ ctx, messages, execute, create = claudeCreate }) {
   const { settings, conversation, session, lead } = ctx;
   const { kbPages, toneExcerpts } = await loadKnowledge(settings.institution_id);
+  const brand = await loadAssistantBrand(settings.institution_id, settings);
   const system = buildStaticSystemPrompt({
+    brand,
     kbPages: selectKbPages(kbPages, kbQueryFromMessages(messages, ctx.collected)),
     toneGuide: settings.tone_guide,
     toneExcerpts,
@@ -980,7 +1023,10 @@ export async function resumeConversation(conversationId, { actorId = null } = {}
 export async function refreshKnowledgeBase(institutionId, { fetchImpl = fetch } = {}) {
   const settings = await getSettings(institutionId);
   const inst = settings.institution_id;
-  const urls = sanitizeSiteUrls(settings.site_urls?.length ? settings.site_urls : DEFAULT_SITE_URLS);
+  const platform = isPlatformInst(inst);
+  const urls = platform
+    ? sanitizeSiteUrls(settings.site_urls?.length ? settings.site_urls : DEFAULT_SITE_URLS)
+    : sanitizeSiteUrls(settings.site_urls || [], null);
   const results = [];
   const queue = [...urls];
   async function worker() {
@@ -990,7 +1036,7 @@ export async function refreshKnowledgeBase(institutionId, { fetchImpl = fetch } 
       try {
         const ctl = new AbortController();
         const timer = setTimeout(() => ctl.abort(), 15000);
-        const res = await fetchImpl(url, { signal: ctl.signal, headers: { 'User-Agent': 'OnlineVIP-CRM-KnowledgeBot/1.0', Accept: 'text/html' } });
+        const res = await fetchImpl(url, { signal: ctl.signal, headers: { 'User-Agent': 'CRM-KnowledgeBot/1.0', Accept: 'text/html' } });
         clearTimeout(timer);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const { title, text } = htmlToText(await res.text());
@@ -1106,7 +1152,10 @@ export async function testChat(institutionId, turns = []) {
     stop_reason: result.stopReason,
     tools: notes,
     usage: result.usage,
-    kvkk_notice: messages.filter((m) => m.sender_type === 'bot').length === 0 ? buildKvkkNotice(settings.kvkk_url) : null
+    kvkk_notice:
+      messages.filter((m) => m.sender_type === 'bot').length === 0
+        ? buildKvkkNotice(settings.kvkk_url, await loadAssistantBrand(settings.institution_id, settings))
+        : null
   };
 }
 
