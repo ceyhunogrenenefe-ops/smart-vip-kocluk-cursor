@@ -837,6 +837,43 @@ export async function listApprovedCrmWhatsAppTemplates({ force = false } = {}) {
   return payload;
 }
 
+/**
+ * Platform dışı kurum: yalnız kurumun KENDİ WABA'sındaki şablonlar.
+ * Kurumun WhatsApp'ı bağlı değilse boş liste — platformun şablonları asla görünmez.
+ */
+export async function listInstitutionWhatsAppTemplates(institutionId) {
+  const { resolveMetaConnection } = await import('./crm-meta-connection.js');
+  const conn = await resolveMetaConnection(institutionId);
+  const tok = String(conn?.whatsapp?.token || '').trim();
+  const waba = String(conn?.whatsapp?.wabaId || '').trim();
+  if (!tok || !waba) {
+    return {
+      ok: true,
+      source: 'institution_none',
+      error: null,
+      hint: 'Kurumun WhatsApp hattı bağlı değil — şablonlar hat bağlanınca görünür.',
+      templates: [],
+      pending: []
+    };
+  }
+  const r = await fetchTemplatesForWaba(waba, tok, { includeComponents: true });
+  const mapped = (r.templates || []).filter((t) => String(t.name || '').trim()).map(mapGraphTemplateToCrm);
+  const approved = mapped
+    .filter((t) => isMetaTemplateSendableStatus(t.status))
+    .sort((a, b) => a.name.localeCompare(b.name, 'tr') || a.language.localeCompare(b.language));
+  const pending = mapped
+    .filter((t) => isMetaTemplatePendingStatus(t.status))
+    .sort((a, b) => a.name.localeCompare(b.name, 'tr') || a.language.localeCompare(b.language));
+  return {
+    ok: Boolean(r.ok),
+    source: 'institution_waba',
+    error: r.ok ? null : r.error || 'waba_templates_failed',
+    hint: approved.length ? null : 'Kurumun WABA’sında onaylı şablon yok.',
+    templates: approved,
+    pending
+  };
+}
+
 /** Panel tanı: unknown nedenini göstermek için (token/WABA/şablon adı). */
 export async function getMetaTemplateSyncDiagnostics(templateName, preferredLang) {
   const name = String(templateName || '').trim();

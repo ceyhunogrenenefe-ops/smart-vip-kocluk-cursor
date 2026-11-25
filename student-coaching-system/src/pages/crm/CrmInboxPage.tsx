@@ -766,7 +766,10 @@ export default function CrmInboxPage() {
     return d as Record<string, unknown>;
   }, [selected]);
 
-  const lineLabel = inbound?.display_phone || inbound?.company_line || '0506 187 74 94';
+  // Kurum hattı: platform numarası asla yedek olarak gösterilmez
+  const lineLabel = inbound?.institution_scoped
+    ? inbound?.display_phone || inbound?.company_line || ''
+    : inbound?.display_phone || inbound?.company_line || '0506 187 74 94';
   const inboundOk = Boolean(inbound?.bound_to_production);
   const inboundPending = inboundChecking && !inbound;
 
@@ -782,7 +785,7 @@ export default function CrmInboxPage() {
         }`}
       >
         <p className="min-w-0 leading-snug">
-          <span className="font-semibold">Kurumsal WhatsApp {lineLabel}</span>
+          <span className="font-semibold">{lineLabel ? `Kurumsal WhatsApp ${lineLabel}` : 'Kurumsal WhatsApp'}</span>
           <span className="mx-1.5 text-current/50">·</span>
           {inboundPending
             ? 'Bağlantı durumu kontrol ediliyor…'
@@ -804,6 +807,7 @@ export default function CrmInboxPage() {
           >
             Widgetler
           </Link>
+          {!inbound?.institution_scoped && (
           <button
             type="button"
             disabled={binding}
@@ -825,6 +829,7 @@ export default function CrmInboxPage() {
           >
             {binding ? 'Bağlanıyor…' : inboundOk || inboundPending ? 'Hattı yenile' : 'Hattı bağla'}
           </button>
+          )}
           </div>
         )}
       </div>

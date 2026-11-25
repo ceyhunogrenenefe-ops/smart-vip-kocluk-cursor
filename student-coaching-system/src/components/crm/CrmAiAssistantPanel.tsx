@@ -17,6 +17,8 @@ import {
   X
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { useApp } from '../../context/AppContext';
+import { PLATFORM_PRIMARY_INSTITUTION_ID } from '../../lib/activeInstitutionScope';
 import {
   aiConsultants,
   aiGetSettings,
@@ -143,6 +145,9 @@ function readFileText(file: File): Promise<string> {
  * Varsayılan kapalı; yönetici açana kadar tek mesaj gönderilmez.
  */
 export default function CrmAiAssistantPanel() {
+  const { institution } = useApp();
+  // Platform (Online VIP) dışı kurumda Online VIP'e özgü numara / hesap / site gösterilmez
+  const isPlatform = !institution?.id || String(institution.id) === PLATFORM_PRIMARY_INSTITUTION_ID;
   const [acik, setAcik] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
@@ -277,12 +282,12 @@ export default function CrmAiAssistantPanel() {
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="space-y-2 rounded-xl border border-slate-200 bg-white p-3">
               <Toggle checked={form.is_active} onChange={(v) => patch({ is_active: v })} label="Asistanı aç" hint="Kapalıyken hiçbir otomatik yanıt gitmez." />
-              <Toggle checked={form.channel_whatsapp} onChange={(v) => patch({ channel_whatsapp: v })} label="WhatsApp (0506 187 74 94)" />
+              <Toggle checked={form.channel_whatsapp} onChange={(v) => patch({ channel_whatsapp: v })} label={isPlatform ? 'WhatsApp (0506 187 74 94)' : 'WhatsApp'} />
               <Toggle checked={form.channel_instagram} onChange={(v) => patch({ channel_instagram: v })} label="Instagram DM" />
               <Toggle
                 checked={form.primary_ig_only}
                 onChange={(v) => patch({ primary_ig_only: v })}
-                label="Yalnız ana Instagram hesabı (@onlinevipdershane)"
+                label={isPlatform ? 'Yalnız ana Instagram hesabı (@onlinevipdershane)' : 'Yalnız kurumun ana Instagram hesabı'}
                 hint="Ek bağlı hesaplara (ör. @onlinevipdersvekocluk) gelen DM'lere bot yazmaz."
               />
             </div>
@@ -328,10 +333,10 @@ export default function CrmAiAssistantPanel() {
           {/* 3. Bilgi tabanı */}
           <div className="rounded-xl border border-slate-200 bg-white p-3">
             <h3 className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-slate-900">
-              <Globe className="h-4 w-4 text-violet-700" /> Bilgi tabanı (onlinevipdershane.com)
+              <Globe className="h-4 w-4 text-violet-700" /> Bilgi tabanı ({isPlatform ? 'onlinevipdershane.com' : 'kurumun sitesi'})
             </h3>
             <label className="block text-xs font-semibold text-slate-600">
-              Çekilecek sayfalar (her satıra bir adres; yalnız onlinevipdershane.com)
+              Çekilecek sayfalar (her satıra bir adres; {isPlatform ? 'yalnız onlinevipdershane.com' : 'hepsi kurumun kendi sitesinden, ilk satır ana sayfa'})
               <textarea className={`${input} h-28 font-mono text-[11px]`} value={siteText} onChange={(e) => setSiteText(e.target.value)} />
             </label>
             <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -379,7 +384,7 @@ export default function CrmAiAssistantPanel() {
             <div className="flex flex-wrap items-end gap-2">
               <label className="text-xs font-semibold text-slate-600">
                 Bizim taraftaki ad (boşsa otomatik)
-                <input className={input} value={bizAuthor} onChange={(e) => setBizAuthor(e.target.value)} placeholder="Online VIP Dershane" />
+                <input className={input} value={bizAuthor} onChange={(e) => setBizAuthor(e.target.value)} placeholder={isPlatform ? 'Online VIP Dershane' : institution?.name || 'Kurum adı'} />
               </label>
               <label className={`${btn} cursor-pointer`}>
                 {busy === 'upload' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />} Sohbet yükle
