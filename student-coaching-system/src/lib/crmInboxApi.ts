@@ -278,6 +278,8 @@ export function crmPoll(since: string, conversationId?: string) {
 
 export type CrmInboundStatus = {
   ok: boolean;
+  /** true: platform dışı kurumun kendi bağlantı durumu */
+  institution_scoped?: boolean;
   bound_to_production: boolean;
   company_line: string;
   company_digits: string;

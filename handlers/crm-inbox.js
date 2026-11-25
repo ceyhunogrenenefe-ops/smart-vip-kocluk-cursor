@@ -451,6 +451,16 @@ export default async function handler(req, res) {
       if (!isAdmin) {
         return res.status(403).json({ error: 'forbidden', hint: 'Meta hattını yalnızca yönetici bağlar.' });
       }
+      {
+        // Bu işlem platformun hattını bağlar; kurum kendi hattını Widgetler'den bağlar
+        const { isPlatformInstitutionId } = await import('../api/_lib/crm-meta-connection.js');
+        if (institutionId && !isPlatformInstitutionId(institutionId)) {
+          return res.status(400).json({
+            error: 'platform_only',
+            hint: 'Kurumun hattı CRM → Widgetler ekranından bağlanır.'
+          });
+        }
+      }
       await ensureCrmInboxSchema({ force: true }).catch(() => null);
       const inbound = await ensureMetaInboundDelivery({ apply: true });
       const social = await ensureMetaSocialInbound({ apply: true });
@@ -992,6 +1002,25 @@ export default async function handler(req, res) {
     }
 
     if (op === 'list_meta_templates') {
+      {
+        // Platform dışı kurum: yalnız kendi WABA şablonları; platformun şablonları sızmaz
+        const { isPlatformInstitutionId } = await import('../api/_lib/crm-meta-connection.js');
+        if (institutionId && !isPlatformInstitutionId(institutionId)) {
+          const { listInstitutionWhatsAppTemplates } = await import('../api/_lib/meta-templates-sync.js');
+          const own = await listInstitutionWhatsAppTemplates(institutionId).catch((e) => ({
+            templates: [],
+            pending: [],
+            source: 'institution_error',
+            hint: e instanceof Error ? e.message : String(e)
+          }));
+          return res.status(200).json({
+            data: own.templates || [],
+            pending: own.pending || [],
+            source: own.source,
+            hint: own.hint || null
+          });
+        }
+      }
       await loadMetaWhatsAppSecretsFromDb();
       const force =
         String(req.query?.refresh || body.refresh || '').trim() === '1' ||
