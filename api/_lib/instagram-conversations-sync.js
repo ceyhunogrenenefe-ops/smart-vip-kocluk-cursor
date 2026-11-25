@@ -145,8 +145,9 @@ async function fetchThreadMessages(conversationId, tok, messagesPerThread) {
 /**
  * Son IG konuşmalarını Graph’tan çekip CRM’e yazar.
  * @param {{ limit?: number, messagesPerThread?: number, apply?: boolean,
- *   account?: { token: string, pageId: string, igUserId: string } }} opts
+ *   account?: { token: string, pageId: string, igUserId: string, institutionId?: string } }} opts
  *   account verilirse (ek Instagram hesabı) o hesabın anahtarı/sayfası kullanılır.
+ *   account.institutionId verilirse (kurumun kendi bağladığı Instagram) mesajlar o kuruma yazılır.
  */
 export async function syncInstagramConversationsFromGraph(opts = {}) {
   const limit = Math.min(Math.max(Number(opts.limit) || 8, 1), 20);
@@ -156,7 +157,7 @@ export async function syncInstagramConversationsFromGraph(opts = {}) {
   await loadMetaWhatsAppSecretsFromDb().catch(() => null);
   const acct = opts.account && String(opts.account.token || '').trim() ? opts.account : null;
   const { token, source } = acct
-    ? { token: String(acct.token).trim(), source: 'crm_instagram_accounts' }
+    ? { token: String(acct.token).trim(), source: acct.institutionId ? 'crm_meta_connections' : 'crm_instagram_accounts' }
     : resolveSocialToken();
   const pageId = acct ? String(acct.pageId || '').trim() : resolvePageId();
   const igId = acct ? String(acct.igUserId || '').trim() : igBusinessIdEnv();
@@ -243,9 +244,15 @@ export async function syncInstagramConversationsFromGraph(opts = {}) {
   }
 
   try {
+    const institutionId = acct && acct.institutionId ? String(acct.institutionId) : null;
     const crm = await syncInstagramMessagingToCrm(events, {
       channel: 'instagram',
-      ...(acct ? { accountIgUserId: igId } : {})
+      // Kurum hesabı: mesajlar doğrudan kurumun gelen kutusuna, profil kurumun anahtarıyla
+      ...(institutionId
+        ? { institutionId, profileToken: acct.token }
+        : acct
+          ? { accountIgUserId: igId }
+          : {})
     });
     out.crm = crm;
     out.ok = true;
@@ -287,4 +294,47 @@ export async function syncExtraInstagramAccountsFromGraph(opts = {}) {
     });
   }
   return { ok: accounts.every((a) => a.ok), accounts };
+}
+
+/**
+ * Kurumların kendi bağladığı Instagram hesapları (crm_meta_connections) için backfill.
+ * Webhook kaçırılan reklam DM'leri kurumun kendi gelen kutusuna düşer.
+ * Platform kurumu burada taranmaz; onun hesabı ana senkronda.
+ */
+export async function syncInstitutionInstagramAccountsFromGraph(opts = {}) {
+  const { supabaseAdmin } = await import('./supabase-admin.js');
+  const { isPlatformInstitutionId } = await import('./crm-meta-connection.js');
+  const { data, error } = await supabaseAdmin
+    .from('crm_meta_connections')
+    .select('institution_id, ig_user_id, ig_username, ig_page_id, ig_page_token, is_active')
+    .not('ig_page_token', 'is', null)
+    .limit(50);
+  if (error) {
+    if (String(error.code) === '42P01') return { ok: true, institutions: [] };
+    return { ok: false, error: error.message, institutions: [] };
+  }
+  const institutions = [];
+  for (const row of data || []) {
+    if (row.is_active === false || isPlatformInstitutionId(row.institution_id)) continue;
+    const token = String(row.ig_page_token || '').trim();
+    if (!token || (!row.ig_page_id && !row.ig_user_id)) continue;
+    const r = await syncInstagramConversationsFromGraph({
+      ...opts,
+      account: {
+        token,
+        pageId: row.ig_page_id,
+        igUserId: row.ig_user_id,
+        institutionId: String(row.institution_id)
+      }
+    }).catch((e) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }));
+    institutions.push({
+      institution_id: String(row.institution_id),
+      ig_username: row.ig_username || null,
+      ok: Boolean(r?.ok),
+      processed: r?.crm?.processed || 0,
+      error: r?.error || null,
+      blocker: r?.blocker || null
+    });
+  }
+  return { ok: institutions.every((a) => a.ok), institutions };
 }

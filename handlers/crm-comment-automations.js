@@ -254,6 +254,10 @@ export default async function handler(req, res) {
 
   const institutionId = actor.institution_id || null;
   const op = String(req.query?.op || '').trim();
+  {
+    const { assertCrmModule } = await import('../api/_lib/crm-module.js');
+    if (!(await assertCrmModule(res, { institutionId, isSuperAdmin: tags.includes('super_admin') }))) return;
+  }
 
   try {
     /** Facebook ile ekleme sonrası birden fazla aday sayfa → seçim */

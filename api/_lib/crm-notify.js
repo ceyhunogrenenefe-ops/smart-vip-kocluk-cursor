@@ -104,6 +104,8 @@ export async function sendPushToUser(userId, payload) {
 /** CRM içi bildirim + push (hata olursa akışı bozmaz) */
 export async function createCrmNotification({ userId, title, body, link, priority = 'normal', institutionId = null, tag = null }) {
   if (!userId) return null;
+  const { crmSenderName } = await import('./crm-brand.js');
+  const senderName = await crmSenderName(institutionId).catch(() => 'CRM');
   const { data, error } = await supabaseAdmin
     .from('platform_notifications')
     .insert({
@@ -113,7 +115,7 @@ export async function createCrmNotification({ userId, title, body, link, priorit
       target_user_id: String(userId),
       sender_user_id: 'system',
       sender_role: 'admin',
-      sender_name: 'Online VIP CRM',
+      sender_name: senderName,
       institution_id: institutionId,
       priority: ['low', 'normal', 'high'].includes(priority) ? priority : 'normal',
       link_url: link
