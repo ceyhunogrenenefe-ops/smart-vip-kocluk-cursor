@@ -132,6 +132,8 @@ export type PrivateLessonFeeRow = {
   payment_account?: PrivateLessonFeePaymentAccount | null;
   notes?: string | null;
   fee_row_id?: string | null;
+  /** Satırın ait olduğu ay (YYYY-MM) — "Tüm aylar" görünümünde her satır kendi ayını taşır */
+  period_ym?: string;
 };
 
 export type PrivateLessonFeeSummary = {

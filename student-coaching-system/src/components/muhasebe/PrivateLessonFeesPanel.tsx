@@ -23,7 +23,7 @@ import {
 import { listPaymentAccounts, type PaymentAccount } from '../../lib/studentPaymentTrackerApi';
 import { normalizeWhatsAppPhoneForSend } from '../../lib/whatsappOutbound';
 import { buildClassFilterOptions, classLevelLabel, uniqueNames } from '../../lib/classFilterOptions';
-import { classLevelKey, matchesSearch } from '../../lib/turkishSearch';
+import { classLevelKey, foldTr, matchesSearch } from '../../lib/turkishSearch';
 import {
   buildPrivateLessonFeeWhatsAppMessage,
   deletePrivateLessonFee,
@@ -42,6 +42,32 @@ import {
 function currentMonthYm() {
   const n = new Date();
   return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}`;
+}
+
+/** "Tüm aylar" seçeneği — özel ders ücret kayıtları Ağustos 2026'dan başlıyor */
+const ALL_MONTHS = 'all';
+const FIRST_FEE_MONTH = '2026-08';
+const AY_ADLARI = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
+
+function monthLabel(ym: string) {
+  const [y, m] = ym.split('-').map((x) => parseInt(x, 10));
+  return y && m ? `${AY_ADLARI[m - 1]} ${y}` : ym;
+}
+
+/** İlk kayıt ayından içinde bulunulan aya kadar (yeniden eskiye) */
+function monthOptions(): string[] {
+  const out: string[] = [];
+  const end = currentMonthYm();
+  let [y, m] = end.split('-').map((x) => parseInt(x, 10));
+  while (`${y}-${String(m).padStart(2, '0')}` >= FIRST_FEE_MONTH && out.length < 60) {
+    out.push(`${y}-${String(m).padStart(2, '0')}`);
+    m -= 1;
+    if (m === 0) {
+      m = 12;
+      y -= 1;
+    }
+  }
+  return out;
 }
 
 /** Ders dışı kalem satırı — rehberlik, deneme, kaynak… */
@@ -187,6 +213,12 @@ export default function PrivateLessonFeesPanel() {
   /** Liste filtresi: öğrenci / veli / öğretmen adı ve sınıf (büyük-küçük harf fark etmez) */
   const [q, setQ] = useState('');
   const [filterClass, setFilterClass] = useState('');
+  const [filterStudent, setFilterStudent] = useState('');
+  const [filterStatus, setFilterStatus] = useState('');
+  const aylar = useMemo(monthOptions, []);
+  const isAllMonths = month === ALL_MONTHS;
+  /** Yeni kayıt (dış öğrenci) hangi aya yazılsın: "Tüm aylar"da içinde bulunulan ay */
+  const entryMonth = isAllMonths ? currentMonthYm() : month;
   const [rows, setRows] = useState<PrivateLessonFeeRow[]>([]);
   const [summary, setSummary] = useState<PrivateLessonFeeSummary | null>(null);
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
@@ -223,13 +255,37 @@ export default function PrivateLessonFeesPanel() {
     setLoading(true);
     setSchemaHint(null);
     try {
-      const [data, accPack] = await Promise.all([
-        fetchPrivateLessonFees({
-          month,
-          institutionId: institutionId || undefined
-        }),
+      const months = month === ALL_MONTHS ? monthOptions() : [month];
+      const [packs, accPack] = await Promise.all([
+        Promise.all(
+          months.map((m) => fetchPrivateLessonFees({ month: m, institutionId: institutionId || undefined }))
+        ),
         listPaymentAccounts(institutionId || undefined, 'bank').catch(() => ({ data: [] as PaymentAccount[] }))
       ]);
+      const multi = months.length > 1;
+      const sum = (k: keyof PrivateLessonFeeSummary) =>
+        packs.reduce((a, pk) => a + (Number(pk.summary?.[k]) || 0), 0);
+      const data = {
+        hint: packs.find((pk) => pk.hint)?.hint || null,
+        extraKinds: packs[0]?.extraKinds || PRIVATE_LESSON_FEE_EXTRA_KINDS,
+        // Her satır kendi ayını taşır; "Tüm aylar"da anahtar ayla birlikte tekil olur
+        rows: packs.flatMap((pk) =>
+          pk.rows.map((r) => ({
+            ...r,
+            period_ym: pk.month,
+            row_key: multi ? `${pk.month}|${privateLessonFeeRowKey(r)}` : privateLessonFeeRowKey(r)
+          }))
+        ),
+        summary: {
+          student_count: sum('student_count'),
+          system_hours: sum('system_hours'),
+          hours: sum('hours'),
+          total_tl: sum('total_tl'),
+          extras_tl: sum('extras_tl'),
+          collected_tl: sum('collected_tl'),
+          remaining_tl: sum('remaining_tl')
+        } as PrivateLessonFeeSummary
+      };
       if (data.hint) {
         setSchemaHint(`Supabase SQL Editor’da \`${data.hint}\` dosyasını çalıştırın.`);
       }
@@ -258,16 +314,23 @@ export default function PrivateLessonFeesPanel() {
     () => uniqueNames(rows.flatMap((r) => [r.student_name, ...r.teachers.map((t) => t.teacher_name)])),
     [rows]
   );
+  const studentNames = useMemo(() => uniqueNames(rows.map((r) => r.student_name)), [rows]);
   const visibleRows = useMemo(
     () =>
       rows.filter((r) => {
+        if (filterStudent && foldTr(r.student_name) !== foldTr(filterStudent)) return false;
+        if (filterStatus) {
+          const d = drafts[privateLessonFeeRowKey(r)];
+          const st = String(d?.collection_status || r.collection_status || 'unpaid');
+          if (st !== filterStatus) return false;
+        }
         if (filterClass && classLevelKey(r.class_level) !== filterClass) return false;
         return matchesSearch(
           [r.student_name, r.parent_name, r.contact_phone_resolved, ...r.teachers.map((t) => t.teacher_name)],
           q
         );
       }),
-    [rows, q, filterClass]
+    [rows, q, filterClass, filterStudent, filterStatus, drafts]
   );
 
   useEffect(() => {
@@ -275,9 +338,9 @@ export default function PrivateLessonFeesPanel() {
     const row = rows.find((r) => privateLessonFeeRowKey(r) === waModal.rowKey);
     const draft = drafts[waModal.rowKey];
     if (!row || !draft) return;
-    const next = buildWaMessageForRow(row, draft, month, accounts);
+    const next = buildWaMessageForRow(row, draft, row.period_ym || entryMonth, accounts);
     setWaModal((m) => (m && m.message !== next ? { ...m, message: next } : m));
-  }, [accounts, drafts, month, rows, waModal?.rowKey, waModal?.userEditedMessage]);
+  }, [accounts, drafts, entryMonth, rows, waModal?.rowKey, waModal?.userEditedMessage]);
 
   const patchDraft = (key: string, patch: Partial<Draft>) => {
     setDrafts((prev) => {
@@ -299,7 +362,7 @@ export default function PrivateLessonFeesPanel() {
       rowKey,
       rowLabel: row.student_name,
       phone,
-      message: buildWaMessageForRow(row, draft, month, accounts),
+      message: buildWaMessageForRow(row, draft, row.period_ym || entryMonth, accounts),
       userEditedMessage: false
     });
   };
@@ -404,7 +467,7 @@ export default function PrivateLessonFeesPanel() {
           ? row.external_student_name || row.student_name
           : null,
         fee_row_id: row.fee_row_id || null,
-        month,
+        month: row.period_ym || entryMonth,
         institution_id: institutionId || null,
         hours_override: hoursOverride,
         unit_price_tl: unit,
@@ -456,7 +519,7 @@ export default function PrivateLessonFeesPanel() {
         external_student_name: row.is_external
           ? row.external_student_name || row.student_name
           : null,
-        month,
+        month: row.period_ym || entryMonth,
         institution_id: institutionId || null
       });
       toast.success('Silindi');
@@ -495,7 +558,7 @@ export default function PrivateLessonFeesPanel() {
       await upsertPrivateLessonFee({
         is_external: true,
         external_student_name: name,
-        month,
+        month: entryMonth,
         institution_id: institutionId || null,
         hours_override: hours,
         unit_price_tl: unit,
@@ -559,12 +622,18 @@ export default function PrivateLessonFeesPanel() {
         <div className="flex flex-wrap items-end gap-2">
           <label className="text-xs text-slate-500">
             Ay
-            <input
-              type="month"
+            <select
               value={month}
               onChange={(e) => setMonth(e.target.value)}
               className="mt-1 block rounded-lg border border-slate-200 px-2.5 py-2 text-sm dark:border-slate-600 dark:bg-slate-900"
-            />
+            >
+              <option value={ALL_MONTHS}>Tüm aylar</option>
+              {aylar.map((ym) => (
+                <option key={ym} value={ym}>
+                  {monthLabel(ym)}
+                </option>
+              ))}
+            </select>
           </label>
           <button
             type="button"
@@ -689,7 +758,7 @@ export default function PrivateLessonFeesPanel() {
       <div className="grid gap-3 sm:grid-cols-3">
         <div className="rounded-2xl border border-indigo-200 bg-gradient-to-br from-indigo-50 to-white p-4 dark:border-indigo-900 dark:from-indigo-950/40 dark:to-slate-900">
           <p className="text-[11px] font-semibold uppercase tracking-wide text-indigo-700 dark:text-indigo-300">
-            Aylık toplam özel ders tutarı
+            {isAllMonths ? 'Tüm aylar' : 'Aylık'} toplam özel ders tutarı
           </p>
           <p className="mt-1 text-2xl font-bold text-indigo-900 dark:text-indigo-100">
             {formatTryAmount(totals.billed)} ₺
@@ -701,7 +770,7 @@ export default function PrivateLessonFeesPanel() {
         </div>
         <div className="rounded-2xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-white p-4 dark:border-emerald-900 dark:from-emerald-950/40 dark:to-slate-900">
           <p className="text-[11px] font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-300">
-            Aylık toplam özel ders tahsilatı
+            {isAllMonths ? 'Tüm aylar' : 'Aylık'} toplam özel ders tahsilatı
           </p>
           <p className="mt-1 text-2xl font-bold text-emerald-900 dark:text-emerald-100">
             {formatTryAmount(totals.collected)} ₺
@@ -727,7 +796,7 @@ export default function PrivateLessonFeesPanel() {
         </p>
       ) : rows.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-slate-200 px-4 py-8 text-center text-sm text-slate-500 dark:border-slate-700">
-          Bu ay için özel ders öğrencisi / tamamlanan ders bulunamadı. Yukarıdan dışarıdan öğrenci
+          {isAllMonths ? 'Hiçbir ayda' : 'Bu ay için'} özel ders öğrencisi / tamamlanan ders bulunamadı. Yukarıdan dışarıdan öğrenci
           ekleyebilirsiniz.
         </div>
       ) : (
@@ -749,6 +818,28 @@ export default function PrivateLessonFeesPanel() {
                 ))}
               </datalist>
             </label>
+            <label className="w-52 text-xs text-slate-500">
+              Öğrenci
+              <select value={filterStudent} onChange={(e) => setFilterStudent(e.target.value)} className={fieldCls}>
+                <option value="">Tüm öğrenciler</option>
+                {studentNames.map((n) => (
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="w-40 text-xs text-slate-500">
+              Durum
+              <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className={fieldCls}>
+                <option value="">Tümü</option>
+                {(Object.keys(PRIVATE_LESSON_FEE_STATUS_LABELS) as PrivateLessonFeeStatus[]).map((k) => (
+                  <option key={k} value={k}>
+                    {PRIVATE_LESSON_FEE_STATUS_LABELS[k]}
+                  </option>
+                ))}
+              </select>
+            </label>
             <label className="w-44 text-xs text-slate-500">
               Sınıf
               <select value={filterClass} onChange={(e) => setFilterClass(e.target.value)} className={fieldCls}>
@@ -760,12 +851,14 @@ export default function PrivateLessonFeesPanel() {
                 ))}
               </select>
             </label>
-            {q || filterClass ? (
+            {q || filterClass || filterStudent || filterStatus ? (
               <button
                 type="button"
                 onClick={() => {
                   setQ('');
                   setFilterClass('');
+                  setFilterStudent('');
+                  setFilterStatus('');
                 }}
                 className="pb-2 text-xs font-medium text-slate-500 underline-offset-2 hover:text-slate-800 hover:underline"
               >
@@ -773,7 +866,7 @@ export default function PrivateLessonFeesPanel() {
               </button>
             ) : null}
             <span className="ml-auto pb-2 text-xs text-slate-500">
-              {visibleRows.length} / {rows.length} öğrenci
+              {visibleRows.length} / {rows.length} {isAllMonths ? 'kayıt' : 'öğrenci'}
             </span>
           </div>
           {visibleRows.length === 0 ? (
@@ -809,6 +902,11 @@ export default function PrivateLessonFeesPanel() {
                       className="text-left font-semibold text-slate-900 hover:text-indigo-700 hover:underline dark:text-slate-100"
                     >
                       {row.student_name}
+                      {isAllMonths && row.period_ym ? (
+                        <span className="ml-1.5 rounded bg-indigo-50 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-700 dark:bg-indigo-950 dark:text-indigo-200">
+                          {monthLabel(row.period_ym)}
+                        </span>
+                      ) : null}
                       {row.class_level ? (
                         <span className="ml-1.5 text-[11px] font-normal text-slate-500">
                           · {classLevelLabel(row.class_level)}
