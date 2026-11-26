@@ -21,6 +21,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useApp } from '../../context/AppContext';
 import { formatClassLevelLabel, type Student } from '../../types';
 import { normalizeWhatsAppPhoneForSend } from '../../lib/whatsappOutbound';
+import { deletePrivateLessonFee, upsertPrivateLessonFee } from '../../lib/privateLessonFeesApi';
 import { buildClassFilterOptions, classLevelLabel, uniqueNames } from '../../lib/classFilterOptions';
 import {
   buildPaymentWhatsAppMessage,
@@ -681,7 +682,44 @@ export default function StudentPaymentTrackerPanel() {
     }
   };
 
+  /**
+   * Özel ders ücretleri ekranından gelen satırlar kendi tablosunda güncellenir;
+   * böylece iki ekran aynı kaydı gösterir, çift kayıt oluşmaz.
+   */
+  const ozelDersKimligi = (row: StudentPaymentRecord) => ({
+    fee_row_id: row.private_lesson_fee_id || null,
+    student_id: row.student_id || null,
+    is_external: !row.student_id,
+    external_student_name: row.student_id ? null : row.external_student_name || row.student_name || null,
+    month: String(row.period_ym || String(row.due_date || '').slice(0, 7)),
+    institution_id: institutionId || null
+  });
+
+  const saveOzelDers = async (
+    row: StudentPaymentRecord,
+    patch: { amount_collected_tl: number; collection_status: string },
+    okMsg: string
+  ) => {
+    try {
+      await upsertPrivateLessonFee({ ...ozelDersKimligi(row), ...patch });
+      toast.success(okMsg);
+      await reload();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Güncellenemedi');
+    }
+  };
+
   const togglePaid = async (row: StudentPaymentRecord, paid: boolean) => {
+    if (row.source === 'private_lesson_fee') {
+      await saveOzelDers(
+        row,
+        paid
+          ? { amount_collected_tl: Math.max(row.amount_paid || 0, row.amount_total || 0), collection_status: 'paid' }
+          : { amount_collected_tl: 0, collection_status: 'unpaid' },
+        paid ? 'Özel ders ödendi işaretlendi' : 'Özel ders ödenmedi olarak işaretlendi'
+      );
+      return;
+    }
     try {
       let paid_at: string | null = null;
       if (paid) {
@@ -710,6 +748,10 @@ export default function StudentPaymentTrackerPanel() {
   };
 
   const markPaid = async (row: StudentPaymentRecord) => {
+    if (row.source === 'private_lesson_fee') {
+      await togglePaid(row, true);
+      return;
+    }
     try {
       const suggested =
         (row.paid_at && String(row.paid_at).slice(0, 10)) || todayYmdLocal();
@@ -736,6 +778,19 @@ export default function StudentPaymentTrackerPanel() {
   const updatePaidAmount = async (row: StudentPaymentRecord, paidStr: string) => {
     const paid = Number(paidStr);
     if (Number.isNaN(paid) || paid < 0) return;
+    if (row.source === 'private_lesson_fee') {
+      if (paid === Number(row.amount_paid || 0)) return;
+      const total = Number(row.amount_total || 0);
+      await saveOzelDers(
+        row,
+        {
+          amount_collected_tl: paid,
+          collection_status: paid <= 0 ? 'unpaid' : total > 0 && paid < total ? 'partial' : 'paid'
+        },
+        'Özel ders tahsilatı güncellendi'
+      );
+      return;
+    }
     try {
       await patchStudentPayment({ id: row.id, amount_paid: paid });
       await reload();
@@ -745,6 +800,25 @@ export default function StudentPaymentTrackerPanel() {
   };
 
   const removeRow = async (row: StudentPaymentRecord) => {
+    if (row.source === 'private_lesson_fee') {
+      const ay = String(row.period_ym || '');
+      if (
+        !window.confirm(
+          `${row.student_name} — ${ay} özel ders kaydı (${formatTry(row.amount_paid)} tahsilat) silinsin mi?\n\n` +
+            'Kayıt Özel ders ücretleri ekranından da silinir ve geri alınamaz.'
+        )
+      ) {
+        return;
+      }
+      try {
+        await deletePrivateLessonFee(ozelDersKimligi(row));
+        toast.success('Özel ders kaydı silindi');
+        await reload();
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'Silinemedi');
+      }
+      return;
+    }
     if (!window.confirm(`${row.student_name} — ${PAYMENT_TYPE_LABELS[row.payment_type]} kaydını silmek istiyor musunuz?`)) {
       return;
     }
@@ -843,9 +917,8 @@ export default function StudentPaymentTrackerPanel() {
           <input
             type="checkbox"
             checked={r.status === 'paid'}
-            disabled={ozelDers}
             onChange={(e) => void togglePaid(r, e.target.checked)}
-            title={ozelDers ? 'Özel ders ücretleri ekranından değiştirilir' : 'Ödendi işaretle'}
+            title="Ödendi işaretle"
             className="rounded border-slate-300"
           />
         </td>
@@ -885,9 +958,6 @@ export default function StudentPaymentTrackerPanel() {
         )}
         <td className="px-3 py-2.5 text-right tabular-nums font-medium">{formatTry(r.amount_total)}</td>
         <td className="px-3 py-2.5 text-right">
-          {ozelDers ? (
-            <span className="text-xs font-medium tabular-nums">{formatTry(r.amount_paid)}</span>
-          ) : (
           <input
             type="number"
             min={0}
@@ -897,7 +967,6 @@ export default function StudentPaymentTrackerPanel() {
             onBlur={(e) => void updatePaidAmount(r, e.target.value)}
             className="w-24 rounded border border-slate-200 px-1.5 py-1 text-right text-xs tabular-nums dark:border-slate-600 dark:bg-slate-800"
           />
-          )}
         </td>
         <td className="px-3 py-2.5 text-right tabular-nums font-semibold text-rose-700 dark:text-rose-300">
           {formatTry(r.remaining ?? 0)}
@@ -908,17 +977,16 @@ export default function StudentPaymentTrackerPanel() {
           </span>
         </td>
         <td className="px-3 py-2.5">
-          {ozelDers ? (
-            <div className="flex justify-end">
-              <a
-                href="/muhasebe?tab=ozel-ders-ucret"
-                className="rounded-lg px-2 py-1 text-[11px] font-semibold text-indigo-700 hover:bg-indigo-50 dark:text-indigo-300 dark:hover:bg-indigo-950/40"
-              >
-                Özel ders ekranında aç
-              </a>
-            </div>
-          ) : (
           <div className="flex flex-wrap items-center justify-end gap-1">
+            {ozelDers ? (
+              <a
+                href={`/muhasebe?tab=ozel-ders-ucret`}
+                title="Ders adedi, birim ücret ve hesabı özel ders ekranında düzenle"
+                className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-800 dark:hover:bg-slate-800 dark:hover:text-slate-100"
+              >
+                <Pencil className="h-4 w-4" />
+              </a>
+            ) : (
             <button
               type="button"
               title="Düzenle"
@@ -927,6 +995,7 @@ export default function StudentPaymentTrackerPanel() {
             >
               <Pencil className="h-4 w-4" />
             </button>
+            )}
             <button
               type="button"
               title="WhatsApp"
@@ -935,7 +1004,7 @@ export default function StudentPaymentTrackerPanel() {
             >
               <MessageCircle className="h-4 w-4" />
             </button>
-            {(r.remaining ?? 0) > 0 && r.status !== 'paid' && r.status !== 'cancelled' ? (
+            {!ozelDers && (r.remaining ?? 0) > 0 && r.status !== 'paid' && r.status !== 'cancelled' ? (
               <button
                 type="button"
                 title="Garanti ödeme linki"
@@ -963,7 +1032,6 @@ export default function StudentPaymentTrackerPanel() {
               <Trash2 className="h-4 w-4" />
             </button>
           </div>
-          )}
         </td>
       </tr>
     );
