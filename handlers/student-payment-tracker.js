@@ -53,6 +53,7 @@ async function loadPrivateLessonFeeRows({ inst, dueFrom, dueTo, accountIds, acco
           : 'partial';
     if (status && st !== status) continue;
     const ym = String(f.period_ym || '');
+    const odemeSayisi = String(f.notes || '').split('\n').filter((l) => l.trim().startsWith('• ')).length;
     out.push({
       id: `plf:${f.id}`,
       source: 'private_lesson_fee',
@@ -64,7 +65,10 @@ async function loadPrivateLessonFeeRows({ inst, dueFrom, dueTo, accountIds, acco
       coach_id: null,
       payment_account_id: accId,
       payment_type: 'ozel_ders',
-      title: `Özel ders — ${ym}${hours ? ` · ${hours} ders × ${unit} ₺` : ''}`,
+      // Aynı ay içindeki ayrı ödemeler notta "• N. ödeme: …" satırları olarak tutulur
+      title: `Özel ders — ${ym}${hours ? ` · ${hours} ders × ${unit} ₺` : ''}${
+        odemeSayisi > 1 ? ` · ${odemeSayisi} ödeme` : ''
+      }`,
       amount_total: total,
       amount_paid: collected,
       currency: 'TRY',

@@ -22,6 +22,7 @@ import { useApp } from '../../context/AppContext';
 import { formatClassLevelLabel, type Student } from '../../types';
 import { normalizeWhatsAppPhoneForSend } from '../../lib/whatsappOutbound';
 import { deletePrivateLessonFee, upsertPrivateLessonFee } from '../../lib/privateLessonFeesApi';
+import { addPaymentToNotes, clearPaymentsInNotes } from '../../lib/privateLessonPaymentHistory';
 import { buildClassFilterOptions, classLevelLabel, uniqueNames } from '../../lib/classFilterOptions';
 import {
   buildPaymentWhatsAppMessage,
@@ -697,7 +698,7 @@ export default function StudentPaymentTrackerPanel() {
 
   const saveOzelDers = async (
     row: StudentPaymentRecord,
-    patch: { amount_collected_tl: number; collection_status: string },
+    patch: { amount_collected_tl: number; collection_status: string; notes?: string | null },
     okMsg: string
   ) => {
     try {
@@ -779,14 +780,40 @@ export default function StudentPaymentTrackerPanel() {
     const paid = Number(paidStr);
     if (Number.isNaN(paid) || paid < 0) return;
     if (row.source === 'private_lesson_fee') {
-      if (paid === Number(row.amount_paid || 0)) return;
+      const prev = Number(row.amount_paid || 0);
+      if (paid === prev) return;
       const total = Number(row.amount_total || 0);
+      const durum = (c: number) => (c <= 0 ? 'unpaid' : total > 0 && c < total ? 'partial' : 'paid');
+      // Bu ay için zaten tahsilat varsa uyar: ikinci ödeme mi, eski tutarın düzeltmesi mi?
+      if (prev > 0 && paid > 0) {
+        const ay = String(row.period_ym || '');
+        if (
+          window.confirm(
+            `${row.student_name} için ${ay} ayında zaten ${formatTry(prev)} tahsilat var.\n\n` +
+              `Tamam: ${formatTry(paid)} İKİNCİ ÖDEME olarak eklensin (toplam ${formatTry(prev + paid)}).\n` +
+              'İptal: ikinci ödeme değil (sonraki adımda düzeltme sorulur).'
+          )
+        ) {
+          const toplam = Math.round((prev + paid) * 100) / 100;
+          await saveOzelDers(
+            row,
+            {
+              amount_collected_tl: toplam,
+              collection_status: durum(toplam),
+              notes: addPaymentToNotes(row.notes, prev, paid)
+            },
+            'İkinci ödeme eklendi'
+          );
+          return;
+        }
+        if (!window.confirm(`Tahsilat ${formatTry(prev)} yerine ${formatTry(paid)} olarak düzeltilsin mi?`)) {
+          await reload();
+          return;
+        }
+      }
       await saveOzelDers(
         row,
-        {
-          amount_collected_tl: paid,
-          collection_status: paid <= 0 ? 'unpaid' : total > 0 && paid < total ? 'partial' : 'paid'
-        },
+        { amount_collected_tl: paid, collection_status: durum(paid), notes: clearPaymentsInNotes(row.notes) },
         'Özel ders tahsilatı güncellendi'
       );
       return;
