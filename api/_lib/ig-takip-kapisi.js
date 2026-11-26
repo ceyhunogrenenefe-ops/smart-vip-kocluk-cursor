@@ -78,10 +78,19 @@ export function butonYukunuCoz(payload) {
  * Yorum geldiğinde ne yapılacak?
  * Takip kapısı kapalıysa mevcut davranış korunur: doğrudan dm_text.
  */
-export function yorumIcinPlan(automation) {
+export function yorumIcinPlan(automation, { takipEdiyor = null } = {}) {
   const kapiAcik = automation?.follow_gate_enabled === true;
   if (!kapiAcik) {
     return { aksiyon: 'send_pdf', text: automation?.dm_text || '', durum: null };
+  }
+  /**
+   * Kullanıcı zaten takip ediyorsa (Meta'dan DOĞRULANMIŞ, yalnız true)
+   * "takip et" sorulmaz; PDF doğrudan gider. Meta bu alanı yalnız daha önce
+   * işletmeye mesaj atmış kullanıcılar için verir; okunamazsa (null) veya
+   * takip etmiyorsa (false) davet akışı aynen devam eder.
+   */
+  if (takipEdiyor === true) {
+    return { aksiyon: 'send_pdf', text: automation?.dm_text || '', durum: 'pdf_sent', dogrulandi: true };
   }
   return {
     aksiyon: 'send_invite',

@@ -16,6 +16,7 @@
 import { supabaseAdmin } from './supabase-admin.js';
 import { PLATFORM_PRIMARY_INSTITUTION_ID } from './quota-enforce.js';
 import { yorumIcinPlan } from './ig-takip-kapisi.js';
+import { takipDurumunuOku } from './ig-takip-dogrula.js';
 import {
   ADIMLAR,
   gonderimHakkiAl,
@@ -198,9 +199,27 @@ export async function runCommentAutomationForComment({ comment, institutionId, a
      * Acik: PDF yerine DAVET mesaji gider; PDF bagi burada GECMEZ ve
      * yorum altina "PDF gonderdik" yaniti verilmez.
      */
-    const plan = yorumIcinPlan(automation);
+    /**
+     * Kapı açıksa önce takip durumuna bak: zaten takip eden (daha önce
+     * mesajlaşmış, Meta'nın doğruladığı) kişiye "takip et" sorulmaz, PDF
+     * doğrudan gider. Okunamazsa / takip etmiyorsa davet akışı aynen.
+     */
+    let takipEdiyor = null;
+    if (automation.follow_gate_enabled === true && igUserId) {
+      const sonuc = await takipDurumunuOku({
+        institutionId: institutionId || automation.institution_id || null,
+        igsid: igUserId,
+        token: override?.token
+      }).catch(() => null);
+      takipEdiyor = sonuc?.takipEdiyor ?? null;
+      patch.follow_checked_at = new Date().toISOString();
+      if (sonuc?.hata) patch.follow_check_error = String(sonuc.hata).slice(0, 500);
+    }
+    const plan = yorumIcinPlan(automation, { takipEdiyor });
     const takipKapisi = plan.aksiyon === 'send_invite';
+    const dogrudanPdf = plan.dogrulandi === true;
     if (takipKapisi) patch.follow_state = 'invite_sent';
+    if (dogrudanPdf) patch.follow_state = 'pdf_sent';
 
     const dmText = takipKapisi
       ? renderAutomationText(plan.text, vars)
@@ -214,16 +233,19 @@ export async function runCommentAutomationForComment({ comment, institutionId, a
        * yorumu zaten engelliyor; bu kilit webhook'un iki ornekte ayni anda
        * islenmesine (oku-sonra-yaz yarisi) karsi ikinci savunma.
        */
+      // Doğrudan PDF: buton akışıyla aynı ömürlük PDF anahtarı (ikinci kez gitmesin)
+      const adim = dogrudanPdf ? ADIMLAR.PDF : ADIMLAR.INVITE;
       const davetKey = islemAnahtari({
-        step: ADIMLAR.INVITE,
+        step: adim,
         automationId: automation.id,
+        igUserId,
         commentId
       });
       const hak = await gonderimHakkiAl({
         dedupKey: davetKey,
         automationId: automation.id,
         igUserId: igUserId || null,
-        step: ADIMLAR.INVITE
+        step: adim
       });
       if (!hak.alindi) {
         patch.dm_status = 'skipped';
