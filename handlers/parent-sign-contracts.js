@@ -1,3 +1,4 @@
+import { splitProgramAciklama } from '../api/_lib/program-aciklama.js';
 import { imzaSonrasiTaksitPlani, planToplami } from '../api/_lib/parent-sign-taksit-plan-edit.js';
 import { requireAuthenticatedActor, hasInstitutionAccess } from '../api/_lib/auth.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
@@ -138,7 +139,9 @@ async function buildRegistrationHintForVeli(row) {
     bitis_tarihi: row.bitis_tarihi || null,
     ucret: row.ucret,
     para_birimi: resolveRowParaBirimi(row),
-    taksit_sayisi: row.taksit_sayisi
+    taksit_sayisi: row.taksit_sayisi,
+    // Kurumun bu öğrenciye özel notu (ör. sadece sayısal dersler, farklı başlangıç)
+    program_aciklama: splitProgramAciklama(row.sablon_ek_detay_snapshot).aciklama || null
   };
 
   let ogrenci_ad = String(row.ogrenci_ad || '').trim();
@@ -532,7 +535,7 @@ export default async function handler(req, res) {
       const { data: row, error } = await supabaseAdmin
         .from('parent_sign_contracts')
         .select(
-          'id,merged_html,contract_number,status,signed_at,institution_id,preset_id,signature_png_base64,kayit_formu_json,program_adi,sinif,baslangic_tarihi,bitis_tarihi,ucret,pesinat,taksit_sayisi,para_birimi,ogrenci_ad,ogrenci_soyad,veli_ad,veli_soyad,telefon,adres,student_id,ogrenci_user_id'
+          'id,merged_html,contract_number,status,signed_at,institution_id,preset_id,signature_png_base64,kayit_formu_json,program_adi,sinif,baslangic_tarihi,bitis_tarihi,ucret,pesinat,taksit_sayisi,para_birimi,ogrenci_ad,ogrenci_soyad,veli_ad,veli_soyad,telefon,adres,student_id,ogrenci_user_id,sablon_ek_detay_snapshot'
         )
         .eq('signing_token', signingToken)
         .maybeSingle();

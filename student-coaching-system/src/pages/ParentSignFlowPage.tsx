@@ -16,6 +16,7 @@ import { useAuth } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
 import { apiFetch } from '../lib/session';
 import { branchMatches, normalizeStudentBranchKey, STANDARD_BRANCH_LETTERS } from '../lib/userStats';
+import { composeProgramAciklama, splitProgramAciklama } from '../lib/programAciklama';
 import { isMaarifVeliProgram, resolveSinifFromVeliKayit } from '../lib/veliKayitClassLevel';
 import {
   createParentSignClassPreset,
@@ -710,6 +711,8 @@ export default function ParentSignFlowPage() {
   const [sinif, setSinif] = useState('');
   const [selectedPresetIds, setSelectedPresetIds] = useState<string[]>([]);
   const [veliProgramCustom, setVeliProgramCustom] = useState('');
+  /** Öğrenciye özel program notu: sadece sayısal dersler, farklı başlangıç tarihi vb. */
+  const [programAciklama, setProgramAciklama] = useState('');
   const [priceDrafts, setPriceDrafts] = useState<Record<string, PriceSetupDraft>>({});
   const [lastCreatedLink, setLastCreatedLink] = useState<string | null>(null);
   const [baslangic, setBaslangic] = useState(todayPlus(0));
@@ -749,6 +752,8 @@ export default function ParentSignFlowPage() {
   const [editAdres, setEditAdres] = useState('');
   const [editSinif, setEditSinif] = useState('');
   const [editProgramAdi, setEditProgramAdi] = useState('');
+  const [editProgramAciklama, setEditProgramAciklama] = useState('');
+  const [editAciklamaBase, setEditAciklamaBase] = useState('');
   const [editBaslangic, setEditBaslangic] = useState('');
   const [editBitis, setEditBitis] = useState('');
   const [editHaftalikDersSaati, setEditHaftalikDersSaati] = useState(0);
@@ -1071,6 +1076,9 @@ export default function ParentSignFlowPage() {
         adres: adres.trim(),
         sinif: sinifOut,
         program_adi,
+        ...(programAciklama.trim()
+          ? { sablon_ek_detay_snapshot: composeProgramAciklama('', programAciklama) }
+          : {}),
         baslangic_tarihi: baslangic,
         bitis_tarihi: bitis,
         haftalik_ders_saati: ogrenciOnceKayitFormu ? 0 : suggested.hours,
@@ -1094,6 +1102,7 @@ export default function ParentSignFlowPage() {
       const created = await createParentSignContract(body);
       const url = buildVeliImzaPublicUrl(created.signing_token);
       setLastCreatedLink(url || null);
+      setProgramAciklama('');
       if (url) {
         const shareText = formatVeliKayitShareMessage({
           kurumAdi: headerKurumAdi || institution?.name?.trim() || 'Kurum',
@@ -1611,6 +1620,11 @@ export default function ParentSignFlowPage() {
     setEditAdres(String(r.adres || ''));
     setEditSinif(String(r.sinif || ''));
     setEditProgramAdi(String(r.program_adi || ''));
+    {
+      const parts = splitProgramAciklama(r.sablon_ek_detay_snapshot);
+      setEditAciklamaBase(parts.base);
+      setEditProgramAciklama(parts.aciklama);
+    }
     setEditBaslangic(String(r.baslangic_tarihi || '').slice(0, 10));
     setEditBitis(String(r.bitis_tarihi || '').slice(0, 10));
     setEditHaftalikDersSaati(Number(r.haftalik_ders_saati) || 0);
@@ -1670,6 +1684,7 @@ export default function ParentSignFlowPage() {
         adres: editAdres.trim(),
         sinif: editSinif.trim(),
         program_adi: editProgramAdi.trim(),
+        sablon_ek_detay_snapshot: composeProgramAciklama(editAciklamaBase, editProgramAciklama),
         baslangic_tarihi: editBaslangic,
         bitis_tarihi: editBitis,
         haftalik_ders_saati: editHaftalikDersSaati,
@@ -2216,6 +2231,59 @@ export default function ParentSignFlowPage() {
                   Kayıtta görünecek program: <strong>{resolvedProgramAdi()}</strong>
                 </p>
               ) : null}
+            </div>
+
+            <div className="sm:col-span-2 rounded-xl border border-amber-200 bg-amber-50/60 p-3 dark:border-amber-900 dark:bg-amber-950/20">
+              <label className="text-xs font-semibold text-amber-900 dark:text-amber-200">
+                Program açıklaması (isteğe bağlı)
+              </label>
+              <p className="text-[11px] text-amber-800/80 dark:text-amber-200/70">
+                Bu öğrenciye özel durum: yalnız bazı dersleri alıyorsa, derse farklı bir tarihte başlıyorsa vb.
+                Veli kayıt formunda ve sözleşmede görünür.
+              </p>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {['Sadece sayısal dersler', 'Sadece sözel dersler', 'Sadece matematik', 'Sadece fen bilimleri'].map((t) => (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => setProgramAciklama((prev) => (prev.trim() ? `${prev.trim()}\n${t}` : t))}
+                    className="rounded-full border border-amber-300 bg-white px-2 py-0.5 text-[11px] font-medium text-amber-900 hover:bg-amber-100 dark:border-amber-800 dark:bg-slate-900 dark:text-amber-200"
+                  >
+                    + {t}
+                  </button>
+                ))}
+              </div>
+              <textarea
+                rows={3}
+                className="mt-2 w-full rounded-lg border px-3 py-2 text-sm dark:bg-slate-950 dark:border-slate-600"
+                value={programAciklama}
+                onChange={(e) => setProgramAciklama(e.target.value)}
+                maxLength={1000}
+                placeholder="ör. Sadece sayısal dersler (matematik, fizik, kimya, biyoloji). Derslere 15 Aralık'ta başlayacak."
+              />
+              <div className="mt-2 flex flex-wrap items-end gap-2">
+                <label className="text-[11px] text-slate-600 dark:text-slate-300">
+                  Derse başlama tarihi
+                  <input
+                    type="date"
+                    className="mt-1 block rounded-lg border px-3 py-1.5 text-sm dark:bg-slate-950 dark:border-slate-600"
+                    value={baslangic}
+                    onChange={(e) => setBaslangic(e.target.value)}
+                  />
+                </label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const d = baslangic ? new Date(`${baslangic}T12:00:00`) : null;
+                    if (!d || Number.isNaN(d.getTime())) return;
+                    const t = `Derslere ${d.toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' })} tarihinde başlayacak.`;
+                    setProgramAciklama((prev) => (prev.trim() ? `${prev.trim()}\n${t}` : t));
+                  }}
+                  className="rounded-lg border border-amber-300 bg-white px-2 py-1.5 text-[11px] font-medium text-amber-900 hover:bg-amber-100 dark:border-amber-800 dark:bg-slate-900 dark:text-amber-200"
+                >
+                  Başlangıç tarihini açıklamaya yaz
+                </button>
+              </div>
             </div>
 
             <div className="sm:col-span-2">
@@ -3608,6 +3676,17 @@ export default function ParentSignFlowPage() {
                   className="mt-1 w-full rounded-lg border px-3 py-2 text-sm dark:bg-slate-950 dark:border-slate-600"
                   value={editTaksitSayisi}
                   onChange={(e) => setEditTaksitSayisi(Number(e.target.value))}
+                />
+              </div>
+              <div className="sm:col-span-2">
+                <label className="text-xs text-slate-500">Program açıklaması (sözleşmede ve veli formunda görünür)</label>
+                <textarea
+                  rows={2}
+                  maxLength={1000}
+                  className="mt-1 w-full rounded-lg border px-3 py-2 text-sm dark:bg-slate-950 dark:border-slate-600"
+                  value={editProgramAciklama}
+                  onChange={(e) => setEditProgramAciklama(e.target.value)}
+                  placeholder="ör. Sadece sayısal dersler. Derslere 15 Aralık'ta başlayacak."
                 />
               </div>
               <div>

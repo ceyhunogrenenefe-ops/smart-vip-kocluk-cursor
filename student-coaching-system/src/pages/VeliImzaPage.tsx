@@ -451,6 +451,11 @@ export default function VeliImzaPage() {
                     <p>
                       <strong>Sınıf:</strong> {String(regHint.sinif || '—')}
                     </p>
+                    {regHint.program_aciklama ? (
+                      <p className="whitespace-pre-line">
+                        <strong>Açıklama:</strong> {String(regHint.program_aciklama)}
+                      </p>
+                    ) : null}
                     <p>
                       <strong>Dönem:</strong> {String(regHint.baslangic_tarihi || '').slice(0, 10)} –{' '}
                       {String(regHint.bitis_tarihi || '').slice(0, 10)}

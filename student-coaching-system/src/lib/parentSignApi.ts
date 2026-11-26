@@ -530,6 +530,8 @@ export async function syncPaidTaksitToStudentPayments(institutionId?: string) {
 }
 
 export type VeliImzaRegistrationHint = {
+  /** Kurumun öğrenciye özel program notu (sadece sayısal dersler, farklı başlangıç vb.) */
+  program_aciklama?: string | null;
   program_adi?: string | null;
   programlar?: string[] | null;
   sinif?: string | null;
