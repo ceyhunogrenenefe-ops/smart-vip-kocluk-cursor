@@ -96,6 +96,8 @@ export type PrivateLessonFeeRow = {
   parent_name?: string | null;
   parent_phone?: string | null;
   contact_phone_resolved?: string | null;
+  /** Öğrencinin sınıfı (dış öğrencide boş) */
+  class_level?: string | null;
   teachers: PrivateLessonFeeTeacher[];
   system_hours: number;
   /** Öğretmenin aylık beyanında bildirdiği özel ders adedi */

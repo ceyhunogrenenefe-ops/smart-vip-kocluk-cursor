@@ -7,6 +7,7 @@ import {
   roleSetHasSuperAdmin
 } from '../api/_lib/actor-roles.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
+import { classLevelKey, matchesSearch } from '../api/_lib/turkish-search.js';
 
 const jsonError = (res, status, error, extra) => res.status(status).json({ error, ...extra });
 
@@ -146,7 +147,8 @@ async function enrichRecords(rows) {
       amount_total: Number(r.amount_total) || 0,
       amount_paid: Number(r.amount_paid) || 0,
       remaining,
-      student_name: st?.name || r.external_student_name || r.student_id || 'Dış kayıt',
+      // Öğrenci kaydı silinmişse kimlik numarası değil, kayıttaki ad görünsün
+      student_name: st?.name || r.external_student_name || r.contact_name || (r.student_id ? 'Silinmiş öğrenci' : 'Dış kayıt'),
       student_email: st?.email || null,
       student_phone: st?.phone || null,
       parent_phone: st?.parent_phone || null,
@@ -236,7 +238,7 @@ async function handleGetRecords(req, res, actor, roleSet) {
   const dueTo = typeof req.query?.due_to === 'string' ? req.query.due_to.trim().slice(0, 10) : '';
   const onlyOverdue = String(req.query?.only_overdue || '') === '1';
   const accountType = typeof req.query?.account_type === 'string' ? req.query.account_type.trim() : '';
-  const qSearch = typeof req.query?.q === 'string' ? req.query.q.trim().toLowerCase() : '';
+  const qSearch = typeof req.query?.q === 'string' ? req.query.q.trim() : '';
   const classLevel = typeof req.query?.class_level === 'string' ? req.query.class_level.trim() : '';
 
   let q = supabaseAdmin
@@ -288,30 +290,33 @@ async function handleGetRecords(req, res, actor, roleSet) {
   if (classLevel) {
     // Zenginlestirmeden sonra: kayittaki class_level bos olabiliyor, enrichRecords
     // ogrencinin kaydindan dolduruyor. Once filtrelenirse o kayitlar kaybolur.
-    enriched = enriched.filter((r) => String(r.class_level || '') === classLevel);
+    // "5" ile "5. Sınıf", "YOS" ile "YÖS" aynı sınıf sayılır
+    const wanted = classLevelKey(classLevel);
+    enriched = enriched.filter((r) => classLevelKey(r.class_level) === wanted);
   }
   if (onlyOverdue) {
     const today = todayYmd();
     enriched = enriched.filter((r) => r.status !== 'paid' && r.due_date && String(r.due_date).slice(0, 10) < today);
   }
   if (qSearch) {
-    enriched = enriched.filter((r) => {
-      const blob = [
-        r.student_name,
-        r.external_student_name,
-        r.coach_name,
-        r.account_label,
-        r.title,
-        r.class_level,
-        r.contact_phone_resolved,
-        r.notes,
-        r.payment_type
-      ]
-        .filter(Boolean)
-        .join(' ')
-        .toLowerCase();
-      return blob.includes(qSearch);
-    });
+    enriched = enriched.filter((r) =>
+      matchesSearch(
+        [
+          r.student_name,
+          r.external_student_name,
+          r.coach_name,
+          r.account_label,
+          r.title,
+          r.class_level,
+          r.contact_phone_resolved,
+          r.notes,
+          r.payment_type,
+          r.contact_name,
+          r.parent_name
+        ],
+        qSearch
+      )
+    );
   }
 
   const today = todayYmd();

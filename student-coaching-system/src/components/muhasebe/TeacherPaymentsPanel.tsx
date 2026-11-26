@@ -13,7 +13,8 @@ import {
   Unlock,
   Wallet
 } from 'lucide-react';
-import { apiFetch } from '../../lib/session';
+import { uniqueNames } from '../../lib/classFilterOptions';
+import { matchesSearch } from '../../lib/turkishSearch';
 import {
   addTeacherPayrollExtra,
   deleteTeacherPayrollExtra,
@@ -30,7 +31,6 @@ import {
   type PayrollTeacherCard
 } from '../../lib/teacherPayrollApi';
 
-type TeacherOption = { id: string; name: string };
 
 function monthStartIso(): string {
   const d = new Date();
@@ -102,7 +102,6 @@ type Props = {
 };
 
 export function TeacherPaymentsPanel({ onTeacherTotalChange }: Props) {
-  const [teachers, setTeachers] = useState<TeacherOption[]>([]);
   const [odemeFiltre, setOdemeFiltre] = useState<'all' | 'paid' | 'unpaid'>('all');
   /**
    * Ödeme hesapları.
@@ -126,7 +125,8 @@ export function TeacherPaymentsPanel({ onTeacherTotalChange }: Props) {
   const [varsayilanKaydet, setVarsayilanKaydet] = useState(false);
   const [from, setFrom] = useState(monthStartIso);
   const [to, setTo] = useState(() => monthEndIso(monthStartIso()));
-  const [teacherId, setTeacherId] = useState('');
+  /** Öğretmen adına göre süzme — büyük/küçük harf ve Türkçe harf farkı gözetmez */
+  const [teacherQuery, setTeacherQuery] = useState('');
   const [cards, setCards] = useState<PayrollTeacherCard[]>([]);
   // Tip, uç noktanın döndürdüğü özetle aynı kalsın diye API tipinden türetilir
   const [overview, setOverview] = useState<PayrollSummary['overview'] | null>(null);
@@ -147,39 +147,6 @@ export function TeacherPaymentsPanel({ onTeacherTotalChange }: Props) {
     setTo(bounds.to);
   }, []);
 
-  useEffect(() => {
-    let cancel = false;
-    void (async () => {
-      try {
-        const res = await apiFetch('/api/users');
-        const uj = await res.json().catch(() => ({}));
-        if (!cancel && res.ok) {
-          const rows = Array.isArray(uj.data) ? uj.data : [];
-          setTeachers(
-            rows
-              .filter((r: { role?: string; roles?: string[] }) => {
-                const roleRaw = String(r.role || '').toLowerCase();
-                const roleList = Array.isArray(r.roles)
-                  ? r.roles.map((x) => String(x || '').toLowerCase())
-                  : [];
-                return roleRaw === 'teacher' || roleList.includes('teacher');
-              })
-              .map((r: { id: string; name?: string; email?: string }) => ({
-                id: String(r.id),
-                name: String(r.name || r.email || r.id)
-              }))
-              .sort((a: TeacherOption, b: TeacherOption) => a.name.localeCompare(b.name, 'tr'))
-          );
-        }
-      } catch (e) {
-        if (!cancel) setError(e instanceof Error ? e.message : 'Öğretmen listesi yüklenemedi');
-      }
-    })();
-    return () => {
-      cancel = true;
-    };
-  }, []);
-
   const reload = useCallback(async () => {
     if (!from || !to) return;
     setLoading(true);
@@ -187,8 +154,7 @@ export function TeacherPaymentsPanel({ onTeacherTotalChange }: Props) {
     try {
       const data = await fetchTeacherPayrollSummary({
         from,
-        to,
-        teacherId: teacherId || undefined
+        to
       });
       setCards(data.teachers || []);
       setOverview(data.overview || null);
@@ -217,7 +183,7 @@ export function TeacherPaymentsPanel({ onTeacherTotalChange }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [from, to, teacherId, onTeacherTotalChange]);
+  }, [from, to, onTeacherTotalChange]);
 
   useEffect(() => {
     void reload();
@@ -379,10 +345,15 @@ export function TeacherPaymentsPanel({ onTeacherTotalChange }: Props) {
   const filteredCount = cards.length;
   /** Ödeme durumu filtresi — özet kartları tüm aya ait kalır, tablo süzülür. */
   const gorunenKartlar = useMemo(() => {
-    if (odemeFiltre === 'all') return cards;
     const odendi = (c: PayrollTeacherCard) => c.settlement?.status === 'paid';
-    return cards.filter((c) => (odemeFiltre === 'paid' ? odendi(c) : !odendi(c)));
-  }, [cards, odemeFiltre]);
+    return cards.filter((c) => {
+      if (odemeFiltre !== 'all' && (odemeFiltre === 'paid' ? !odendi(c) : odendi(c))) return false;
+      return matchesSearch(c.teacher_name, teacherQuery);
+    });
+  }, [cards, odemeFiltre, teacherQuery]);
+
+  /** Arama kutusunda öneri olarak çıkan öğretmen adları (seçili ayda kartı olanlar) */
+  const teacherNames = useMemo(() => uniqueNames(cards.map((c) => c.teacher_name)), [cards]);
 
   const beyanliOgretmenSayisi = useMemo(
     () => cards.filter((c) => c.declaration).length,
@@ -512,18 +483,19 @@ export function TeacherPaymentsPanel({ onTeacherTotalChange }: Props) {
           </label>
           <label className="block text-sm">
             <span className="mb-1 block font-medium text-slate-700 dark:text-slate-200">Öğretmen</span>
-            <select
-              value={teacherId}
-              onChange={(e) => setTeacherId(e.target.value)}
+            <input
+              type="search"
+              value={teacherQuery}
+              onChange={(e) => setTeacherQuery(e.target.value)}
+              list="ogretmen-odeme-isimler"
+              placeholder="Öğretmen adı yazın…"
               className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-800"
-            >
-              <option value="">Tüm öğretmenler</option>
-              {teachers.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.name}
-                </option>
+            />
+            <datalist id="ogretmen-odeme-isimler">
+              {teacherNames.map((n) => (
+                <option key={n} value={n} />
               ))}
-            </select>
+            </datalist>
           </label>
           <label className="block text-sm">
             <span className="mb-1 block font-medium text-slate-700 dark:text-slate-200">Başlangıç</span>
@@ -688,6 +660,12 @@ export function TeacherPaymentsPanel({ onTeacherTotalChange }: Props) {
       {!loading && filteredCount === 0 ? (
         <div className="rounded-xl border border-dashed border-slate-300 px-4 py-10 text-center text-sm text-slate-500">
           Seçili dönemde sistem kaydı veya hakediş kartı bulunamadı.
+        </div>
+      ) : null}
+
+      {!loading && cards.length > 0 && gorunenKartlar.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-slate-300 px-4 py-6 text-center text-sm text-slate-500">
+          Aramaya veya ödeme durumuna uyan öğretmen yok.
         </div>
       ) : null}
 
