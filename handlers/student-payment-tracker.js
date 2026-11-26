@@ -8,6 +8,78 @@ import {
 } from '../api/_lib/actor-roles.js';
 import { supabaseAdmin } from '../api/_lib/supabase-admin.js';
 import { classLevelKey, matchesSearch } from '../api/_lib/turkish-search.js';
+import { extraItemsTotal, readExtraItems } from '../api/_lib/private-lesson-fee-extras.js';
+
+/**
+ * Özel ders ücretleri ekranında girilen aylık tahsilatlar ayrı tabloda durur
+ * (private_lesson_monthly_fees). Öğrenci ödemeleri listesinde de görünsünler diye
+ * salt-okunur satır olarak eklenir; düzenleme Özel ders ücretleri ekranından yapılır.
+ * Genel bakış bu tabloyu zaten ayrıca topladığı için orada çift sayım olmaz.
+ */
+async function loadPrivateLessonFeeRows({ inst, dueFrom, dueTo, accountIds, accountType, status }) {
+  let q = supabaseAdmin
+    .from('private_lesson_monthly_fees')
+    .select('*')
+    .order('period_ym', { ascending: true })
+    .limit(3000);
+  if (inst) q = q.or(`institution_id.eq.${inst},institution_id.is.null`);
+  if (dueFrom) q = q.gte('period_ym', dueFrom.slice(0, 7));
+  if (dueTo) q = q.lte('period_ym', dueTo.slice(0, 7));
+  const { data, error } = await q;
+  if (error) {
+    if (/private_lesson_monthly_fees|does not exist|schema cache|PGRST205/i.test(errorMessage(error))) return [];
+    throw error;
+  }
+  const allowed = accountIds ? new Set(accountIds.map(String)) : null;
+  const out = [];
+  for (const f of data || []) {
+    const accId = f.payment_account_id ? String(f.payment_account_id) : null;
+    if (allowed) {
+      // Banka kanalında hesabı seçilmemiş kayıtlar da görünür (diğer kayıtlardaki gibi)
+      if (accId ? !allowed.has(accId) : accountType !== 'bank') continue;
+    }
+    const unit = Number(f.unit_price_tl) || 0;
+    const hours = f.hours_override != null ? Number(f.hours_override) || 0 : 0;
+    const extras = extraItemsTotal(readExtraItems(f.extra_items));
+    const collected = Number(f.amount_collected_tl) || 0;
+    const total = Math.round(Math.max(hours * unit + extras, collected) * 100) / 100;
+    if (total <= 0 && collected <= 0) continue;
+    const st = STATUSES.has(String(f.collection_status))
+      ? String(f.collection_status)
+      : collected <= 0
+        ? 'unpaid'
+        : collected >= total
+          ? 'paid'
+          : 'partial';
+    if (status && st !== status) continue;
+    const ym = String(f.period_ym || '');
+    out.push({
+      id: `plf:${f.id}`,
+      source: 'private_lesson_fee',
+      private_lesson_fee_id: f.id,
+      period_ym: ym,
+      institution_id: f.institution_id,
+      student_id: f.student_id || null,
+      external_student_name: f.student_id ? null : f.external_student_name || null,
+      coach_id: null,
+      payment_account_id: accId,
+      payment_type: 'ozel_ders',
+      title: `Özel ders — ${ym}${hours ? ` · ${hours} ders × ${unit} ₺` : ''}`,
+      amount_total: total,
+      amount_paid: collected,
+      currency: 'TRY',
+      status: st,
+      due_date: /^\d{4}-\d{2}$/.test(ym) ? `${ym}-01` : null,
+      paid_at: null,
+      class_level: null,
+      contact_phone: null,
+      notes: f.notes || null,
+      created_at: f.created_at,
+      updated_at: f.updated_at
+    });
+  }
+  return out;
+}
 
 const jsonError = (res, status, error, extra) => res.status(status).json({ error, ...extra });
 
@@ -260,8 +332,10 @@ async function handleGetRecords(req, res, actor, roleSet) {
   if (dueFrom && YMD.test(dueFrom)) q = q.gte('due_date', dueFrom);
   if (dueTo && YMD.test(dueTo)) q = q.lte('due_date', dueTo);
 
+  let channelAccountIds = null;
   if (accountType && ACCOUNT_TYPES.has(accountType)) {
     const typeIds = await accountIdsForType(inst, accountType);
+    channelAccountIds = typeIds;
     if (accountType === 'bank') {
       // Tahsilat/taksit senkronu hesap seçmeden kayıt açar (payment_account_id null).
       // Banka kanalında bu kayıtlar da görünsün.
@@ -286,7 +360,24 @@ async function handleGetRecords(req, res, actor, roleSet) {
     throw error;
   }
 
-  let enriched = await enrichRecords(data || []);
+  // Özel ders ücretleri ekranındaki tahsilatlar da listede görünsün (salt-okunur)
+  let privateRows = [];
+  if ((!paymentType || paymentType === 'ozel_ders') && !coachId) {
+    privateRows = await loadPrivateLessonFeeRows({
+      inst,
+      dueFrom: dueFrom && YMD.test(dueFrom) ? dueFrom : '',
+      dueTo: dueTo && YMD.test(dueTo) ? dueTo : '',
+      accountIds: accountId ? [accountId] : channelAccountIds,
+      accountType: accountId ? 'specific' : accountType,
+      status: status && STATUSES.has(status) ? status : ''
+    });
+    if (studentId) privateRows = privateRows.filter((r) => String(r.student_id || '') === studentId);
+  }
+
+  let enriched = await enrichRecords([...(data || []), ...privateRows]);
+  if (privateRows.length) {
+    enriched.sort((x, y) => String(x.due_date || '9999').localeCompare(String(y.due_date || '9999')));
+  }
   if (classLevel) {
     // Zenginlestirmeden sonra: kayittaki class_level bos olabiliyor, enrichRecords
     // ogrencinin kaydindan dolduruyor. Once filtrelenirse o kayitlar kaybolur.
