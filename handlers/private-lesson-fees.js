@@ -124,7 +124,7 @@ async function loadNames(studentIds, teacherIds) {
   if (sids.length) {
     const { data } = await supabaseAdmin
       .from('students')
-      .select('id,name,phone,parent_phone,parent_name')
+      .select('id,name,phone,parent_phone,parent_name,class_level')
       .in('id', sids);
     for (const s of data || []) {
       const id = String(s.id);
@@ -132,7 +132,8 @@ async function loadNames(studentIds, teacherIds) {
       studentContactMap.set(id, {
         parent_name: s.parent_name || null,
         parent_phone: s.parent_phone || null,
-        phone: s.phone || null
+        phone: s.phone || null,
+        class_level: s.class_level != null && String(s.class_level).trim() ? String(s.class_level) : null
       });
     }
   }
@@ -251,6 +252,8 @@ function buildRow({
     parent_name: parentName,
     parent_phone: parentPhone,
     contact_phone_resolved: parentPhone,
+    // Muhasebe ekranındaki sınıf filtresi için
+    class_level: contact?.class_level || null,
     teachers,
     system_hours: systemHours,
     declared_hours: declaredHours,

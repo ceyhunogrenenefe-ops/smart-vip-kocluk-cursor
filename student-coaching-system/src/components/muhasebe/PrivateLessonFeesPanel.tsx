@@ -22,6 +22,8 @@ import {
 } from '../../lib/groupLessonPaymentUnits';
 import { listPaymentAccounts, type PaymentAccount } from '../../lib/studentPaymentTrackerApi';
 import { normalizeWhatsAppPhoneForSend } from '../../lib/whatsappOutbound';
+import { buildClassFilterOptions, classLevelLabel, uniqueNames } from '../../lib/classFilterOptions';
+import { classLevelKey, matchesSearch } from '../../lib/turkishSearch';
 import {
   buildPrivateLessonFeeWhatsAppMessage,
   deletePrivateLessonFee,
@@ -182,6 +184,9 @@ export default function PrivateLessonFeesPanel() {
   ).trim();
 
   const [month, setMonth] = useState(currentMonthYm);
+  /** Liste filtresi: öğrenci / veli / öğretmen adı ve sınıf (büyük-küçük harf fark etmez) */
+  const [q, setQ] = useState('');
+  const [filterClass, setFilterClass] = useState('');
   const [rows, setRows] = useState<PrivateLessonFeeRow[]>([]);
   const [summary, setSummary] = useState<PrivateLessonFeeSummary | null>(null);
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
@@ -247,6 +252,23 @@ export default function PrivateLessonFeesPanel() {
   useEffect(() => {
     void reload();
   }, [reload]);
+
+  const classOptions = useMemo(() => buildClassFilterOptions(rows.map((r) => r.class_level)), [rows]);
+  const nameSuggestions = useMemo(
+    () => uniqueNames(rows.flatMap((r) => [r.student_name, ...r.teachers.map((t) => t.teacher_name)])),
+    [rows]
+  );
+  const visibleRows = useMemo(
+    () =>
+      rows.filter((r) => {
+        if (filterClass && classLevelKey(r.class_level) !== filterClass) return false;
+        return matchesSearch(
+          [r.student_name, r.parent_name, r.contact_phone_resolved, ...r.teachers.map((t) => t.teacher_name)],
+          q
+        );
+      }),
+    [rows, q, filterClass]
+  );
 
   useEffect(() => {
     if (!waModal?.rowKey || waModal.userEditedMessage) return;
@@ -710,7 +732,56 @@ export default function PrivateLessonFeesPanel() {
         </div>
       ) : (
         <div className="space-y-3">
-          {rows.map((row) => {
+          <div className="flex flex-wrap items-end gap-2 rounded-xl border border-slate-200 bg-slate-50/80 p-3 dark:border-slate-700 dark:bg-slate-800/40">
+            <label className="min-w-[14rem] flex-1 text-xs text-slate-500">
+              Ara
+              <input
+                type="search"
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                list="ozel-ders-isimler"
+                placeholder="Öğrenci, veli veya öğretmen adı…"
+                className={fieldCls}
+              />
+              <datalist id="ozel-ders-isimler">
+                {nameSuggestions.map((n) => (
+                  <option key={n} value={n} />
+                ))}
+              </datalist>
+            </label>
+            <label className="w-44 text-xs text-slate-500">
+              Sınıf
+              <select value={filterClass} onChange={(e) => setFilterClass(e.target.value)} className={fieldCls}>
+                <option value="">Tümü</option>
+                {classOptions.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {q || filterClass ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setQ('');
+                  setFilterClass('');
+                }}
+                className="pb-2 text-xs font-medium text-slate-500 underline-offset-2 hover:text-slate-800 hover:underline"
+              >
+                Filtreyi temizle
+              </button>
+            ) : null}
+            <span className="ml-auto pb-2 text-xs text-slate-500">
+              {visibleRows.length} / {rows.length} öğrenci
+            </span>
+          </div>
+          {visibleRows.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-slate-200 px-4 py-6 text-center text-sm text-slate-500 dark:border-slate-700">
+              Aramaya uyan öğrenci yok.
+            </div>
+          ) : null}
+          {visibleRows.map((row) => {
             const key = privateLessonFeeRowKey(row);
             const draft = drafts[key] || draftFromRow(row);
             const dersTutari = liveLessonTotal(draft);
@@ -738,6 +809,11 @@ export default function PrivateLessonFeesPanel() {
                       className="text-left font-semibold text-slate-900 hover:text-indigo-700 hover:underline dark:text-slate-100"
                     >
                       {row.student_name}
+                      {row.class_level ? (
+                        <span className="ml-1.5 text-[11px] font-normal text-slate-500">
+                          · {classLevelLabel(row.class_level)}
+                        </span>
+                      ) : null}
                       {row.is_external ? (
                         <span className="ml-1.5 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800 dark:bg-amber-950 dark:text-amber-200">
                           Dış

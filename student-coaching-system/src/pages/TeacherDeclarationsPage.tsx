@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, Check, Copy, Loader2, Send, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiFetch } from '../lib/session';
+import { uniqueNames } from '../lib/classFilterOptions';
+import { matchesSearch } from '../lib/turkishSearch';
 
 type Totals = { group: number; private: number; guidance: number };
 type CompareRow = {
@@ -131,14 +133,16 @@ export default function TeacherDeclarationsPage() {
   };
 
   const filtered = useMemo(() => {
-    const needle = q.trim().toLocaleLowerCase('tr');
     return rows.filter((r) => {
-      if (fStatus && r.status !== fStatus) return false;
-      if (fStatus === 'mismatch' && r.comparison.state !== 'mismatch') return false;
-      if (!needle) return true;
-      return r.teacher_name.toLocaleLowerCase('tr').includes(needle);
+      if (fStatus === 'mismatch') {
+        if (r.comparison?.state !== 'mismatch') return false;
+      } else if (fStatus && r.status !== fStatus) return false;
+      // Büyük/küçük harf ve Türkçe harf farkı gözetmez: "ILKER", "ilker", "İlker" aynı
+      return matchesSearch(r.teacher_name, q);
     });
   }, [rows, q, fStatus]);
+
+  const teacherNames = useMemo(() => uniqueNames(rows.map((r) => r.teacher_name)), [rows]);
 
   const ac = async (id: string) => {
     setDetailLoading(true);
@@ -274,10 +278,18 @@ Devam edilsin mi?`
         <label className="text-xs text-slate-600">
           Öğretmen ara
           <input
+            type="search"
             value={q}
             onChange={(e) => setQ(e.target.value)}
+            list="beyan-ogretmen-isimler"
+            placeholder="Öğretmen adı…"
             className="mt-1 block w-48 rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
           />
+          <datalist id="beyan-ogretmen-isimler">
+            {teacherNames.map((n) => (
+              <option key={n} value={n} />
+            ))}
+          </datalist>
         </label>
         <label className="text-xs text-slate-600">
           Form durumu
@@ -290,6 +302,7 @@ Devam edilsin mi?`
             {Object.entries(STATUS).map(([id, s]) => (
               <option key={id} value={id}>{s.dot} {s.label}</option>
             ))}
+            <option value="mismatch">🔴 Sistemle uyuşmayan</option>
           </select>
         </label>
         <span className="ml-auto text-xs text-slate-500">{filtered.length} kayıt · {periodLabel}</span>

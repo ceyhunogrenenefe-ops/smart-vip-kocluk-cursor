@@ -19,8 +19,9 @@ import {
 import { toast } from 'sonner';
 import { useAuth } from '../../context/AuthContext';
 import { useApp } from '../../context/AppContext';
-import { CLASS_LEVELS, formatClassLevelLabel, type Student } from '../../types';
+import { formatClassLevelLabel, type Student } from '../../types';
 import { normalizeWhatsAppPhoneForSend } from '../../lib/whatsappOutbound';
+import { buildClassFilterOptions, classLevelLabel, uniqueNames } from '../../lib/classFilterOptions';
 import {
   buildPaymentWhatsAppMessage,
   createPaymentAccount,
@@ -254,6 +255,14 @@ export default function StudentPaymentTrackerPanel() {
   const [error, setError] = useState('');
 
   const [q, setQ] = useState('');
+  /** Aramada her tuşta istek atılmasın; yazmayı bırakınca (300 ms) sorgulanır. */
+  const [qDebounced, setQDebounced] = useState('');
+  useEffect(() => {
+    const t = window.setTimeout(() => setQDebounced(q.trim()), 300);
+    return () => window.clearTimeout(t);
+  }, [q]);
+  /** Yalnız son isteğin cevabı ekrana yazılır; geç gelen eski cevap listeyi bozmasın. */
+  const reloadSeq = useRef(0);
   const [channel, setChannel] = useState<PaymentAccountType>('bank');
   const [filterType, setFilterType] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
@@ -307,28 +316,23 @@ export default function StudentPaymentTrackerPanel() {
    * Sinif secenekleri kapsamdaki ogrencilerden turetiliyor; satirlardan turetilseydi
    * filtre secilince liste tek secenege dusup geri donulemez olurdu.
    */
-  const classOptions = useMemo(() => {
-    const seen = new Set<string>();
-    for (const st of scopedStudents) {
-      const lv = st.classLevel;
-      if (lv !== undefined && lv !== null && String(lv).trim()) seen.add(String(lv));
-    }
-    const ordered = CLASS_LEVELS.filter((l) => seen.has(String(l.value))).map((l) => ({
-      value: String(l.value),
-      label: l.label
-    }));
-    const bilinen = new Set(ordered.map((o) => o.value));
-    const digerleri = [...seen]
-      .filter((v) => !bilinen.has(v))
-      .sort((a, b) => a.localeCompare(b, 'tr', { numeric: true }))
-      .map((v) => ({ value: v, label: formatClassLevelLabel(v) }));
-    return [...ordered, ...digerleri];
-  }, [scopedStudents]);
+  const [rowClassValues, setRowClassValues] = useState<string[]>([]);
+  const classOptions = useMemo(
+    () => buildClassFilterOptions([...scopedStudents.map((st) => st.classLevel), ...rowClassValues]),
+    [scopedStudents, rowClassValues]
+  );
+
+  /** Arama kutusunda yazarken öneri olarak çıkan öğrenci adları */
+  const nameSuggestions = useMemo(
+    () => uniqueNames([...scopedStudents.map((st) => st.name), ...rows.map((r) => r.student_name)]),
+    [scopedStudents, rows]
+  );
 
   const channelLabel = ACCOUNT_TYPE_LABELS[channel];
   const isCreditCard = channel === 'credit_card';
 
   const reload = useCallback(async () => {
+    const seq = ++reloadSeq.current;
     setLoading(true);
     setError('');
     setSchemaHint(null);
@@ -345,24 +349,33 @@ export default function StudentPaymentTrackerPanel() {
           dueFrom: dueFrom || undefined,
           dueTo: dueTo || undefined,
           onlyOverdue: onlyOverdue || undefined,
-          q: q.trim() || undefined
+          q: qDebounced || undefined
         }),
         listPaymentAccounts(institutionId || undefined, channel)
       ]);
+      if (seq !== reloadSeq.current) return;
       if (rec.hint === 'student_payment_tracker_sql_missing' || acc.hint === 'student_payment_tracker_sql_missing') {
         setSchemaHint(
           'Supabase SQL Editor’da `2026-08-05-student-payment-tracker.sql`, `2026-08-06-student-payment-installments.sql` ve `2026-08-06-student-payment-external.sql` dosyalarını çalıştırın.'
         );
       }
       setRows(rec.data);
+      // Kayıtlardaki sınıflar da seçenek olsun (öğrenci kartında sınıf boş olabiliyor);
+      // filtre seçilince liste daralmasın diye eklenir, çıkarılmaz
+      setRowClassValues((prev) => {
+        const next = new Set(prev);
+        for (const r of rec.data) if (r.class_level) next.add(String(r.class_level));
+        return next.size === prev.length ? prev : [...next];
+      });
       setStats(rec.stats);
       setAccounts(acc.data);
     } catch (e) {
+      if (seq !== reloadSeq.current) return;
       setError(e instanceof Error ? e.message : 'Yüklenemedi');
     } finally {
-      setLoading(false);
+      if (seq === reloadSeq.current) setLoading(false);
     }
-  }, [institutionId, filterStatus, filterType, filterCoach, filterAccount, filterClass, channel, dueFrom, dueTo, onlyOverdue, q]);
+  }, [institutionId, filterStatus, filterType, filterCoach, filterAccount, filterClass, channel, dueFrom, dueTo, onlyOverdue, qDebounced]);
 
   useEffect(() => {
     setFilterAccount('');
@@ -847,7 +860,7 @@ export default function StudentPaymentTrackerPanel() {
           </div>
         </td>
         <td className="px-3 py-2.5 text-slate-700 dark:text-slate-300">
-          <div>{r.class_level != null ? formatClassLevelLabel(r.class_level) : '—'}</div>
+          <div>{r.class_level != null ? classLevelLabel(r.class_level) : '—'}</div>
           <div className="text-[11px] text-slate-500">{r.coach_name || '—'}</div>
         </td>
         <td className="px-3 py-2.5">
@@ -1122,11 +1135,18 @@ export default function StudentPaymentTrackerPanel() {
         <label className="text-xs text-slate-500">
           Ara
           <input
+            type="search"
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="Öğrenci, koç, hesap, telefon…"
+            list="ogrenci-odeme-isimler"
+            placeholder="Öğrenci adı, koç, hesap, telefon…"
             className="mt-1 w-full rounded-lg border border-slate-200 px-2.5 py-2 text-sm dark:border-slate-600 dark:bg-slate-900"
           />
+          <datalist id="ogrenci-odeme-isimler">
+            {nameSuggestions.map((n) => (
+              <option key={n} value={n} />
+            ))}
+          </datalist>
         </label>
         <label className="text-xs text-slate-500">
           Ödeme türü
