@@ -24,6 +24,7 @@ import { listPaymentAccounts, type PaymentAccount } from '../../lib/studentPayme
 import { normalizeWhatsAppPhoneForSend } from '../../lib/whatsappOutbound';
 import { buildClassFilterOptions, classLevelLabel, uniqueNames } from '../../lib/classFilterOptions';
 import { classLevelKey, foldTr, matchesSearch } from '../../lib/turkishSearch';
+import { addPaymentToNotes, clearPaymentsInNotes, paymentLines } from '../../lib/privateLessonPaymentHistory';
 import {
   buildPrivateLessonFeeWhatsAppMessage,
   deletePrivateLessonFee,
@@ -428,13 +429,51 @@ export default function PrivateLessonFeesPanel() {
     setExtras(key, (list) => list.filter((_, i) => i !== idx));
   };
 
-  const saveRow = async (row: PrivateLessonFeeRow) => {
+  /**
+   * Aynı ay için ikinci (üçüncü…) ödeme: ekranda uyarı çıkar, onaylanırsa
+   * önceki tahsilatın üstüne eklenir ve ödeme geçmişine satır olarak yazılır.
+   */
+  const [payModal, setPayModal] = useState<{
+    rowKey: string;
+    /** 'add': "Ödeme ekle" ile açıldı; 'changed': Tahsilat kutusu değiştirilip Kaydet'e basıldı */
+    mode: 'add' | 'changed';
+    amount: string;
+    accountId: string;
+  } | null>(null);
+  const payModalRow = payModal ? rows.find((r) => privateLessonFeeRowKey(r) === payModal.rowKey) || null : null;
+
+  const saveRow = async (
+    row: PrivateLessonFeeRow,
+    opts?: { mode: 'add' | 'replace'; amount?: number; accountId?: string }
+  ) => {
     const key = privateLessonFeeRowKey(row);
     const draft = drafts[key];
     if (!draft) return;
     const hours = Number(draft.hours);
     const unit = Number(draft.unit_price_tl);
-    const collected = Number(draft.amount_collected_tl);
+    const prevCollected = Number(row.amount_collected_tl) || 0;
+    let collected = Number(draft.amount_collected_tl);
+    // Bu ay için zaten tahsilat varken tutar değiştirildiyse önce sor: ikinci ödeme mi, düzeltme mi?
+    if (
+      !opts &&
+      row.fee_row_id &&
+      prevCollected > 0 &&
+      Number.isFinite(collected) &&
+      Math.abs(collected - prevCollected) > 0.001
+    ) {
+      setPayModal({ rowKey: key, mode: 'changed', amount: String(collected), accountId: draft.payment_account_id || '' });
+      return;
+    }
+    let notesPatch: { notes?: string | null } = {};
+    let statusOverride: string | null = null;
+    if (opts?.mode === 'add') {
+      const amount = Number(opts.amount) || 0;
+      collected = Math.round((prevCollected + amount) * 100) / 100;
+      notesPatch = { notes: addPaymentToNotes(row.notes, prevCollected, amount) };
+      statusOverride = collected >= liveTotal(draft) - 0.001 ? 'paid' : 'partial';
+    } else if (opts?.mode === 'replace') {
+      notesPatch = { notes: clearPaymentsInNotes(row.notes) };
+    }
     if (!Number.isFinite(hours) || hours < 0) {
       toast.error('Geçerli ders adedi girin');
       return;
@@ -472,8 +511,9 @@ export default function PrivateLessonFeesPanel() {
         hours_override: hoursOverride,
         unit_price_tl: unit,
         amount_collected_tl: collected,
-        collection_status: draft.collection_status,
-        payment_account_id: draft.payment_account_id || null,
+        collection_status: statusOverride || draft.collection_status,
+        payment_account_id: (opts?.mode === 'add' && opts.accountId) || draft.payment_account_id || null,
+        ...notesPatch,
         extra_items: draft.extras.map((e) => ({
           id: e.id || undefined,
           kind: e.kind,
@@ -482,7 +522,8 @@ export default function PrivateLessonFeesPanel() {
           unit_price_tl: Number(e.unit_price_tl) || 0
         }))
       });
-      toast.success('Kaydedildi');
+      toast.success(opts?.mode === 'add' ? 'Ödeme eklendi' : 'Kaydedildi');
+      setPayModal(null);
       await reload();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Kayıt başarısız');
@@ -553,8 +594,41 @@ export default function PrivateLessonFeesPanel() {
       return;
     }
 
+    // Aynı ay için bu adla kayıt varsa uyar; onaylanırsa ikinci ödeme olarak eklenir
+    const mevcut = rows.find(
+      (r) =>
+        (r.period_ym || entryMonth) === entryMonth &&
+        r.fee_row_id &&
+        foldTr(r.student_name) === foldTr(name)
+    );
+    let ekOdeme = false;
+    if (mevcut) {
+      const prev = Number(mevcut.amount_collected_tl) || 0;
+      ekOdeme = window.confirm(
+        `${mevcut.student_name} için ${monthLabel(entryMonth)} ayında zaten kayıt var` +
+          (prev > 0 ? ` (${formatTryAmount(prev)} ₺ tahsilat).` : '.') +
+          `\n\nTamam: ${formatTryAmount(collected)} ₺ ikinci ödeme olarak eklensin (toplam ${formatTryAmount(prev + collected)} ₺).` +
+          '\nİptal: hiçbir şey kaydedilmesin.'
+      );
+      if (!ekOdeme) return;
+    }
+
     setAddingExternal(true);
     try {
+      if (mevcut && ekOdeme) {
+        const prev = Number(mevcut.amount_collected_tl) || 0;
+        await upsertPrivateLessonFee({
+          fee_row_id: mevcut.fee_row_id || null,
+          student_id: mevcut.is_external ? null : mevcut.student_id,
+          is_external: Boolean(mevcut.is_external),
+          external_student_name: mevcut.is_external ? mevcut.external_student_name || mevcut.student_name : null,
+          month: entryMonth,
+          institution_id: institutionId || null,
+          amount_collected_tl: Math.round((prev + collected) * 100) / 100,
+          notes: addPaymentToNotes(mevcut.notes, prev, collected),
+          ...(extAccountId ? { payment_account_id: extAccountId } : {})
+        });
+      } else {
       await upsertPrivateLessonFee({
         is_external: true,
         external_student_name: name,
@@ -566,7 +640,8 @@ export default function PrivateLessonFeesPanel() {
         collection_status: extStatus,
         payment_account_id: extAccountId || null
       });
-      toast.success('Dış öğrenci eklendi');
+      }
+      toast.success(mevcut ? 'İkinci ödeme eklendi' : 'Dış öğrenci eklendi');
       setExtName('');
       setExtHours('0');
       setExtUnit('0');
@@ -1032,6 +1107,32 @@ export default function PrivateLessonFeesPanel() {
                       onChange={(e) => patchDraft(key, { amount_collected_tl: e.target.value })}
                       className={fieldCls}
                     />
+                    {row.fee_row_id && Number(row.amount_collected_tl) > 0 ? (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setPayModal({
+                            rowKey: key,
+                            mode: 'add',
+                            amount: '',
+                            accountId: draft.payment_account_id || ''
+                          })
+                        }
+                        className="mt-1.5 inline-flex w-full items-center justify-center gap-1 rounded-lg border border-indigo-200 bg-indigo-50 px-2 py-1 text-[11px] font-semibold text-indigo-800 hover:bg-indigo-100 dark:border-indigo-900 dark:bg-indigo-950/40 dark:text-indigo-200"
+                        title="Bu ay için ikinci bir ödeme ekle"
+                      >
+                        + Ödeme ekle
+                      </button>
+                    ) : null}
+                    {paymentLines(row.notes).length ? (
+                      <span className="mt-1 block space-y-0.5 text-[10px] font-normal text-slate-500">
+                        {paymentLines(row.notes).map((l, i) => (
+                          <span key={i} className="block">
+                            {l}
+                          </span>
+                        ))}
+                      </span>
+                    ) : null}
                     <button
                       type="button"
                       onClick={() => openPaymentWaModal(row, draft)}
@@ -1345,6 +1446,94 @@ export default function PrivateLessonFeesPanel() {
           })}
         </div>
       )}
+
+      {payModal && payModalRow ? (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/50 p-4 sm:items-center"
+          role="dialog"
+          aria-labelledby="ozel-ders-ikinci-odeme"
+        >
+          {(() => {
+            const prev = Number(payModalRow.amount_collected_tl) || 0;
+            const amount = Number(payModal.amount) || 0;
+            const ay = monthLabel(payModalRow.period_ym || entryMonth);
+            const busy = savingId === payModal.rowKey;
+            return (
+              <div className="w-full max-w-md rounded-2xl bg-white p-4 shadow-xl dark:bg-slate-900">
+                <h2 id="ozel-ders-ikinci-odeme" className="text-sm font-bold text-amber-800 dark:text-amber-300">
+                  ⚠️ Bu ay için zaten ödeme kayıtlı
+                </h2>
+                <p className="mt-2 text-sm text-slate-700 dark:text-slate-200">
+                  <strong>{payModalRow.student_name}</strong> için <strong>{ay}</strong> ayında{' '}
+                  <strong>{formatTryAmount(prev)} ₺</strong> tahsilat zaten var.
+                </p>
+                {paymentLines(payModalRow.notes).length ? (
+                  <ul className="mt-1 list-inside list-disc text-xs text-slate-500">
+                    {paymentLines(payModalRow.notes).map((l, i) => (
+                      <li key={i}>{l}</li>
+                    ))}
+                  </ul>
+                ) : null}
+                <label className="mt-3 block text-[11px] font-medium text-slate-500">
+                  {payModal.mode === 'add' ? 'Yeni ödeme tutarı' : 'Girdiğin tutar'}
+                  <input
+                    type="number"
+                    min={0}
+                    step={1}
+                    autoFocus
+                    value={payModal.amount}
+                    onChange={(e) => setPayModal({ ...payModal, amount: e.target.value })}
+                    className={fieldCls}
+                  />
+                </label>
+                <label className="mt-2 block text-[11px] font-medium text-slate-500">
+                  Yatırılan banka hesabı
+                  <select
+                    value={payModal.accountId}
+                    onChange={(e) => setPayModal({ ...payModal, accountId: e.target.value })}
+                    className={fieldCls}
+                  >
+                    <option value="">— Seçiniz —</option>
+                    {accounts.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {formatPaymentAccountLabel(a)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <div className="mt-4 flex flex-col gap-2">
+                  <button
+                    type="button"
+                    disabled={busy || amount <= 0}
+                    onClick={() => void saveRow(payModalRow, { mode: 'add', amount, accountId: payModal.accountId })}
+                    className="rounded-lg bg-indigo-600 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
+                  >
+                    İkinci ödeme olarak ekle — toplam {formatTryAmount(prev + amount)} ₺
+                  </button>
+                  {payModal.mode === 'changed' ? (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => void saveRow(payModalRow, { mode: 'replace' })}
+                      className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-600 dark:text-slate-200"
+                    >
+                      Eski tutarı düzelt — tahsilat {formatTryAmount(amount)} ₺ olsun
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => setPayModal(null)}
+                    className="rounded-lg px-3 py-2 text-sm text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
+                  >
+                    Vazgeç
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
+        </div>
+      ) : null}
 
       {waModal ? (
         <div
