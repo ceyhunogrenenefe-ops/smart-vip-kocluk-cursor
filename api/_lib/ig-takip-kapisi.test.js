@@ -132,3 +132,15 @@ test('kullanıcı adı yoksa yer tutucu ham gönderilmez', () => {
   assert.ok(!/username/i.test(sonuc));
   assert.equal(takipMetniniDoldur(null, null), '');
 });
+
+test('zaten takip eden kisiye davet sorulmaz, PDF dogrudan gider', () => {
+  const p = yorumIcinPlan(ACIK, { takipEdiyor: true });
+  assert.equal(p.aksiyon, 'send_pdf');
+  assert.equal(p.text, PDF);
+  assert.equal(p.durum, 'pdf_sent');
+});
+
+test('takip durumu okunamazsa veya takip etmiyorsa davet devam eder', () => {
+  assert.equal(yorumIcinPlan(ACIK, { takipEdiyor: null }).aksiyon, 'send_invite');
+  assert.equal(yorumIcinPlan(ACIK, { takipEdiyor: false }).aksiyon, 'send_invite');
+});
