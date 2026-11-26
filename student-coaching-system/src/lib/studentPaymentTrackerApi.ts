@@ -47,6 +47,10 @@ export type StudentPaymentRecord = {
   contact_name?: string | null;
   notes?: string | null;
   student_name?: string;
+  /** 'private_lesson_fee': Özel ders ücretleri ekranından gelen salt-okunur satır */
+  source?: 'private_lesson_fee';
+  private_lesson_fee_id?: string;
+  period_ym?: string;
   student_email?: string | null;
   student_phone?: string | null;
   parent_phone?: string | null;

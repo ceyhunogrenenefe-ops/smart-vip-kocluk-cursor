@@ -810,6 +810,8 @@ export default function StudentPaymentTrackerPanel() {
   const renderPaymentRow = (r: StudentPaymentRecord, opts?: { hideAccount?: boolean }) => {
     const vadeDurum = rowVadeDurum(r);
     const vadeEtiket = vadeDurumEtiket(vadeDurum);
+    /** Özel ders ücretleri ekranından gelen satır: burada değiştirilmez, oradan düzenlenir */
+    const ozelDers = r.source === 'private_lesson_fee';
     return (
       <tr key={r.id} className="border-b border-slate-50 last:border-0 dark:border-slate-800">
         <td className="px-3 py-2.5 whitespace-nowrap">
@@ -841,14 +843,20 @@ export default function StudentPaymentTrackerPanel() {
           <input
             type="checkbox"
             checked={r.status === 'paid'}
+            disabled={ozelDers}
             onChange={(e) => void togglePaid(r, e.target.checked)}
-            title="Ödendi işaretle"
+            title={ozelDers ? 'Özel ders ücretleri ekranından değiştirilir' : 'Ödendi işaretle'}
             className="rounded border-slate-300"
           />
         </td>
         <td className="px-3 py-2.5">
           <div className="font-medium text-slate-900 dark:text-white">{r.student_name}</div>
           <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
+            {ozelDers ? (
+              <span className="rounded-full bg-indigo-100 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-900 dark:bg-indigo-900/40 dark:text-indigo-200">
+                Özel ders ekranından
+              </span>
+            ) : null}
             {r.is_external || !r.student_id ? (
               <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-900 dark:bg-amber-900/40 dark:text-amber-100">
                 Dışarıdan
@@ -877,6 +885,9 @@ export default function StudentPaymentTrackerPanel() {
         )}
         <td className="px-3 py-2.5 text-right tabular-nums font-medium">{formatTry(r.amount_total)}</td>
         <td className="px-3 py-2.5 text-right">
+          {ozelDers ? (
+            <span className="text-xs font-medium tabular-nums">{formatTry(r.amount_paid)}</span>
+          ) : (
           <input
             type="number"
             min={0}
@@ -886,6 +897,7 @@ export default function StudentPaymentTrackerPanel() {
             onBlur={(e) => void updatePaidAmount(r, e.target.value)}
             className="w-24 rounded border border-slate-200 px-1.5 py-1 text-right text-xs tabular-nums dark:border-slate-600 dark:bg-slate-800"
           />
+          )}
         </td>
         <td className="px-3 py-2.5 text-right tabular-nums font-semibold text-rose-700 dark:text-rose-300">
           {formatTry(r.remaining ?? 0)}
@@ -896,6 +908,16 @@ export default function StudentPaymentTrackerPanel() {
           </span>
         </td>
         <td className="px-3 py-2.5">
+          {ozelDers ? (
+            <div className="flex justify-end">
+              <a
+                href="/muhasebe?tab=ozel-ders-ucret"
+                className="rounded-lg px-2 py-1 text-[11px] font-semibold text-indigo-700 hover:bg-indigo-50 dark:text-indigo-300 dark:hover:bg-indigo-950/40"
+              >
+                Özel ders ekranında aç
+              </a>
+            </div>
+          ) : (
           <div className="flex flex-wrap items-center justify-end gap-1">
             <button
               type="button"
@@ -941,6 +963,7 @@ export default function StudentPaymentTrackerPanel() {
               <Trash2 className="h-4 w-4" />
             </button>
           </div>
+          )}
         </td>
       </tr>
     );
