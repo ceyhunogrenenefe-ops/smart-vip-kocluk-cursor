@@ -1181,6 +1181,9 @@ export default async function handler(req, res) {
         .from('crm_conversations')
         .update({ unread_count: 0, updated_at: new Date().toISOString() })
         .eq('id', conversationId);
+      // Zildeki bu sohbete ait bildirim kartları da kapansın
+      const { markConversationNotificationsRead } = await import('../api/_lib/crm-notify.js');
+      await markConversationNotificationsRead(conversationId);
       return res.status(200).json({ ok: true });
     }
 

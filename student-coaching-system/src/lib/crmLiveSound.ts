@@ -4,7 +4,35 @@
  * Belirgin olsun diye: üç notalı yükselen zil, iki kez çalar; üçgen dalga
  * (sinüsten daha "dolu"), yüksek kazanç ve kırpılmayı önleyen kompresör.
  */
+/**
+ * Zil en fazla 20 saniyede bir çalar — tüm sayfalar ve açık sekmeler ortak.
+ * Üretimde aynı olay birden çok yerden (kabuk, gelen kutusu, pipeline)
+ * ve her poll'da tetiklenip zil hiç susmuyordu.
+ */
+const CHIME_GAP_MS = 20_000;
+const CHIME_KEY = 'crm_chime_last_at';
+let lastChimeAt = 0;
+
+function chimeAllowed(): boolean {
+  const now = Date.now();
+  let last = lastChimeAt;
+  try {
+    last = Math.max(last, Number(localStorage.getItem(CHIME_KEY) || 0));
+  } catch {
+    /* ignore */
+  }
+  if (now - last < CHIME_GAP_MS) return false;
+  lastChimeAt = now;
+  try {
+    localStorage.setItem(CHIME_KEY, String(now));
+  } catch {
+    /* ignore */
+  }
+  return true;
+}
+
 export function playCrmLeadChime() {
+  if (!chimeAllowed()) return;
   try {
     const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
     if (!Ctx) return;

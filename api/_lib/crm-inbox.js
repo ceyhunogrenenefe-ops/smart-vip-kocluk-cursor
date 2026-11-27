@@ -532,6 +532,12 @@ export async function upsertCrmMessage({
     try {
       const { markAgentReplied } = await import('./crm-ai-assistant.js');
       if (senderType === 'agent') await markAgentReplied(conversation.id, senderId || null);
+      // Temsilci yanıtladı: sohbet okunmuş sayılır, bildirim kartları kapanır
+      if (senderType === 'agent') {
+        await supabaseAdmin.from('crm_conversations').update({ unread_count: 0 }).eq('id', conversation.id);
+        const { markConversationNotificationsRead } = await import('./crm-notify.js');
+        await markConversationNotificationsRead(conversation.id);
+      }
     } catch (e) {
       console.warn('[crm-inbox] ai temsilci devri:', e instanceof Error ? e.message : e);
     }

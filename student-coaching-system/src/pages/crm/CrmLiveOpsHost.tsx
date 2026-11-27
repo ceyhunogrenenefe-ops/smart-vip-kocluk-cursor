@@ -74,6 +74,12 @@ export default function CrmLiveOpsHost() {
         }
         for (const c of convs) {
           if (knownConvRef.current.has(c.id)) continue;
+          /**
+           * Yalnız gerçekten cevap bekleyen (okunmamış) dış konuşma çalar.
+           * Önceden sohbet açılınca, bot yanıt verince ya da temsilci yazınca
+           * de (updated_at değiştiği için) zil çalıyordu.
+           */
+          if (!(Number(c.unread_count || 0) > 0) || c.is_internal) continue;
           knownConvRef.current.add(c.id);
           playCrmLeadChime();
           // Push açıksa bildirimi service worker gösterir (çift bildirim olmasın)
