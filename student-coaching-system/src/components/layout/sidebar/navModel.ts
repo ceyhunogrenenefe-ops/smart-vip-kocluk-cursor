@@ -40,7 +40,8 @@ import {
   Store,
   Puzzle,
   PhoneCall,
-  School
+  School,
+  Clapperboard
 } from 'lucide-react';
 import type { UserRole } from '../../../types';
 
@@ -58,6 +59,13 @@ export const NAV_OZEL_DERS_TALEPLERI: FlatNavItem = {
   path: '/ozel-ders-talepleri',
   icon: GraduationCap,
   label: 'Özel ders talepleri'
+};
+
+/** Reklam Videoları — öğretmen görevleri, yönetici/kurgu incelemesi */
+export const NAV_AD_VIDEOS: FlatNavItem = {
+  path: '/reklam-videolari',
+  icon: Clapperboard,
+  label: 'Reklam Videoları'
 };
 
 /** Admin / süper admin — öğretmen vitrin profil onayları */
@@ -207,6 +215,7 @@ const PANEL_PATHS = new Set([
 
 const LESSON_PATHS = new Set([
   '/class-live-lessons',
+  '/reklam-videolari',
   '/ders-saatleri-yeni-donem',
   '/schedule-planner',
   '/canli-ozel-ders',
@@ -358,6 +367,7 @@ const LESSON_LABELS: Record<string, string> = {
   '/student-meetings': 'Online Görüşmeler',
   '/edu-panel': EDU_HOMEWORK_ANIMATIONS_LABEL,
   '/edu-derslerim': EDU_HOMEWORK_ANIMATIONS_LABEL,
+  '/reklam-videolari': 'Reklam Videoları',
   '/ai-agents': 'AI Koçlarım',
   '/ai-agents-admin': 'AI Ders Ajanları',
   '/exams': 'AI Denemelerim'
@@ -442,6 +452,7 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
       { path: '/ders-saatleri-yeni-donem', icon: CalendarDays, label: 'Ders Programı Planlayıcısı' },
       { path: '/meetings', icon: Video, label: 'Online görüşmeler' },
       { path: '/edu-panel', icon: Presentation, label: EDU_HOMEWORK_ANIMATIONS_LABEL },
+      NAV_AD_VIDEOS,
       STAFF_NAV_YARDIM,
       { path: '/students', icon: GraduationCap, label: 'Öğrenciler' },
       { path: '/veli-memnuniyet', icon: PhoneCall, label: 'Veli Memnuniyet ve Takip' },
@@ -527,6 +538,7 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
     { path: '/ders-saatleri-yeni-donem', icon: CalendarDays, label: 'Ders Programı Planlayıcısı' },
     { path: '/meetings', icon: Video, label: 'Online görüşmeler' },
     { path: '/edu-panel', icon: Presentation, label: EDU_HOMEWORK_ANIMATIONS_LABEL },
+      NAV_AD_VIDEOS,
     STAFF_NAV_YARDIM,
     { path: '/students', icon: GraduationCap, label: 'Öğrenciler' },
     { path: '/veli-memnuniyet', icon: PhoneCall, label: 'Veli Memnuniyet ve Takip' },
@@ -584,6 +596,7 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
     { path: '/teacher-solution-appointments', icon: Calendar, label: 'Bugünkü Randevular' },
     { path: '/toplantilarim', icon: ClipboardCheck, label: 'Toplantılarım' },
     { path: '/edu-panel', icon: Presentation, label: EDU_HOMEWORK_ANIMATIONS_LABEL },
+      NAV_AD_VIDEOS,
     STAFF_NAV_YARDIM,
     { path: '/soru-havuzu', icon: CircleHelp, label: 'Soru Havuzu' },
     { path: '/academic-center', icon: Sparkles, label: 'Akademik Merkez' },
@@ -606,6 +619,7 @@ export function getFlatMenuForRoles(tags: UserRole[]): FlatNavItem[] {
     { path: '/coach-kilavuz', icon: ScrollText, label: 'Kullanım kılavuzu' },
     { path: '/class-live-lessons', icon: Calendar, label: 'Canlı Grup Dersi' },
     { path: '/edu-panel', icon: Presentation, label: EDU_HOMEWORK_ANIMATIONS_LABEL },
+      NAV_AD_VIDEOS,
     STAFF_NAV_YARDIM,
     ...privateLiveNavForRoles(['coach']),
     { path: '/meetings', icon: Video, label: 'Online görüşmeler' },
