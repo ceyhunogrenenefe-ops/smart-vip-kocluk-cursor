@@ -155,7 +155,7 @@ export default function CrmDailyReportPage() {
           <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-700">CRM · Günlük rapor</p>
           <h2 className="mt-1 font-serif text-2xl font-semibold">{dateLabel(date)}</h2>
           <p className="mt-1 text-sm text-slate-600">
-            Her akşam 21:00’de admin ve temsilcilere WhatsApp ile gönderilir, tarih tarih arşivlenir.
+            Her akşam 22:00’de admin ve temsilcilere WhatsApp ile gönderilir, tarih tarih arşivlenir.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -215,19 +215,49 @@ export default function CrmDailyReportPage() {
       ) : p ? (
         <>
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-            <Stat label="Gelen başvuru" value={p.sources.total} hint="Bugün oluşan yeni lead" />
-            <Stat
-              label="Gelen mesaj"
-              value={p.inbound_messages.total}
-              hint={`WA ${p.inbound_messages.whatsapp} · IG ${p.inbound_messages.instagram} · FB ${p.inbound_messages.facebook}`}
-            />
-            <Stat
-              label="Görüşülen kişi"
-              value={p.conversations.contacted}
-              hint={`${p.conversations.outbound_messages} mesaj · ${p.conversations.notes} not/arama`}
-            />
-            <Stat label="Kesin kayıt" value={p.status.confirmed} hint={`Kaybedilen ${p.status.lost}`} />
-            <Stat label="Yanıt bekleyen" value={p.waiting_reply} hint="Okunmamış açık görüşme (şu an)" />
+            {p.incoming ? (
+              <>
+                <Stat
+                  label="Bugün yazan kişi"
+                  value={p.incoming.people.total}
+                  hint={`WA ${p.incoming.people.whatsapp} · IG ${p.incoming.people.instagram} · Web ${p.incoming.people.website} · FB ${p.incoming.people.facebook}`}
+                />
+                <Stat
+                  label="Görüşülen"
+                  value={`${p.incoming.contacted.total} / ${p.incoming.people.total}`}
+                  hint={`%${p.incoming.contact_rate} · ${p.incoming.not_contacted} kişiye dönülmedi`}
+                />
+                <Stat
+                  label="Gelen mesaj"
+                  value={p.incoming.messages.total}
+                  hint={`İlk kez yazan ${p.incoming.first_time} · tekrar ${p.incoming.returning}`}
+                />
+              </>
+            ) : (
+              <>
+                <Stat label="Gelen başvuru" value={p.sources.total} hint="Bugün oluşan yeni lead" />
+                <Stat
+                  label="Gelen mesaj"
+                  value={p.inbound_messages.total}
+                  hint={`WA ${p.inbound_messages.whatsapp} · IG ${p.inbound_messages.instagram} · FB ${p.inbound_messages.facebook}`}
+                />
+                <Stat
+                  label="Görüşülen kişi"
+                  value={p.conversations.contacted}
+                  hint={`${p.conversations.outbound_messages} mesaj · ${p.conversations.notes} not/arama`}
+                />
+              </>
+            )}
+            <Stat label="Kesin kayıt" value={p.status.confirmed} hint={`Kaybedilen ${p.status.lost} · ${p.status.stage_changes} aşama değişikliği`} />
+            {p.alarms ? (
+              <Stat
+                label="Takvim alarmı"
+                value={p.alarms.total}
+                hint={`${p.alarms.setters} kişi kurdu${p.ai_appointments?.total ? ` · AI randevu ${p.ai_appointments.total}` : ''}`}
+              />
+            ) : (
+              <Stat label="Yanıt bekleyen" value={p.waiting_reply} hint="Okunmamış açık görüşme (şu an)" />
+            )}
           </div>
 
           <div className="grid gap-4 lg:grid-cols-2">
@@ -254,32 +284,75 @@ export default function CrmDailyReportPage() {
             </Section>
           </div>
 
+          {p.incoming ? (
+            <Section
+              title="Kurum dışı · bugün yazanlar ve görüşülenler"
+              aside={<span className="text-[11px] text-slate-500">Temsilci mesajı, not ya da aşama kaydı = görüşüldü</span>}
+            >
+              <div className="space-y-2.5">
+                {(
+                  [
+                    ['whatsapp', 'WhatsApp'],
+                    ['instagram', 'Instagram'],
+                    ['website', 'Web sitesi'],
+                    ['facebook', 'Facebook']
+                  ] as const
+                ).map(([k, label]) => (
+                  <Bar
+                    key={k}
+                    label={`${label} · ${p.incoming!.contacted[k]} / ${p.incoming!.people[k]} görüşüldü`}
+                    value={p.incoming!.contacted[k]}
+                    max={Math.max(1, p.incoming!.people[k])}
+                  />
+                ))}
+              </div>
+              {p.incoming.not_contacted ? (
+                <p className="mt-3 text-sm font-medium text-rose-700">⚠️ {p.incoming.not_contacted} kişiye henüz dönüş yapılmadı.</p>
+              ) : null}
+              {p.calls?.inbound ? (
+                <p className="mt-2 text-xs text-slate-500">
+                  Gelen arama {p.calls.inbound} · açılan {p.calls.answered} · cevapsız {p.calls.missed}
+                </p>
+              ) : null}
+              {p.alarms?.by_user.length ? (
+                <p className="mt-2 text-xs text-slate-500">
+                  Alarm kuranlar: {p.alarms.by_user.map((u) => `${u.name} ${u.count}`).join(' · ')}
+                </p>
+              ) : null}
+              {p.ai_appointments?.total ? (
+                <p className="mt-1 text-xs text-slate-500">
+                  🤖 AI asistan randevusu: {p.ai_appointments.by_consultant.map((x) => `${x.name} ${x.count}`).join(' · ')}
+                </p>
+              ) : null}
+            </Section>
+          ) : (
           <Section
-            title="Kurum içi — kendi öğrencilerimiz"
-            aside={
-              <span className="text-[11px] font-semibold text-teal-800">
-                {p.internal?.total || 0} mesaj · {p.internal?.pending || 0} bekliyor
-              </span>
-            }
-          >
-            {p.internal?.total ? (
-              <p className="text-sm text-slate-600">
-                Kendi öğrenci/velilerimizden {p.internal.total} kayıt geldi;{' '}
-                <strong className="text-emerald-700">{p.internal.answered}</strong> yanıtlandı,{' '}
-                <strong className={p.internal.pending ? 'text-rose-700' : 'text-slate-500'}>
-                  {p.internal.pending}
-                </strong>{' '}
-                bekliyor. Bu sayılar satış performansına dahil değildir.
-                {p.internal.by_channel?.length ? (
-                  <span className="mt-1 block text-xs text-slate-500">
-                    {p.internal.by_channel.map((c) => `${c.label}: ${c.count}`).join(' · ')}
-                  </span>
-                ) : null}
-              </p>
-            ) : (
-              <p className="text-sm text-slate-500">Bugün kurum içi mesaj yok.</p>
-            )}
-          </Section>
+              title="Kurum içi — kendi öğrencilerimiz"
+              aside={
+                <span className="text-[11px] font-semibold text-teal-800">
+                  {p.internal?.total || 0} mesaj · {p.internal?.pending || 0} bekliyor
+                </span>
+              }
+            >
+              {p.internal?.total ? (
+                <p className="text-sm text-slate-600">
+                  Kendi öğrenci/velilerimizden {p.internal.total} kayıt geldi;{' '}
+                  <strong className="text-emerald-700">{p.internal.answered}</strong> yanıtlandı,{' '}
+                  <strong className={p.internal.pending ? 'text-rose-700' : 'text-slate-500'}>
+                    {p.internal.pending}
+                  </strong>{' '}
+                  bekliyor. Bu sayılar satış performansına dahil değildir.
+                  {p.internal.by_channel?.length ? (
+                    <span className="mt-1 block text-xs text-slate-500">
+                      {p.internal.by_channel.map((c) => `${c.label}: ${c.count}`).join(' · ')}
+                    </span>
+                  ) : null}
+                </p>
+              ) : (
+                <p className="text-sm text-slate-500">Bugün kurum içi mesaj yok.</p>
+              )}
+            </Section>
+          )}
 
           <Section title="Temsilciler · kaç görüşme yapıldı">
             {p.representatives.length ? (
@@ -290,8 +363,9 @@ export default function CrmDailyReportPage() {
                       <th className="py-2">Temsilci</th>
                       <th className="py-2 text-right">Görüşülen kişi</th>
                       <th className="py-2 text-right">Mesaj</th>
-                      <th className="py-2 text-right">Not / arama</th>
+                      <th className="py-2 text-right">Not</th>
                       <th className="py-2 text-right">Aşama değişikliği</th>
+                      <th className="py-2 text-right">Alarm</th>
                       <th className="py-2 text-right">Kesin kayıt</th>
                     </tr>
                   </thead>
@@ -303,6 +377,7 @@ export default function CrmDailyReportPage() {
                         <td className="py-2 text-right tabular-nums">{r.messages}</td>
                         <td className="py-2 text-right tabular-nums">{r.notes}</td>
                         <td className="py-2 text-right tabular-nums">{r.stage_changes}</td>
+                        <td className="py-2 text-right tabular-nums">{r.alarms ?? 0}</td>
                         <td className="py-2 text-right tabular-nums">{r.confirmed}</td>
                       </tr>
                     ))}

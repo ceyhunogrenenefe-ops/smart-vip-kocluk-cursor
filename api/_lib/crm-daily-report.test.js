@@ -78,7 +78,8 @@ test('computeCrmDailyReport + metin', async () => {
   assert.equal(p.inbound_messages.total, 2);
   assert.deepEqual(p.conversations, { contacted: 3, outbound_messages: 3, notes: 1 });
   const ayse = p.representatives.find((r) => r.name === 'Ayşe');
-  assert.deepEqual([ayse.contacts, ayse.messages, ayse.stage_changes], [1, 2, 1]);
+  // Aşama kaydı da görüşme sayılır: l1 (mesaj) + l2 (aşama)
+  assert.deepEqual([ayse.contacts, ayse.messages, ayse.stage_changes], [2, 2, 1]);
   const mehmet = p.representatives.find((r) => r.name === 'Mehmet');
   assert.deepEqual([mehmet.contacts, mehmet.messages, mehmet.notes, mehmet.confirmed], [2, 1, 1, 1]);
   assert.equal(p.status.confirmed, 1);
@@ -93,9 +94,9 @@ test('computeCrmDailyReport + metin', async () => {
   assert.ok(reportHasActivity(p));
 
   const text = formatCrmDailyReportText(p);
-  assert.match(text, /Gelen başvuru: 3/);
-  assert.match(text, /WhatsApp 1 · Instagram 1 · Web sitesi 1/);
-  assert.match(text, /Ayşe: 1 kişi · 2 mesaj/);
+  assert.match(text, /Bugün yazan kişi: 1/);
+  assert.match(text, /Web sitesi 1/);
+  assert.match(text, /Ayşe: \*2 kişi\* · 2 mesaj/);
   assert.match(text, /3 kişiye gönderildi · Ulaştı 1 \(okundu 0\) · Beklemede 1 · Hatalı 1/);
   assert.match(text, /gunluk-rapor\?tarih=2026-09-16/);
 });
@@ -140,4 +141,54 @@ test('yorum yoksa metinde yorum satırı olmaz', () => {
   const day = '2026-09-24';
   const p = computeCrmDailyReport({ date: day, leads: [], users: [], inboundMessages: [] });
   assert.doesNotMatch(formatCrmDailyReportText(p), /Yorum:/);
+});
+
+test('bugün yazan kişiler, görüşülenler, alarm ve AI randevusu', () => {
+  const D = '2026-11-27';
+  const at = (h) => `${D}T${String(h).padStart(2, '0')}:00:00+03:00`;
+  const p = computeCrmDailyReport({
+    date: D,
+    users: [{ id: 'u1', name: 'Muzaffer' }, { id: 'u2', name: 'Sultan' }],
+    leads: [
+      { id: 'a', created_at: at(9), source: 'whatsapp_inbound', stage: 'new_lead', primary_status: 'tracking' },
+      { id: 'b', created_at: '2026-10-01T10:00:00+03:00', source: 'whatsapp_inbound', stage: 'new_lead', primary_status: 'tracking' },
+      { id: 'c', created_at: at(10), source: 'instagram_inbound', stage: 'new_lead', primary_status: 'tracking' },
+      { id: 'w', created_at: at(11), source: 'website_form', stage: 'new_lead', primary_status: 'tracking' }
+    ],
+    leadMessages: [
+      { lead_id: 'a', conversation_id: 'ca', channel: 'whatsapp', created_at: at(9) },
+      { lead_id: 'a', conversation_id: 'ca', channel: 'whatsapp', created_at: at(9) },
+      { lead_id: 'b', conversation_id: 'cb', channel: 'whatsapp', created_at: at(12) },
+      { lead_id: 'c', conversation_id: 'cc', channel: 'instagram', created_at: at(10) }
+    ],
+    inboxAgentMessages: [{ conversation_id: 'ca', lead_id: 'a', sender_id: 'u1', created_at: at(9) }],
+    stageHistory: [
+      { lead_id: 'b', new_stage: 'no_response', new_primary_status: 'tracking', changed_by: 'u2', changed_at: at(13) },
+      { lead_id: 'c', new_stage: 'first_contact_pending', new_primary_status: 'tracking', changed_by: null, changed_at: at(13) }
+    ],
+    createdTasks: [
+      { created_by: 'u2', auto_generated: false, task_type: 'call_parent', created_at: at(14) },
+      { created_by: 'u2', auto_generated: true, task_type: 'whatsapp', created_at: at(14) },
+      { created_by: null, auto_generated: true, task_type: 'call_parent', assigned_to: 'u1', deduplication_key: 'ai-callback:c:x', created_at: at(15) }
+    ],
+    calls: [{ direction: 'inbound', answered: true, started_at: at(10) }, { direction: 'inbound', answered: null, started_at: at(11) }]
+  });
+  assert.deepEqual(p.incoming.people, { whatsapp: 2, instagram: 1, website: 1, facebook: 0, other: 0, total: 4 });
+  assert.equal(p.incoming.first_time, 3);
+  assert.equal(p.incoming.messages.total, 4);
+  // a: temsilci mesajı, b: aşama kaydı → görüşüldü; c: yalnız AI aşaması (görüşme sayılmaz), w: dokunulmadı
+  assert.equal(p.incoming.contacted.total, 2);
+  assert.equal(p.incoming.not_contacted, 2);
+  assert.deepEqual([p.alarms.total, p.alarms.setters], [1, 1]);
+  assert.equal(p.ai_appointments.total, 1);
+  assert.equal(p.ai_appointments.by_consultant[0].name, 'Muzaffer');
+  assert.deepEqual(p.calls, { inbound: 2, answered: 1, missed: 1, outbound: 0 });
+  const sultan = p.representatives.find((r) => r.name === 'Sultan');
+  assert.deepEqual([sultan.contacts, sultan.alarms], [1, 1]);
+  const text = formatCrmDailyReportText(p);
+  assert.match(text, /Bugün yazan kişi: 4/);
+  assert.match(text, /görüşülen: \*2 \/ 4\*/);
+  assert.match(text, /Takvim alarmı: 1/);
+  assert.match(text, /AI asistan randevusu: 1/);
+  assert.doesNotMatch(text, /Kurum içi/);
 });
