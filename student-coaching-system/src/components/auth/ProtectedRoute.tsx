@@ -57,7 +57,8 @@ export default function ProtectedRoute({ children, allowedRoles }: ProtectedRout
   // CRM agent: yalnızca /crm/* — diğer tüm panelleri kilitle
   if (isCrmAgentOnly(effectiveUser)) {
     const path = location.pathname || '';
-    if (!path.startsWith('/crm')) {
+    // Kurgu ekibine eklenen temsilci, bildirimden Reklam Videoları'nı açabilsin (yetki sunucuda)
+    if (!path.startsWith('/crm') && !path.startsWith('/reklam-videolari')) {
       return <Navigate to="/crm/inbox" replace />;
     }
   }

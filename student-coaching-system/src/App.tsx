@@ -37,6 +37,7 @@ import ParentSatisfactionPage from './pages/ParentSatisfactionPage';
 import WhatsAppTemplatesPage from './pages/WhatsAppTemplatesPage';
 import TeacherDeclarationsPage from './pages/TeacherDeclarationsPage';
 import TeacherDeclarationFormPage from './pages/TeacherDeclarationFormPage';
+import AdVideosPage from './pages/AdVideosPage';
 import AdminPanel from './pages/AdminPanel';
 import BookTracking from './pages/BookTracking';
 import WrittenExamTracking from './components/WrittenExamTracking';
@@ -673,6 +674,15 @@ function App() {
               <ProtectedRoute allowedRoles={rolesForProtectedRoute('/ogretmen-beyanlari')}>
                 <Layout>
                   <TeacherDeclarationsPage />
+                </Layout>
+              </ProtectedRoute>
+            } />
+
+            {/* Reklam Videoları — görev, çekim/teslim takibi, kurgu incelemesi */}
+            <Route path="/reklam-videolari" element={
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/reklam-videolari')}>
+                <Layout>
+                  <AdVideosPage />
                 </Layout>
               </ProtectedRoute>
             } />
