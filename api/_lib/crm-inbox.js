@@ -227,6 +227,25 @@ export async function upsertCrmMessage({
         .eq(idCol, extId)
         .maybeSingle();
       if (dup?.id) return { skipped: true, reason: 'duplicate', conversation_id: dup.conversation_id };
+
+      /**
+       * Temsilcinin SİLDİĞİ mesaj geri gelmesin.
+       * Üretimde görüldü: sohbet silindi, Instagram senkronu (graph
+       * conversations) aynı eski mesajı Meta'dan yeniden çekti, sohbet ve
+       * kart geri geldi, yapay zekâ saatler önceki mesaja yeniden yanıt verdi.
+       * Silme sırasında mesajlar registration_channel_messages'ta deleted_at
+       * ile işaretleniyor; o işaret varsa mesaj yeniden alınmaz. Yeni
+       * mesajların kimliği farklı olduğu için gerçek yeni yazışma etkilenmez.
+       */
+      const { data: silinmis } = await supabaseAdmin
+        .from('registration_channel_messages')
+        .select('id')
+        .eq('external_message_id', extId)
+        .not('deleted_at', 'is', null)
+        .limit(1);
+      if (Array.isArray(silinmis) && silinmis.length) {
+        return { skipped: true, reason: 'deleted_by_user' };
+      }
     } catch (e) {
       if (/crm_messages|does not exist|schema cache/i.test(e?.message || '')) {
         if (_schemaRetried) return { skipped: true, reason: 'table_missing' };
@@ -463,7 +482,22 @@ export async function upsertCrmMessage({
    * Konuşma asistanın sorumluluğundaysa Otomatik Karşılama çalışmaz (tek bot konuşur).
    */
   let aiOwnsConversation = false;
-  if (direction === 'inbound' && !conversation.is_internal && body) {
+  /**
+   * Botlar şu mesajlara yanıt VERMEZ:
+   * - Takip kapısı butonu ("Takip Ettim" / "Tekrar Kontrol Et"): bunu yorum
+   *   otomasyonu işliyor (takip kontrolü + PDF). Üretimde AI asistan da
+   *   ayrıca karşılama + "kaynağın ulaşması gerekiyordu" yazıyordu.
+   * - Eski mesaj (30 dk'dan eski): senkronun sonradan çektiği mesaja saatler
+   *   sonra cevap gitmesin.
+   */
+  const qrPayload = String(payload?.message?.quick_reply?.payload ?? payload?.postback?.payload ?? '');
+  const takipButonu =
+    qrPayload.startsWith('ig_follow_gate:') ||
+    /^\s*(✅\s*)?takip ettim\s*$|^\s*(🔄\s*)?tekrar kontrol et\s*$/i.test(String(body || ''));
+  const mesajZamani = Date.parse(occurredAt || '');
+  const eskiMesaj = Number.isFinite(mesajZamani) && Date.now() - mesajZamani > 30 * 60 * 1000;
+  const botSussun = takipButonu || eskiMesaj;
+  if (direction === 'inbound' && !conversation.is_internal && body && !botSussun) {
     try {
       const { onInboundMessage } = await import('./crm-ai-assistant.js');
       const ai = await onInboundMessage({
@@ -478,7 +512,7 @@ export async function upsertCrmMessage({
     }
   }
 
-  if (direction === 'inbound' && !conversation.is_internal && body && !aiOwnsConversation) {
+  if (direction === 'inbound' && !conversation.is_internal && body && !aiOwnsConversation && !botSussun) {
     try {
       const { runAutoGreetingFlow } = await import('./crm-auto-greeting.js');
       await runAutoGreetingFlow({ conversation, body });
