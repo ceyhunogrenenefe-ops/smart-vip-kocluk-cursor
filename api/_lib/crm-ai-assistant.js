@@ -762,7 +762,9 @@ async function bookCallback(ctx, b) {
       priority: 'high',
       status: 'pending',
       due_at: b.start_iso,
-      created_by: BOT_AUTHOR_ID,
+      // created_by users(id)'ye bağlı: 'ai-assistant' yazılırsa kayıt reddediliyordu (randevu hiç oluşmuyordu).
+      // AI randevusu deduplication_key 'ai-callback:' önekinden tanınır.
+      created_by: null,
       deduplication_key: `ai-callback:${leadId || conversation.id}:${b.start_iso}`,
       auto_generated: true
     })
@@ -791,8 +793,35 @@ async function bookCallback(ctx, b) {
     conversation,
     institutionId: settings.institution_id
   });
-  await logEvent({ institutionId: settings.institution_id, conversationId: conversation.id, leadId, event: 'appointment_booked', detail: { start_iso: b.start_iso, consultant, task_id: task?.id } });
+  const wa = await notifyConsultantWhatsApp({ settings, conversation, consultant, taskId: task?.id, label, booking: b });
+  await logEvent({ institutionId: settings.institution_id, conversationId: conversation.id, leadId, event: 'appointment_booked', detail: { start_iso: b.start_iso, consultant, task_id: task?.id, wa_status: wa.status, wa_error: wa.error || null } });
   return `Randevu oluşturuldu: ${label}. Danışman bu saatte ${displayTrPhone(b.parent_phone || b.phone)} numarasını arayacak. Müşteriye saati ve numarayı teyit et, teşekkür et.`;
+}
+
+const CHANNEL_LABELS = { whatsapp: 'WhatsApp', instagram: 'Instagram', facebook: 'Facebook' };
+
+/** Randevu atanan danışmana WhatsApp (personel uyarı hattı) mesajı. Hata randevuyu bozmaz. */
+async function notifyConsultantWhatsApp({ settings, conversation, consultant, taskId, label, booking: b }) {
+  try {
+    const { sendStaffAlert } = await import('./crm-staff-alerts.js');
+    const phone = displayTrPhone(b.parent_phone || b.phone);
+    const who = [b.parent_name ? `Veli ${b.parent_name}` : '', b.student_name ? `öğrenci ${b.student_name}` : '']
+      .filter(Boolean)
+      .join(', ');
+    return await sendStaffAlert({
+      institutionId: settings.institution_id,
+      userId: consultant,
+      eventType: 'ai_appointment',
+      dedupeKey: `ai_appointment:${taskId || conversation.id}`,
+      summary: `🤖 AI asistan sizin için randevu ayarladı: ${label}`,
+      detail: `takviminize alarm eklendi. Aranacak tel: ${phone} · ${who || 'Aday'} (${[b.grade, b.target].filter(Boolean).join(', ')}) · ${CHANNEL_LABELS[conversation.channel] || conversation.channel}`,
+      // Randevu iş saatinde verilir; gece verilen randevu da sabaha kalmadan bildirilsin
+      ignoreQuiet: true
+    });
+  } catch (e) {
+    console.warn('[ai-assistant] danışman WhatsApp bildirimi:', errorMessage(e));
+    return { status: 'failed', error: errorMessage(e) };
+  }
 }
 
 async function advanceLeadStage(ctx, { consultant, startIso, label }) {
@@ -821,7 +850,7 @@ async function advanceLeadStage(ctx, { consultant, startIso, label }) {
         old_stage: lead.stage || null,
         new_stage: 'first_contact_pending',
         reason: `AI asistan danışman araması planladı (${label})`,
-        changed_by: BOT_AUTHOR_ID
+        changed_by: null // users(id) FK; AI olduğu reason metninden anlaşılır
       })
       .then(({ error: e }) => e && console.warn('[ai-assistant] aşama geçmişi:', e.message));
   }
@@ -975,7 +1004,7 @@ async function writeSummary(ctx) {
         result: ctx.booked ? 'appointment_booked' : 'handover',
         next_action_type: ctx.booked ? 'call_parent' : null,
         next_action_at: ctx.session?.appointment_at || null,
-        created_by: BOT_AUTHOR_ID
+        created_by: null // users(id) FK; başlık 'AI asistan:' ile başlar
       })
       .then(({ error }) => error && console.warn('[ai-assistant] etkileşim:', error.message));
   }

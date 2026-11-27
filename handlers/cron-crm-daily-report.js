@@ -2,7 +2,7 @@ import { authorizeVercelOrCronSecret, rejectUnauthorizedCron } from '../api/_lib
 import { runCrmDailyReportJob } from '../api/_lib/crm-daily-report.js';
 import { recordCronRun } from '../api/_lib/cron-run-log.js';
 
-/** Her akşam 21:00 (TR): CRM günlük raporu arşivle ve admin + temsilcilere WhatsApp ile gönder. */
+/** Her akşam 22:00 (TR, 19:00 UTC): CRM günlük raporu arşivle ve admin + temsilcilere WhatsApp ile gönder. */
 export default async function handler(req, res) {
   if (req.method !== 'GET' && req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });

@@ -459,7 +459,21 @@ export type CrmDailyReportPayload = {
     notes: number;
     stage_changes: number;
     confirmed: number;
+    alarms?: number;
   }>;
+  /** Bugün yazan kişiler (kurum dışı) ve kaçıyla görüşüldü */
+  incoming?: {
+    people: { whatsapp: number; instagram: number; website: number; facebook: number; other: number; total: number };
+    first_time: number;
+    returning: number;
+    messages: { whatsapp: number; instagram: number; facebook: number; total: number };
+    contacted: { whatsapp: number; instagram: number; website: number; facebook: number; other: number; total: number };
+    not_contacted: number;
+    contact_rate: number;
+  };
+  alarms?: { total: number; setters: number; by_user: Array<{ user_id: string; name: string; count: number }> };
+  ai_appointments?: { total: number; by_consultant: Array<{ name: string; count: number }> };
+  calls?: { inbound: number; answered: number; missed: number; outbound: number };
   status: {
     stage_changes: number;
     confirmed: number;

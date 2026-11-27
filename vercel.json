@@ -183,7 +183,7 @@
     },
     {
       "path": "/api/cron/crm-daily-report",
-      "schedule": "0 18 * * *"
+      "schedule": "0 19 * * *"
     },
     {
       "path": "/api/cron/crm-instagram-sync",
