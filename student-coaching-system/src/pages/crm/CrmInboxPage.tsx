@@ -931,8 +931,11 @@ export default function CrmInboxPage() {
                     setSelectedId(c.id);
                     if (window.matchMedia('(max-width: 1023px)').matches) setCardOpen(true);
                   }}
-                  className={`flex w-full flex-col gap-1 border-b border-slate-100 px-3 py-3 text-left transition ${
-                    active ? 'bg-emerald-50' : 'hover:bg-white'
+                  className={`flex w-full flex-col gap-1 border-b px-3 py-3 text-left transition ${
+                    unread
+                      ? // Okunmamış: yapay zekâ yanıtlamış olsa da temsilci açana kadar belirgin kalır
+                        `border-l-4 border-b-sky-300 border-l-sky-700 ${active ? 'bg-sky-300' : 'bg-sky-200 hover:bg-sky-300'}`
+                      : `border-slate-100 ${active ? 'bg-emerald-50' : 'hover:bg-white'}`
                   }`}
                 >
                   <div className="flex items-center justify-between gap-2">
@@ -952,11 +955,18 @@ export default function CrmInboxPage() {
                     <ChannelBadge channel={c.channel} contactIdentifier={c.contact_identifier} adSourceData={c.ad_source_data as Record<string, unknown> | null} />
                   </div>
                   <div className="flex items-center justify-between gap-2">
-                    <span className="truncate text-xs text-slate-500">
+                    <span className={`truncate text-xs ${unread ? 'font-semibold text-slate-900' : 'text-slate-500'}`}>
                       {c.last_message_preview || '—'}
                     </span>
-                    <span className="shrink-0 text-[10px] text-slate-400">
-                      {formatTime(c.last_message_at)}
+                    <span className="flex shrink-0 items-center gap-1.5">
+                      {unread ? (
+                        <span className="rounded-full bg-red-600 px-1.5 py-0.5 text-[10px] font-bold leading-none text-white">
+                          Yeni · {Number(c.unread_count)}
+                        </span>
+                      ) : null}
+                      <span className={`text-[10px] ${unread ? 'font-semibold text-sky-900' : 'text-slate-400'}`}>
+                        {formatTime(c.last_message_at)}
+                      </span>
                     </span>
                   </div>
                   <div className="flex flex-wrap items-center gap-1.5">
