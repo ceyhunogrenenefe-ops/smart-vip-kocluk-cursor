@@ -38,6 +38,8 @@ export type RegLead = {
   confirmed_by?: string | null;
   last_inbound_channel?: 'whatsapp' | 'instagram' | string | null;
   last_inbound_snippet?: string | null;
+  /** Gelen kutusunda okunmamış mesaj sayısı (liste yanıtında) */
+  unread_count?: number;
   last_inbound_at?: string | null;
   instagram_scoped_id?: string | null;
   /** FAZ 1: Instagram kullanıcı adı / profil fotoğrafı */

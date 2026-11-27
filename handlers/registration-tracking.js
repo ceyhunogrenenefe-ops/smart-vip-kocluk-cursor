@@ -251,13 +251,27 @@ function applyLeadFilters(q, filters, institutionId) {
   if (filters.created_from) query = query.gte('created_at', filters.created_from);
   if (filters.created_to) query = query.lte('created_at', filters.created_to);
 
-  if (filters.date_from) {
-    const b = istanbulDayBounds(filters.date_from);
-    if (b) query = query.gte('created_at', b.start);
-  }
-  if (filters.date_to) {
-    const b = istanbulDayBounds(filters.date_to);
-    if (b) query = query.lte('created_at', b.end);
+  /**
+   * Tarih süzgeci: kart o aralıkta AÇILDIYSA ya da o aralıkta HAREKET
+   * gördüyse (yeni mesaj, aşama değişikliği, arama/not) gösterilir.
+   * Önceden yalnız created_at'e bakılıyordu; "Bugün" seçilince dün açılıp
+   * bugün "Düşünülüyor"a alınan ya da bugün yeniden yazan kişiler
+   * görünmüyordu.
+   */
+  {
+    const bFrom = filters.date_from ? istanbulDayBounds(filters.date_from) : null;
+    const bTo = filters.date_to ? istanbulDayBounds(filters.date_to) : null;
+    if (bFrom || bTo) {
+      const kosul = (col) => {
+        const parca = [];
+        if (bFrom) parca.push(`${col}.gte.${bFrom.start}`);
+        if (bTo) parca.push(`${col}.lte.${bTo.end}`);
+        return parca.length === 1 ? parca[0] : `and(${parca.join(',')})`;
+      };
+      query = query.or(
+        ['created_at', 'updated_at', 'last_inbound_at', 'last_contact_at'].map(kosul).join(',')
+      );
+    }
   }
 
   if (filters.coach_id === '_unassigned') query = query.is('assigned_user_id', null);
@@ -429,7 +443,8 @@ async function handleDashboard(institutionId, filters) {
 
 async function handleList(institutionId, filters, tags, actor) {
   const page = Math.max(1, parseInt(filters.page || '1', 10) || 1);
-  const pageSize = Math.min(200, Math.max(10, parseInt(filters.page_size || '50', 10) || 50));
+  // Pipeline panosu 500 kart istiyor; 200 sınırı eski kartları sessizce kesiyordu
+  const pageSize = Math.min(500, Math.max(10, parseInt(filters.page_size || '50', 10) || 50));
   const from = (page - 1) * pageSize;
   const to = from + pageSize - 1;
 
@@ -448,8 +463,30 @@ async function handleList(institutionId, filters, tags, actor) {
   const { data, error, count } = await query.range(from, to);
   if (error) throw error;
 
+  /**
+   * Gelen kutusundaki okunmamış mesaj sayısı kartta da görünsün (koyu renk
+   * + "Yeni" rozeti). Yapay zekâ yanıtlasa da temsilci sohbeti açana kadar
+   * sayı düşmez. Okunamazsa kartlar yine gelir, yalnız vurgu olmaz.
+   */
+  const okunmamis = {};
+  try {
+    const ids = (data || []).map((l) => l.id);
+    for (let i = 0; i < ids.length; i += 200) {
+      const { data: convs } = await supabaseAdmin
+        .from('crm_conversations')
+        .select('lead_id, unread_count')
+        .in('lead_id', ids.slice(i, i + 200))
+        .gt('unread_count', 0);
+      for (const c of convs || []) {
+        okunmamis[c.lead_id] = (okunmamis[c.lead_id] || 0) + Number(c.unread_count || 0);
+      }
+    }
+  } catch (e) {
+    console.warn('[registration-tracking] okunmamis sayisi:', errorMessage(e));
+  }
+
   return {
-    items: (data || []).map((l) => sanitizeLeadForActor(l, tags)),
+    items: (data || []).map((l) => ({ ...sanitizeLeadForActor(l, tags), unread_count: okunmamis[l.id] || 0 })),
     total: count ?? 0,
     page,
     page_size: pageSize

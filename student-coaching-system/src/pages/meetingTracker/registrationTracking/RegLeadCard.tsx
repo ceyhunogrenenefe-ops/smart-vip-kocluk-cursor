@@ -82,12 +82,18 @@ export default function RegLeadCard({
   const tone = leadCardTone(lead);
   const overdue = isOverdue(lead.next_action_at) && lead.primary_status === 'tracking';
   const inboundSnippet = String(lead.last_inbound_snippet || '').trim();
+  // Gelen kutusunda okunmamış mesaj: temsilci açana kadar koyu kalır
+  const unread = Number(lead.unread_count || 0);
 
   return (
     <div
       draggable={draggable}
       onDragStart={onDragStart}
-      className={`group relative rounded-lg border border-slate-200/80 p-2.5 text-left shadow-sm transition hover:shadow-md dark:border-slate-600 ${CARD_TONE_CLASS[tone]}`}
+      className={`group relative rounded-lg p-2.5 text-left shadow-sm transition hover:shadow-md ${
+        unread > 0
+          ? 'border border-sky-400 border-l-4 border-l-sky-700 bg-sky-200 dark:bg-sky-900/70'
+          : `border border-slate-200/80 dark:border-slate-600 ${CARD_TONE_CLASS[tone]}`
+      }`}
     >
       {onSelect && (
         <input
@@ -103,7 +109,14 @@ export default function RegLeadCard({
           <span className="font-semibold text-sm text-slate-900 dark:text-white leading-tight">
             {lead.full_name || `${lead.first_name} ${lead.last_name}`}
           </span>
-          <TempIcon temperature={lead.temperature} />
+          <span className="flex shrink-0 items-center gap-1">
+            {unread > 0 ? (
+              <span className="rounded-full bg-red-600 px-1.5 py-0.5 text-[10px] font-bold leading-none text-white">
+                Yeni · {unread}
+              </span>
+            ) : null}
+            <TempIcon temperature={lead.temperature} />
+          </span>
         </div>
         <div className="mt-0.5 text-xs text-slate-500">{GRADE_LABEL[lead.grade_program] || lead.grade_program}</div>
         <div className="mt-1 flex flex-wrap gap-1 text-[10px]">
