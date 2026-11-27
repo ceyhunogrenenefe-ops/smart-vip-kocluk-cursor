@@ -231,23 +231,15 @@ export default function RegistrationTrackingPanel({ isManager, canAssign, instit
         const query = buildQuery();
         const listRes = await rtListLeads(query);
         const items = listRes.items || [];
-        let added = false;
-        for (const item of items) {
-          if (!knownLeadIdsRef.current.has(item.id)) {
-            knownLeadIdsRef.current.add(item.id);
-            if (leadsPrimedRef.current) added = true;
-          }
-        }
+        /**
+         * Pipeline kendi zilini çalmaz: yeni mesaj sesi CRM kabuğunda
+         * (CrmLiveOpsHost) tek yerden çalar. Burada kart listeye girip
+         * çıktıkça (500 kartlık pencere, tarih süzgeci) zil her 6 sn'de
+         * çalıyordu.
+         */
+        for (const item of items) knownLeadIdsRef.current.add(item.id);
         leadsPrimedRef.current = true;
         setLeads(items);
-        if (added) {
-          try {
-            const { playCrmLeadChime } = await import('../../lib/crmLiveSound');
-            playCrmLeadChime();
-          } catch {
-            /* ignore */
-          }
-        }
       } catch {
         /* ignore soft poll errors */
       }

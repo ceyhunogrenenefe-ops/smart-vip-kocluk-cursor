@@ -567,7 +567,8 @@ export default function CrmInboxPage() {
                   map.delete(c.id);
                   continue;
                 }
-                if (!map.has(c.id)) newConv = true;
+                // Yalnız cevap bekleyen yeni konuşma çalar (bot/temsilci hareketi değil)
+                if (!map.has(c.id) && Number(c.unread_count || 0) > 0) newConv = true;
                 map.set(c.id, { ...(map.get(c.id) || ({} as CrmConversation)), ...c });
               }
               if (newConv) playCrmLeadChime();

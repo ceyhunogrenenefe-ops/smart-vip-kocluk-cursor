@@ -247,3 +247,36 @@ export async function markCrmNotificationsRead(userId, ids) {
   if (error) throw error;
   return list.length;
 }
+
+/**
+ * Sohbet açıldığında ya da temsilci yanıt verdiğinde o sohbete ait TÜM
+ * bildirim kartlarını (kime gittiyse) okundu say. Atanmamış sohbette
+ * bildirim tüm yöneticilere gidiyordu; biri ilgilense de diğerlerinde ve
+ * kendi zilinde kart kalıyordu.
+ */
+export async function markConversationNotificationsRead(conversationId) {
+  const id = String(conversationId || '').trim();
+  if (!id) return 0;
+  try {
+    const { data } = await supabaseAdmin
+      .from('platform_notifications')
+      .select('id, target_user_id')
+      .eq('link_url', conversationLink(id))
+      .order('created_at', { ascending: false })
+      .limit(200);
+    const rows = (data || []).filter((n) => n.target_user_id);
+    if (!rows.length) return 0;
+    const now = new Date().toISOString();
+    const { error } = await supabaseAdmin
+      .from('platform_notification_reads')
+      .upsert(
+        rows.map((n) => ({ notification_id: n.id, user_id: String(n.target_user_id), read_at: now })),
+        { onConflict: 'notification_id,user_id', ignoreDuplicates: true }
+      );
+    if (error) throw error;
+    return rows.length;
+  } catch (e) {
+    console.warn('[crm-notify] sohbet bildirimleri okundu:', e instanceof Error ? e.message : e);
+    return 0;
+  }
+}
