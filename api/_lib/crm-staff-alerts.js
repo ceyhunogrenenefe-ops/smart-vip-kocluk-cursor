@@ -202,6 +202,75 @@ function contactLabel(w) {
   return String(w.contact_identifier || 'Müşteri');
 }
 
+function istanbulSlotLabel(iso) {
+  return new Date(iso).toLocaleString('tr-TR', {
+    timeZone: 'Europe/Istanbul',
+    day: 'numeric',
+    month: 'long',
+    weekday: 'long',
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+}
+
+function displayPhone(raw) {
+  const d = String(raw || '').replace(/\D/g, '');
+  const n = d.startsWith('90') ? d.slice(2) : d.startsWith('0') ? d.slice(1) : d;
+  return n.length === 10 ? `0${n.slice(0, 3)} ${n.slice(3, 6)} ${n.slice(6, 8)} ${n.slice(8)}` : String(raw || '-');
+}
+
+/** Gelecekteki, danışmana bildirilmemiş AI randevu görevleri için bildirim gönderir. */
+async function pendingAiAppointmentAlerts(institutionId, now) {
+  const { data: tasks } = await supabaseAdmin
+    .from('registration_tasks')
+    .select('id, lead_id, assigned_to, due_at, deduplication_key')
+    .eq('institution_id', institutionId)
+    .like('deduplication_key', 'ai-callback:%')
+    .in('status', ['pending', 'in_progress'])
+    .not('assigned_to', 'is', null)
+    .gt('due_at', new Date(now).toISOString())
+    .gte('created_at', new Date(now - 3 * 24 * 60 * 60 * 1000).toISOString())
+    .limit(50);
+  if (!tasks?.length) return [];
+  const keys = tasks.map((t) => `ai_appointment:${t.id}`);
+  const { data: done } = await supabaseAdmin
+    .from('crm_staff_alert_log')
+    .select('dedupe_key, status')
+    .in('dedupe_key', keys);
+  // Başarısız kayıt da var sayılır (dedupe UNIQUE); tekrar deneme için önce silinmesi gerekir
+  const seen = new Set((done || []).map((d) => d.dedupe_key));
+  const todo = tasks.filter((t) => !seen.has(`ai_appointment:${t.id}`));
+  if (!todo.length) return [];
+  const leadIds = todo.map((t) => t.lead_id).filter(Boolean);
+  const { data: leads } = leadIds.length
+    ? await supabaseAdmin
+        .from('registration_leads')
+        .select('id, full_name, parent_full_name, phone, normalized_phone, grade_program')
+        .in('id', leadIds)
+    : { data: [] };
+  const leadById = new Map((leads || []).map((l) => [String(l.id), l]));
+  const results = [];
+  for (const t of todo) {
+    const l = leadById.get(String(t.lead_id)) || {};
+    const who = [l.parent_full_name ? `Veli ${l.parent_full_name}` : '', l.full_name && l.full_name !== l.parent_full_name ? l.full_name : '']
+      .filter(Boolean)
+      .join(', ');
+    results.push(
+      await sendStaffAlert({
+        institutionId,
+        userId: t.assigned_to,
+        eventType: 'ai_appointment',
+        dedupeKey: `ai_appointment:${t.id}`,
+        summary: `🤖 AI asistan sizin için randevu ayarladı: ${istanbulSlotLabel(t.due_at)}`,
+        detail: `takviminize alarm eklendi. Aranacak tel: ${displayPhone(l.phone || l.normalized_phone)} · ${who || 'Aday'}`,
+        now,
+        ignoreQuiet: true
+      })
+    );
+  }
+  return results;
+}
+
 /** Zamanlanmış görev: kurum başına SLA 15/30 dk, yeni atanan lead, 09:30 gecikmiş görev özeti. */
 export async function runStaffAlertsJob({ now = Date.now() } = {}) {
   const out = { institutions: 0, sent: 0, skipped: 0, failed: 0, template: null, events: [] };
@@ -220,6 +289,11 @@ export async function runStaffAlertsJob({ now = Date.now() } = {}) {
   for (const st of settingsRows) {
     const inst = String(st.institution_id);
     out.institutions += 1;
+
+    // 0) AI asistan randevusu: danışmana henüz bildirilmediyse gönder (anında gönderim başarısız
+    //    olduysa ya da randevu sonradan elle eklendiyse yakalar). Aynı dedupe anahtarı → tek mesaj.
+    for (const r of await pendingAiAppointmentAlerts(inst, now)) tally(r, 'ai_appointment');
+
     if (isQuietHour(now)) continue;
     const adminId = st.staff_wa_admin_user_id ? String(st.staff_wa_admin_user_id) : null;
     // Vardiya: o an görevde olan temsilciler (null → vardiya tanımlı değil)
