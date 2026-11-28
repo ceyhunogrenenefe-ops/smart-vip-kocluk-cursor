@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Circle, Loader2, UserCheck, UserPlus } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -15,6 +16,7 @@ import CrmFollowUpRulesPanel from './CrmFollowUpRulesPanel';
 import CrmCannedRepliesPanel from './CrmCannedRepliesPanel';
 import CrmStaffAlertsPanel from './CrmStaffAlertsPanel';
 import CrmShiftsPanel from './CrmShiftsPanel';
+import { CRM_WIDGET_CATALOG } from './crmWidgetCatalog';
 
 type AgentRow = {
   id: string;
@@ -22,7 +24,15 @@ type AgentRow = {
   email: string;
   role: string;
   roles?: string[];
+  widget_ids?: string[];
 };
+
+function widgetLabels(ids: string[] | undefined) {
+  if (!ids?.length) return '';
+  return ids
+    .map((id) => CRM_WIDGET_CATALOG.find((w) => w.id === id)?.name || id)
+    .join(' · ');
+}
 
 type CoachRow = { id: string; name: string; email: string; role: string };
 
@@ -45,16 +55,10 @@ export default function CrmAgentsPage() {
     setLoading(true);
     try {
       const res = await crmAdminListAgents();
-      const fromRoles = res.data?.role_users || [];
-      const fromAssign = (res.data?.assignments || [])
-        .map((a: Record<string, unknown>) => {
-          const u = a.users as { id: string; name: string; email: string; role: string; roles?: string[] } | undefined;
-          return u ? { id: u.id, name: u.name, email: u.email, role: u.role, roles: u.roles } : null;
-        })
-        .filter(Boolean) as AgentRow[];
-      const map = new Map<string, AgentRow>();
-      for (const u of [...fromRoles, ...fromAssign]) map.set(u.id, u);
-      setAgents([...map.values()]);
+      if (res.data?.widget_agents_error) {
+        toast.error('Widget temsilcileri okunamadı');
+      }
+      setAgents(res.data?.widget_agents || []);
       setCoaches(res.data?.coach_candidates || []);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Temsilci listesi alınamadı');
@@ -134,8 +138,8 @@ export default function CrmAgentsPage() {
         </h2>
         <p className="mt-1 text-sm text-slate-600">
           {canManage
-            ? 'Yalnızca CRM erişimli kullanıcı oluşturun veya mevcut koçları temsilci yapın. Temsilciler faturalama ve sistem ayarlarını göremez.'
-            : 'Ekipteki temsilciler ve vardiyalar. Değişiklik yalnızca yöneticide yapılır.'}
+            ? 'Listede yalnız Widgetler sayfasında bir kanala eklenen temsilciler durur. Widget’e temsilci ekledikçe burada görünür.'
+            : 'Widgetlere eklenen temsilciler ve vardiyalar. Değişiklik yalnızca yöneticide yapılır.'}
         </p>
       </div>
 
@@ -195,6 +199,9 @@ export default function CrmAgentsPage() {
             {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
             Oluştur
           </button>
+          <p className="text-xs text-slate-500">
+            Hesap açılınca kişi, Widgetler sayfasında bir kanala eklenmeden bu listede görünmez.
+          </p>
         </form>
 
         <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -222,6 +229,9 @@ export default function CrmAgentsPage() {
           >
             CRM temsilcisi olarak ata
           </button>
+          <p className="text-xs text-slate-500">
+            Atanan koç, bir widget’e eklenince aşağıdaki listede görünür.
+          </p>
         </div>
       </div>
       ) : null}
@@ -230,7 +240,7 @@ export default function CrmAgentsPage() {
         <div className="border-b border-slate-100 px-4 py-3 font-semibold text-slate-900">
           Aktif temsilciler
           <span className="ml-2 text-xs font-normal text-emerald-700">
-            · {onlineIds.size} çevrimiçi
+            · {agents.filter((a) => onlineIds.has(a.id)).length} çevrimiçi
           </span>
         </div>
         {loading ? (
@@ -238,7 +248,14 @@ export default function CrmAgentsPage() {
             <Loader2 className="h-6 w-6 animate-spin text-slate-400" />
           </div>
         ) : agents.length === 0 ? (
-          <p className="p-4 text-sm text-slate-500">Henüz CRM temsilcisi yok</p>
+          <p className="p-4 text-sm text-slate-500">
+            Henüz widget’e temsilci eklenmedi.{' '}
+            {canManage ? (
+              <Link to="/crm/widgetler" className="font-medium text-emerald-700 hover:underline">
+                Widgetler
+              </Link>
+            ) : null}
+          </p>
         ) : (
           <ul className="divide-y divide-slate-100">
             {agents.map((a) => (
@@ -261,7 +278,11 @@ export default function CrmAgentsPage() {
                     {a.email} · {a.role}
                     {a.roles?.length ? ` [${a.roles.join(', ')}]` : ''}
                   </p>
+                  {widgetLabels(a.widget_ids) ? (
+                    <p className="text-xs text-emerald-700">{widgetLabels(a.widget_ids)}</p>
+                  ) : null}
                 </div>
+                {canManage ? (
                 <button
                   type="button"
                   onClick={() => {
@@ -276,6 +297,7 @@ export default function CrmAgentsPage() {
                 >
                   Yetkiyi kaldır
                 </button>
+                ) : null}
               </li>
             ))}
           </ul>

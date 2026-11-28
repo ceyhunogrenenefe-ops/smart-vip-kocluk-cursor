@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { CheckCircle2, Loader2, Puzzle, Search } from 'lucide-react';
 import { toast } from 'sonner';
 import CrmInstitutionMetaCard from '../../components/crm/CrmInstitutionMetaCard';
+import CrmWidgetAgentsPanel from './CrmWidgetAgentsPanel';
 import CrmAutoGreetingPanel from '../../components/crm/CrmAutoGreetingPanel';
 import CrmAiAssistantPanel from '../../components/crm/CrmAiAssistantPanel';
 import CrmCommentAutomationPanel from '../../components/crm/CrmCommentAutomationPanel';
@@ -292,6 +293,8 @@ export default function CrmWidgetsPage() {
           Gelen kutusuna dön
         </Link>
       </div>
+
+      <CrmWidgetAgentsPanel />
 
       {/* Platform dışı kurumlar kendi Meta hesabını bağlar */}
       <CrmInstitutionMetaCard />
