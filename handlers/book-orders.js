@@ -329,7 +329,7 @@ async function insertBookOrder(payload) {
   }
   if (error) throw error;
   if (data?.id) {
-    queueCrmWebsiteOrderSync(() => syncKitapSiparisById(data.id));
+    await queueCrmWebsiteOrderSync(() => syncKitapSiparisById(data.id));
   }
   return data;
 }
