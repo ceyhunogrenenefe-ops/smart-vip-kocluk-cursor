@@ -7,7 +7,7 @@ import crypto from 'crypto';
 
 const DEFAULTS = {
   ad_video_tasks: () => ({ status: 'planned', deleted_at: null }),
-  ad_video_submissions: () => ({ review_status: 'pending', is_revision: false }),
+  ad_video_submissions: () => ({ review_status: 'pending', is_revision: false, kind: 'raw', open_for_comments: false }),
   ad_video_settings: () => ({
     editor_user_ids: [],
     drive_upload_enabled: false,
@@ -20,7 +20,7 @@ const DEFAULTS = {
 
 const UNIQUE = {
   ad_video_notification_log: [['event_key', 'recipient_id']],
-  ad_video_submissions: [['task_id', 'version']],
+  ad_video_submissions: [['task_id', 'kind', 'version']],
   ad_video_settings: [['institution_id']]
 };
 

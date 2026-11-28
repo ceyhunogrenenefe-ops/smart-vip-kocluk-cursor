@@ -60,7 +60,7 @@ export function fmtBytes(n: number | null | undefined): string {
 export const STATUS_META: Record<string, { label: string; cls: string }> = {
   planned: { label: 'Planlandı', cls: 'bg-slate-100 text-slate-700' },
   shot: { label: 'Çekildi', cls: 'bg-sky-100 text-sky-800' },
-  submitted: { label: 'Teslim Edildi', cls: 'bg-indigo-100 text-indigo-800' },
+  submitted: { label: 'Ham Video Teslim Edildi', cls: 'bg-indigo-100 text-indigo-800' },
   revision_requested: { label: 'Düzeltme İstendi', cls: 'bg-amber-100 text-amber-900' },
   approved: { label: 'Onaylandı', cls: 'bg-emerald-100 text-emerald-800' },
   overdue: { label: 'Gecikti', cls: 'bg-rose-100 text-rose-800' }
@@ -70,14 +70,12 @@ export const EVENT_LABELS: Record<string, string> = {
   created: 'Görev oluşturuldu',
   updated: 'Görev güncellendi',
   shot: 'Çekim kaydedildi',
-  submitted: 'Video teslim edildi',
-  resubmitted: 'Düzeltilmiş video yüklendi',
+  submitted: 'Ham video teslim edildi',
+  resubmitted: 'Ham video yeniden yüklendi',
+  edit_uploaded: 'Montaj yüklendi',
+  review_opened: 'Montaj yorumlara açıldı',
   approved: 'Onaylandı',
   revision_requested: 'Düzeltme istendi',
   deleted: 'Görev silindi'
 };
 
-/** Drive dosya kimliği → önizleme (izleyicinin Google hesabıyla Drive erişimi gerekir) */
-export function drivePreviewUrl(fileId: string | null | undefined): string | null {
-  return fileId ? `https://drive.google.com/file/d/${encodeURIComponent(fileId)}/preview` : null;
-}

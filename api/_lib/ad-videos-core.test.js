@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  canOpenStoredFile,
   computeTeacherStats,
   dailySummaryDue,
   isOverdue,
@@ -48,5 +49,32 @@ describe('durum ve dosya kuralları', () => {
     expect(dailySummaryDue({}, new Date('2026-11-27T15:00:00Z')).due).toBe(true); // cuma 18:00 TR
     expect(dailySummaryDue({}, new Date('2026-11-27T14:59:00Z')).due).toBe(false);
     expect(dailySummaryDue({}, new Date('2026-11-28T15:30:00Z')).due).toBe(false); // cumartesi
+  });
+});
+
+describe('panel dosya yetkisi', () => {
+  const task = { id: 't', teacher_id: 'owner', institution_id: 'i', deleted_at: null };
+  const raw = { id: 'r', kind: 'raw', source: 'drive_upload', drive_file_id: 'f1' };
+  const draft = { id: 'd', kind: 'edit', source: 'drive_upload', drive_file_id: 'f2', open_for_comments: false };
+  const open = { id: 'o', kind: 'edit', source: 'drive_upload', drive_file_id: 'f3', open_for_comments: true };
+  const legacy = { id: 'l', kind: 'raw', source: 'drive_link', drive_file_id: 'old', drive_url: 'https://drive.google.com/file/d/old/view' };
+  const teacher = (id) => ({ sub: id });
+  const roles = (name) => new Set([name]);
+  const staff = { reviewer: true };
+  const none = { reviewer: false };
+
+  it('ham ve taslak montajı yalnız sahibi, yönetici ve kurgu açar', () => {
+    expect(canOpenStoredFile(teacher('owner'), roles('teacher'), task, raw, none)).toBe(true);
+    expect(canOpenStoredFile(teacher('other'), roles('teacher'), task, raw, none)).toBe(false);
+    expect(canOpenStoredFile(teacher('other'), roles('teacher'), task, raw, staff)).toBe(true);
+    expect(canOpenStoredFile(teacher('other'), roles('teacher'), task, draft, none)).toBe(false);
+    expect(canOpenStoredFile(teacher('editor'), roles('coach'), task, draft, staff)).toBe(true);
+    expect(canOpenStoredFile(teacher('kid'), roles('student'), task, open, staff)).toBe(false);
+  });
+
+  it('yorumlara açılan montajı diğer öğretmen görür; eski bağlantı arşiv sayılmaz', () => {
+    expect(canOpenStoredFile(teacher('other'), roles('teacher'), task, open, none)).toBe(true);
+    expect(canOpenStoredFile(teacher('owner'), roles('teacher'), task, legacy, none)).toBe(false);
+    expect(canOpenStoredFile(teacher('admin'), roles('admin'), task, legacy, staff)).toBe(false);
   });
 });

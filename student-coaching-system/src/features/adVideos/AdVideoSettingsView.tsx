@@ -117,7 +117,7 @@ export default function AdVideoSettingsView({ onSaved }: { onSaved: () => void }
         <div className="rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-700">
           Doğrudan yükleme: <b>{drive?.upload_effective ? 'etkin' : 'kapalı'}</b>
           {' · '}Hizmet hesabı anahtarı: <b>{drive?.credentials_configured ? 'tanımlı' : 'tanımlı değil'}</b>
-          {!drive?.upload_effective ? ' · Öğretmenler Drive bağlantısı ekleyerek teslim eder.' : ''}
+          {!drive?.upload_effective ? ' · Yükleme kapalıyken yeni teslim alınmaz. Kişisel Drive bağlantısı kabul edilmez.' : ''}
         </div>
         <label className="flex items-center gap-2 text-sm text-slate-800">
           <input type="checkbox" className="h-4 w-4" checked={s.drive_upload_enabled} onChange={(e) => patch({ drive_upload_enabled: e.target.checked })} />
@@ -133,10 +133,10 @@ export default function AdVideoSettingsView({ onSaved }: { onSaved: () => void }
             <input value={s.drive_folder_id || ''} onChange={(e) => patch({ drive_folder_id: e.target.value.trim() })} className={field} placeholder="1xY…" />
           </label>
         </div>
-        <label className="block">
-          <span className="mb-1 block text-xs font-semibold text-slate-600">Bağlantı ile teslimde öğretmene gösterilecek klasör</span>
-          <input value={s.link_folder_url || ''} onChange={(e) => patch({ link_folder_url: e.target.value })} className={field} placeholder="https://drive.google.com/drive/folders/…" inputMode="url" />
-        </label>
+        <p className="text-xs text-slate-500">
+          Öğretmen ve kurgu ekibi dosyayı panelden yükler. Google hesabına giriş veya paylaşım ayarı gerekmez. Kurulum: hizmet hesabı JSON’u sunucuda
+          <code className="mx-1">GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON</code>, Paylaşılan Drive ve klasör kimlikleri burada. Ayrıntı <code>docs/REKLAM_VIDEOLARI_DRIVE.md</code>.
+        </p>
         <div className="flex flex-wrap items-center gap-2">
           <button type="button" onClick={() => void runCheck()} disabled={checking} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
             {checking ? <Loader2 className="h-4 w-4 animate-spin" /> : null} Drive bağlantısını test et

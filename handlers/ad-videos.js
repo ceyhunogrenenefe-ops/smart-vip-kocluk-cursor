@@ -13,7 +13,10 @@ import { actorRoleSet } from '../api/_lib/actor-roles.js';
 import {
   STATUSES,
   buildDailySummary,
+  canBrowseReviews,
+  canCommentOn,
   canMarkShot,
+  canOpenStoredFile,
   canReview,
   canSeeTask,
   canSubmit,
@@ -22,16 +25,20 @@ import {
   isDateKey,
   moduleAccess,
   normalizeVideoFile,
+  previewPlan,
+  publicSubmission,
+  signMediaTicket,
   statusAfterShot,
+  submissionKind,
   taskPatchForSubmission,
   teacherSafeTask,
   trDateKey,
   trDayStartMs,
   addDaysKey,
-  validateDriveLink,
   validateSettings,
   validateShootDate,
-  validateTaskFields
+  validateTaskFields,
+  verifyMediaTicket
 } from '../api/_lib/ad-videos-core.js';
 import {
   UPLOAD_CHUNK_BYTES,
@@ -42,16 +49,18 @@ import {
   driveViewUrl,
   effectiveUploadEnabled,
   getDriveFile,
+  openDriveMedia,
   querySessionStatus,
   verifyUploadedFile
 } from '../api/_lib/ad-videos-drive.js';
-import { loadSettings, notifyAssigned, notifyRevision, settingsKey } from '../api/_lib/ad-videos-notify.js';
+import { loadSettings, notifyAssigned, notifyRawDelivered, notifyReviewOpened, notifyRevision, settingsKey } from '../api/_lib/ad-videos-notify.js';
 
 const TASKS = 'ad_video_tasks';
 const SUBS = 'ad_video_submissions';
 const EVENTS = 'ad_video_events';
 const UPLOADS = 'ad_video_upload_sessions';
 const SETTINGS = 'ad_video_settings';
+const COMMENTS = 'ad_video_comments';
 
 class HttpError extends Error {
   constructor(status, message) {
@@ -117,22 +126,27 @@ function shapeTask(task, { forTeacher, teacherName }) {
   return { ...out, teacher_name: teacherName || 'Öğretmen' };
 }
 
-/** Teslim (yükleme ya da bağlantı) kaydı — tek yer */
-async function recordSubmission(ctx, task, { source, driveFileId, driveUrl, fileName, mimeType, sizeBytes, actualShootDate }) {
-  const shootDate = actualShootDate || task.actual_shoot_date;
-  if (!shootDate) throw bad('Gerçekleşen çekim tarihi gerekli');
-  const shootErr = validateShootDate(shootDate);
-  if (shootErr) throw bad(shootErr);
+/** Doğrulanmış kurum arşivi kaydı. Ham ve montaj ayrı sürüm dizileri tutar. */
+async function recordSubmission(ctx, task, { source, kind = 'raw', driveFileId, driveUrl, fileName, mimeType, sizeBytes, actualShootDate }) {
+  const fileKind = kind === 'edit' ? 'edit' : 'raw';
+  if (fileKind === 'raw') {
+    const shootDate = actualShootDate || task.actual_shoot_date;
+    if (!shootDate) throw bad('Gerçekleşen çekim tarihi gerekli');
+    const shootErr = validateShootDate(shootDate);
+    if (shootErr) throw bad(shootErr);
+  }
 
   const { data: prev, error: pErr } = await supabaseAdmin
     .from(SUBS)
-    .select('id, version, review_status')
+    .select('id, version, review_status, kind')
     .eq('task_id', task.id)
+    .eq('kind', fileKind)
     .order('version', { ascending: false })
     .limit(1);
   if (pErr) throw pErr;
   const version = (prev?.[0]?.version || 0) + 1;
   const at = new Date();
+  const preview = previewPlan(mimeType, fileName);
 
   const { data: sub, error } = await supabaseAdmin
     .from(SUBS)
@@ -140,33 +154,105 @@ async function recordSubmission(ctx, task, { source, driveFileId, driveUrl, file
       task_id: task.id,
       teacher_id: task.teacher_id,
       version,
+      kind: fileKind,
       source,
       drive_file_id: driveFileId || null,
       drive_url: driveUrl,
       file_name: fileName || null,
       mime_type: mimeType || null,
       size_bytes: sizeBytes || null,
-      is_revision: Boolean(task.first_submitted_at),
+      is_revision: fileKind === 'raw' ? Boolean(task.first_submitted_at) : version > 1,
       uploaded_by: ctx.actor.sub,
-      uploaded_at: at.toISOString()
+      uploaded_at: at.toISOString(),
+      review_status: fileKind === 'edit' ? 'pending' : 'pending',
+      open_for_comments: false,
+      preview_status: preview.status,
+      preview_note: preview.note
     })
     .select('*')
     .single();
-  if (error) throw error;
+  if (error) {
+    if (/column|schema cache|open_for_comments|preview_status/i.test(String(error.message || ''))) {
+      throw bad('Veritabanı güncellemesi eksik. sql/2026-11-28-ad-videos-panel-izleme.sql Supabase SQL Editor’de çalıştırılmalı.');
+    }
+    throw error;
+  }
 
-  // İncelenmemiş eski sürüm varsa yenisi onun yerini alır
-  await supabaseAdmin.from(SUBS).update({ review_status: 'superseded' }).eq('task_id', task.id).eq('review_status', 'pending').lt('version', version);
+  // Aynı türdeki incelenmemiş eski sürüm yenisinin yerini alır. Ham video montajla silinmez.
+  await supabaseAdmin
+    .from(SUBS)
+    .update({ review_status: 'superseded' })
+    .eq('task_id', task.id)
+    .eq('kind', fileKind)
+    .eq('review_status', 'pending')
+    .lt('version', version);
 
-  const patch = taskPatchForSubmission(task, { submissionId: sub.id, at, actualShootDate: shootDate });
+  const iso = at.toISOString();
+  const patch =
+    fileKind === 'edit'
+      ? { has_edit: true, current_submission_id: sub.id, last_edit_at: iso, updated_at: iso }
+      : taskPatchForSubmission(task, { submissionId: sub.id, at, actualShootDate: actualShootDate || task.actual_shoot_date });
   const { data: updated, error: uErr } = await supabaseAdmin.from(TASKS).update(patch).eq('id', task.id).select('*').single();
   if (uErr) throw uErr;
-  await logEvent(task.id, ctx.actor.sub, sub.is_revision ? 'resubmitted' : 'submitted', null, { version, source });
+  const eventKind = fileKind === 'edit' ? 'edit_uploaded' : sub.is_revision ? 'resubmitted' : 'submitted';
+  await logEvent(task.id, ctx.actor.sub, eventKind, null, { version, source, kind: fileKind });
   return { task: updated, submission: sub };
 }
 
 // ------------------------------------------------------------------ handler
 
+async function loadActorContext(userId) {
+  const { data: user, error } = await supabaseAdmin.from('users').select('id, role, roles, institution_id, is_active, name').eq('id', userId).maybeSingle();
+  if (error) throw error;
+  if (!user || user.is_active === false) return null;
+  const actor = { sub: String(user.id), role: user.role, roles: user.roles, institution_id: user.institution_id, name: user.name };
+  const roles = await actorRoleSet(actor);
+  return { actor, roles, user };
+}
+
+async function streamMedia(req, res) {
+  try {
+    const ticket = verifyMediaTicket(String(req.query?.ticket || ''));
+    if (!ticket) return res.status(401).json({ error: 'Oturum bileti geçersiz veya süresi dolmuş' });
+    const { data: sub, error } = await supabaseAdmin.from(SUBS).select('*').eq('id', ticket.submissionId).maybeSingle();
+    if (error) throw error;
+    if (!sub?.drive_file_id || sub.source === 'drive_link') return res.status(404).json({ error: 'Bu dosya panelde oynatılamaz' });
+    const task = await loadTask(sub.task_id);
+    const ctx = await loadActorContext(ticket.actorId);
+    if (!ctx) return res.status(401).json({ error: 'Kullanıcı bulunamadı' });
+    const settings = await loadSettings(task.institution_id);
+    const access = moduleAccess(ctx.actor, ctx.roles, settings);
+    if (!canOpenStoredFile(ctx.actor, ctx.roles, task, sub, access)) return res.status(403).json({ error: 'Bu videoyu açma yetkiniz yok' });
+    const driveRes = await openDriveMedia(sub.drive_file_id, req.headers?.range || req.headers?.Range);
+    if (!driveRes.ok && driveRes.status !== 206) {
+      const t = await driveRes.text().catch(() => '');
+      return res.status(502).json({ error: `Video okunamadı (${driveRes.status}) ${t.slice(0, 180)}` });
+    }
+    const buf = Buffer.from(await driveRes.arrayBuffer());
+    const status = driveRes.status === 200 ? 206 : driveRes.status;
+    res.status(status);
+    res.setHeader('Content-Type', sub.mime_type || driveRes.headers.get('content-type') || 'video/mp4');
+    res.setHeader('Accept-Ranges', 'bytes');
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.setHeader('Content-Length', String(buf.length));
+    const cr = driveRes.headers.get('content-range');
+    if (cr) res.setHeader('Content-Range', cr);
+    if (String(req.query?.dl || '') === '1') {
+      const name = String(sub.file_name || 'video.mp4').replace(/[^\w.\- ()]+/g, '_');
+      res.setHeader('Content-Disposition', `attachment; filename="${name}"`);
+    }
+    return res.end(buf);
+  } catch (e) {
+    if (e instanceof HttpError) return res.status(e.status).json({ ok: false, error: e.message });
+    console.error('[ad-videos] media', errorMessage(e));
+    return res.status(500).json({ error: 'Video açılamadı' });
+  }
+}
+
 export default async function handler(req, res) {
+  const opEarly = String(req.query?.op || '').trim();
+  if (req.method === 'GET' && opEarly === 'media') return streamMedia(req, res);
+
   let actor;
   try {
     actor = requireAuthenticatedActor(req);
@@ -208,7 +294,10 @@ export default async function handler(req, res) {
         access: { manager: ownAccess.manager, editor: ownAccess.editor, reviewer: ownAccess.reviewer, has_tasks: Boolean(count) },
         upload: {
           enabled: effectiveUploadEnabled(ownSettings),
-          link_folder_url: ownSettings.link_folder_url || null,
+          credentials: driveCredentialsConfigured(),
+          folder: Boolean(ownSettings.drive_folder_id),
+          shared_drive: Boolean(ownSettings.drive_shared_drive_id),
+          enabled_flag: Boolean(ownSettings.drive_upload_enabled),
           chunk_bytes: UPLOAD_CHUNK_BYTES
         },
         today: trDateKey(new Date())
@@ -264,26 +353,44 @@ export default async function handler(req, res) {
     // -------------------------------------------------------------- tek görev
     if (isGet && op === 'get') {
       const { task, access, isOwner } = await taskForActor(ctx, String(req.query?.id || ''));
-      const [{ data: subs }, { data: events }, names] = await Promise.all([
+      const [{ data: subs }, { data: events }, { data: comments }, names] = await Promise.all([
         supabaseAdmin.from(SUBS).select('*').eq('task_id', task.id).order('version', { ascending: false }),
         supabaseAdmin.from(EVENTS).select('*').eq('task_id', task.id).order('created_at', { ascending: false }).limit(200),
+        supabaseAdmin.from(COMMENTS).select('*').eq('task_id', task.id).order('created_at', { ascending: true }),
         usersByIds([task.teacher_id])
       ]);
-      const actorNames = await usersByIds((events || []).map((e) => e.actor_id).concat((subs || []).map((s) => s.reviewed_by)));
+      const visible = (subs || []).filter((s) => s.source === 'drive_link' || canOpenStoredFile(actor, roles, task, s, access) || access.reviewer || isOwner);
+      const actorNames = await usersByIds(
+        (events || []).map((e) => e.actor_id).concat((visible || []).map((s) => s.reviewed_by)).concat((comments || []).map((c) => c.author_id))
+      );
       const forTeacher = isOwner && !access.reviewer;
+      const hasRawArchive = (subs || []).some((s) => submissionKind(s) === 'raw' && s.source === 'drive_upload' && s.drive_file_id);
       return res.status(200).json({
         ok: true,
         task: shapeTask(task, { forTeacher, teacherName: names.get(String(task.teacher_id))?.name }),
-        submissions: (subs || []).map((s) => ({
-          ...s,
-          reviewed_by_name: s.reviewed_by ? actorNames.get(String(s.reviewed_by))?.name || null : null
-        })),
+        submissions: visible.map((s) => {
+          const playable = canOpenStoredFile(actor, roles, task, s, access);
+          const ownComments = playable || s.source === 'drive_link'
+            ? (comments || []).filter((c) => c.submission_id === s.id).map((c) => ({
+                id: c.id,
+                body: c.body,
+                author_name: c.author_name || actorNames.get(String(c.author_id))?.name || 'Kullanıcı',
+                created_at: c.created_at
+              }))
+            : [];
+          return {
+            ...publicSubmission(s, { playable, comments: ownComments }),
+            reviewed_by_name: s.reviewed_by ? actorNames.get(String(s.reviewed_by))?.name || null : null
+          };
+        }),
         events: (events || []).map((e) => ({ ...e, actor_name: actorNames.get(String(e.actor_id))?.name || null })),
         can: {
           manage: access.manager,
           review: access.reviewer && canReview(task),
           mark_shot: isOwner && canMarkShot(task),
-          submit: isOwner && canSubmit(task)
+          submit: isOwner && canSubmit(task),
+          upload_edit: access.reviewer && hasRawArchive,
+          open_review: access.reviewer
         }
       });
     }
@@ -417,34 +524,45 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, task: teacherSafeTask(decorateTask(data)) });
     }
 
-    // -------------------------------------------------------------- teslim: Drive bağlantısı
+    // Yeni teslim kişisel Drive bağlantısı kabul etmez. Eski kayıtlar geçmişte kalır.
     if (isPost && op === 'submit_link') {
-      const { task, isOwner } = await taskForActor(ctx, String(body.id || ''));
-      if (!isOwner) throw forbidden('Teslimi yalnız görevin öğretmeni yapar');
-      if (!canSubmit(task)) throw bad('Bu görev için teslim yapılamaz');
-      const link = validateDriveLink(body.url);
-      if (!link.ok) throw bad(link.error);
-      const r = await recordSubmission(ctx, task, {
-        source: 'drive_link',
-        driveFileId: link.fileId,
-        driveUrl: link.url,
-        actualShootDate: body.actual_shoot_date ? String(body.actual_shoot_date) : null
-      });
-      return res.status(200).json({ ok: true, task: teacherSafeTask(decorateTask(r.task)), submission: r.submission });
+      throw new HttpError(
+        409,
+        'Yeni teslimler kişisel Drive bağlantısıyla kaydedilmez. Dosyayı panelden yükleyin. Kurum Drive’ı hazır değilse yönetici kurulumu tamamlamalı.'
+      );
     }
 
     // -------------------------------------------------------------- teslim: doğrudan Drive yükleme
     if (isPost && op === 'upload_start') {
-      const { task, settings, isOwner } = await taskForActor(ctx, String(body.id || ''));
-      if (!isOwner) throw forbidden('Teslimi yalnız görevin öğretmeni yapar');
-      if (!canSubmit(task)) throw bad('Bu görev için teslim yapılamaz');
-      if (!effectiveUploadEnabled(settings)) throw new HttpError(409, 'Doğrudan Drive yükleme etkin değil; Drive bağlantısı ile teslim edin');
+      const kind = body.kind === 'edit' ? 'edit' : 'raw';
+      const { task, settings, access, isOwner } = await taskForActor(ctx, String(body.id || ''));
+      if (kind === 'raw') {
+        if (!isOwner) throw forbidden('Ham videoyu yalnız görevin öğretmeni yükler');
+        if (!canSubmit(task)) throw bad('Bu görev için teslim yapılamaz');
+      } else if (!access.reviewer) {
+        throw forbidden('Montajı yalnız yönetici ve kurgu ekibi yükler');
+      }
+      if (!effectiveUploadEnabled(settings)) {
+        throw new HttpError(409, 'Kurumsal Drive yüklemesi henüz hazır değil. Yönetici Paylaşılan Drive, klasör ve hizmet hesabını tanımlamalı. Kişisel bağlantı kabul edilmez.');
+      }
       const file = normalizeVideoFile({ name: body.file_name, mime: body.mime_type, size: body.size });
       if (!file.ok) throw bad(file.error);
       const shootDate = body.actual_shoot_date ? String(body.actual_shoot_date) : task.actual_shoot_date;
-      if (!shootDate) throw bad('Gerçekleşen çekim tarihi gerekli');
-      const sErr = validateShootDate(shootDate);
-      if (sErr) throw bad(sErr);
+      if (kind === 'raw') {
+        if (!shootDate) throw bad('Gerçekleşen çekim tarihi gerekli');
+        const sErr = validateShootDate(shootDate);
+        if (sErr) throw bad(sErr);
+      } else {
+        const { data: raws, error: rawErr } = await supabaseAdmin
+          .from(SUBS)
+          .select('id')
+          .eq('task_id', task.id)
+          .eq('kind', 'raw')
+          .eq('source', 'drive_upload')
+          .limit(1);
+        if (rawErr) throw rawErr;
+        if (!raws?.length) throw bad('Montajdan önce ham video kurum arşivine kaydedilmeli');
+      }
 
       // Aynı dosya için açık oturum varsa onu döndür (kesintiden sonra devam)
       const { data: open } = await supabaseAdmin
@@ -456,18 +574,18 @@ export default async function handler(req, res) {
         .gt('expires_at', new Date().toISOString())
         .order('created_at', { ascending: false })
         .limit(5);
-      const same = (open || []).find((s) => s.file_name === file.fileName && Number(s.size_bytes) === file.size);
+      const same = (open || []).find((s) => s.file_name === file.fileName && Number(s.size_bytes) === file.size && (s.kind || 'raw') === kind);
       if (same) {
         return res.status(200).json({ ok: true, session_id: same.id, session_uri: same.session_uri, chunk_bytes: UPLOAD_CHUNK_BYTES, resumed: true });
       }
 
-      const { data: last } = await supabaseAdmin.from(SUBS).select('version').eq('task_id', task.id).order('version', { ascending: false }).limit(1);
+      const { data: last } = await supabaseAdmin.from(SUBS).select('version').eq('task_id', task.id).eq('kind', kind).order('version', { ascending: false }).limit(1);
       const names = await usersByIds([task.teacher_id]);
       const name = buildDriveFileName({
         teacherName: names.get(String(task.teacher_id))?.name || 'Ogretmen',
         title: task.title,
         version: (last?.[0]?.version || 0) + 1,
-        dateKey: shootDate,
+        dateKey: shootDate || trDateKey(new Date()),
         originalName: file.fileName
       });
       const origin = String(req.headers?.origin || '').trim() || null;
@@ -484,6 +602,7 @@ export default async function handler(req, res) {
         .insert({
           task_id: task.id,
           teacher_id: actor.sub,
+          kind,
           session_uri: sessionUri,
           file_name: file.fileName,
           mime_type: file.mimeType,
@@ -506,13 +625,16 @@ export default async function handler(req, res) {
     }
 
     if (isGet && op === 'upload_pending') {
-      const { task, isOwner } = await taskForActor(ctx, String(req.query?.id || ''));
-      if (!isOwner) throw forbidden();
+      const kind = req.query?.kind === 'edit' ? 'edit' : 'raw';
+      const { task, access, isOwner } = await taskForActor(ctx, String(req.query?.id || ''));
+      if (kind === 'raw' && !isOwner) throw forbidden();
+      if (kind === 'edit' && !access.reviewer) throw forbidden();
       const { data } = await supabaseAdmin
         .from(UPLOADS)
-        .select('id, file_name, size_bytes, mime_type, session_uri, created_at')
+        .select('id, file_name, size_bytes, mime_type, session_uri, created_at, kind')
         .eq('task_id', task.id)
         .eq('teacher_id', actor.sub)
+        .eq('kind', kind)
         .is('completed_at', null)
         .gt('expires_at', new Date().toISOString())
         .order('created_at', { ascending: false })
@@ -544,8 +666,10 @@ export default async function handler(req, res) {
         sharedDriveId: settings.drive_shared_drive_id
       });
       if (vErr) throw bad(vErr);
+      const kind = sess.kind === 'edit' ? 'edit' : 'raw';
       const r = await recordSubmission(ctx, task, {
         source: 'drive_upload',
+        kind,
         driveFileId: file.id,
         driveUrl: file.webViewLink || driveViewUrl(file.id),
         fileName: sess.file_name,
@@ -556,7 +680,15 @@ export default async function handler(req, res) {
         .from(UPLOADS)
         .update({ completed_at: new Date().toISOString(), drive_file_id: file.id, submission_id: r.submission.id })
         .eq('id', sess.id);
-      return res.status(200).json({ ok: true, task: teacherSafeTask(decorateTask(r.task)), submission: r.submission });
+      if (kind === 'raw') {
+        await notifyRawDelivered(r.task).catch((e) => console.warn('[ad-videos] raw notify:', errorMessage(e)));
+      }
+      const playable = canOpenStoredFile(actor, roles, r.task, r.submission, moduleAccess(actor, roles, settings));
+      return res.status(200).json({
+        ok: true,
+        task: teacherSafeTask(decorateTask(r.task)),
+        submission: publicSubmission(r.submission, { playable })
+      });
     }
 
     // -------------------------------------------------------------- inceleme
@@ -568,8 +700,10 @@ export default async function handler(req, res) {
       const note = String(body.note || '').trim().slice(0, 4000);
       if (!['approve', 'revision'].includes(action)) throw bad('Geçersiz işlem');
       if (action === 'revision' && !note) throw bad('Düzeltme için açıklama yazın');
-      const { data: sub } = await supabaseAdmin.from(SUBS).select('*').eq('id', task.current_submission_id).maybeSingle();
+      const wanted = String(body.submission_id || task.current_submission_id || '');
+      const { data: sub } = await supabaseAdmin.from(SUBS).select('*').eq('id', wanted).eq('task_id', task.id).maybeSingle();
       if (!sub) throw bad('İncelenecek teslim bulunamadı');
+      if (sub.source === 'drive_link') throw bad('Eski kişisel bağlantı onaylanamaz; öğretmen orijinali yeniden yüklemeli');
       const nowIso = new Date().toISOString();
       await supabaseAdmin
         .from(SUBS)
@@ -582,12 +716,24 @@ export default async function handler(req, res) {
         .eq('id', sub.id);
       const patch =
         action === 'approve'
-          ? { status: 'approved', approved_at: nowIso, approved_by: actor.sub, updated_at: nowIso }
+          ? {
+              status: 'approved',
+              approved_at: nowIso,
+              approved_by: actor.sub,
+              approved_version: sub.version,
+              approved_kind: submissionKind(sub),
+              current_submission_id: sub.id,
+              updated_at: nowIso
+            }
           : { status: 'revision_requested', review_note: note, review_note_at: nowIso, review_note_by: actor.sub, updated_at: nowIso };
       if (action === 'approve' && note) Object.assign(patch, { review_note: note, review_note_at: nowIso, review_note_by: actor.sub });
       const { data, error } = await supabaseAdmin.from(TASKS).update(patch).eq('id', task.id).select('*').single();
       if (error) throw error;
-      await logEvent(task.id, actor.sub, action === 'approve' ? 'approved' : 'revision_requested', note || null, { version: sub.version });
+      await logEvent(task.id, actor.sub, action === 'approve' ? 'approved' : 'revision_requested', note || null, {
+        version: sub.version,
+        kind: submissionKind(sub),
+        submission_id: sub.id
+      });
       if (action === 'revision') await notifyRevision(data, sub, note).catch((e) => console.warn('[ad-videos] revision notify:', errorMessage(e)));
       return res.status(200).json({ ok: true, task: decorateTask(data) });
     }
@@ -645,6 +791,144 @@ export default async function handler(req, res) {
       requireManager();
       const r = await checkDriveAccess({ folderId: ownSettings.drive_folder_id, sharedDriveId: ownSettings.drive_shared_drive_id });
       return res.status(200).json({ ok: !r.error, ...r });
+    }
+
+    // -------------------------------------------------------------- panel bileti (oynatma / indirme)
+    if (isPost && op === 'ticket') {
+      const sid = String(body.submission_id || '').trim();
+      if (!sid) throw bad('Dosya gerekli');
+      const { data: sub, error } = await supabaseAdmin.from(SUBS).select('*').eq('id', sid).maybeSingle();
+      if (error) throw error;
+      if (!sub) throw notFound('Dosya bulunamadı');
+      const task = await loadTask(sub.task_id);
+      const settings = await loadSettings(task.institution_id);
+      const access = moduleAccess(actor, roles, settings);
+      if (String(task.institution_id || '') !== String(actor.institution_id || '') && !(roles.has('super_admin') && !actor.institution_id)) {
+        throw notFound();
+      }
+      if (!canOpenStoredFile(actor, roles, task, sub, access)) throw forbidden('Bu videoyu açma yetkiniz yok');
+      if (!effectiveUploadEnabled(settings) && !sub.drive_file_id) throw bad('Dosya arşivde değil');
+      const signed = signMediaTicket({ submissionId: sub.id, actorId: actor.sub });
+      return res.status(200).json({
+        ok: true,
+        ticket: signed.ticket,
+        url: `/api/ad-videos?op=media&ticket=${encodeURIComponent(signed.ticket)}`,
+        exp: signed.exp
+      });
+    }
+
+    // -------------------------------------------------------------- yorumlara açık montajlar
+    if (isGet && op === 'reviews') {
+      if (!canBrowseReviews(roles, ownAccess)) throw forbidden();
+      const { data: subs, error } = await supabaseAdmin.from(SUBS).select('*').eq('kind', 'edit').eq('open_for_comments', true).limit(500);
+      if (error) throw error;
+      const ids = [...new Set((subs || []).map((s) => s.task_id))];
+      if (!ids.length) return res.status(200).json({ ok: true, items: [] });
+      let tq = supabaseAdmin.from(TASKS).select('*').in('id', ids).is('deleted_at', null);
+      tq = scopeInstitution(tq);
+      const { data: tasks, error: tErr } = await tq;
+      if (tErr) throw tErr;
+      const byId = new Map((tasks || []).map((t) => [t.id, t]));
+      const names = await usersByIds((tasks || []).map((t) => t.teacher_id));
+      const items = (subs || [])
+        .filter((s) => byId.has(s.task_id))
+        .map((s) => {
+          const task = byId.get(s.task_id);
+          return {
+            submission_id: s.id,
+            task_id: task.id,
+            title: task.title,
+            teacher_name: names.get(String(task.teacher_id))?.name || 'Öğretmen',
+            version: s.version,
+            opened_at: s.opened_at,
+            preview_status: s.preview_status || null,
+            preview_note: s.preview_note || null,
+            review_status: s.review_status
+          };
+        })
+        .sort((a, b) => String(b.opened_at || '').localeCompare(String(a.opened_at || '')));
+      return res.status(200).json({ ok: true, items });
+    }
+
+    if (isGet && op === 'review_get') {
+      if (!canBrowseReviews(roles, ownAccess)) throw forbidden();
+      const sid = String(req.query?.id || '').trim();
+      const { data: sub, error } = await supabaseAdmin.from(SUBS).select('*').eq('id', sid).maybeSingle();
+      if (error) throw error;
+      if (!sub || submissionKind(sub) !== 'edit' || !sub.open_for_comments) throw notFound('İncelemede montaj yok');
+      const task = await loadTask(sub.task_id);
+      const settings = await loadSettings(task.institution_id);
+      const access = moduleAccess(actor, roles, settings);
+      if (!canSeeTask(task, actor, { ...access, reviewer: access.reviewer || canBrowseReviews(roles, access) }) && !canOpenStoredFile(actor, roles, task, sub, access)) {
+        throw notFound();
+      }
+      if (String(task.institution_id || '') !== String(actor.institution_id || '') && !(roles.has('super_admin') && !actor.institution_id)) {
+        throw notFound();
+      }
+      const { data: comments } = await supabaseAdmin.from(COMMENTS).select('*').eq('submission_id', sub.id).order('created_at', { ascending: true });
+      return res.status(200).json({
+        ok: true,
+        item: {
+          ...publicSubmission(sub, {
+            playable: canOpenStoredFile(actor, roles, task, sub, access),
+            comments: (comments || []).map((c) => ({ id: c.id, body: c.body, author_name: c.author_name, created_at: c.created_at }))
+          }),
+          title: task.title,
+          teacher_name: (await usersByIds([task.teacher_id])).get(String(task.teacher_id))?.name || 'Öğretmen'
+        }
+      });
+    }
+
+    if (isPost && op === 'open_review') {
+      const sid = String(body.submission_id || '').trim();
+      const { data: sub, error } = await supabaseAdmin.from(SUBS).select('*').eq('id', sid).maybeSingle();
+      if (error) throw error;
+      if (!sub) throw notFound('Montaj bulunamadı');
+      const { task, access } = await taskForActor(ctx, sub.task_id);
+      if (!access.reviewer) throw forbidden();
+      if (submissionKind(sub) !== 'edit' || sub.source !== 'drive_upload') throw bad('Yorumlara yalnız kurum arşivindeki montaj açılır');
+      const nowIso = new Date().toISOString();
+      const { data: updated, error: uErr } = await supabaseAdmin
+        .from(SUBS)
+        .update({ open_for_comments: true, opened_at: nowIso, opened_by: actor.sub })
+        .eq('id', sub.id)
+        .select('*')
+        .single();
+      if (uErr) throw uErr;
+      await supabaseAdmin.from(TASKS).update({ review_open: true, updated_at: nowIso }).eq('id', task.id);
+      await logEvent(task.id, actor.sub, 'review_opened', null, { version: sub.version, submission_id: sub.id });
+      await notifyReviewOpened(task, updated).catch((e) => console.warn('[ad-videos] review notify:', errorMessage(e)));
+      return res.status(200).json({ ok: true, submission: publicSubmission(updated, { playable: true }) });
+    }
+
+    if (isPost && op === 'comment') {
+      const sid = String(body.submission_id || '').trim();
+      const text = String(body.body || '').trim().slice(0, 4000);
+      if (!text) throw bad('Yorum yazın');
+      const { data: sub, error } = await supabaseAdmin.from(SUBS).select('*').eq('id', sid).maybeSingle();
+      if (error) throw error;
+      if (!sub) throw notFound('Montaj bulunamadı');
+      const task = await loadTask(sub.task_id);
+      const settings = await loadSettings(task.institution_id);
+      const access = moduleAccess(actor, roles, settings);
+      if (!canCommentOn(actor, roles, task, sub, access)) throw forbidden('Bu sürüme yorum yazamazsınız');
+      if (String(task.institution_id || '') !== String(actor.institution_id || '') && !(roles.has('super_admin') && !actor.institution_id)) {
+        throw forbidden();
+      }
+      const names = await usersByIds([actor.sub]);
+      const { data, error: cErr } = await supabaseAdmin
+        .from(COMMENTS)
+        .insert({
+          submission_id: sub.id,
+          task_id: task.id,
+          author_id: actor.sub,
+          author_name: names.get(String(actor.sub))?.name || 'Kullanıcı',
+          body: text
+        })
+        .select('*')
+        .single();
+      if (cErr) throw cErr;
+      return res.status(200).json({ ok: true, comment: { id: data.id, body: data.body, author_name: data.author_name, created_at: data.created_at } });
     }
 
     return res.status(404).json({ error: 'unknown_op' });
