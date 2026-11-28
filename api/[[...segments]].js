@@ -30,8 +30,7 @@ const TOKEN_REQUIRED_ROUTES = new Set([
   'commerce-admin',
   'commerce-vendor',
   'commerce-upload',
-  'edu-programs',
-  'ad-videos'
+  'edu-programs'
 ]);
 
 function hasBearerToken(req) {

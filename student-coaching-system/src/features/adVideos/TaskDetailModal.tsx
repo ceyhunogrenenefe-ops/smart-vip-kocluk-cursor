@@ -5,7 +5,6 @@ import {
   ExternalLink,
   FileVideo,
   History,
-  Link2,
   Loader2,
   Pause,
   Pencil,
@@ -18,8 +17,9 @@ import {
 import { toast } from 'sonner';
 import { AppModal } from '../../components/ui/AppModal';
 import { adVideosApi, type AdVideoDetail, type AdVideoMe } from './api';
-import { EVENT_LABELS, STATUS_META, drivePreviewUrl, fmtBytes, fmtDateTime, fmtDay, todayKey } from './format';
+import { EVENT_LABELS, STATUS_META, fmtBytes, fmtDateTime, fmtDay, todayKey } from './format';
 import { UploadAborted, uploadResumable } from './resumableUpload';
+import PanelVideo from './PanelVideo';
 import TaskFormModal from './TaskFormModal';
 
 type Props = {
@@ -52,8 +52,9 @@ export default function TaskDetailModal({ taskId, me, onClose, onChanged }: Prop
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [shootDate, setShootDate] = useState(todayKey());
-  const [linkUrl, setLinkUrl] = useState('');
   const [submitShootDate, setSubmitShootDate] = useState(todayKey());
+  const [editFile, setEditFile] = useState<File | null>(null);
+  const [approveId, setApproveId] = useState('');
   const [reviewNote, setReviewNote] = useState('');
   const [editOpen, setEditOpen] = useState(false);
   const [file, setFile] = useState<File | null>(null);
@@ -90,8 +91,9 @@ export default function TaskDetailModal({ taskId, me, onClose, onChanged }: Prop
     setD(null);
     setFile(null);
     setPending(null);
-    setLinkUrl('');
+    setEditFile(null);
     setReviewNote('');
+    setApproveId('');
     setUp({ phase: 'idle', sent: 0, total: 0 });
     sessionRef.current = null;
     void load();
@@ -119,26 +121,28 @@ export default function TaskDetailModal({ taskId, me, onClose, onChanged }: Prop
   const task = d?.task;
   const needsShootDate = Boolean(task && !task.actual_shoot_date);
 
-  const startUpload = async () => {
-    if (!task || !file) return;
-    const ext = (file.name.split('.').pop() || '').toLowerCase();
+  const startUpload = async (kind: 'raw' | 'edit' = 'raw') => {
+    const chosen = kind === 'edit' ? editFile : file;
+    if (!task || !chosen) return;
+    const ext = (chosen.name.split('.').pop() || '').toLowerCase();
     if (!['mp4', 'mov', 'm4v'].includes(ext)) return toast.error('Yalnız MP4 veya MOV video yüklenebilir');
-    setUp({ phase: 'uploading', sent: 0, total: file.size });
+    setUp({ phase: 'uploading', sent: 0, total: chosen.size });
     try {
       if (!sessionRef.current) {
         const s = await adVideosApi.uploadStart({
           id: task.id,
-          file_name: file.name,
-          mime_type: file.type,
-          size: file.size,
-          actual_shoot_date: needsShootDate ? submitShootDate : undefined
+          kind,
+          file_name: chosen.name,
+          mime_type: chosen.type,
+          size: chosen.size,
+          actual_shoot_date: kind === 'raw' && needsShootDate ? submitShootDate : undefined
         });
         sessionRef.current = { id: s.session_id, uri: s.session_uri, chunk: s.chunk_bytes };
         if (s.resumed) toast.message('Yarım kalan yükleme kaldığı yerden sürüyor');
       }
       const ctrl = new AbortController();
       abortRef.current = ctrl;
-      await uploadResumable(file, sessionRef.current.uri, {
+      await uploadResumable(chosen, sessionRef.current.uri, {
         chunkBytes: sessionRef.current.chunk,
         signal: ctrl.signal,
         onProgress: (p) => setUp((u) => ({ ...u, phase: 'uploading', sent: p.sent, total: p.total }))
@@ -158,9 +162,10 @@ export default function TaskDetailModal({ taskId, me, onClose, onChanged }: Prop
         }
       }
       if (lastErr) throw lastErr;
-      toast.success('Video Drive’a kaydedildi ve teslim edildi');
+      toast.success(kind === 'edit' ? 'Montaj arşive kaydedildi. Henüz taslak; yorumlara açılmadı.' : 'Ham video arşive kaydedildi ve teslim edildi');
       sessionRef.current = null;
       setFile(null);
+      setEditFile(null);
       setPending(null);
       setUp({ phase: 'idle', sent: 0, total: 0 });
       await refresh();
@@ -176,9 +181,9 @@ export default function TaskDetailModal({ taskId, me, onClose, onChanged }: Prop
   };
 
   const pct = up.total ? Math.floor((up.sent / up.total) * 100) : 0;
-  const current = d?.submissions.find((s) => s.id === task?.current_submission_id) || d?.submissions[0] || null;
   const isReviewer = Boolean(me?.access.reviewer);
-  const preview = isReviewer ? drivePreviewUrl(current?.drive_file_id) : null;
+  const edits = (d?.submissions || []).filter((s) => s.kind === 'edit');
+  const raws = (d?.submissions || []).filter((s) => s.kind !== 'edit');
 
   return (
     <AppModal open={Boolean(taskId)} onClose={up.phase === 'uploading' ? undefined : onClose} panelClassName="sm:max-w-3xl">
@@ -280,7 +285,7 @@ export default function TaskDetailModal({ taskId, me, onClose, onChanged }: Prop
               <section className="rounded-2xl border border-indigo-200 bg-indigo-50/40 p-3">
                 <h4 className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-900">
                   <Upload className="h-4 w-4 text-indigo-600" />
-                  {task.first_submitted_at ? 'Yeni video yükle' : 'Videoyu teslim et'}
+                  {task.first_submitted_at ? 'Ham videoyu yeniden yükle' : 'Ham Videoyu Yükle'}
                 </h4>
                 {needsShootDate ? (
                   <label className="mb-3 block">
@@ -338,97 +343,145 @@ export default function TaskDetailModal({ taskId, me, onClose, onChanged }: Prop
                         <button
                           type="button"
                           disabled={!file || up.phase === 'finalizing' || (needsShootDate && !submitShootDate)}
-                          onClick={() => void startUpload()}
+                          onClick={() => void startUpload('raw')}
                           className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-60"
                         >
                           {up.phase === 'paused' || up.phase === 'error' ? <Play className="h-4 w-4" /> : <Upload className="h-4 w-4" />}
-                          {up.phase === 'paused' || up.phase === 'error' ? 'Devam et' : 'Yükle ve teslim et'}
+                          {up.phase === 'paused' || up.phase === 'error' ? 'Devam et' : 'Ham Videoyu Yükle'}
                         </button>
                       )}
                     </div>
                     <p className="text-xs text-slate-500">MP4 veya MOV. Video kurumun Drive alanına kaydedilmeden teslim sayılmaz; yükleme sırasında bu pencereyi kapatmayın.</p>
                   </div>
                 ) : (
-                  <div className="space-y-2">
-                    <p className="text-xs text-slate-600">
-                      Videoyu kurumun Drive klasörüne yükleyin, ardından videonun <b>dosya bağlantısını</b> buraya ekleyin.
-                      {me?.upload.link_folder_url ? (
-                        <>
-                          {' '}
-                          <a href={me.upload.link_folder_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 font-medium text-indigo-700 hover:underline">
-                            Drive klasörünü aç <ExternalLink className="h-3 w-3" />
-                          </a>
-                        </>
-                      ) : null}
-                    </p>
-                    <input
-                      value={linkUrl}
-                      onChange={(e) => setLinkUrl(e.target.value)}
-                      placeholder="https://drive.google.com/file/d/…"
-                      inputMode="url"
-                      className={field}
-                    />
-                    <button
-                      type="button"
-                      disabled={busy || !linkUrl.trim() || (needsShootDate && !submitShootDate)}
-                      onClick={() =>
-                        void run(
-                          () => adVideosApi.submitLink(task.id, linkUrl.trim(), needsShootDate ? submitShootDate : undefined),
-                          'Video teslim edildi'
-                        ).then(() => setLinkUrl(''))
-                      }
-                      className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-60"
-                    >
-                      <Link2 className="h-4 w-4" /> Bağlantıyla teslim et
-                    </button>
+                  <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
+                    Kurumsal Drive henüz hazır değil. Ham video yüklenemez ve kişisel Drive bağlantısı kabul edilmez. Yönetici Paylaşılan Drive kimliğini, hedef klasörü ve sunucudaki hizmet hesabını tanımlamalı.
                   </div>
                 )}
               </section>
             ) : null}
 
-            {/* ---------- İnceleme */}
-            {current && isReviewer ? (
-              <section className="space-y-3 rounded-2xl border border-slate-200 p-3">
+            {d.can.upload_edit ? (
+              <section className="rounded-2xl border border-slate-200 p-3">
+                <h4 className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-900">
+                  <Upload className="h-4 w-4 text-slate-700" /> Montajı Yükle
+                </h4>
+                <input
+                  type="file"
+                  accept="video/mp4,video/quicktime,.mp4,.mov,.m4v"
+                  disabled={up.phase === 'uploading' || up.phase === 'finalizing'}
+                  onChange={(e) => {
+                    setEditFile(e.target.files?.[0] || null);
+                    sessionRef.current = null;
+                    setUp({ phase: 'idle', sent: 0, total: 0 });
+                  }}
+                  className="block w-full text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-slate-800 file:px-3 file:py-2 file:text-sm file:font-semibold file:text-white"
+                />
+                <button
+                  type="button"
+                  disabled={!editFile || up.phase === 'uploading' || up.phase === 'finalizing' || !me?.upload.enabled}
+                  onClick={() => void startUpload('edit')}
+                  className="mt-2 inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
+                >
+                  <Upload className="h-4 w-4" /> Montajı Yükle
+                </button>
+                {!me?.upload.enabled ? <p className="mt-2 text-xs text-amber-800">Kurumsal Drive hazır olmadığı için montaj yüklenemez.</p> : null}
+                <p className="mt-1 text-xs text-slate-500">Montaj önce taslak kalır. Yorumlara açılınca diğer öğretmenler yalnız bu sürümü görür.</p>
+              </section>
+            ) : null}
+
+            {/* ---------- Ham video: panel oynatıcı */}
+            {raws
+                  .filter((s) => s.playable)
+                  .slice(0, 1)
+                  .map((s) => (
+                    <section key={s.id} className="space-y-2 rounded-2xl border border-slate-200 p-3">
+                      <h4 className="text-sm font-semibold text-slate-900">Ham video · v{s.version}</h4>
+                      <PanelVideo
+                        submissionId={s.id}
+                        title={`${task.title} ham`}
+                        fileName={s.file_name}
+                        sizeBytes={s.size_bytes}
+                        allowDownload={isReviewer}
+                        previewStatus={s.preview_status}
+                        previewNote={s.preview_note}
+                      />
+                    </section>
+                  ))}
+
+            {edits.map((s) => (
+              <section key={s.id} className="space-y-2 rounded-2xl border border-slate-200 p-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <h4 className="text-sm font-semibold text-slate-900">Teslim edilen video · v{current.version}</h4>
-                  <a
-                    href={current.drive_url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
-                  >
-                    Drive’da aç <ExternalLink className="h-3.5 w-3.5" />
-                  </a>
+                  <h4 className="text-sm font-semibold text-slate-900">
+                    Montaj v{s.version} {s.open_for_comments ? '· yorumlara açık' : '· taslak'}
+                    {s.review_status === 'approved' ? ' · onaylandı' : ''}
+                  </h4>
+                  {d.can.open_review && !s.open_for_comments && s.playable ? (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => void run(() => adVideosApi.openReview(s.id), 'Montaj yorumlara açıldı')}
+                      className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white"
+                    >
+                      Yorumlara Aç
+                    </button>
+                  ) : null}
                 </div>
-                {preview ? (
-                  <div className="aspect-video w-full overflow-hidden rounded-xl bg-slate-900">
-                    <iframe src={preview} title="Video önizleme" className="h-full w-full" allow="autoplay; fullscreen" allowFullScreen />
-                  </div>
-                ) : null}
-                <p className="text-[11px] text-slate-500">Video herkese açık değildir; kurumun Drive alanına erişimi olan Google hesabıyla açılır.</p>
-                {d.can.review ? (
-                  <div className="space-y-2">
-                    <textarea value={reviewNote} onChange={(e) => setReviewNote(e.target.value)} rows={3} placeholder="Düzeltme açıklaması (düzeltme isterken zorunlu)" className={field} />
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        disabled={busy}
-                        onClick={() => void run(() => adVideosApi.review(task.id, 'approve', reviewNote), 'Video onaylandı')}
-                        className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
-                      >
-                        <CheckCircle2 className="h-4 w-4" /> Onayla
-                      </button>
-                      <button
-                        type="button"
-                        disabled={busy || !reviewNote.trim()}
-                        onClick={() => void run(() => adVideosApi.review(task.id, 'revision', reviewNote), 'Düzeltme istendi')}
-                        className="inline-flex items-center gap-2 rounded-xl bg-amber-500 px-4 py-2.5 text-sm font-semibold text-white hover:bg-amber-600 disabled:opacity-60"
-                      >
-                        <RotateCcw className="h-4 w-4" /> Düzeltme iste
-                      </button>
-                    </div>
-                  </div>
-                ) : null}
+                {s.playable ? (
+                  <PanelVideo
+                    submissionId={s.id}
+                    title={`${task.title} v${s.version}`}
+                    fileName={s.file_name}
+                    sizeBytes={s.size_bytes}
+                    allowDownload={isReviewer}
+                    previewStatus={s.preview_status}
+                    previewNote={s.preview_note}
+                  />
+                ) : (
+                  <p className="text-xs text-slate-500">Bu sürüm sizin için kapalı.</p>
+                )}
+                {(s.comments || []).map((c) => (
+                  <p key={c.id} className="text-xs text-slate-600">
+                    <b>{c.author_name}</b> · {fmtDateTime(c.created_at)} — {c.body}
+                  </p>
+                ))}
+              </section>
+            ))}
+
+            {d.can.review ? (
+              <section className="space-y-3 rounded-2xl border border-slate-200 p-3">
+                <h4 className="text-sm font-semibold text-slate-900">Onay</h4>
+                {edits.length ? (
+                  <select value={approveId || edits[0]?.id || ''} onChange={(e) => setApproveId(e.target.value)} className={field}>
+                    {edits.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        Montaj v{s.version}
+                        {s.open_for_comments ? ' · yorumlara açık' : ' · taslak'}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <p className="text-xs text-slate-500">Onaylanacak montaj yok. Ham video duruyor; montaj yükleyin.</p>
+                )}
+                <textarea value={reviewNote} onChange={(e) => setReviewNote(e.target.value)} rows={3} placeholder="Yeni sürüm isterken açıklama zorunlu" className={field} />
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    disabled={busy || !edits.length}
+                    onClick={() => void run(() => adVideosApi.review(task.id, 'approve', reviewNote, approveId || edits[0]?.id), 'Seçilen sürüm onaylandı')}
+                    className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
+                  >
+                    <CheckCircle2 className="h-4 w-4" /> Seçilen sürümü onayla
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busy || !reviewNote.trim()}
+                    onClick={() => void run(() => adVideosApi.review(task.id, 'revision', reviewNote, approveId || edits[0]?.id), 'Yeni sürüm istendi')}
+                    className="inline-flex items-center gap-2 rounded-xl bg-amber-500 px-4 py-2.5 text-sm font-semibold text-white hover:bg-amber-600 disabled:opacity-60"
+                  >
+                    <RotateCcw className="h-4 w-4" /> Yeni sürüm iste
+                  </button>
+                </div>
               </section>
             ) : null}
 
@@ -443,10 +496,10 @@ export default function TaskDetailModal({ taskId, me, onClose, onChanged }: Prop
                     <li key={s.id} className="flex flex-col gap-1 px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between">
                       <div className="min-w-0">
                         <p className="text-sm font-medium text-slate-900">
-                          v{s.version} {s.is_revision ? <span className="text-xs font-normal text-amber-700">(düzeltme)</span> : null}
+                          {s.kind === 'edit' ? 'Montaj' : 'Ham'} v{s.version} {s.is_revision ? <span className="text-xs font-normal text-amber-700">(yeniden)</span> : null}
                         </p>
                         <p className="text-xs text-slate-500">
-                          {fmtDateTime(s.uploaded_at)} · {s.source === 'drive_upload' ? 'Drive’a yüklendi' : 'Drive bağlantısı'}
+                          {fmtDateTime(s.uploaded_at)} · {s.legacy_link ? 'Eski kişisel bağlantı (kurum arşivi değil)' : 'Kurum arşivi'}
                           {s.size_bytes ? ` · ${fmtBytes(s.size_bytes)}` : ''}
                         </p>
                         {s.review_note ? <p className="mt-0.5 whitespace-pre-wrap text-xs text-amber-800">Not: {s.review_note}</p> : null}
@@ -461,9 +514,11 @@ export default function TaskDetailModal({ taskId, me, onClose, onChanged }: Prop
                                 ? 'Yenisi yüklendi'
                                 : 'İnceleme bekliyor'}
                         </span>
-                        <a href={s.drive_url} target="_blank" rel="noreferrer" className="rounded-lg p-1.5 text-indigo-700 hover:bg-indigo-50" title="Aç">
-                          <ExternalLink className="h-4 w-4" />
-                        </a>
+                        {s.legacy_link && s.drive_url ? (
+                          <a href={s.drive_url} target="_blank" rel="noreferrer" className="text-[11px] text-amber-800 underline" title="Eski kişisel bağlantı">
+                            Eski bağlantı
+                          </a>
+                        ) : null}
                       </div>
                     </li>
                   ))}

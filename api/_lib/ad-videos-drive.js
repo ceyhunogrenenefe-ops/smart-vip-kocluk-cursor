@@ -3,7 +3,9 @@
  *
  * Kimlik: Google Cloud hizmet hesabı (service account). Dosyalar kurumun Paylaşılan
  * Drive'ındaki hedef klasöre yazılır; hizmet hesabı o Paylaşılan Drive'a "İçerik yöneticisi"
- * olarak eklenmelidir. Dosyalar herkese açık paylaşılmaz: yalnız Paylaşılan Drive üyeleri açar.
+ * olarak eklenmelidir. Dosyalar herkese açık paylaşılmaz. İzleme, panel oturumunun
+ * verdiği kısa ömürlü bilet ile sunucunun hizmet hesabından akar; tarayıcıya Google
+ * jetonu veya Drive bağlantısı verilmez.
  *
  * Ortam değişkenleri:
  *   GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON  hizmet hesabı JSON anahtarı (düz JSON veya base64)
@@ -180,6 +182,26 @@ export function verifyUploadedFile(file, { folderId, size, sharedDriveId }) {
 
 export function driveViewUrl(fileId) {
   return `https://drive.google.com/file/d/${encodeURIComponent(fileId)}/view`;
+}
+
+const MEDIA_CHUNK = 2 * 1024 * 1024;
+
+/**
+ * Panel oynatıcısı için Drive'dan sınırlı bir aralık okur.
+ * Hizmet hesabı jetonu yalnız bu istekte kalır.
+ */
+export async function openDriveMedia(fileId, rangeHeader) {
+  const token = await getDriveAccessToken();
+  let start = 0;
+  const m = String(rangeHeader || '').match(/bytes=(\d+)-(\d*)/);
+  if (m) start = Number(m[1]) || 0;
+  let end = m && m[2] !== undefined && m[2] !== '' ? Number(m[2]) : start + MEDIA_CHUNK - 1;
+  if (!Number.isFinite(end) || end < start) end = start + MEDIA_CHUNK - 1;
+  if (end - start + 1 > MEDIA_CHUNK) end = start + MEDIA_CHUNK - 1;
+  const res = await fetchImpl(`${FILES_URL}/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true`, {
+    headers: { Authorization: `Bearer ${token}`, Range: `bytes=${start}-${end}` }
+  });
+  return res;
 }
 
 /** Yönetici "Drive bağlantısını test et": hizmet hesabı klasörü görebiliyor mu? */

@@ -30,13 +30,23 @@ export interface AdVideoTask {
   created_at: string;
 }
 
+export interface AdVideoComment {
+  id: string;
+  body: string;
+  author_name: string;
+  created_at: string;
+}
+
 export interface AdVideoSubmission {
   id: string;
   version: number;
+  kind: 'raw' | 'edit';
   source: 'drive_upload' | 'drive_link';
-  drive_file_id: string | null;
-  drive_url: string;
+  legacy_link?: boolean;
+  archive?: boolean;
+  drive_url: string | null;
   file_name: string | null;
+  mime_type?: string | null;
   size_bytes: number | null;
   is_revision: boolean;
   uploaded_at: string;
@@ -44,6 +54,12 @@ export interface AdVideoSubmission {
   reviewed_at: string | null;
   reviewed_by_name: string | null;
   review_note: string | null;
+  open_for_comments?: boolean;
+  opened_at?: string | null;
+  preview_status?: 'not_needed' | 'unavailable' | 'ready' | null;
+  preview_note?: string | null;
+  playable?: boolean;
+  comments?: AdVideoComment[];
 }
 
 export interface AdVideoEvent {
@@ -59,12 +75,19 @@ export interface AdVideoDetail {
   task: AdVideoTask;
   submissions: AdVideoSubmission[];
   events: AdVideoEvent[];
-  can: { manage: boolean; review: boolean; mark_shot: boolean; submit: boolean };
+  can: { manage: boolean; review: boolean; mark_shot: boolean; submit: boolean; upload_edit?: boolean; open_review?: boolean };
 }
 
 export interface AdVideoMe {
   access: { manager: boolean; editor: boolean; reviewer: boolean; has_tasks: boolean };
-  upload: { enabled: boolean; link_folder_url: string | null; chunk_bytes: number };
+  upload: {
+    enabled: boolean;
+    credentials?: boolean;
+    folder?: boolean;
+    shared_drive?: boolean;
+    enabled_flag?: boolean;
+    chunk_bytes: number;
+  };
   today: string;
 }
 
@@ -88,6 +111,8 @@ export interface TeacherStatRow {
   week: { planned: number; shot: number; first_submitted: number; approved: number };
   shot_awaiting_submission: BriefTask[];
   awaiting_review: BriefTask[];
+  edits_waiting?: BriefTask[];
+  open_for_comments?: BriefTask[];
   revision_requested: BriefTask[];
   overdue: BriefTask[];
   upcoming_shoots: BriefTask[];
@@ -101,6 +126,8 @@ export interface AdVideoStats {
     week: { planned: number; shot: number; first_submitted: number; approved: number };
     shot_awaiting_submission: number;
     awaiting_review: number;
+    edits_waiting?: number;
+    open_for_comments?: number;
     revision_requested: number;
     overdue: number;
     upcoming_shoots: number;
@@ -113,6 +140,7 @@ export interface DailySummary {
   tomorrow: string;
   delivered: BriefTask[];
   awaiting_review: BriefTask[];
+  open_for_comments?: BriefTask[];
   overdue: BriefTask[];
   tomorrow_shoots: BriefTask[];
 }
@@ -164,15 +192,18 @@ export const adVideosApi = {
   update: (body: Record<string, unknown>) => call<{ task: AdVideoTask }>('update', { method: 'POST', body }),
   remove: (id: string) => call<{ ok: true }>('delete', { method: 'POST', body: { id } }),
   markShot: (id: string, date: string) => call<{ task: AdVideoTask }>('mark_shot', { method: 'POST', body: { id, date } }),
-  submitLink: (id: string, url: string, actual_shoot_date?: string) =>
-    call<{ task: AdVideoTask }>('submit_link', { method: 'POST', body: { id, url, actual_shoot_date } }),
-  uploadStart: (body: { id: string; file_name: string; mime_type: string; size: number; actual_shoot_date?: string }) =>
+  uploadStart: (body: { id: string; file_name: string; mime_type: string; size: number; actual_shoot_date?: string; kind?: 'raw' | 'edit' }) =>
     call<{ session_id: string; session_uri: string; chunk_bytes: number; resumed: boolean }>('upload_start', { method: 'POST', body }),
   uploadPending: (id: string) =>
     call<{ session: { id: string; file_name: string; size_bytes: number; created_at: string } | null }>('upload_pending', { query: { id } }),
   uploadFinalize: (session_id: string) => call<{ task: AdVideoTask; already?: boolean }>('upload_finalize', { method: 'POST', body: { session_id } }),
-  review: (id: string, action: 'approve' | 'revision', note: string) =>
-    call<{ task: AdVideoTask }>('review', { method: 'POST', body: { id, action, note } }),
+  review: (id: string, action: 'approve' | 'revision', note: string, submission_id?: string) =>
+    call<{ task: AdVideoTask & { approved_version?: number; approved_kind?: string } }>('review', { method: 'POST', body: { id, action, note, submission_id } }),
+  ticket: (submission_id: string) => call<{ ticket: string; url: string }>('ticket', { method: 'POST', body: { submission_id } }),
+  reviews: () => call<{ items: Array<{ submission_id: string; task_id: string; title: string; teacher_name: string; version: number; opened_at: string | null; review_status: string }> }>('reviews'),
+  reviewGet: (id: string) => call<{ item: AdVideoSubmission & { title: string; teacher_name: string } }>('review_get', { query: { id } }),
+  openReview: (submission_id: string) => call<{ submission: AdVideoSubmission }>('open_review', { method: 'POST', body: { submission_id } }),
+  comment: (submission_id: string, body: string) => call<{ comment: AdVideoComment }>('comment', { method: 'POST', body: { submission_id, body } }),
   stats: (week: string, teacher_id?: string) => call<AdVideoStats>('stats', { query: { week, teacher_id } }),
   daily: (date: string) => call<{ summary: DailySummary }>('daily_summary', { query: { date } }),
   settings: () =>

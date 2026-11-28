@@ -92,6 +92,18 @@ function driveFetch(url, opts = {}) {
     }
     return json(200, s.file);
   }
+  if (u.includes('alt=media')) {
+    const id = decodeURIComponent(u.split('/files/')[1].split('?')[0]);
+    const f = drive.files.get(id);
+    if (!f) return json(404, {});
+    const body = new Uint8Array([0, 1, 2, 3, 4, 5, 6, 7]);
+    return Promise.resolve(
+      new Response(body, {
+        status: 206,
+        headers: { 'content-type': f.mimeType || 'video/mp4', 'content-range': `bytes 0-${body.length - 1}/8`, 'content-length': String(body.length) }
+      })
+    );
+  }
   if (u.startsWith('https://www.googleapis.com/drive/v3/files/')) {
     const id = decodeURIComponent(u.split('/files/')[1].split('?')[0]);
     const f = drive.files.get(id);
@@ -212,19 +224,14 @@ describe('Reklam Videoları — bir yönetici, iki öğretmen', () => {
     expect(r.json.task.actual_shoot_date).toBe(today());
   });
 
-  it('öğretmen 2 teslim ekranında çekim tarihini girip Drive bağlantısıyla teslim eder', async () => {
+  it('yeni teslim kişisel Drive bağlantısıyla kaydedilmez', async () => {
     const fileUrl = 'https://drive.google.com/file/d/1AbCdEfGhIjKlMnOp/view?usp=sharing';
-    expect((await call('u-t2', 'POST', 'submit_link', { body: { id: ids.t2, url: fileUrl } })).status).toBe(400); // çekim tarihi yok
-    expect(
-      (await call('u-t2', 'POST', 'submit_link', { body: { id: ids.t2, url: 'https://drive.google.com/drive/folders/abc123', actual_shoot_date: today() } })).status
-    ).toBe(400);
-    expect((await call('u-t2', 'POST', 'submit_link', { body: { id: ids.t2, url: 'http://evil.example/x.mp4', actual_shoot_date: today() } })).status).toBe(400);
-    const r = await call('u-t2', 'POST', 'submit_link', { body: { id: ids.t2, url: fileUrl, actual_shoot_date: today() } });
-    expect(r.status).toBe(200);
-    expect(r.json.task.status).toBe('submitted');
-    expect(r.json.task.first_submitted_at).toBeTruthy();
-    expect(r.json.task.actual_shoot_date).toBe(today());
-    expect(r.json.submission).toMatchObject({ source: 'drive_link', version: 1, is_revision: false, drive_file_id: '1AbCdEfGhIjKlMnOp' });
+    for (const url of [fileUrl, 'https://drive.google.com/drive/folders/abc123', 'http://evil.example/x.mp4']) {
+      const r = await call('u-t2', 'POST', 'submit_link', { body: { id: ids.t2, url, actual_shoot_date: today() } });
+      expect(r.status).toBe(409);
+      expect(r.json.error).toMatch(/kişisel Drive/);
+    }
+    expect((fake.client.db.ad_video_submissions || []).filter((s) => s.task_id === ids.t2)).toHaveLength(0);
   });
 
   it('Drive yükleme: kaydedilmeden teslim sayılmaz, tamamlanınca bağlantı göreve otomatik bağlanır', async () => {
@@ -258,12 +265,23 @@ describe('Reklam Videoları — bir yönetici, iki öğretmen', () => {
     const fin = await call('u-t1', 'POST', 'upload_finalize', { body: { session_id: st.json.session_id } });
     expect(fin.status).toBe(200);
     expect(fin.json.task.status).toBe('submitted');
-    expect(fin.json.submission).toMatchObject({ source: 'drive_upload', version: 1, mime_type: 'video/quicktime', size_bytes: 50_000_000 });
-    expect(fin.json.submission.drive_url).toMatch(/^https:\/\/drive\.google\.com\/file\/d\//);
+    expect(fin.json.submission).toMatchObject({ source: 'drive_upload', kind: 'raw', version: 1, mime_type: 'video/quicktime', size_bytes: 50_000_000, playable: true, legacy_link: false });
+    expect(fin.json.submission.drive_url).toBeNull();
+    expect(fin.json.submission.preview_status).toBe('unavailable');
+    expect(notifsFor('u-admin').map((n) => n.title)).toContain('Ham video teslim edildi');
     // İkinci kez kapatmak teslimi çoğaltmaz
     const dup = await call('u-t1', 'POST', 'upload_finalize', { body: { session_id: st.json.session_id } });
     expect(dup.json.already).toBe(true);
     expect(fake.client.db.ad_video_submissions.filter((s) => s.task_id === ids.t1)).toHaveLength(1);
+
+    const t2 = await call('u-t2', 'POST', 'upload_start', { body: { id: ids.t2, file_name: 'banu.mp4', size: 2000, actual_shoot_date: today() } });
+    expect(t2.status).toBe(200);
+    browserFinishesUpload(t2.json.session_uri);
+    const t2fin = await call('u-t2', 'POST', 'upload_finalize', { body: { session_id: t2.json.session_id } });
+    expect(t2fin.status).toBe(200);
+    expect(t2fin.json.task.status).toBe('submitted');
+    expect(t2fin.json.submission.preview_status).toBe('not_needed');
+    expect(t2fin.json.task.actual_shoot_date).toBe(today());
   });
 
   it('kurgu ekibi düzeltme ister; öğretmen notu görür ve aynı göreve yeni video yükler', async () => {
@@ -283,7 +301,10 @@ describe('Reklam Videoları — bir yönetici, iki öğretmen', () => {
     const before = fake.client.db.ad_video_tasks.find((t) => t.id === ids.t1);
     const firstAt = before.first_submitted_at;
     await new Promise((res) => setTimeout(res, 5));
-    const re = await call('u-t1', 'POST', 'submit_link', { body: { id: ids.t1, url: 'https://drive.google.com/file/d/2ZyXwVuTsRqPoNm/view' } });
+    const st2 = await call('u-t1', 'POST', 'upload_start', { body: { id: ids.t1, file_name: 'duzeltme.mp4', size: 4000 } });
+    expect(st2.status).toBe(200);
+    browserFinishesUpload(st2.json.session_uri);
+    const re = await call('u-t1', 'POST', 'upload_finalize', { body: { session_id: st2.json.session_id } });
     expect(re.status).toBe(200);
     expect(re.json.task.status).toBe('submitted');
     expect(re.json.task.first_submitted_at).toBe(firstAt);
@@ -306,7 +327,7 @@ describe('Reklam Videoları — bir yönetici, iki öğretmen', () => {
     expect(r.status).toBe(200);
     expect(r.json.task.status).toBe('approved');
     expect(r.json.task.approved_at).toBeTruthy();
-    expect((await call('u-t1', 'POST', 'submit_link', { body: { id: ids.t1, url: 'https://drive.google.com/file/d/3abcdefghijk/view' } })).status).toBe(400);
+    expect((await call('u-t1', 'POST', 'upload_start', { body: { id: ids.t1, file_name: 'yeniden.mp4', size: 10 } })).status).toBe(400);
     expect((await call('u-admin', 'POST', 'review', { body: { id: ids.t1, action: 'approve' } })).status).toBe(400);
   });
 
@@ -404,5 +425,76 @@ describe('Reklam Videoları — bir yönetici, iki öğretmen', () => {
     const l = await call('u-t2', 'GET', 'list');
     expect(l.json.tasks.map((t) => t.id)).not.toContain(ids.far);
     expect(pushes.length).toBeGreaterThan(0);
+  });
+
+  it('ham video ve montaj panel oturumuyla ayrılır; ikinci öğretmen yalnız açık montajı görür', async () => {
+    const created = await call('u-admin', 'POST', 'create', {
+      body: { teacher_ids: ['u-t1'], title: 'Panel akışı', due_at: iso(now + 48 * H) }
+    });
+    const id = created.json.tasks[0].id;
+    const rawStart = await call('u-t1', 'POST', 'upload_start', {
+      body: { id, file_name: 'telefon.mov', size: 8000, actual_shoot_date: today() }
+    });
+    expect(rawStart.status).toBe(200);
+    browserFinishesUpload(rawStart.json.session_uri);
+    const raw = await call('u-t1', 'POST', 'upload_finalize', { body: { session_id: rawStart.json.session_id } });
+    expect(raw.json.submission).toMatchObject({ kind: 'raw', playable: true, drive_url: null, legacy_link: false });
+    expect(raw.json.task.status).toBe('submitted');
+
+    expect((await call('u-t2', 'GET', 'get', { query: { id } })).status).toBe(404);
+    expect((await call('u-t2', 'POST', 'ticket', { body: { submission_id: raw.json.submission.id } })).status).toBe(403);
+    expect((await call('u-t1', 'POST', 'upload_start', { body: { id, kind: 'edit', file_name: 'montaj.mp4', size: 3000 } })).status).toBe(403);
+
+    const editStart = await call('u-admin', 'POST', 'upload_start', { body: { id, kind: 'edit', file_name: 'montaj-v1.mp4', size: 3000 } });
+    expect(editStart.status).toBe(200);
+    browserFinishesUpload(editStart.json.session_uri);
+    const edit = await call('u-admin', 'POST', 'upload_finalize', { body: { session_id: editStart.json.session_id } });
+    expect(edit.json.submission).toMatchObject({ kind: 'edit', version: 1, open_for_comments: false });
+    expect(edit.json.task.status).toBe('submitted');
+    expect(edit.json.task.first_submitted_at).toBe(raw.json.task.first_submitted_at);
+    expect((await call('u-t2', 'POST', 'ticket', { body: { submission_id: edit.json.submission.id } })).status).toBe(403);
+    expect((await call('u-student', 'GET', 'reviews')).status).toBe(403);
+    expect((await call('u-t2', 'GET', 'reviews')).json.items.find((x) => x.submission_id === edit.json.submission.id)).toBeUndefined();
+
+    const opened = await call('u-admin', 'POST', 'open_review', { body: { submission_id: edit.json.submission.id } });
+    expect(opened.status).toBe(200);
+    expect(notifsFor('u-t2').map((n) => n.title)).toContain('Montaj yorumlara açıldı');
+    expect(notifsFor('u-t1').map((n) => n.title)).toContain('Montaj yorumlara açıldı');
+
+    const list = await call('u-t2', 'GET', 'reviews');
+    expect(list.json.items.map((x) => x.submission_id)).toContain(edit.json.submission.id);
+    const view = await call('u-t2', 'GET', 'review_get', { query: { id: edit.json.submission.id } });
+    expect(view.json.item).toMatchObject({ playable: true, drive_url: null, version: 1, title: 'Panel akışı' });
+    const note = await call('u-t2', 'POST', 'comment', { body: { submission_id: edit.json.submission.id, body: 'Giriş biraz uzun.' } });
+    expect(note.json.comment.author_name).toBe('Öğretmen Banu');
+
+    const pass = await call('u-t2', 'POST', 'ticket', { body: { submission_id: edit.json.submission.id } });
+    const media = await call(null, 'GET', 'media', { query: { ticket: pass.json.ticket } });
+    expect(media.status).toBe(206);
+
+    const edit2Start = await call('u-admin', 'POST', 'upload_start', { body: { id, kind: 'edit', file_name: 'montaj-v2.mp4', size: 3500 } });
+    browserFinishesUpload(edit2Start.json.session_uri);
+    const edit2 = await call('u-admin', 'POST', 'upload_finalize', { body: { session_id: edit2Start.json.session_id } });
+    expect(edit2.json.submission).toMatchObject({ kind: 'edit', version: 2, open_for_comments: false });
+    expect((await call('u-t2', 'POST', 'ticket', { body: { submission_id: edit2.json.submission.id } })).status).toBe(403);
+
+    const still = await call('u-t2', 'GET', 'review_get', { query: { id: edit.json.submission.id } });
+    expect(still.json.item.comments).toHaveLength(1);
+    expect(still.json.item.comments[0].body).toBe('Giriş biraz uzun.');
+
+    const approved = await call('u-admin', 'POST', 'review', {
+      body: { id, action: 'approve', submission_id: edit2.json.submission.id }
+    });
+    expect(approved.status).toBe(200);
+    expect(approved.json.task).toMatchObject({ status: 'approved', approved_version: 2, approved_kind: 'edit', approved_by: 'u-admin' });
+
+    const hist = await call('u-admin', 'GET', 'get', { query: { id } });
+    const rawRow = hist.json.submissions.find((s) => s.kind === 'raw');
+    const v1 = hist.json.submissions.find((s) => s.kind === 'edit' && s.version === 1);
+    const v2 = hist.json.submissions.find((s) => s.kind === 'edit' && s.version === 2);
+    expect(rawRow).toMatchObject({ playable: true, archive: true, drive_url: null });
+    expect(v1.comments).toHaveLength(1);
+    expect(v2.review_status).toBe('approved');
+    expect(v1.comments[0].body).toBe('Giriş biraz uzun.');
   });
 });

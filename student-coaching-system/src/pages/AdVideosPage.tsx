@@ -8,14 +8,15 @@ import TaskDetailModal, { StatusBadge } from '../features/adVideos/TaskDetailMod
 import TaskFormModal from '../features/adVideos/TaskFormModal';
 import { AdVideoDailyView, AdVideoStatsView } from '../features/adVideos/AdVideoReports';
 import AdVideoSettingsView from '../features/adVideos/AdVideoSettingsView';
+import ReviewMontaj from '../features/adVideos/ReviewMontaj';
 
-type Tab = 'gorevler' | 'gorevlerim' | 'ozet' | 'gunluk' | 'ayarlar';
+type Tab = 'gorevler' | 'gorevlerim' | 'ozet' | 'gunluk' | 'ayarlar' | 'inceleme';
 
 const STATUS_OPTIONS: Array<[string, string]> = [
   ['', 'Tüm durumlar'],
   ['planned', 'Planlandı'],
   ['shot', 'Çekildi'],
-  ['submitted', 'Teslim Edildi'],
+  ['submitted', 'Ham Video Teslim Edildi'],
   ['revision_requested', 'Düzeltme İstendi'],
   ['approved', 'Onaylandı'],
   ['overdue', 'Gecikti']
@@ -96,10 +97,11 @@ export default function AdVideosPage() {
   const tabParam = params.get('sekme') as Tab | null;
   const tab: Tab = useMemo(() => {
     if (!me) return 'gorevler';
+    if (tabParam === 'inceleme') return 'inceleme';
     if (!reviewer) return 'gorevlerim';
     if (tabParam === 'ayarlar' && !manager) return 'gorevler';
     if (tabParam === 'gorevlerim' && !me.access.has_tasks) return 'gorevler';
-    return tabParam && ['gorevler', 'gorevlerim', 'ozet', 'gunluk', 'ayarlar'].includes(tabParam) ? tabParam : 'gorevler';
+    return tabParam && ['gorevler', 'gorevlerim', 'ozet', 'gunluk', 'ayarlar', 'inceleme'].includes(tabParam) ? tabParam : 'gorevler';
   }, [me, reviewer, manager, tabParam]);
 
   const openId = params.get('gorev');
@@ -153,11 +155,15 @@ export default function AdVideosPage() {
     ? [
         ['gorevler', 'Görevler'],
         ...(me?.access.has_tasks ? ([['gorevlerim', 'Görevlerim']] as Array<[Tab, string]>) : []),
+        ['inceleme', 'İncelemedeki Montajlar'],
         ['ozet', 'Öğretmen özeti'],
         ['gunluk', 'Günlük özet'],
         ...(manager ? ([['ayarlar', 'Ayarlar']] as Array<[Tab, string]>) : [])
       ]
-    : [];
+    : [
+        ['gorevlerim', 'Görevlerim'],
+        ['inceleme', 'İncelemedeki Montajlar']
+      ];
 
   if (!me) {
     return (
@@ -191,6 +197,16 @@ export default function AdVideosPage() {
           </button>
         ) : null}
       </div>
+
+      {!me.upload.enabled ? (
+        <div className="rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+          Kurumsal Paylaşılan Drive hazır değil. Yeni videolar yüklenemez; kişisel Drive bağlantısı kabul edilmez.
+          {me.upload.credentials === false ? ' Sunucuda hizmet hesabı anahtarı yok.' : ''}
+          {me.upload.folder === false ? ' Hedef klasör kimliği girilmemiş.' : ''}
+          {me.upload.shared_drive === false ? ' Paylaşılan Drive kimliği girilmemiş.' : ''}
+          {me.upload.credentials && me.upload.folder && me.upload.shared_drive && me.upload.enabled_flag === false ? ' Yükleme ayarı kapalı.' : ''}
+        </div>
+      ) : null}
 
       {tabs.length ? (
         <div className="-mx-3 overflow-x-auto px-3 print:hidden">
@@ -280,6 +296,7 @@ export default function AdVideosPage() {
         </>
       ) : null}
 
+      {tab === 'inceleme' ? <ReviewMontaj focusId={params.get('montaj')} /> : null}
       {tab === 'ozet' ? <AdVideoStatsView onOpen={(id) => setParam('gorev', id)} /> : null}
       {tab === 'gunluk' ? <AdVideoDailyView onOpen={(id) => setParam('gorev', id)} initialDate={params.get('tarih') || undefined} /> : null}
       {tab === 'ayarlar' && manager ? <AdVideoSettingsView onSaved={() => void loadMe()} /> : null}

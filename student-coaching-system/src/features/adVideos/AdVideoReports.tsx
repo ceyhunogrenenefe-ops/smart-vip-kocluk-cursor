@@ -86,6 +86,8 @@ export function AdVideoStatsView({ onOpen, initialWeek }: { onOpen: (id: string)
             <Tile label="İlk teslim" value={data.totals.week.first_submitted} tone="indigo" />
             <Tile label="Onaylanan" value={data.totals.week.approved} tone="emerald" />
             <Tile label="Teslim bekleyen" value={data.totals.shot_awaiting_submission} tone="amber" />
+            <Tile label="Montaj bekleyen" value={data.totals.edits_waiting || 0} tone="amber" />
+            <Tile label="Yorumlara açık" value={data.totals.open_for_comments || 0} tone="indigo" />
             <Tile label="İnceleme bekleyen" value={data.totals.awaiting_review} tone="indigo" />
             <Tile label="Geciken" value={data.totals.overdue} tone="rose" />
             <Tile label="Yaklaşan çekim" value={data.totals.upcoming_shoots} />
@@ -229,7 +231,9 @@ export function AdVideoDailyView({ onOpen, initialDate }: { onOpen: (id: string)
       ) : (
         <div className="grid gap-3 md:grid-cols-2">
           {block('O gün teslim edilenler', s.delivered, (t) => `${t.teacher_name} — ${t.title}${t.is_revision ? ' (düzeltme)' : ''} · ${fmtDateTime(t.last_uploaded_at).slice(-5)}`)}
-          {block('İnceleme bekleyenler', s.awaiting_review, (t) => `${t.teacher_name} — ${t.title}`, 'text-indigo-800')}
+          {block('Yeni ham teslimler', s.delivered.filter((t) => !t.is_revision), (t) => `${t.teacher_name} — ${t.title}`)}
+          {block('İnceleme bekleyen montajlar', s.awaiting_review, (t) => `${t.teacher_name} — ${t.title}`, 'text-indigo-800')}
+          {block('Yorumlara açık', s.open_for_comments || [], (t) => `${t.teacher_name} — ${t.title}`, 'text-indigo-800')}
           {block('Gecikenler', s.overdue, (t) => `${t.teacher_name} — ${t.title} · son teslim ${fmtDateTime(t.due_at)}`, 'text-rose-700')}
           {block(`Ertesi gün (${fmtDay(s.tomorrow)}) planlanan çekimler`, s.tomorrow_shoots, (t) => `${fmtDateTime(t.planned_shoot_at).slice(-5)} ${t.teacher_name} — ${t.title}`)}
         </div>

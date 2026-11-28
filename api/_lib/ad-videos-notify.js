@@ -112,6 +112,48 @@ export function notifyAssigned(task) {
   });
 }
 
+/** Ham video kurum arşivine yazılınca yöneticilere ve kurgu ekibine. */
+export async function notifyRawDelivered(task) {
+  const settings = await loadSettings(task.institution_id);
+  const ids = await summaryRecipients(task.institution_id, settings);
+  for (const rid of ids) {
+    await notifyOnce({
+      eventKey: `raw:${task.id}:${task.first_submitted_at || task.last_uploaded_at || '1'}`,
+      recipientId: rid,
+      taskId: task.id,
+      kind: 'raw_delivered',
+      title: 'Ham video teslim edildi',
+      body: `${task.title}\nÖğretmen ham videoyu kurum arşivine yükledi.`,
+      link: taskLink(task.id),
+      institutionId: task.institution_id,
+      priority: 'high'
+    });
+  }
+}
+
+/** Montaj yorumlara açılınca kurumdaki öğretmenlere. */
+export async function notifyReviewOpened(task, submission) {
+  const { data, error } = await supabaseAdmin.from('users').select('id, role, roles, institution_id, is_active').limit(5000);
+  if (error) throw error;
+  const inst = settingsKey(task.institution_id);
+  for (const u of data || []) {
+    if (u.is_active === false) continue;
+    const tags = new Set([u.role, ...(Array.isArray(u.roles) ? u.roles : [])].map((r) => String(r || '').toLowerCase()));
+    if (!tags.has('teacher')) continue;
+    if (settingsKey(u.institution_id) !== inst) continue;
+    await notifyOnce({
+      eventKey: `review-open:${submission.id}:${u.id}`,
+      recipientId: u.id,
+      taskId: task.id,
+      kind: 'review_opened',
+      title: 'Montaj yorumlara açıldı',
+      body: `${task.title}\nSürüm ${submission.version} incelemede. Panelden izleyip yorum yazabilirsiniz.`,
+      link: `/reklam-videolari?sekme=inceleme&montaj=${submission.id}`,
+      institutionId: task.institution_id
+    });
+  }
+}
+
 export function notifyRevision(task, submission, note) {
   return notifyOnce({
     eventKey: `revision:${submission.id}`,
