@@ -40,7 +40,13 @@ import {
   buildKvkkNotice,
   buildStaticSystemPrompt,
   buildToneExcerpt,
+  CHEAP_MODEL,
   computeFreeSlots,
+  isNoiseInbound,
+  matchQuickAnswer,
+  pickReplyModel,
+  systemBlocksForCache,
+  trailingCustomerMessages,
   classifyAiServiceError,
   decideRun,
   formatForChannel,
@@ -65,6 +71,7 @@ export const SESSION_TABLE = 'crm_ai_sessions';
 export const LOG_TABLE = 'crm_ai_logs';
 export const KB_TABLE = 'crm_ai_kb_pages';
 export const TONE_TABLE = 'crm_ai_tone_sources';
+export const QUICK_TABLE = 'crm_ai_quick_answers';
 
 const FALLBACK_BETA = 'server-side-fallback-2026-07-01';
 
@@ -256,8 +263,21 @@ export async function logEvent({ institutionId = null, conversationId = null, le
       conversation_id: conversationId,
       lead_id: leadId,
       event,
-      detail,
-      input_tokens: usage ? Number(usage.input_tokens || 0) + Number(usage.cache_read_input_tokens || 0) : null,
+      detail: usage
+        ? {
+            ...(detail || {}),
+            usage: {
+              input: Number(usage.input_tokens || 0),
+              cache_read: Number(usage.cache_read_input_tokens || 0),
+              cache_write: Number(usage.cache_creation_input_tokens || 0),
+              output: Number(usage.output_tokens || 0)
+            }
+          }
+        : detail,
+      // Toplam okunan metin (tam ücretli + önbellekten + önbelleğe yazılan); kırılım detail.usage'da
+      input_tokens: usage
+        ? Number(usage.input_tokens || 0) + Number(usage.cache_read_input_tokens || 0) + Number(usage.cache_creation_input_tokens || 0)
+        : null,
       output_tokens: usage ? Number(usage.output_tokens || 0) : null
     });
   } catch (e) {
@@ -506,6 +526,34 @@ export async function processConversation(conversationId, { expectedPendingAt = 
       return { ran: false, reason: decision.reason };
     }
 
+    // Model çağırmadan: cevap gerektirmeyen satırlar ve hazır cevaplar
+    const pending = trailingCustomerMessages(messages);
+    const pendingTexts = pending.map((m) => String(m.body || '')).filter((t) => !isNoiseInbound(t));
+    if (pending.length && !pendingTexts.length) {
+      await release();
+      await logEvent({ institutionId: inst, conversationId, leadId: conversation.lead_id, event: 'skipped', detail: { reason: 'noise' } });
+      return { ran: false, reason: 'noise' };
+    }
+    const hasPriorReply = Number(session.bot_reply_count || 0) > 0 || messages.some((m) => m.sender_type === 'bot' || m.sender_type === 'agent');
+    const quick = matchQuickAnswer(await loadQuickAnswers(inst), { pendingTexts, hasPriorReply });
+    if (quick) {
+      if (!session.kvkk_notice_sent_at) {
+        await sendText(conversation, buildKvkkNotice(settings.kvkk_url, await loadAssistantBrand(settings.institution_id, settings)));
+        session = await patchSession(conversationId, { kvkk_notice_sent_at: new Date().toISOString() });
+      }
+      const qText = formatForChannel(String(quick.answer).trim(), conversation.channel);
+      for (const part of splitForChannel(qText, conversation.channel)) await sendText(conversation, part);
+      await release({
+        bot_reply_count: Number(session.bot_reply_count || 0) + 1,
+        last_processed_at: new Date().toISOString(),
+        lead_id: conversation.lead_id || session.lead_id || null
+      });
+      await bumpQuickAnswer(quick.id);
+      await logEvent({ institutionId: inst, conversationId, leadId: conversation.lead_id, event: 'quick_answer', detail: { quick_answer_id: quick.id } });
+      if (session?.pending_at && session.state !== 'handover') return processConversation(conversationId, {});
+      return { ran: true, reason: 'quick_answer' };
+    }
+
     const lead = await loadLead(conversation.lead_id || session.lead_id);
     ctx = {
       conversation,
@@ -547,7 +595,7 @@ export async function processConversation(conversationId, { expectedPendingAt = 
       conversationId,
       leadId: conversation.lead_id,
       event: 'replied',
-      detail: { stop_reason: result.stopReason, tools: result.toolCalls.map((t) => t.name), model: settings.model },
+      detail: { stop_reason: result.stopReason, tools: result.toolCalls.map((t) => t.name), model: result.model || settings.model },
       usage: result.usage
     });
 
@@ -611,19 +659,81 @@ export async function generateReply({ ctx, messages, execute, create = claudeCre
     botReplyCount: Number(session?.bot_reply_count || 0),
     maxBotReplies: Number(settings.max_bot_replies || 15)
   });
-  return runAssistantLoop({
+  const lastCustomer = [...messages].reverse().find((m) => m?.sender_type === 'lead');
+  const model = pickReplyModel({
+    settingsModel: settings.model || DEFAULT_MODEL,
+    collected: ctx.collected,
+    session,
+    lastCustomerText: lastCustomer?.body || '',
+    cheapModel: process.env.CRM_AI_CHEAP_MODEL ?? CHEAP_MODEL
+  });
+  const isCheap = model !== (settings.model || DEFAULT_MODEL);
+  const result = await runAssistantLoop({
     create,
     executeTool: execute,
     maxIterations: ASSISTANT_MAX_ITERATIONS,
     params: {
-      model: settings.model || DEFAULT_MODEL,
+      model,
       max_tokens: REPLY_MAX_TOKENS,
-      output_config: { effort: settings.effort || 'low' },
-      system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral', ttl: '1h' } }],
+      // Haiku'da effort ayarı yok; yalnız ana modele gönderilir
+      ...(isCheap ? {} : { output_config: { effort: settings.effort || 'low' } }),
+      system: systemBlocksForCache(system),
       tools: ASSISTANT_TOOLS,
       messages: [...history, { role: 'system', content: dynamic }]
     }
   });
+  return { ...result, model };
+}
+
+/* ------------------------------------------------------------------ */
+/* Hazır cevaplar (model çağrılmaz)                                    */
+/* ------------------------------------------------------------------ */
+
+export async function loadQuickAnswers(inst) {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from(QUICK_TABLE)
+      .select('id, patterns, answer, first_message_only, is_active')
+      .eq('institution_id', inst)
+      .eq('is_active', true);
+    if (error) {
+      if (!tableMissing(error)) console.warn('[ai-assistant] hazır cevap:', errorMessage(error));
+      return [];
+    }
+    return data || [];
+  } catch (e) {
+    console.warn('[ai-assistant] hazır cevap:', errorMessage(e));
+    return [];
+  }
+}
+
+async function bumpQuickAnswer(id) {
+  try {
+    const { data } = await supabaseAdmin.from(QUICK_TABLE).select('hit_count').eq('id', id).maybeSingle();
+    await supabaseAdmin
+      .from(QUICK_TABLE)
+      .update({ hit_count: Number(data?.hit_count || 0) + 1, last_hit_at: new Date().toISOString() })
+      .eq('id', id);
+  } catch (e) {
+    console.warn('[ai-assistant] hazır cevap sayaç:', errorMessage(e));
+  }
+}
+
+export function sanitizeQuickAnswer(input = {}) {
+  const patterns = (Array.isArray(input.patterns) ? input.patterns : String(input.patterns || '').split('\n'))
+    .map((p) => String(p || '').trim())
+    .filter(Boolean)
+    .slice(0, 30)
+    .map((p) => p.slice(0, 300));
+  const answer = String(input.answer || '').trim().slice(0, 3000);
+  if (!patterns.length) throw new Error('En az bir müşteri mesajı yazın');
+  if (!answer) throw new Error('Cevap metni boş olamaz');
+  return {
+    patterns,
+    answer,
+    first_message_only: input.first_message_only !== false,
+    is_active: input.is_active !== false
+  };
 }
 
 /* ------------------------------------------------------------------ */
@@ -1175,16 +1285,25 @@ export async function testChat(institutionId, turns = []) {
     if (name === 'handover_to_human') return '(DENEME) Konuşma devredildi. Müşteriye danışmanın döneceğini söyle.';
     throw new Error(`Bilinmeyen araç: ${name}`);
   };
+  const kvkkFirst =
+    messages.filter((m) => m.sender_type === 'bot').length === 0
+      ? buildKvkkNotice(settings.kvkk_url, await loadAssistantBrand(settings.institution_id, settings))
+      : null;
+  const quick = matchQuickAnswer(await loadQuickAnswers(instKey(institutionId)), {
+    pendingTexts: trailingCustomerMessages(messages).map((m) => m.body),
+    hasPriorReply: messages.some((m) => m.sender_type === 'bot')
+  });
+  if (quick) {
+    return { reply: String(quick.answer).trim(), stop_reason: 'quick_answer', tools: [], usage: {}, model: 'hazır cevap', kvkk_notice: kvkkFirst };
+  }
   const result = await generateReply({ ctx, messages, execute });
   return {
     reply: result.text || HANDOVER_REPLY,
     stop_reason: result.stopReason,
     tools: notes,
     usage: result.usage,
-    kvkk_notice:
-      messages.filter((m) => m.sender_type === 'bot').length === 0
-        ? buildKvkkNotice(settings.kvkk_url, await loadAssistantBrand(settings.institution_id, settings))
-        : null
+    model: result.model,
+    kvkk_notice: kvkkFirst
   };
 }
 

@@ -41,6 +41,7 @@ import {
   type AiSlot,
   type AiToneSource
 } from '../../lib/crmAiAssistantApi';
+import CrmAiQuickAnswers from './CrmAiQuickAnswers';
 
 const input =
   'mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-violet-600 focus:outline-none';
@@ -51,6 +52,7 @@ const DAYS = ['Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartes
 const EVENT_LABELS: Record<string, string> = {
   session_started: 'Yeni konuşma devralındı',
   replied: 'Yanıt gönderildi',
+  quick_answer: 'Hazır cevap gönderildi (token harcanmadı)',
   appointment_booked: 'Randevu oluşturuldu',
   handover: 'İnsana devredildi',
   resumed: 'Bot yeniden başlatıldı',
@@ -520,6 +522,8 @@ export default function CrmAiAssistantPanel() {
           </div>
 
           {/* 6. Deneme sohbeti */}
+          <CrmAiQuickAnswers />
+
           <div className="rounded-xl border border-dashed border-violet-300 bg-white p-3">
             <h3 className="mb-1 text-sm font-semibold text-slate-900">Deneme sohbeti</h3>
             <p className="mb-2 text-xs text-slate-500">

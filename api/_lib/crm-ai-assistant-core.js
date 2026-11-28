@@ -857,6 +857,95 @@ ${kb}
 </bilgi_tabani>`;
 }
 
+/**
+ * Sistem metnini önbellek için iki bloğa böler.
+ * 1) Talimatlar + ton + örnekler: tüm sohbetlerde aynı → 1 saat önbellek.
+ * 2) Bilgi tabanı: soruya göre değişir → 5 dk önbellek (aynı sohbette tekrar kullanılır).
+ * Eskiden ikisi tek bloktu; seçilen sayfa değişince talimatlar da her seferinde
+ * yeniden (2 kat ücretle) önbelleğe yazılıyordu.
+ */
+export function systemBlocksForCache(systemText) {
+  const text = String(systemText || '');
+  const at = text.lastIndexOf('<bilgi_tabani>');
+  if (at <= 0) return [{ type: 'text', text, cache_control: { type: 'ephemeral', ttl: '1h' } }];
+  return [
+    { type: 'text', text: text.slice(0, at).trimEnd(), cache_control: { type: 'ephemeral', ttl: '1h' } },
+    { type: 'text', text: text.slice(at), cache_control: { type: 'ephemeral' } }
+  ];
+}
+
+/** Ucuz model (basit turlar). CRM_AI_CHEAP_MODEL=off ile kapatılır. */
+export const CHEAP_MODEL = 'claude-haiku-5-5';
+
+const BOOKING_WORDS = /\b(randevu|gorusme|gorusmek|arayin|arasin|aranmak|ara\b|saat|yarin|bugun|musait|uygun|danisman|telefon|numara|kayit|ucret|fiyat|taksit|indirim|iade|iptal|sikayet|odeme)/;
+
+/**
+ * Bu tur için model. Selamlaşma, sınıf/hedef öğrenme gibi basit turlar Haiku;
+ * randevu aşaması, fiyat/itiraz, hassas konular ve araç sonucu gereken her şey ana model.
+ */
+export function pickReplyModel({ settingsModel = DEFAULT_MODEL, collected = {}, session = null, lastCustomerText = '', cheapModel = CHEAP_MODEL } = {}) {
+  const main = settingsModel || DEFAULT_MODEL;
+  const cheap = String(cheapModel || '').trim();
+  if (!cheap || cheap === 'off' || cheap === main) return main;
+  if (session?.appointment_at) return main;
+  const c = collected || {};
+  const filled = ['student_name', 'grade', 'target'].filter((k) => String(c[k] || '').trim()).length;
+  if (filled >= 2) return main;
+  const q = foldTr(lastCustomerText);
+  if (BOOKING_WORDS.test(q)) return main;
+  if (q.length > 280) return main;
+  return cheap;
+}
+
+/** Hazır cevap eşleşmesi için metni sadeleştirir (Türkçe harf, noktalama, emoji yok). */
+export function normalizeQuickText(value) {
+  return foldTr(value)
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Bekleyen müşteri mesajları bir hazır cevapla birebir eşleşiyor mu?
+ * Tam eşleşme (kısmi değil): yanlış cevap riski olmasın.
+ * @param {{patterns:string[], first_message_only?:boolean, is_active?:boolean}[]} answers
+ * @param {{pendingTexts:string[], hasPriorReply:boolean}} ctx
+ */
+export function matchQuickAnswer(answers, { pendingTexts = [], hasPriorReply = false } = {}) {
+  const joined = normalizeQuickText(pendingTexts.join(' '));
+  if (!joined) return null;
+  for (const a of answers || []) {
+    if (!a || a.is_active === false || !String(a.answer || '').trim()) continue;
+    if (a.first_message_only !== false && hasPriorReply) continue;
+    const pats = (Array.isArray(a.patterns) ? a.patterns : []).map(normalizeQuickText).filter(Boolean);
+    if (pats.includes(joined)) return a;
+  }
+  return null;
+}
+
+/** Cevap gerektirmeyen sistem kaynaklı satırlar (tepki, düzenleme, iletilemeyen mesaj). */
+export function isNoiseInbound(text) {
+  const t = String(text || '').trim();
+  if (!t) return true;
+  return /^tepki verdi:/i.test(t) || /^müşteri mesajını düzenledi$/i.test(t) || /^⚠️ mesaj alınamadı/i.test(t);
+}
+
+/** Son asistan/temsilci mesajından sonra gelen müşteri mesajları. */
+export function trailingCustomerMessages(rows) {
+  const out = [];
+  for (let i = (rows || []).length - 1; i >= 0; i -= 1) {
+    const r = rows[i];
+    if (!r) continue;
+    if (r.sender_type === 'lead') {
+      if (r.message_type !== 'comment') out.unshift(r);
+      continue;
+    }
+    if (r.sender_type === 'system') continue;
+    break;
+  }
+  return out;
+}
+
 /** Her istekte değişen bağlam (konuşma sonuna sistem mesajı olarak eklenir). */
 export function buildDynamicContext({ now = Date.now(), channel = '', contactName = '', contactPhone = '', collected = {}, appointmentLabel = '', botReplyCount = 0, maxBotReplies = 15 } = {}) {
   const p = istanbulParts(now);
@@ -1035,13 +1124,34 @@ export function extractText(content) {
  * Araç döngüsü. client.create(params) → Claude yanıtı; executeTool(name, input) → string sonuç.
  * Döner: { text, stopReason, usage, toolCalls, handedOver }
  */
+/**
+ * Son (sistem olmayan) mesaja önbellek işareti koyar: araç turlarında ve
+ * kişi 5 dk içinde yazdığında geçmiş tekrar tam ücretle okunmaz.
+ * Kopya döner; asıl dizi değişmez. Tek işaret kullanılır (sınır 4).
+ */
+export function withHistoryCacheBreakpoint(messages) {
+  const list = [...(messages || [])];
+  for (let i = list.length - 1; i >= 0; i -= 1) {
+    const m = list[i];
+    if (!m || m.role === 'system') continue;
+    const blocks = typeof m.content === 'string' ? [{ type: 'text', text: m.content }] : [...(m.content || [])];
+    if (!blocks.length) return list;
+    const last = blocks[blocks.length - 1];
+    if (last.type === 'thinking' || last.type === 'redacted_thinking') return list;
+    blocks[blocks.length - 1] = { ...last, cache_control: { type: 'ephemeral' } };
+    list[i] = { ...m, content: blocks };
+    return list;
+  }
+  return list;
+}
+
 export async function runAssistantLoop({ create, params, executeTool, maxIterations = ASSISTANT_MAX_ITERATIONS }) {
   const messages = [...params.messages];
-  const usage = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0 };
+  const usage = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 };
   const toolCalls = [];
   let lastText = '';
   for (let i = 0; i < maxIterations; i += 1) {
-    const response = await create({ ...params, messages });
+    const response = await create({ ...params, messages: withHistoryCacheBreakpoint(messages) });
     for (const k of Object.keys(usage)) usage[k] += Number(response?.usage?.[k] || 0);
     const text = extractText(response?.content);
     if (text) lastText = text;

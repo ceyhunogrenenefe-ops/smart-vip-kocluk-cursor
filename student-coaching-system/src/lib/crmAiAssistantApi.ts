@@ -148,3 +148,20 @@ export const aiConversationState = (conversationId: string) =>
   aiGet<AiConversationState>('state', { conversation_id: conversationId });
 export const aiHandover = (conversationId: string) => aiPost<{ ok: boolean }>('handover', { conversation_id: conversationId });
 export const aiResume = (conversationId: string) => aiPost<{ ok: boolean }>('resume', { conversation_id: conversationId });
+
+/** Hazır cevap: bu mesajlardan biri gelince model çağrılmadan bu cevap gider. */
+export type AiQuickAnswer = {
+  id: string;
+  patterns: string[];
+  answer: string;
+  first_message_only: boolean;
+  is_active: boolean;
+  hit_count: number;
+  last_hit_at: string | null;
+  updated_at: string;
+};
+
+export const aiQuickAnswers = () => aiGet<{ data: AiQuickAnswer[]; table_missing?: boolean }>('quick_answers');
+export const aiQuickAnswerSave = (row: Partial<AiQuickAnswer>) =>
+  aiPost<{ ok: boolean; data: AiQuickAnswer }>('quick_answer_save', row as Record<string, unknown>);
+export const aiQuickAnswerDelete = (id: string) => aiPost<{ ok: boolean }>('quick_answer_delete', { id });
