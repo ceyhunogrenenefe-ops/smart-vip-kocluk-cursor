@@ -156,7 +156,10 @@ export async function storageListAssignments({
   let list = await readJsonFile(ASSIGNMENTS_PATH, []);
   if (!Array.isArray(list)) list = [];
   if (institutionId) {
-    list = list.filter((r) => String(r.institution_id || '') === String(institutionId));
+    // Kurumsuz (NULL) atamalar da kurumun öğrencilerini kapsar; listede de görünmeli
+    list = list.filter(
+      (r) => !r.institution_id || String(r.institution_id) === String(institutionId)
+    );
   }
   if (edesisExamId) {
     list = list.filter((r) => String(r.edesis_exam_id || '') === String(edesisExamId));

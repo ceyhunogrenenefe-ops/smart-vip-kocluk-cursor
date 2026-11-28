@@ -1646,7 +1646,9 @@ export default async function handler(req, res) {
 
       let stuQ = supabaseAdmin
         .from('students')
-        .select('id, name, email, institution_id, class_level, enrollment_status, deleted_at')
+        // coach_id zorunlu: filterStudentsForActor koçu s.coach_id ile süzüyor; kolon seçilmezse
+        // koçun hiçbir öğrencisi listede çıkmıyordu.
+        .select('id, name, email, institution_id, coach_id, class_level, enrollment_status, deleted_at')
         .is('deleted_at', null)
         .order('name', { ascending: true })
         .limit(800);
