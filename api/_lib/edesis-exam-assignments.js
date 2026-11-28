@@ -574,7 +574,172 @@ export async function listSyncedEdesisExams({ institutionId, limit = 200 } = {})
   return { items: data || [], schemaMissing: false, schemaHint: null, backend: 'sql' };
 }
 
+/** "0001-01-01" gibi Edesis boş tarihlerini null say */
+function normalizeCatalogDate(value) {
+  const s = String(value || '').slice(0, 10);
+  if (!s || s < '1900-01-01') return null;
+  return s;
+}
 
+/**
+ * "Tüm denemelerden ata" — kurum geneli (institution_id NULL) + kuruma özel katalog satırlarını
+ * edesis_exam_id'ye göre tekilleştirir; arama, tür, tarih ve atama durumu filtresi + sayfalama.
+ */
+export async function listAllEdesisExams({
+  institutionId,
+  q = '',
+  examType = '',
+  assigned = 'all',
+  dateFrom = '',
+  dateTo = '',
+  page = 1,
+  pageSize = 50
+} = {}) {
+  const instRaw = String(institutionId || '').trim();
+  // PostgREST .or() filtresine giriyor → yalnız güvenli karakterler
+  const inst = /^[A-Za-z0-9_-]+$/.test(instRaw) ? instRaw : null;
+  let ensured = null;
+  let schemaHint = null;
+  try {
+    ensured = await ensureEdesisExamAssignmentSchema();
+  } catch (e) {
+    schemaHint = e?.hint || e?.message || AUTO_SCHEMA_HINT;
+  }
+  const useStorage = ensured?.via === 'storage' || getEdesisAssignBackendMode() === 'storage';
+
+  // 1) Katalog satırları
+  let rows = [];
+  if (useStorage) {
+    rows = await storageListExams({ institutionId: null, limit: 100000, maxCap: 100000 });
+  } else {
+    const cols =
+      'id, institution_id, edesis_exam_id, title, exam_date, exam_type, grade_name, is_online, status, duration_seconds, synced_at';
+    const step = 1000;
+    for (let from = 0; from < 50000; from += step) {
+      let qq = supabaseAdmin
+        .from('edesis_exams')
+        .select(cols)
+        .order('id', { ascending: true })
+        .range(from, from + step - 1);
+      qq = inst ? qq.or(`institution_id.is.null,institution_id.eq.${inst}`) : qq.is('institution_id', null);
+      const { data, error } = await qq;
+      if (error) {
+        if (isSchemaMissingError(error)) {
+          return {
+            items: [],
+            total: 0,
+            totalAll: 0,
+            examTypes: [],
+            schemaMissing: true,
+            schemaHint: schemaHint || AUTO_SCHEMA_HINT
+          };
+        }
+        throw error;
+      }
+      rows.push(...(data || []));
+      if (!data || data.length < step) break;
+    }
+  }
+  if (inst && useStorage) {
+    rows = rows.filter((r) => !r.institution_id || String(r.institution_id) === inst);
+  } else if (!inst && useStorage) {
+    rows = rows.filter((r) => !r.institution_id);
+  }
+
+  // 2) Tekilleştir — en son senkronlanan satır kalır
+  const byId = new Map();
+  for (const r of rows) {
+    const id = String(r.edesis_exam_id || '').trim();
+    if (!id) continue;
+    const prev = byId.get(id);
+    if (!prev || String(r.synced_at || '') > String(prev.synced_at || '')) byId.set(id, r);
+  }
+  let list = [...byId.values()].map((r) => ({ ...r, exam_date: normalizeCatalogDate(r.exam_date) }));
+  const totalAll = list.length;
+  const examTypes = [...new Set(list.map((r) => String(r.exam_type || '').trim()).filter(Boolean))].sort(
+    (a, b) => a.localeCompare(b, 'tr')
+  );
+
+  // 3) Atama sayıları
+  let assignRows = [];
+  if (useStorage) {
+    assignRows = await storageListAssignments({ institutionId: inst, limit: 100000 });
+  } else {
+    const step = 1000;
+    for (let from = 0; from < 100000; from += step) {
+      let aq = supabaseAdmin
+        .from('edesis_exam_assignments')
+        .select('id, edesis_exam_id, target_type')
+        .order('id', { ascending: true })
+        .range(from, from + step - 1);
+      if (inst) aq = aq.eq('institution_id', inst);
+      const { data, error } = await aq;
+      if (error) {
+        if (isSchemaMissingError(error)) break;
+        throw error;
+      }
+      assignRows.push(...(data || []));
+      if (!data || data.length < step) break;
+    }
+  }
+  const countByExam = new Map();
+  for (const a of assignRows) {
+    const id = String(a.edesis_exam_id || '');
+    const c = countByExam.get(id) || { classes: 0, students: 0 };
+    if (a.target_type === 'class') c.classes += 1;
+    else c.students += 1;
+    countByExam.set(id, c);
+  }
+  list = list.map((r) => {
+    const c = countByExam.get(String(r.edesis_exam_id)) || { classes: 0, students: 0 };
+    return { ...r, assigned_class_count: c.classes, assigned_student_count: c.students };
+  });
+
+  // 4) Filtreler
+  const needle = String(q || '').trim().toLocaleLowerCase('tr');
+  if (needle) {
+    list = list.filter((r) =>
+      `${r.title || ''} ${r.exam_type || ''} ${r.edesis_exam_id} ${r.grade_name || ''}`
+        .toLocaleLowerCase('tr')
+        .includes(needle)
+    );
+  }
+  const type = String(examType || '').trim();
+  if (type) list = list.filter((r) => String(r.exam_type || '').trim() === type);
+  const isAssigned = (r) => r.assigned_class_count + r.assigned_student_count > 0;
+  if (assigned === 'yes') list = list.filter(isAssigned);
+  else if (assigned === 'no') list = list.filter((r) => !isAssigned(r));
+  const df = normalizeCatalogDate(dateFrom);
+  const dt = normalizeCatalogDate(dateTo);
+  if (df) list = list.filter((r) => r.exam_date && r.exam_date >= df);
+  if (dt) list = list.filter((r) => r.exam_date && r.exam_date <= dt);
+
+  // 5) Sırala (yeni tarih önce, tarihsizler sonda) + sayfala
+  list.sort((a, b) => {
+    const da = a.exam_date || '';
+    const db = b.exam_date || '';
+    if (da !== db) return db.localeCompare(da);
+    return String(a.title || '').localeCompare(String(b.title || ''), 'tr');
+  });
+  const size = Math.min(200, Math.max(10, Number(pageSize) || 50));
+  const total = list.length;
+  const pageCount = Math.max(1, Math.ceil(total / size));
+  const p = Math.min(pageCount, Math.max(1, Number(page) || 1));
+  const items = list.slice((p - 1) * size, p * size);
+
+  return {
+    items,
+    total,
+    totalAll,
+    page: p,
+    pageSize: size,
+    pageCount,
+    examTypes,
+    schemaMissing: false,
+    schemaHint: null,
+    backend: useStorage ? 'storage' : 'sql'
+  };
+}
 
 export async function listEdesisExamAssignments({
   institutionId,

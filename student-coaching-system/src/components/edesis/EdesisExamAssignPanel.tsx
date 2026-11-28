@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertCircle,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   Loader2,
   RefreshCw,
   Trash2,
@@ -11,11 +13,13 @@ import {
 } from 'lucide-react';
 import {
   assignEdesisExam,
+  fetchAllEdesisExams,
   fetchEdesisAssignTargets,
   fetchEdesisExamAssignments,
   fetchSyncedEdesisExams,
   syncEdesisExamCatalog,
   unassignEdesisExam,
+  type EdesisAllExam,
   type EdesisExamAssignmentRow,
   type EdesisSyncedExam,
 } from '../../lib/edesis/edesisApi';
@@ -43,7 +47,10 @@ function toggleId(list: string[], id: string, setList: (next: string[]) => void)
   setList(list.includes(id) ? list.filter((x) => x !== id) : [...list, id]);
 }
 
-export function EdesisExamAssignPanel() {
+type PanelMode = 'synced' | 'all';
+
+export function EdesisExamAssignPanel({ mode = 'synced' }: { mode?: PanelMode } = {}) {
+  const isAll = mode === 'all';
   const [busy, setBusy] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -62,6 +69,62 @@ export function EdesisExamAssignPanel() {
   const [studentQuery, setStudentQuery] = useState('');
   const [assignments, setAssignments] = useState<EdesisExamAssignmentRow[]>([]);
   const [assignBusy, setAssignBusy] = useState(false);
+
+  // "Tüm denemelerden ata" modu — sunucu tarafı filtre + sayfalama
+  const [allItems, setAllItems] = useState<EdesisAllExam[]>([]);
+  const [allTotal, setAllTotal] = useState(0);
+  const [allTotalAll, setAllTotalAll] = useState(0);
+  const [allPage, setAllPage] = useState(1);
+  const [allPageCount, setAllPageCount] = useState(1);
+  const [examTypes, setExamTypes] = useState<string[]>([]);
+  const [typeFilter, setTypeFilter] = useState('');
+  const [assignedFilter, setAssignedFilter] = useState<'all' | 'yes' | 'no'>('all');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [debouncedQuery, setDebouncedQuery] = useState('');
+
+  useEffect(() => {
+    if (!isAll) return;
+    const t = window.setTimeout(() => setDebouncedQuery(query.trim()), 300);
+    return () => window.clearTimeout(t);
+  }, [query, isAll]);
+
+  useEffect(() => {
+    if (isAll) setAllPage(1);
+  }, [isAll, debouncedQuery, typeFilter, assignedFilter, dateFrom, dateTo]);
+
+  const loadAll = useCallback(async () => {
+    if (!isAll) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetchAllEdesisExams({
+        q: debouncedQuery,
+        examType: typeFilter,
+        assigned: assignedFilter,
+        dateFrom,
+        dateTo,
+        page: allPage,
+        pageSize: 50,
+      });
+      setSchemaMissing(Boolean(res.schemaMissing));
+      setSchemaHint(res.schemaMissing ? res.hint || null : null);
+      setAllItems(Array.isArray(res.items) ? res.items : []);
+      setAllTotal(res.total ?? 0);
+      setAllTotalAll(res.totalAll ?? 0);
+      setAllPageCount(res.pageCount ?? 1);
+      if (Array.isArray(res.examTypes)) setExamTypes(res.examTypes);
+      if (res.page && res.page !== allPage) setAllPage(res.page);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }, [isAll, debouncedQuery, typeFilter, assignedFilter, dateFrom, dateTo, allPage]);
+
+  useEffect(() => {
+    if (isAll) void loadAll();
+  }, [isAll, loadAll]);
 
   const loadExams = useCallback(async () => {
     setBusy(true);
@@ -84,8 +147,13 @@ export function EdesisExamAssignPanel() {
   }, []);
 
   useEffect(() => {
-    void loadExams();
-  }, [loadExams]);
+    if (!isAll) void loadExams();
+  }, [loadExams, isAll]);
+
+  const reloadList = useCallback(async () => {
+    if (isAll) await loadAll();
+    else await loadExams();
+  }, [isAll, loadAll, loadExams]);
 
   const filteredExams = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase('tr');
@@ -115,7 +183,7 @@ export function EdesisExamAssignPanel() {
       setSchemaMissing(false);
       setSchemaHint(null);
       setOkMsg(`Katalog senkron: ${res.upserted ?? 0} kayıt · Edesis’ten ${res.fetched ?? 0} satır`);
-      await loadExams();
+      await reloadList();
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       if (/şema|schema|SUPABASE_DB/i.test(msg)) {
@@ -170,6 +238,8 @@ export function EdesisExamAssignPanel() {
   const closeAssign = () => {
     setAssignExam(null);
     setAssignments([]);
+    // Tüm denemeler modunda atama sayıları değişmiş olabilir
+    if (isAll) void loadAll();
   };
 
   const filteredStudents = useMemo(() => {
@@ -236,14 +306,41 @@ export function EdesisExamAssignPanel() {
     return a.class_name ? `Öğrenci: ${who} · ${a.class_name}` : `Öğrenci: ${who}`;
   };
 
+  const rowsToShow: EdesisSyncedExam[] = isAll ? allItems : filteredExams;
+
+  const assignedSummary = (ex: EdesisAllExam) => {
+    const c = ex.assigned_class_count || 0;
+    const st = ex.assigned_student_count || 0;
+    if (!c && !st) return <span className="text-slate-400">Atanmamış</span>;
+    const parts: string[] = [];
+    if (c) parts.push(`${c} sınıf`);
+    if (st) parts.push(`${st} öğrenci`);
+    return (
+      <span className="rounded-full bg-emerald-50 px-2 py-0.5 font-medium text-emerald-700">{parts.join(' · ')}</span>
+    );
+  };
+
   return (
     <div className="space-y-4">
       <div className="rounded-xl border border-indigo-100 bg-indigo-50/60 px-4 py-3 text-sm text-indigo-950">
-        <p className="font-semibold">Edesis deneme atama</p>
-        <p className="mt-1 text-indigo-900/80">
-          Edesis kataloğunu senkronlayın, ardından sınıf veya öğrenci bazlı atama yapın. Öğrenci paneli yalnızca
-          kendisine veya sınıfına atanan denemeleri görür; filtre backend’de uygulanır.
-        </p>
+        {isAll ? (
+          <>
+            <p className="font-semibold">Tüm denemelerden ata</p>
+            <p className="mt-1 text-indigo-900/80">
+              Edesis’te tanımlı tüm denemeler (kurum geneli + kurumunuza özel) burada listelenir — yalnızca sizin
+              atadıklarınız değil. Tür, tarih ve atama durumuna göre süzüp sınıf veya öğrenci bazlı atama yapın.
+              {allTotalAll ? ` Katalogda toplam ${allTotalAll.toLocaleString('tr-TR')} deneme var.` : ''}
+            </p>
+          </>
+        ) : (
+          <>
+            <p className="font-semibold">Edesis deneme atama</p>
+            <p className="mt-1 text-indigo-900/80">
+              Edesis kataloğunu senkronlayın, ardından sınıf veya öğrenci bazlı atama yapın. Öğrenci paneli yalnızca
+              kendisine veya sınıfına atanan denemeleri görür; filtre backend’de uygulanır.
+            </p>
+          </>
+        )}
       </div>
 
       {schemaMissing ? (
@@ -288,7 +385,7 @@ export function EdesisExamAssignPanel() {
         </button>
         <button
           type="button"
-          onClick={() => void loadExams()}
+          onClick={() => void reloadList()}
           disabled={busy}
           className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
         >
@@ -303,6 +400,74 @@ export function EdesisExamAssignPanel() {
         />
       </div>
 
+      {isAll ? (
+        <div className="flex flex-wrap items-end gap-2 text-sm">
+          <label className="flex flex-col gap-1">
+            <span className="text-xs font-medium text-slate-500">Sınav türü</span>
+            <select
+              value={typeFilter}
+              onChange={(e) => setTypeFilter(e.target.value)}
+              className="min-w-[10rem] rounded-lg border border-slate-200 bg-white px-2 py-2"
+            >
+              <option value="">Tümü</option>
+              {examTypes.map((t) => (
+                <option key={t} value={t}>
+                  {t}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-xs font-medium text-slate-500">Atama durumu</span>
+            <select
+              value={assignedFilter}
+              onChange={(e) => setAssignedFilter(e.target.value as 'all' | 'yes' | 'no')}
+              className="rounded-lg border border-slate-200 bg-white px-2 py-2"
+            >
+              <option value="all">Tümü</option>
+              <option value="no">Atanmamış</option>
+              <option value="yes">Atanmış</option>
+            </select>
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-xs font-medium text-slate-500">Başlangıç</span>
+            <input
+              type="date"
+              value={dateFrom}
+              onChange={(e) => setDateFrom(e.target.value)}
+              className="rounded-lg border border-slate-200 px-2 py-1.5"
+            />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-xs font-medium text-slate-500">Bitiş</span>
+            <input
+              type="date"
+              value={dateTo}
+              onChange={(e) => setDateTo(e.target.value)}
+              className="rounded-lg border border-slate-200 px-2 py-1.5"
+            />
+          </label>
+          {typeFilter || assignedFilter !== 'all' || dateFrom || dateTo || query ? (
+            <button
+              type="button"
+              onClick={() => {
+                setTypeFilter('');
+                setAssignedFilter('all');
+                setDateFrom('');
+                setDateTo('');
+                setQuery('');
+              }}
+              className="rounded-lg px-2 py-2 text-xs font-medium text-indigo-700 hover:bg-indigo-50"
+            >
+              Filtreleri temizle
+            </button>
+          ) : null}
+          <span className="ml-auto text-xs text-slate-500">
+            {allTotal.toLocaleString('tr-TR')} deneme bulundu
+          </span>
+        </div>
+      ) : null}
+
       <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
         <table className="min-w-full text-left text-sm">
           <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
@@ -312,24 +477,34 @@ export function EdesisExamAssignPanel() {
               <th className="px-3 py-2">Tarih</th>
               <th className="px-3 py-2">Sınıf</th>
               <th className="px-3 py-2">Edesis ID</th>
+              {isAll ? <th className="px-3 py-2">Atama</th> : null}
               <th className="px-3 py-2 text-right">İşlem</th>
             </tr>
           </thead>
           <tbody>
-            {filteredExams.length === 0 ? (
+            {rowsToShow.length === 0 ? (
               <tr>
-                <td colSpan={6} className="px-3 py-8 text-center text-slate-500">
-                  {busy ? 'Yükleniyor…' : 'Senkronize edilmiş deneme yok. Önce senkronize edin.'}
+                <td colSpan={isAll ? 7 : 6} className="px-3 py-8 text-center text-slate-500">
+                  {busy
+                    ? 'Yükleniyor…'
+                    : isAll && allTotalAll > 0
+                      ? 'Filtrelere uyan deneme yok.'
+                      : 'Senkronize edilmiş deneme yok. Önce senkronize edin.'}
                 </td>
               </tr>
             ) : (
-              filteredExams.map((ex) => (
+              rowsToShow.map((ex) => (
                 <tr key={ex.id} className="border-t border-slate-100">
                   <td className="px-3 py-2 font-medium text-slate-900">{ex.title || '—'}</td>
                   <td className="px-3 py-2 text-slate-600">{ex.exam_type || '—'}</td>
                   <td className="whitespace-nowrap px-3 py-2 text-slate-600">{fmtDate(ex.exam_date)}</td>
                   <td className="px-3 py-2 text-slate-600">{ex.grade_name || '—'}</td>
                   <td className="px-3 py-2 font-mono text-xs text-slate-500">{ex.edesis_exam_id}</td>
+                  {isAll ? (
+                    <td className="whitespace-nowrap px-3 py-2 text-xs">
+                      {assignedSummary(ex as EdesisAllExam)}
+                    </td>
+                  ) : null}
                   <td className="px-3 py-2 text-right">
                     <button
                       type="button"
@@ -347,6 +522,30 @@ export function EdesisExamAssignPanel() {
           </tbody>
         </table>
       </div>
+
+      {isAll && allPageCount > 1 ? (
+        <div className="flex items-center justify-end gap-2 text-sm">
+          <button
+            type="button"
+            onClick={() => setAllPage((p) => Math.max(1, p - 1))}
+            disabled={busy || allPage <= 1}
+            className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+          >
+            <ChevronLeft className="h-4 w-4" /> Önceki
+          </button>
+          <span className="tabular-nums text-slate-600">
+            Sayfa {allPage} / {allPageCount}
+          </span>
+          <button
+            type="button"
+            onClick={() => setAllPage((p) => Math.min(allPageCount, p + 1))}
+            disabled={busy || allPage >= allPageCount}
+            className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+          >
+            Sonraki <ChevronRight className="h-4 w-4" />
+          </button>
+        </div>
+      ) : null}
 
       {assignExam ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
