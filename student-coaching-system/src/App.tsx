@@ -72,6 +72,7 @@ import BbbGuestJoinPage from './pages/BbbGuestJoinPage';
 import TeacherPanel from './pages/TeacherPanel';
 import YaziliHazirlikPage from './pages/YaziliHazirlikPage';
 import VideoSolutionCenterPage from './pages/videoSolution/VideoSolutionCenterPage';
+import ReklamVideolariPage from './pages/ReklamVideolariPage';
 import VideoSolutionPublicHome from './pages/videoSolution/public/VideoSolutionPublicHome';
 import VideoSolutionSetPage from './pages/videoSolution/public/VideoSolutionSetPage';
 import VideoSolutionQuestionPage from './pages/videoSolution/public/VideoSolutionQuestionPage';
@@ -778,6 +779,14 @@ function App() {
               <ProtectedRoute allowedRoles={rolesForProtectedRoute('/video-cozum-merkezi')}>
                 <Layout>
                   <VideoSolutionCenterPage />
+                </Layout>
+              </ProtectedRoute>
+            } />
+
+            <Route path="/reklam-videolari" element={
+              <ProtectedRoute allowedRoles={rolesForProtectedRoute('/reklam-videolari')}>
+                <Layout>
+                  <ReklamVideolariPage />
                 </Layout>
               </ProtectedRoute>
             } />

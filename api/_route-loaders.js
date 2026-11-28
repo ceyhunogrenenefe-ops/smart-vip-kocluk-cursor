@@ -93,6 +93,7 @@ export const routeLoaders = {
   'teacher-scope': () => import('../handlers/teacher-scope.js'),
   'yazili-hazirlik': () => import('../handlers/yazili-hazirlik.js'),
   'video-solution': () => import('../handlers/video-solution.js'),
+  'reklam-videolari': () => import('../handlers/reklam-videolari.js'),
   'public-video-solution': () => import('../handlers/public-video-solution.js'),
   'yazili-program': () => import('../handlers/yazili-program.js'),
   'teacher-private-lesson-assignments': () => import('../handlers/teacher-private-lesson-assignments.js'),

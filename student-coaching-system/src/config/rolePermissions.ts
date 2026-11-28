@@ -71,6 +71,7 @@ export const ROUTE_ALLOWED_ROLES = {
   '/yazili-hazirlik': ['super_admin', 'admin', 'coach', 'teacher', 'student'],
   '/yazili-hazirlik-takip': ['super_admin', 'admin'],
   '/video-cozum-merkezi': ['super_admin', 'admin', 'coach', 'teacher'],
+  '/reklam-videolari': ['super_admin', 'admin', 'coach', 'teacher'],
   '/ders-saatleri-yeni-donem/yazili-hazirlik': ['super_admin', 'admin'],
   '/teacher-solution-appointments': ['teacher', 'super_admin', 'admin'],
   '/class-live-lessons': ['super_admin', 'admin', 'coach', 'teacher'],
