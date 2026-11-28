@@ -3,7 +3,7 @@
  *
  * Yönetici: settings, save_settings, kb_pages, kb_refresh, tone_sources,
  *           tone_upload, tone_delete, tone_rebuild, consultants, slots_preview,
- *           test_chat, logs
+ *           test_chat, logs, quick_answers, quick_answer_save, quick_answer_delete
  * CRM kullanıcısı (temsilci / koç / yönetici): state, handover, resume
  */
 import { requireAuthenticatedActor } from '../api/_lib/auth.js';
@@ -56,7 +56,10 @@ const ADMIN_OPS = new Set([
   'consultants',
   'slots_preview',
   'test_chat',
-  'logs'
+  'logs',
+  'quick_answers',
+  'quick_answer_save',
+  'quick_answer_delete'
 ]);
 
 export default async function handler(req, res) {
@@ -209,6 +212,44 @@ export default async function handler(req, res) {
       } catch (e) {
         return res.status(502).json({ error: 'test_failed', message: errorMessage(e) });
       }
+    }
+
+    if (op === 'quick_answers') {
+      const { data, error } = await supabaseAdmin
+        .from(ai.QUICK_TABLE)
+        .select('id, patterns, answer, first_message_only, is_active, hit_count, last_hit_at, updated_at')
+        .eq('institution_id', inst)
+        .order('hit_count', { ascending: false });
+      if (error) {
+        if (ai.tableMissing(error)) return res.status(200).json({ data: [], table_missing: true });
+        throw error;
+      }
+      return res.status(200).json({ data: data || [] });
+    }
+
+    if (op === 'quick_answer_save' && isPost) {
+      let row;
+      try {
+        row = ai.sanitizeQuickAnswer(body);
+      } catch (e) {
+        return res.status(400).json({ error: 'invalid', message: errorMessage(e) });
+      }
+      const id = String(body.id || '').trim();
+      const now = new Date().toISOString();
+      const q = id
+        ? supabaseAdmin.from(ai.QUICK_TABLE).update({ ...row, updated_at: now }).eq('id', id).eq('institution_id', inst)
+        : supabaseAdmin.from(ai.QUICK_TABLE).insert({ ...row, institution_id: inst, created_by: actor.sub });
+      const { data, error } = await q.select('id, patterns, answer, first_message_only, is_active, hit_count, last_hit_at, updated_at').maybeSingle();
+      if (error) throw error;
+      return res.status(200).json({ ok: true, data });
+    }
+
+    if (op === 'quick_answer_delete' && isPost) {
+      const id = String(body.id || '').trim();
+      if (!id) return res.status(400).json({ error: 'id_required' });
+      const { error } = await supabaseAdmin.from(ai.QUICK_TABLE).delete().eq('id', id).eq('institution_id', inst);
+      if (error) throw error;
+      return res.status(200).json({ ok: true });
     }
 
     if (op === 'logs') {

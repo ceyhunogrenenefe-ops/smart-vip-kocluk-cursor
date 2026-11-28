@@ -395,7 +395,8 @@ test('araç döngüsü: araç çağrılır, sonuç geri verilir, son metin döne
   const second = calls[1].messages;
   assert.equal(second[1].role, 'assistant');
   assert.equal(second[1].content[0].type, 'thinking');
-  assert.deepEqual(second[2].content[0], { type: 'tool_result', tool_use_id: 't1', content: '[{"start_iso":"x"}]' });
+  // son araç sonucu önbellek işaretli gider (geçmiş tekrar tam ücretle okunmaz)
+  assert.deepEqual(second[2].content[0], { type: 'tool_result', tool_use_id: 't1', content: '[{"start_iso":"x"}]', cache_control: { type: 'ephemeral' } });
 });
 
 test('araç döngüsü: araç hatası is_error ile döner, ret metin vermez', async () => {
@@ -457,4 +458,94 @@ test('geçmiş son 12 mesajı taşır', () => {
   assert.equal(msgs.length, 12);
   assert.equal(msgs[0].content, 'm8');
   assert.equal(msgs[msgs.length - 1].content, 'b13');
+});
+
+/* ---------- Token tasarrufu ---------- */
+import {
+  CHEAP_MODEL,
+  isNoiseInbound,
+  matchQuickAnswer,
+  normalizeQuickText,
+  pickReplyModel,
+  systemBlocksForCache,
+  trailingCustomerMessages,
+  withHistoryCacheBreakpoint
+} from './crm-ai-assistant-core.js';
+
+test('sistem metni: talimatlar 1 saat, bilgi tabanı ayrı blokta önbelleğe alınır', () => {
+  const p = buildStaticSystemPrompt({ kbPages: [{ url: 'https://x/lgs', title: 'LGS', content: 'LGS içeriği' }] });
+  const blocks = systemBlocksForCache(p);
+  assert.equal(blocks.length, 2);
+  assert.equal(blocks[0].cache_control.ttl, '1h');
+  assert.ok(!blocks[0].text.includes('LGS içeriği'));
+  assert.ok(blocks[1].text.startsWith('<bilgi_tabani>'));
+  assert.ok(blocks[1].text.includes('LGS içeriği'));
+  assert.equal(blocks[1].cache_control.ttl, undefined);
+  assert.equal(`${blocks[0].text} ${blocks[1].text}`.replace(/\s+/g, ' '), p.replace(/\s+/g, ' '));
+  // Farklı sayfa seçilse de talimat bloğu aynı kalır (önbellek bozulmaz)
+  const p2 = buildStaticSystemPrompt({ kbPages: [{ url: 'https://x/yks', title: 'YKS', content: 'YKS içeriği' }] });
+  assert.equal(systemBlocksForCache(p2)[0].text, blocks[0].text);
+});
+
+test('geçmiş önbelleği: yalnız son sistem-dışı mesaja işaret, asıl dizi değişmez', () => {
+  const msgs = [
+    { role: 'user', content: 'merhaba' },
+    { role: 'assistant', content: 'hoş geldiniz' },
+    { role: 'user', content: '8. sınıf' },
+    { role: 'system', content: 'dinamik' }
+  ];
+  const out = withHistoryCacheBreakpoint(msgs);
+  assert.equal(typeof msgs[2].content, 'string');
+  assert.deepEqual(out[2].content, [{ type: 'text', text: '8. sınıf', cache_control: { type: 'ephemeral' } }]);
+  assert.equal(out[3].content, 'dinamik');
+  assert.equal(out.filter((m) => Array.isArray(m.content)).length, 1);
+  const withTools = withHistoryCacheBreakpoint([...msgs, { role: 'assistant', content: [{ type: 'tool_use', id: 't', name: 'x', input: {} }] }, { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't', content: 'ok' }] }]);
+  assert.deepEqual(withTools[5].content[0].cache_control, { type: 'ephemeral' });
+  assert.equal(typeof withTools[2].content, 'string');
+});
+
+test('araç döngüsü önbellek token’larını toplar', async () => {
+  const r = await runAssistantLoop({
+    create: async () => ({ stop_reason: 'end_turn', usage: { input_tokens: 5, output_tokens: 2, cache_read_input_tokens: 100, cache_creation_input_tokens: 40 }, content: [{ type: 'text', text: 'ok' }] }),
+    executeTool: async () => '',
+    params: { messages: [{ role: 'user', content: 'x' }] }
+  });
+  assert.equal(r.usage.cache_read_input_tokens, 100);
+  assert.equal(r.usage.cache_creation_input_tokens, 40);
+});
+
+test('model seçimi: basit tur Haiku, randevu/fiyat/bilgiler tamam → ana model', () => {
+  assert.equal(pickReplyModel({ settingsModel: DEFAULT_MODEL, lastCustomerText: 'Merhaba bilgi alabilir miyim' }), CHEAP_MODEL);
+  assert.equal(pickReplyModel({ settingsModel: DEFAULT_MODEL, lastCustomerText: '6. sınıf' }), CHEAP_MODEL);
+  assert.equal(pickReplyModel({ settingsModel: DEFAULT_MODEL, lastCustomerText: 'Fiyat nedir?' }), DEFAULT_MODEL);
+  assert.equal(pickReplyModel({ settingsModel: DEFAULT_MODEL, lastCustomerText: 'yarın görüşebiliriz' }), DEFAULT_MODEL);
+  assert.equal(pickReplyModel({ settingsModel: DEFAULT_MODEL, lastCustomerText: 'tamam', collected: { grade: '8', target: 'LGS' } }), DEFAULT_MODEL);
+  assert.equal(pickReplyModel({ settingsModel: DEFAULT_MODEL, lastCustomerText: 'tamam', session: { appointment_at: '2026-11-29T10:00:00Z' } }), DEFAULT_MODEL);
+  assert.equal(pickReplyModel({ settingsModel: DEFAULT_MODEL, lastCustomerText: 'merhaba', cheapModel: 'off' }), DEFAULT_MODEL);
+  assert.equal(pickReplyModel({ settingsModel: DEFAULT_MODEL, lastCustomerText: 'şikayetim var' }), DEFAULT_MODEL);
+});
+
+test('hazır cevap: birebir eşleşme, noktalama/emoji/Türkçe harf fark etmez', () => {
+  const answers = [{ id: 'a', patterns: ['Merhaba! Bunun hakkında daha faza bilgi alabilir miyim?'], answer: 'Hoş geldiniz', first_message_only: true, is_active: true }];
+  assert.equal(normalizeQuickText('Merhaba!  Bunun HAKKINDA daha faza bilgi alabilir miyim? 😊'), 'merhaba bunun hakkinda daha faza bilgi alabilir miyim');
+  assert.equal(matchQuickAnswer(answers, { pendingTexts: ['merhaba! bunun hakkında daha faza bilgi alabilir miyim?'] })?.id, 'a');
+  assert.equal(matchQuickAnswer(answers, { pendingTexts: ['merhaba! bunun hakkında daha faza bilgi alabilir miyim? 8. sınıf'] }), null);
+  assert.equal(matchQuickAnswer(answers, { pendingTexts: ['Merhaba! Bunun hakkında daha faza bilgi alabilir miyim?'], hasPriorReply: true }), null);
+  assert.equal(matchQuickAnswer([{ ...answers[0], is_active: false }], { pendingTexts: ['Merhaba! Bunun hakkında daha faza bilgi alabilir miyim?'] }), null);
+  assert.equal(matchQuickAnswer([{ ...answers[0], first_message_only: false }], { pendingTexts: ['Merhaba! Bunun hakkında daha faza bilgi alabilir miyim?'], hasPriorReply: true })?.id, 'a');
+});
+
+test('cevap gerektirmeyen satırlar ve bekleyen müşteri mesajları', () => {
+  assert.ok(isNoiseInbound('Tepki verdi: 👍'));
+  assert.ok(isNoiseInbound('Müşteri mesajını düzenledi'));
+  assert.ok(isNoiseInbound('⚠️ Mesaj alınamadı (kod 131060) — WhatsApp içeriği iletmedi.'));
+  assert.ok(!isNoiseInbound('teşekkürler'));
+  const rows = [
+    { sender_type: 'lead', body: 'a' },
+    { sender_type: 'bot', body: 'b' },
+    { sender_type: 'lead', body: 'c' },
+    { sender_type: 'lead', body: 'yorum', message_type: 'comment' },
+    { sender_type: 'lead', body: 'd' }
+  ];
+  assert.deepEqual(trailingCustomerMessages(rows).map((r) => r.body), ['c', 'd']);
 });
