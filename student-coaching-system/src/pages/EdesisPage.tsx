@@ -7,6 +7,7 @@ import {
   FileText,
   GraduationCap,
   Link2,
+  ListChecks,
   Loader2,
   MessageCircle,
   PenLine,
@@ -55,7 +56,7 @@ import {
 } from '../lib/edesis/edesisApi';
 import { shareEdesisKarneWithParent } from '../lib/edesis/shareEdesisKarneWhatsApp';
 
-type HubView = 'dosya' | 'atama' | 'senkron';
+type HubView = 'dosya' | 'atama' | 'tum' | 'senkron';
 type DossierTab = 'girecek' | 'girdi' | 'kurum' | 'araclar';
 
 function fmtDate(raw?: string | null) {
@@ -679,6 +680,16 @@ export default function EdesisPage() {
         </button>
         <button
           type="button"
+          onClick={() => setHubView('tum')}
+          className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold ${
+            hubView === 'tum' ? 'bg-indigo-600 text-white' : 'border border-slate-200 bg-white text-slate-700'
+          }`}
+        >
+          <ListChecks className="h-4 w-4" />
+          Tüm Denemelerden Ata
+        </button>
+        <button
+          type="button"
           onClick={() => setHubView('senkron')}
           className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold ${
             hubView === 'senkron' ? 'bg-indigo-600 text-white' : 'border border-slate-200 bg-white text-slate-700'
@@ -694,6 +705,10 @@ export default function EdesisPage() {
       ) : hubView === 'atama' ? (
         <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
           <EdesisExamAssignPanel />
+        </section>
+      ) : hubView === 'tum' ? (
+        <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+          <EdesisExamAssignPanel key="tum" mode="all" />
         </section>
       ) : (
       <div className="grid gap-6 lg:grid-cols-[340px_minmax(0,1fr)]">

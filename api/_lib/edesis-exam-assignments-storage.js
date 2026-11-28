@@ -131,7 +131,7 @@ export async function storagePruneExamsNotInCatalog({ institutionId = null, live
   return { prunedExams, prunedAssignments, staleExamIds: [...staleExamIds] };
 }
 
-export async function storageListExams({ institutionId = null, limit = 200 } = {}) {
+export async function storageListExams({ institutionId = null, limit = 200, maxCap = 500 } = {}) {
   await ensureEdesisAssignStorageBackend();
   let list = await readJsonFile(EXAMS_PATH, []);
   if (!Array.isArray(list)) list = [];
@@ -144,7 +144,7 @@ export async function storageListExams({ institutionId = null, limit = 200 } = {
     if (da !== db) return db.localeCompare(da);
     return String(b.synced_at || '').localeCompare(String(a.synced_at || ''));
   });
-  return list.slice(0, Math.min(500, Math.max(1, Number(limit) || 200)));
+  return list.slice(0, Math.min(Number(maxCap) || 500, Math.max(1, Number(limit) || 200)));
 }
 
 export async function storageListAssignments({

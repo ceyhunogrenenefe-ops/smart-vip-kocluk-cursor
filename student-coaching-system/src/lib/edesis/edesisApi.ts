@@ -816,6 +816,45 @@ export async function fetchSyncedEdesisExams(): Promise<{
   return j;
 }
 
+export type EdesisAllExam = EdesisSyncedExam & {
+  institution_id?: string | null;
+  assigned_class_count: number;
+  assigned_student_count: number;
+};
+
+export type EdesisAllExamsQuery = {
+  q?: string;
+  examType?: string;
+  assigned?: 'all' | 'yes' | 'no';
+  dateFrom?: string;
+  dateTo?: string;
+  page?: number;
+  pageSize?: number;
+};
+
+/** Tüm denemelerden ata — kurum geneli + kuruma özel tam katalog (tekil, sayfalı) */
+export async function fetchAllEdesisExams(query: EdesisAllExamsQuery = {}): Promise<{
+  ok: boolean;
+  items: EdesisAllExam[];
+  total: number;
+  totalAll: number;
+  page: number;
+  pageSize: number;
+  pageCount: number;
+  examTypes: string[];
+  schemaMissing?: boolean;
+  hint?: string | null;
+}> {
+  const params = new URLSearchParams({ op: 'list-all-exams' });
+  for (const [k, v] of Object.entries(query)) {
+    if (v !== undefined && v !== null && String(v) !== '') params.set(k, String(v));
+  }
+  const res = await apiFetch(`/api/edesis-sync?${params.toString()}`);
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(j.hint || j.error || res.statusText);
+  return j;
+}
+
 export async function fetchEdesisExamAssignments(edesisExamId?: string): Promise<{
   ok: boolean;
   items: EdesisExamAssignmentRow[];

@@ -98,6 +98,7 @@ import { filterExamsToSeason, wantsAllSeasons } from '../api/_lib/academic-seaso
 import {
   syncEdesisExamCatalogToDb,
   listSyncedEdesisExams,
+  listAllEdesisExams,
   listEdesisExamAssignments,
   createEdesisExamAssignments,
   deleteEdesisExamAssignment,
@@ -1539,6 +1540,28 @@ export default async function handler(req, res) {
         count: result.items.length,
         items: result.items,
         schemaMissing: result.schemaMissing,
+        hint: result.schemaHint || null
+      });
+    }
+
+    /** Tüm denemelerden ata — tekilleştirilmiş tam katalog, filtre + sayfalama */
+    if (op === 'list-all-exams') {
+      if (!isStaff) return res.status(403).json({ error: 'forbidden' });
+      const qp = req.query || {};
+      const result = await listAllEdesisExams({
+        institutionId: actor?.institution_id || null,
+        q: String(qp.q || ''),
+        examType: String(qp.examType || ''),
+        assigned: ['yes', 'no'].includes(String(qp.assigned)) ? String(qp.assigned) : 'all',
+        dateFrom: String(qp.dateFrom || ''),
+        dateTo: String(qp.dateTo || ''),
+        page: Number(qp.page || 1),
+        pageSize: Number(qp.pageSize || 50)
+      });
+      return res.status(200).json({
+        ok: true,
+        deployMarker: EDESIS_LOCAL_ASSIGN_MARKER,
+        ...result,
         hint: result.schemaHint || null
       });
     }
